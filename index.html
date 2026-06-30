@@ -751,7 +751,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
       frame.appendChild(label);
 
       const iframe = document.createElement("iframe");
-      iframe.src = url;
+      iframe.dataset.src = url;
       iframe.loading = "lazy";
       iframe.setAttribute("sandbox", "allow-scripts allow-same-origin");
       frame.appendChild(iframe);
@@ -802,13 +802,19 @@ And respect reduced motion. Return only the finished HTML file.</div>
   }
 
   function applyVisibility() {
-    if (mode === "single") {
-      frames.forEach((f, i) => f.classList.toggle("visible", i === activeIdx));
-    } else {
-      frames.forEach((f, i) => {
-        f.classList.toggle("grid-visible", gridVisible.has(i));
-      });
-    }
+    const active = mode === "single" ? new Set([activeIdx]) : gridVisible;
+    frames.forEach((f, i) => {
+      const show = active.has(i);
+      f.classList.toggle("visible", mode === "single" && show);
+      f.classList.toggle("grid-visible", mode === "grid" && show);
+      const iframe = f.querySelector("iframe");
+      if (show && !iframe.src) {
+        iframe.src = iframe.dataset.src;
+      } else if (!show && iframe.src) {
+        iframe.src = "";
+        iframe.removeAttribute("src");
+      }
+    });
   }
 
   function setMode(m) {
