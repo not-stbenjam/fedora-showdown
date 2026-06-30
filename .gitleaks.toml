@@ -1,0 +1,9 @@
+[allowlist]
+description = "HMAC anti-spam key is intentionally public (embedded in client-side HTML)"
+paths = [
+  '''api/wrangler\.toml''',
+]
+regexTarget = "line"
+regexes = [
+  '''HMAC_SECRET''',
+]

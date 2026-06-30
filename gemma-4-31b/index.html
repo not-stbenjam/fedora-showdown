@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Fedora</title>
+    <style>
+        :root {
+            --bg-color: #0a0a0c;
+            --text-color: #888;
+            --accent-color: #e31a1c;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: var(--bg-color);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: var(--text-color);
+        }
+
+        .hero {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        canvas {
+            display: block;
+            max-width: 100%;
+            max-height: 100%;
+        }
+
+        .caption {
+            position: absolute;
+            bottom: 10%;
+            font-size: 0.9rem;
+            letter-spacing: 0.15rem;
+            text-transform: uppercase;
+            opacity: 0.6;
+            transition: opacity 0.5s ease;
+            pointer-events: none;
+            text-align: center;
+        }
+
+        .hero:hover .caption {
+            opacity: 0.3;
+        }
+
+        /* Reduced Motion */
+        @media (prefers-reduced-motion: reduce) {
+            .caption {
+                transition: none;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="hero" id="hero">
+        <canvas id="canvas"></canvas>
+        <div class="caption">Precision & Elegance</div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const hero = document.getElementById('hero');
+
+        let width, height;
+        let particles = [];
+        let frame = 0;
+        let isHovered = false;
+        let transitionState = 'idle'; // idle, dissolving, reforming
+        let transitionProgress = 0;
+
+        const CONFIG = {
+            particleCount: 3500,
+            hatColor: { r: 200, g: 20, b: 30 },
+            glowColor: { r: 255, g: 100, b: 100 },
+            spinSpeed: 0.01,
+            slowSpinSpeed: 0.002,
+            transitionSpeed: 0.02,
+            reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        };
+
+        class Particle {
+            constructor(x, y, z) {
+                this.origin = { x, y, z };
+                this.pos = { x, y, z };
+                this.target = { x, y, z };
+                this.vel = { x: 0, y: 0, z: 0 };
+                this.acc = { x: 0, y: 0, z: 0 };
+                this.size = Math.random() * 1.5 + 0.5;
+                this.brightness = Math.random();
+                this.isOrbiting = false;
+                this.orbitOffset = Math.random() * Math.PI * 2;
+            }
+
+            update() {
+                if (transitionState === 'dissolving') {
+                    const noiseX = (Math.random() - 0.5) * 20;
+                    const noiseY = (Math.random() - 0.5) * 20;
+                    const noiseZ = (Math.random() - 0.5) * 20;
+                    this.target.x = this.origin.x + noiseX * transitionProgress * 5;
+                    this.target.y = this.origin.y + noiseY * transitionProgress * 5;
+                    this.target.z = this.origin.z + noiseZ * transitionProgress * 5;
+                } else if (transitionState === 'reforming') {
+                    this.target.x = this.origin.x;
+                    this.target.y = this.origin.y;
+                    this.target.z = this.origin.z;
+                }
+
+                // Smooth lerp to target
+                this.pos.x += (this.target.x - this.pos.x) * 0.1;
+                this.pos.y += (this.target.y - this.pos.y) * 0.1;
+                this.pos.z += (this.target.z - this.pos.z) * 0.1;
+
+                if (this.isOrbiting) {
+                    const angle = frame * 0.02 + this.orbitOffset;
+                    const radius = 1.2 + Math.sin(frame * 0.01 + this.orbitOffset) * 0.2;
+                    this.pos.x += Math.cos(angle) * 0.05;
+                    this.pos.z += Math.sin(angle) * 0.05;
+                }
+            }
+
+            project(angleY, angleX) {
+                // Rotation Y
+                let x = this.pos.x * Math.cos(angleY) - this.pos.z * Math.sin(angleY);
+                let z = this.pos.x * Math.sin(angleY) + this.pos.z * Math.cos(angleY);
+                let y = this.pos.y;
+
+                // Rotation X
+                let y1 = y * Math.cos(angleX) - z * Math.sin(angleX);
+                let z1 = y * Math.sin(angleX) + z * Math.cos(angleX);
+
+                // Perspective
+                const perspective = 600 / (600 + z1);
+                return {
+                    x: x * perspective + width / 2,
+                    y: y1 * perspective + height / 2,
+                    z: z1,
+                    scale: perspective
+                };
+            }
+        }
+
+        function createFedora() {
+            const points = [];
+            
+            // Brim (Elliptical Disk)
+            for (let i = 0; i < CONFIG.particleCount * 0.6; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const radius = 70 + Math.random() * 30;
+                const x = Math.cos(angle) * radius;
+                const z = Math.sin(angle) * radius;
+                // Slight dip in the middle
+                const y = Math.cos(angle * 2) * 5 + (Math.abs(x) < 30 && Math.abs(z) < 30 ? -5 : 0);
+                points.push(new Particle(x, y, z));
+            }
+
+            // Crown (Cylinder/Cone)
+            for (let i = 0; i < CONFIG.particleCount * 0.4; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const height = Math.random() * 60 - 60;
+                // Crown gets narrower at the top (pinched)
+                const taper = 1 - (height / 60) * 0.3;
+                const radius = 30 * taper;
+                const x = Math.cos(angle) * radius;
+                const z = Math.sin(angle) * radius;
+                points.push(new Particle(x, height, z));
+            }
+            return points;
+        }
+
+        function resize() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width;
+            canvas.height = height;
+        }
+
+        function init() {
+            resize();
+            particles = createFedora();
+            window.addEventListener('resize', resize);
+            
+            hero.addEventListener('mouseenter', () => {
+                if (CONFIG.reducedMotion) return;
+                isHovered = true;
+                transitionState = 'dissolving';
+                transitionProgress = 0;
+            });
+            
+            hero.addEventListener('mouseleave', () => {
+                if (CONFIG.reducedMotion) return;
+                isHovered = false;
+                transitionState = 'reforming';
+                transitionProgress = 0;
+            });
+
+            // Touch support
+            hero.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                if (CONFIG.reducedMotion) return;
+                isHovered = true;
+                transitionState = 'dissolving';
+                transitionProgress = 0;
+            });
+            hero.addEventListener('touchend', () => {
+                if (CONFIG.reducedMotion) return;
+                isHovered = false;
+                transitionState = 'reforming';
+                transitionProgress = 0;
+            });
+
+            animate();
+        }
+
+        function animate() {
+            frame++;
+            ctx.clearRect(0, 0, width, height);
+
+            const currentSpinSpeed = isHovered ? CONFIG.slowSpinSpeed : CONFIG.spinSpeed;
+            const angleY = frame * currentSpinSpeed;
+            const angleX = 0.3; // Fixed tilt for depth
+
+            if (transitionState !== 'idle') {
+                transitionProgress += CONFIG.transitionSpeed;
+                if (transitionProgress >= 1) {
+                    if (transitionState === 'reforming') {
+                        transitionState = 'idle';
+                        // Randomly mark a few particles as orbiting after reforming
+                        particles.forEach(p => {
+                            if (Math.random() < 0.01) p.isOrbiting = true;
+                        });
+                    } else if (transitionState === 'dissolving') {
+                        // stay dissolved until mouse leave
+                    }
+                }
+            }
+
+            // Sort particles by Z for simple depth buffering
+            const projected = particles.map(p => {
+                p.update();
+                return { p, proj: p.project(angleY, angleX) };
+            });
+
+            projected.sort((a, b) => b.proj.z - a.proj.z);
+
+            // Draw particles
+            projected.forEach(({ p, proj }) => {
+                const { x, y, scale } = proj;
+                
+                // Lighting calculation: brightness based on Y position and Z depth
+                const light = (p.pos.y / 60) * 0.2 + 0.8;
+                const alpha = Math.max(0.2, scale * p.brightness);
+                
+                const color = isHovered ? CONFIG.glowColor : CONFIG.hatColor;
+                
+                ctx.fillStyle = `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})`;
+                
+                // Subtle glow for orbiting particles
+                if (p.isOrbiting) {
+                    ctx.shadowBlur = 5;
+                    ctx.shadowColor = `rgba(${color.r}, ${color.g}, ${color.b}, 0.8)`;
+                } else {
+                    ctx.shadowBlur = 0;
+                }
+
+                ctx.beginPath();
+                ctx.arc(x, y, p.size * scale, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            requestAnimationFrame(animate);
+        }
+
+        init();
+    </script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+name = "fedora-showdown-api"
+main = "src/index.js"
+compatibility_date = "2024-12-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "fedora-showdown-votes"
+database_id = "ecf34def-9bfe-48d6-a5fb-733913bf5e36"
+
+[vars]
+HMAC_SECRET = "1aeec4328a35de292e6945ff9bdcc02c34f1325f32cb003d259838222e1cbf62"
+ALLOWED_ORIGIN = "https://not-stbenjam.github.io"

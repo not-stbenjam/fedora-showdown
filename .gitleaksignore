@@ -1,0 +1,2 @@
+api/wrangler.toml:General Secret:HMAC_SECRET
+index.html:General Secret:HMAC_SECRET

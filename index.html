@@ -166,6 +166,7 @@
     transition: color 0.15s, border-color 0.15s;
     user-select: none;
   }
+  .sidebar .bottom-actions button + button { margin-top: 6px; }
   .sidebar .bottom-actions button:hover { color: var(--text); border-color: #2a2e3e; }
 
   .sidebar .contribute-link {
@@ -351,7 +352,213 @@
     color: var(--muted);
     pointer-events: none;
     text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 10px;
   }
+
+  .star-rating {
+    pointer-events: auto;
+    display: flex;
+    gap: 2px;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 179, 71, 0.2);
+    border-radius: 6px;
+    padding: 4px 8px;
+  }
+  .star-rating .star {
+    cursor: pointer;
+    font-size: 20px;
+    color: #3a3520;
+    transition: color 0.12s, text-shadow 0.12s, transform 0.1s;
+    line-height: 1;
+  }
+  .star-rating .star:hover,
+  .star-rating .star.hover {
+    color: #ffc233;
+    text-shadow: 0 0 8px rgba(255, 194, 51, 0.5);
+    transform: scale(1.15);
+  }
+  .star-rating .star.filled { color: #ffc233; text-shadow: 0 0 6px rgba(255, 194, 51, 0.3); }
+  .star-rating .star.voted { color: #ffc233; text-shadow: 0 0 8px rgba(255, 194, 51, 0.4); }
+  .star-rating .rate-cta {
+    font-size: 10px;
+    color: rgba(255, 194, 51, 0.6);
+    margin-left: 4px;
+    letter-spacing: 0;
+    text-transform: none;
+    font-weight: 400;
+    animation: pulse-cta 2s ease-in-out infinite;
+  }
+  @keyframes pulse-cta {
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 1; }
+  }
+  .star-rating .vote-info {
+    font-size: 11px;
+    color: rgba(255, 194, 51, 0.7);
+    margin-left: 6px;
+    letter-spacing: 0;
+    text-transform: none;
+    font-weight: 500;
+  }
+
+  .sidebar .model-list button .avg-badge {
+    margin-left: auto;
+    font-size: 11px;
+    color: #ffc233;
+    font-weight: 500;
+    letter-spacing: 0;
+    flex-shrink: 0;
+  }
+
+  /* --- Leaderboard modal --- */
+  .leaderboard-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: rgba(0, 0, 0, 0.6);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .leaderboard-backdrop.open { opacity: 1; pointer-events: auto; }
+
+  .leaderboard-modal {
+    width: min(480px, 90vw);
+    max-height: 85vh;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    transform: scale(0.95);
+    opacity: 0;
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
+    pointer-events: none;
+  }
+  .leaderboard-backdrop.open .leaderboard-modal {
+    transform: scale(1);
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .leaderboard-modal .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .leaderboard-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+  }
+
+  .lb-row {
+    display: flex;
+    align-items: center;
+    padding: 10px 20px;
+    gap: 12px;
+    transition: background 0.12s;
+  }
+  .lb-row:hover { background: var(--accent-dim); }
+
+  .lb-rank {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    flex-shrink: 0;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .lb-row:nth-child(1) .lb-rank { background: linear-gradient(135deg, #ffd700, #b8860b); color: #1a1400; border-color: #ffd700; }
+  .lb-row:nth-child(2) .lb-rank { background: linear-gradient(135deg, #c0c0c0, #808080); color: #1a1a1a; border-color: #c0c0c0; }
+  .lb-row:nth-child(3) .lb-rank { background: linear-gradient(135deg, #cd7f32, #8b4513); color: #1a1000; border-color: #cd7f32; }
+
+  .lb-name {
+    flex: 1;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .lb-name:hover { color: var(--accent); }
+  .lb-group {
+    font-size: 10px;
+    color: var(--muted);
+    font-weight: 400;
+  }
+
+  .lb-stars {
+    font-size: 14px;
+    color: #ffc233;
+    letter-spacing: 1px;
+    flex-shrink: 0;
+  }
+
+  .lb-score {
+    font-size: 14px;
+    font-weight: 700;
+    color: #ffc233;
+    width: 32px;
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  .lb-votes {
+    font-size: 10px;
+    color: var(--muted);
+    width: 48px;
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  .lb-empty {
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  /* --- Nav arrows --- */
+  .nav-arrow {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 10;
+    width: 48px;
+    height: 80px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: rgba(11, 13, 20, 0.7);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    color: var(--muted);
+    font-size: 22px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s, background 0.15s, border-color 0.15s;
+    user-select: none;
+  }
+  .nav-arrow:hover { color: var(--text); background: rgba(11, 13, 20, 0.9); border-color: var(--accent); }
+  .nav-arrow.prev { left: 14px; }
+  .nav-arrow.next { right: 14px; }
+  .viewer.mode-grid .nav-arrow { display: none; }
 
   .frame iframe {
     width: 100%;
@@ -385,6 +592,7 @@
   <div class="logo">Fedora Showdown</div>
   <div class="bottom-actions">
     <button id="btn-prompt">✨ Prompt</button>
+    <button id="btn-leaderboard">🏆 Leaderboard</button>
     <a class="contribute-link" href="https://github.com/stbenjam/fedora-showdown" target="_blank" rel="noopener">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
       Contribute yours
@@ -418,11 +626,29 @@ And respect reduced motion. Return only the finished HTML file.</div>
   </div>
 </div>
 
-<div class="viewer mode-single" id="viewer"></div>
+<div id="leaderboard-backdrop" class="leaderboard-backdrop">
+  <div class="leaderboard-modal">
+    <div class="modal-header">
+      <span class="modal-title">🏆 Leaderboard</span>
+      <button id="leaderboard-close" aria-label="Close">&times;</button>
+    </div>
+    <div class="leaderboard-list" id="leaderboard-list">
+      <div class="lb-empty">No votes yet — be the first to rate!</div>
+    </div>
+  </div>
+</div>
+
+<div class="viewer mode-single" id="viewer">
+  <button class="nav-arrow prev" id="nav-prev" aria-label="Previous model">‹</button>
+  <button class="nav-arrow next" id="nav-next" aria-label="Next model">›</button>
+</div>
 
 <script>
 (function () {
   "use strict";
+
+  const API_URL = "https://fedora-showdown-api.stephen-dda.workers.dev";
+  const HMAC_SECRET = "1aeec4328a35de292e6945ff9bdcc02c34f1325f32cb003d259838222e1cbf62";
 
   const MODELS = [
     { id: "opus-4-8",    name: "Opus 4.8",           group: "Anthropic" },
@@ -435,6 +661,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
     { id: "gemini-3.1-pro", name: "Gemini 3.1 Pro",    group: "Google" },
     { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash", group: "Google" },
     { id: "gemma-4-26b", name: "Gemma 4 26B",         group: "Google" },
+    { id: "gemma-4-31b", name: "Gemma 4 31B",         group: "Google" },
     { id: "qwen3-235b",  name: "Qwen3.7 Max",         group: "Alibaba" },
     { id: "deepseek-v4-pro",   name: "DeepSeek V4 Pro",   group: "DeepSeek" },
     { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", group: "DeepSeek" },
@@ -447,6 +674,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
     { id: "kimi-k2.6",   name: "Kimi K2.6",           group: "Moonshot" },
     { id: "grok-4",      name: "Grok 4",              group: "xAI" },
     { id: "grok-4.3",    name: "Grok 4.3",            group: "xAI" },
+    { id: "fugu-ultra",   name: "Fugu Ultra",           group: "Sakana" },
     { id: "glm-5.2",     name: "GLM-5.2",             group: "Z.ai" },
   ];
 
@@ -457,6 +685,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
   const frames = [];
   const buttons = [];
   const gridVisible = new Set();
+  let voteData = {};
 
   function init() {
     let lastGroup = null;
@@ -479,9 +708,47 @@ And respect reduced motion. Return only the finished HTML file.</div>
       modelList.appendChild(btn);
       buttons.push(btn);
 
+      const avgBadge = document.createElement("span");
+      avgBadge.className = "avg-badge";
+      avgBadge.dataset.model = m.id;
+      btn.appendChild(avgBadge);
+
       const frame = document.createElement("div");
       frame.className = "frame";
-      frame.innerHTML = '<div class="label">' + m.name + "</div>";
+
+      const label = document.createElement("div");
+      label.className = "label";
+
+      const nameSpan = document.createElement("span");
+      nameSpan.textContent = m.name;
+      label.appendChild(nameSpan);
+
+      const starDiv = document.createElement("div");
+      starDiv.className = "star-rating";
+      starDiv.dataset.model = m.id;
+      const userVote = getVote(m.id);
+      for (let s = 1; s <= 5; s++) {
+        const star = document.createElement("span");
+        star.className = "star" + (userVote && s <= userVote ? " voted" : "");
+        star.textContent = (userVote && s <= userVote) ? "★" : "☆";
+        star.dataset.value = s;
+        star.addEventListener("click", () => submitVote(m.id, s, starDiv));
+        star.addEventListener("mouseenter", () => hoverStars(starDiv, s));
+        star.addEventListener("mouseleave", () => unhoverStars(starDiv));
+        starDiv.appendChild(star);
+      }
+      if (!userVote) {
+        const cta = document.createElement("span");
+        cta.className = "rate-cta";
+        cta.textContent = "Rate!";
+        starDiv.appendChild(cta);
+      }
+      const voteInfo = document.createElement("span");
+      voteInfo.className = "vote-info";
+      voteInfo.dataset.model = m.id;
+      starDiv.appendChild(voteInfo);
+      label.appendChild(starDiv);
+      frame.appendChild(label);
 
       const iframe = document.createElement("iframe");
       iframe.src = url;
@@ -564,6 +831,9 @@ And respect reduced motion. Return only the finished HTML file.</div>
   document.getElementById("btn-single").addEventListener("click", () => setMode("single"));
   document.getElementById("btn-grid").addEventListener("click", () => setMode("grid"));
 
+  document.getElementById("nav-prev").addEventListener("click", () => selectTab((activeIdx - 1 + MODELS.length) % MODELS.length));
+  document.getElementById("nav-next").addEventListener("click", () => selectTab((activeIdx + 1) % MODELS.length));
+
   const promptBackdrop = document.getElementById("prompt-backdrop");
   function togglePrompt() { promptBackdrop.classList.toggle("open"); }
   document.getElementById("btn-prompt").addEventListener("click", togglePrompt);
@@ -571,6 +841,12 @@ And respect reduced motion. Return only the finished HTML file.</div>
   promptBackdrop.addEventListener("mousedown", (e) => {
     if (e.target === promptBackdrop) togglePrompt();
   });
+
+  const lbBackdrop = document.getElementById("leaderboard-backdrop");
+  function toggleLeaderboard() { lbBackdrop.classList.toggle("open"); if (lbBackdrop.classList.contains("open")) renderLeaderboard(); }
+  document.getElementById("btn-leaderboard").addEventListener("click", toggleLeaderboard);
+  document.getElementById("leaderboard-close").addEventListener("click", toggleLeaderboard);
+  lbBackdrop.addEventListener("mousedown", (e) => { if (e.target === lbBackdrop) toggleLeaderboard(); });
 
   const copyBtn = document.getElementById("copy-prompt");
   copyBtn.addEventListener("click", () => {
@@ -615,7 +891,137 @@ And respect reduced motion. Return only the finished HTML file.</div>
     else if (e.key === "2") setMode("grid");
   });
 
+  function getVote(modelId) {
+    try { return parseInt(localStorage.getItem("fs-vote-" + modelId)) || 0; } catch { return 0; }
+  }
+
+  function saveVote(modelId, rating) {
+    try { localStorage.setItem("fs-vote-" + modelId, rating); } catch {}
+  }
+
+  function hoverStars(container, val) {
+    container.querySelectorAll(".star").forEach(s => {
+      const v = parseInt(s.dataset.value);
+      s.classList.toggle("hover", v <= val);
+      if (!s.classList.contains("voted")) s.textContent = v <= val ? "★" : "☆";
+    });
+  }
+
+  function unhoverStars(container) {
+    const modelId = container.dataset.model;
+    const voted = getVote(modelId);
+    container.querySelectorAll(".star").forEach(s => {
+      const v = parseInt(s.dataset.value);
+      s.classList.remove("hover");
+      if (!s.classList.contains("voted")) s.textContent = voted && v <= voted ? "★" : "☆";
+    });
+  }
+
+  async function generateHmac(model, rating, ts) {
+    const enc = new TextEncoder();
+    const key = await crypto.subtle.importKey("raw", enc.encode(HMAC_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const sig = await crypto.subtle.sign("HMAC", key, enc.encode(model + ":" + rating + ":" + ts));
+    return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  async function submitVote(modelId, rating, container) {
+    if (getVote(modelId)) return;
+
+    saveVote(modelId, rating);
+    document.querySelectorAll('.star-rating[data-model="' + modelId + '"]').forEach(sr => {
+      sr.querySelectorAll(".star").forEach(s => {
+        const v = parseInt(s.dataset.value);
+        s.className = "star" + (v <= rating ? " voted" : "");
+        s.textContent = v <= rating ? "★" : "☆";
+      });
+      const cta = sr.querySelector(".rate-cta");
+      if (cta) cta.remove();
+    });
+
+    if (!API_URL) return;
+    const ts = Date.now();
+    const hmac = await generateHmac(modelId, rating, ts);
+    try {
+      await fetch(API_URL + "/vote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: modelId, rating, ts, hmac })
+      });
+    } catch {}
+    fetchVotes();
+  }
+
+  async function fetchVotes() {
+    if (!API_URL) return;
+    try {
+      const res = await fetch(API_URL + "/votes");
+      if (!res.ok) return;
+      const data = await res.json();
+      const map = {};
+      data.forEach(d => { map[d.model] = d; });
+      voteData = map;
+      document.querySelectorAll(".avg-badge").forEach(b => {
+        const d = map[b.dataset.model];
+        b.textContent = d ? "★ " + d.avg_rating : "";
+      });
+      document.querySelectorAll(".vote-info").forEach(v => {
+        const d = map[v.dataset.model];
+        v.textContent = d ? d.avg_rating + " (" + d.count + ")" : "";
+      });
+    } catch {}
+  }
+
+  function renderLeaderboard() {
+    const list = document.getElementById("leaderboard-list");
+    const ranked = MODELS
+      .map(m => ({ ...m, data: voteData[m.id] }))
+      .filter(m => m.data)
+      .sort((a, b) => b.data.avg_rating - a.data.avg_rating || b.data.count - a.data.count);
+
+    if (!ranked.length) {
+      list.innerHTML = '<div class="lb-empty">No votes yet — be the first to rate!</div>';
+      return;
+    }
+
+    list.innerHTML = "";
+    ranked.forEach((m, i) => {
+      const row = document.createElement("div");
+      row.className = "lb-row";
+
+      const rank = document.createElement("div");
+      rank.className = "lb-rank";
+      rank.textContent = i + 1;
+
+      const name = document.createElement("div");
+      name.className = "lb-name";
+      name.innerHTML = m.name + ' <span class="lb-group">' + m.group + "</span>";
+      name.addEventListener("click", () => {
+        const idx = MODELS.findIndex(x => x.id === m.id);
+        if (idx >= 0) { selectTab(idx); toggleLeaderboard(); }
+      });
+
+      const stars = document.createElement("div");
+      stars.className = "lb-stars";
+      const avg = parseFloat(m.data.avg_rating);
+      let starStr = "";
+      for (let s = 1; s <= 5; s++) starStr += s <= Math.round(avg) ? "★" : "☆";
+      stars.textContent = starStr;
+
+      const score = document.createElement("div");
+      score.className = "lb-score";
+      score.textContent = m.data.avg_rating;
+
+      const votes = document.createElement("div");
+      votes.className = "lb-votes";
+      votes.textContent = m.data.count + " vote" + (m.data.count === 1 ? "" : "s");
+
+      row.append(rank, name, stars, score, votes);
+      list.appendChild(row);
+    });
+  }
+
   init();
+  fetchVotes();
 })();
 </script>
 </body>
