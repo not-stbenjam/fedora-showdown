@@ -357,6 +357,29 @@
     gap: 10px;
   }
 
+  .frame .hover-hint {
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    background: rgba(11, 13, 20, 0.75);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 6px 16px;
+    font-size: 12px;
+    color: var(--muted);
+    pointer-events: none;
+    animation: fade-hint 4s ease-in-out forwards;
+    white-space: nowrap;
+  }
+  @keyframes fade-hint {
+    0%, 70% { opacity: 0.9; }
+    100% { opacity: 0; }
+  }
+
   .star-rating {
     pointer-events: auto;
     display: flex;
@@ -701,7 +724,9 @@ And respect reduced motion. Return only the finished HTML file.</div>
 
   const MODELS = [
     { id: "opus-4-8",    name: "Opus 4.8",           group: "Anthropic" },
+    { id: "opus-4-7",    name: "Opus 4.7",           group: "Anthropic" },
     { id: "opus-4-6",    name: "Opus 4.6",           group: "Anthropic" },
+    { id: "opus-4-5",    name: "Opus 4.5",           group: "Anthropic" },
     { id: "sonnet-5",    name: "Sonnet 5",            group: "Anthropic" },
     { id: "sonnet-4-6",  name: "Sonnet 4.6",          group: "Anthropic" },
     { id: "haiku-4-5",   name: "Haiku 4.5",           group: "Anthropic" },
@@ -718,6 +743,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
     { id: "llama-4-maverick", name: "Llama 4 Maverick",  group: "Meta" },
     { id: "minimax-m2.7", name: "MiniMax M2.7",        group: "MiniMax" },
     { id: "mistral-medium-3.5", name: "Mistral Medium 3.5", group: "Mistral" },
+    { id: "devstral-2512", name: "Devstral 2512",        group: "Mistral" },
     { id: "nemotron-3-ultra", name: "Nemotron 3 Ultra", group: "NVIDIA" },
     { id: "step-3.7-flash", name: "Step 3.7 Flash",     group: "StepFun" },
     { id: "kimi-k2.6",   name: "Kimi K2.6",           group: "Moonshot" },
@@ -798,6 +824,11 @@ And respect reduced motion. Return only the finished HTML file.</div>
       starDiv.appendChild(voteInfo);
       label.appendChild(starDiv);
       frame.appendChild(label);
+
+      const hint = document.createElement("div");
+      hint.className = "hover-hint";
+      hint.textContent = "Try hovering over the fedora";
+      frame.appendChild(hint);
 
       const iframe = document.createElement("iframe");
       iframe.dataset.src = url;

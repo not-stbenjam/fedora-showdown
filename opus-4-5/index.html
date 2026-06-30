@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fedora</title>
+    <style>
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --bg-dark: #0a0a0f;
+            --bg-gradient: radial-gradient(ellipse at 50% 30%, #1a1a2e 0%, #0a0a0f 70%);
+            --accent: #ee0000;
+            --accent-glow: rgba(238, 0, 0, 0.6);
+            --text: rgba(255, 255, 255, 0.7);
+        }
+
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            background: var(--bg-gradient);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            color: var(--text);
+        }
+
+        .scene {
+            position: relative;
+            width: min(80vw, 400px);
+            height: min(80vw, 400px);
+            perspective: 1000px;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .hat-container {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transform-style: preserve-3d;
+            animation: spin 8s linear infinite;
+        }
+
+        .scene:hover .hat-container,
+        .scene.active .hat-container {
+            animation-duration: 20s;
+        }
+
+        .scene.dissolving .hat-container {
+            animation-play-state: paused;
+        }
+
+        @keyframes spin {
+            from { transform: rotateY(0deg); }
+            to { transform: rotateY(360deg); }
+        }
+
+        .hat {
+            position: relative;
+            transform-style: preserve-3d;
+            filter: drop-shadow(0 30px 40px rgba(0, 0, 0, 0.5));
+            transition: opacity 0.5s ease;
+        }
+
+        .scene.dissolving .hat {
+            opacity: 0;
+        }
+
+        /* Fedora brim */
+        .brim {
+            position: absolute;
+            width: 180px;
+            height: 180px;
+            background: linear-gradient(135deg, #cc0000 0%, #990000 50%, #660000 100%);
+            border-radius: 50%;
+            transform: translateX(-50%) translateY(-50%) rotateX(85deg) translateZ(-20px);
+            left: 50%;
+            top: 50%;
+            box-shadow:
+                inset 0 0 30px rgba(0, 0, 0, 0.4),
+                0 5px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .brim::before {
+            content: '';
+            position: absolute;
+            inset: 15%;
+            background: linear-gradient(135deg, #aa0000 0%, #880000 100%);
+            border-radius: 50%;
+            box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.5);
+        }
+
+        /* Crown base */
+        .crown {
+            position: absolute;
+            width: 100px;
+            height: 70px;
+            left: 50%;
+            top: 50%;
+            transform: translateX(-50%) translateY(-100%);
+            transform-style: preserve-3d;
+        }
+
+        .crown-front, .crown-back {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(180deg, #dd0000 0%, #aa0000 40%, #880000 100%);
+            border-radius: 50% 50% 45% 45% / 30% 30% 70% 70%;
+            box-shadow: inset -10px 0 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .crown-front {
+            transform: translateZ(25px);
+        }
+
+        .crown-back {
+            transform: translateZ(-25px) rotateY(180deg);
+            background: linear-gradient(180deg, #bb0000 0%, #880000 40%, #660000 100%);
+        }
+
+        .crown-left, .crown-right {
+            position: absolute;
+            width: 50px;
+            height: 100%;
+            background: linear-gradient(180deg, #cc0000 0%, #990000 40%, #770000 100%);
+            border-radius: 50% 50% 45% 45% / 30% 30% 70% 70%;
+        }
+
+        .crown-left {
+            left: 0;
+            transform: translateX(-25px) rotateY(-90deg);
+        }
+
+        .crown-right {
+            right: 0;
+            transform: translateX(25px) rotateY(90deg);
+        }
+
+        /* Crown top with pinch */
+        .crown-top {
+            position: absolute;
+            width: 90px;
+            height: 45px;
+            left: 50%;
+            top: -5px;
+            transform: translateX(-50%);
+            background: linear-gradient(90deg, #cc0000 0%, #ee0000 30%, #ee0000 70%, #cc0000 100%);
+            border-radius: 45% 45% 50% 50% / 100% 100% 0% 0%;
+            box-shadow:
+                inset 0 10px 20px rgba(255, 255, 255, 0.1),
+                inset 0 -5px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        .crown-top::before {
+            content: '';
+            position: absolute;
+            width: 60%;
+            height: 8px;
+            left: 20%;
+            top: 5px;
+            background: linear-gradient(90deg, transparent, rgba(0,0,0,0.3) 30%, rgba(0,0,0,0.4) 50%, rgba(0,0,0,0.3) 70%, transparent);
+            border-radius: 50%;
+        }
+
+        /* Hat band */
+        .band {
+            position: absolute;
+            width: 102px;
+            height: 12px;
+            left: 50%;
+            bottom: -2px;
+            transform: translateX(-50%);
+            background: linear-gradient(180deg, #1a1a1a 0%, #0a0a0a 50%, #1a1a1a 100%);
+            border-radius: 2px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        .band::after {
+            content: '';
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: radial-gradient(circle, #ffd700 0%, #b8860b 100%);
+            border-radius: 50%;
+            box-shadow: 0 0 4px rgba(255, 215, 0, 0.5);
+        }
+
+        /* Ambient glow */
+        .glow {
+            position: absolute;
+            width: 250px;
+            height: 250px;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+            opacity: 0.3;
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        /* Particle canvas */
+        #particles {
+            position: absolute;
+            inset: -100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        /* Caption */
+        .caption {
+            margin-top: 2rem;
+            font-size: clamp(0.875rem, 2vw, 1rem);
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+            opacity: 0.6;
+            text-align: center;
+        }
+
+        /* Reduced motion */
+        @media (prefers-reduced-motion: reduce) {
+            .hat-container {
+                animation: none;
+            }
+            .scene:hover .hat-container,
+            .scene.active .hat-container {
+                animation: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="scene" id="scene">
+        <canvas id="particles"></canvas>
+        <div class="glow"></div>
+        <div class="hat-container">
+            <div class="hat" id="hat">
+                <div class="brim"></div>
+                <div class="crown">
+                    <div class="crown-front"></div>
+                    <div class="crown-back"></div>
+                    <div class="crown-left"></div>
+                    <div class="crown-right"></div>
+                    <div class="crown-top">
+                        <div class="band"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <p class="caption">Open Source. Everywhere.</p>
+
+    <script>
+        (function() {
+            const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            if (prefersReducedMotion) return;
+
+            const scene = document.getElementById('scene');
+            const hat = document.getElementById('hat');
+            const canvas = document.getElementById('particles');
+            const ctx = canvas.getContext('2d');
+
+            let particles = [];
+            let orbitingParticles = [];
+            let isDissolving = false;
+            let isReforming = false;
+            let animationId = null;
+            let centerX, centerY;
+
+            function resize() {
+                const rect = scene.getBoundingClientRect();
+                canvas.width = rect.width * 3;
+                canvas.height = rect.height * 3;
+                canvas.style.width = rect.width * 3 + 'px';
+                canvas.style.height = rect.height * 3 + 'px';
+                centerX = canvas.width / 2;
+                centerY = canvas.height / 2;
+            }
+
+            resize();
+            window.addEventListener('resize', resize);
+
+            class Particle {
+                constructor(x, y, color, targetX, targetY) {
+                    this.x = x;
+                    this.y = y;
+                    this.originX = x;
+                    this.originY = y;
+                    this.targetX = targetX || x;
+                    this.targetY = targetY || y;
+                    this.color = color;
+                    this.size = Math.random() * 3 + 1;
+                    this.vx = (Math.random() - 0.5) * 8;
+                    this.vy = (Math.random() - 0.5) * 8;
+                    this.life = 1;
+                    this.decay = 0.002 + Math.random() * 0.002;
+                    this.angle = Math.random() * Math.PI * 2;
+                    this.angleSpeed = (Math.random() - 0.5) * 0.1;
+                    this.distance = Math.random() * 150 + 50;
+                    this.phase = Math.random() * Math.PI * 2;
+                    this.trail = [];
+                    this.maxTrail = 5;
+                }
+
+                update(dissolve, reform) {
+                    this.trail.unshift({ x: this.x, y: this.y });
+                    if (this.trail.length > this.maxTrail) this.trail.pop();
+
+                    if (dissolve) {
+                        this.angle += this.angleSpeed;
+                        this.distance += 2;
+                        this.x = centerX + Math.cos(this.angle + this.phase) * this.distance;
+                        this.y = centerY + Math.sin(this.angle + this.phase) * this.distance * 0.6;
+                        this.vx *= 0.98;
+                        this.vy *= 0.98;
+                        this.x += this.vx;
+                        this.y += this.vy;
+                    } else if (reform) {
+                        const dx = this.originX - this.x;
+                        const dy = this.originY - this.y;
+                        this.x += dx * 0.08;
+                        this.y += dy * 0.08;
+                        if (Math.abs(dx) < 1 && Math.abs(dy) < 1) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+
+                draw() {
+                    for (let i = this.trail.length - 1; i >= 0; i--) {
+                        const t = this.trail[i];
+                        const alpha = (1 - i / this.maxTrail) * 0.3 * this.life;
+                        ctx.beginPath();
+                        ctx.arc(t.x, t.y, this.size * (1 - i / this.maxTrail), 0, Math.PI * 2);
+                        ctx.fillStyle = this.color.replace('1)', alpha + ')');
+                        ctx.fill();
+                    }
+
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                    ctx.fillStyle = this.color;
+                    ctx.shadowBlur = 15;
+                    ctx.shadowColor = this.color;
+                    ctx.fill();
+                    ctx.shadowBlur = 0;
+                }
+            }
+
+            class OrbitingParticle {
+                constructor() {
+                    this.angle = Math.random() * Math.PI * 2;
+                    this.radius = 100 + Math.random() * 60;
+                    this.speed = 0.01 + Math.random() * 0.02;
+                    this.yOffset = (Math.random() - 0.5) * 40;
+                    this.size = Math.random() * 2 + 1;
+                    this.phase = Math.random() * Math.PI * 2;
+                    this.trail = [];
+                    this.maxTrail = 8;
+                    this.color = `rgba(${200 + Math.random() * 55}, ${Math.random() * 50}, ${Math.random() * 50}, 0.8)`;
+                }
+
+                update() {
+                    this.angle += this.speed;
+                    const x = centerX + Math.cos(this.angle) * this.radius;
+                    const y = centerY + Math.sin(this.angle) * this.radius * 0.3 + this.yOffset + Math.sin(this.phase + this.angle * 2) * 10;
+
+                    this.trail.unshift({ x, y });
+                    if (this.trail.length > this.maxTrail) this.trail.pop();
+
+                    this.x = x;
+                    this.y = y;
+                }
+
+                draw() {
+                    for (let i = this.trail.length - 1; i >= 0; i--) {
+                        const t = this.trail[i];
+                        const alpha = (1 - i / this.maxTrail) * 0.4;
+                        ctx.beginPath();
+                        ctx.arc(t.x, t.y, this.size * (1 - i / this.maxTrail * 0.5), 0, Math.PI * 2);
+                        ctx.fillStyle = this.color.replace('0.8)', alpha + ')');
+                        ctx.fill();
+                    }
+
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                    ctx.fillStyle = this.color;
+                    ctx.shadowBlur = 10;
+                    ctx.shadowColor = this.color;
+                    ctx.fill();
+                    ctx.shadowBlur = 0;
+                }
+            }
+
+            function createParticles() {
+                particles = [];
+                const hatRect = hat.getBoundingClientRect();
+                const sceneRect = scene.getBoundingClientRect();
+                const offsetX = (hatRect.left - sceneRect.left + hatRect.width / 2) * 3 / sceneRect.width * canvas.width;
+                const offsetY = (hatRect.top - sceneRect.top + hatRect.height / 2) * 3 / sceneRect.height * canvas.height;
+
+                const colors = [
+                    'rgba(238, 0, 0, 1)',
+                    'rgba(204, 0, 0, 1)',
+                    'rgba(255, 50, 50, 1)',
+                    'rgba(255, 100, 50, 1)',
+                    'rgba(255, 150, 100, 1)'
+                ];
+
+                for (let i = 0; i < 800; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const radiusX = Math.random() * 90;
+                    const radiusY = Math.random() * 60;
+                    const x = centerX + Math.cos(angle) * radiusX + (Math.random() - 0.5) * 40;
+                    const y = centerY + Math.sin(angle) * radiusY * 0.5 + (Math.random() - 0.5) * 80 - 20;
+                    const color = colors[Math.floor(Math.random() * colors.length)];
+                    particles.push(new Particle(x, y, color));
+                }
+            }
+
+            function dissolve() {
+                if (isDissolving || isReforming) return;
+
+                isDissolving = true;
+                scene.classList.add('dissolving');
+                createParticles();
+
+                let dissolveTime = 0;
+                const dissolveDuration = 120;
+                const swirlDuration = 80;
+
+                function animate() {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                    orbitingParticles.forEach(p => {
+                        p.update();
+                        p.draw();
+                    });
+
+                    if (dissolveTime < dissolveDuration) {
+                        particles.forEach(p => {
+                            p.update(true, false);
+                            p.draw();
+                        });
+                        dissolveTime++;
+                        animationId = requestAnimationFrame(animate);
+                    } else if (dissolveTime < dissolveDuration + swirlDuration) {
+                        particles.forEach(p => {
+                            p.angle += p.angleSpeed * 0.5;
+                            p.x = centerX + Math.cos(p.angle + p.phase) * p.distance * 0.95;
+                            p.y = centerY + Math.sin(p.angle + p.phase) * p.distance * 0.5;
+                            p.distance *= 0.995;
+                            p.draw();
+                        });
+                        dissolveTime++;
+                        animationId = requestAnimationFrame(animate);
+                    } else {
+                        isDissolving = false;
+                        isReforming = true;
+                        reform();
+                    }
+                }
+
+                animate();
+            }
+
+            function reform() {
+                let reformed = 0;
+
+                function animate() {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                    orbitingParticles.forEach(p => {
+                        p.update();
+                        p.draw();
+                    });
+
+                    reformed = 0;
+                    particles.forEach(p => {
+                        if (p.update(false, true)) reformed++;
+                        p.draw();
+                    });
+
+                    if (reformed < particles.length * 0.95) {
+                        animationId = requestAnimationFrame(animate);
+                    } else {
+                        isReforming = false;
+                        scene.classList.remove('dissolving');
+                        particles = [];
+
+                        for (let i = 0; i < 5; i++) {
+                            orbitingParticles.push(new OrbitingParticle());
+                        }
+
+                        animateOrbits();
+                    }
+                }
+
+                animate();
+            }
+
+            function animateOrbits() {
+                if (isDissolving || isReforming) return;
+
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                orbitingParticles.forEach(p => {
+                    p.update();
+                    p.draw();
+                });
+
+                animationId = requestAnimationFrame(animateOrbits);
+            }
+
+            scene.addEventListener('click', dissolve);
+            scene.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                scene.classList.add('active');
+                dissolve();
+            }, { passive: false });
+
+            scene.addEventListener('touchend', () => {
+                scene.classList.remove('active');
+            });
+
+            scene.addEventListener('mouseenter', () => {
+                if (!isDissolving && !isReforming) {
+                    setTimeout(() => {
+                        if (scene.matches(':hover') && !isDissolving && !isReforming) {
+                            dissolve();
+                        }
+                    }, 300);
+                }
+            });
+
+            animateOrbits();
+        })();
+    </script>
+</body>
+</html>

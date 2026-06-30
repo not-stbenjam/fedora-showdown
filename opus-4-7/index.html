@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Red Hat</title>
+<style>
+  :root { color-scheme: dark; }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #050306;
+  }
+  body {
+    background:
+      radial-gradient(ellipse 80% 70% at 50% 42%, #2a0d12 0%, #160810 38%, #07040a 75%, #04020a 100%);
+    color: #f0e0e0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+  body::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(1.5px 1.5px at 23% 12%, rgba(255,255,255,0.18), transparent 60%),
+      radial-gradient(1.5px 1.5px at 71% 19%, rgba(255,255,255,0.12), transparent 60%),
+      radial-gradient(1.5px 1.5px at 88% 73%, rgba(255,255,255,0.14), transparent 60%),
+      radial-gradient(1.5px 1.5px at 11% 84%, rgba(255,255,255,0.10), transparent 60%),
+      radial-gradient(1.5px 1.5px at 38% 91%, rgba(255,255,255,0.12), transparent 60%),
+      radial-gradient(1.5px 1.5px at 56% 7%, rgba(255,255,255,0.10), transparent 60%);
+    pointer-events: none;
+  }
+  .scene {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 4vmin;
+    position: relative;
+    z-index: 1;
+  }
+  .stage {
+    position: relative;
+    width: min(74vmin, 680px);
+    height: min(74vmin, 680px);
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    outline: none;
+  }
+  .stage:focus-visible {
+    outline: 1px solid rgba(238, 0, 0, 0.45);
+    outline-offset: 10px;
+    border-radius: 12px;
+  }
+  canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .caption {
+    margin-top: 1.5vmin;
+    text-align: center;
+    pointer-events: none;
+    user-select: none;
+  }
+  .caption .title {
+    font-size: clamp(11px, 1.6vmin, 14px);
+    letter-spacing: 0.42em;
+    text-transform: uppercase;
+    color: rgba(232, 216, 216, 0.6);
+    font-weight: 500;
+    padding-left: 0.42em;
+  }
+  .caption .hint {
+    display: block;
+    margin-top: 0.9em;
+    font-size: clamp(9px, 1.1vmin, 11px);
+    letter-spacing: 0.5em;
+    text-transform: uppercase;
+    color: rgba(232, 216, 216, 0.2);
+    font-weight: 400;
+    padding-left: 0.5em;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .caption .hint { visibility: hidden; }
+  }
+</style>
+</head>
+<body>
+  <div class="scene">
+    <div class="stage" id="stage" tabindex="0" role="button" aria-label="Red Hat fedora. Hover or tap to dissolve and reform.">
+      <canvas id="c"></canvas>
+    </div>
+    <div class="caption">
+      <div class="title">Red Hat</div>
+      <span class="hint">Hover &middot; Tap</span>
+    </div>
+  </div>
+<script>
+(() => {
+  'use strict';
+
+  const canvas = document.getElementById('c');
+  const stage = document.getElementById('stage');
+  const ctx = canvas.getContext('2d', { alpha: true });
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  let W = 0, H = 0, DPR = 1, scale = 100;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    const rect = canvas.getBoundingClientRect();
+    W = rect.width;
+    H = rect.height;
+    canvas.width = Math.max(1, Math.floor(W * DPR));
+    canvas.height = Math.max(1, Math.floor(H * DPR));
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    scale = Math.min(W, H) * 0.20;
+  }
+  window.addEventListener('resize', () => {
+    resize();
+    if (reducedMotion) render(performance.now());
+  });
+
+  // ---- Pre-rendered soft sprites (much faster than per-particle gradients) ----
+  function makeSprite(r, g, b) {
+    const s = 64;
+    const c = document.createElement('canvas');
+    c.width = s; c.height = s;
+    const x = c.getContext('2d');
+    const grad = x.createRadialGradient(s/2, s/2, 0, s/2, s/2, s/2);
+    grad.addColorStop(0,    `rgba(${r},${g},${b},1)`);
+    grad.addColorStop(0.18, `rgba(${r},${g},${b},0.72)`);
+    grad.addColorStop(0.42, `rgba(${(r*0.85)|0},${(g*0.45)|0},${(b*0.4)|0},0.22)`);
+    grad.addColorStop(0.75, `rgba(${(r*0.4)|0},${(g*0.18)|0},${(b*0.18)|0},0.05)`);
+    grad.addColorStop(1,    `rgba(0,0,0,0)`);
+    x.fillStyle = grad;
+    x.fillRect(0, 0, s, s);
+    return c;
+  }
+  const redSprite   = makeSprite(232, 28, 32);
+  const emberSprite = makeSprite(255, 132, 50);
+  const goldSprite  = makeSprite(255, 210, 150);
+
+  // ---- Build fedora point cloud ----
+  function buildHat() {
+    const points = [];
+    const N = 2200;
+    const brimN = Math.floor(N * 0.36);
+    const crownN = Math.floor(N * 0.42);
+    const topN = N - brimN - crownN;
+
+    // Brim: saddle-curved disk. Front (z<0, facing camera) dips down, back (z>0) curls up.
+    for (let i = 0; i < brimN; i++) {
+      const u = Math.random() * Math.PI * 2;
+      const t = Math.sqrt(Math.random());
+      const innerR = 0.93;
+      const outerR = 1.92;
+      const r = innerR + (outerR - innerR) * t;
+      const x = Math.cos(u) * r;
+      const z = Math.sin(u) * r;
+      const tilt = (z / r) * 0.30 * Math.pow(t, 1.4);
+      const jitter = (Math.random() - 0.5) * 0.05;
+      const y = -0.04 + tilt + jitter;
+      points.push({ p: [x, y, z], n: [0, 1, 0] });
+    }
+
+    // Crown: gently tapered cylinder.
+    for (let i = 0; i < crownN; i++) {
+      const u = Math.random() * Math.PI * 2;
+      const v = Math.random();
+      const r = 0.93 - v * 0.08;
+      const x = Math.cos(u) * r;
+      const z = Math.sin(u) * r;
+      const y = 0.06 + v * 1.20;
+      // Outward radial normal, slight upward bias.
+      const nL = Math.hypot(Math.cos(u), 0.12, Math.sin(u));
+      points.push({
+        p: [x, y, z],
+        n: [Math.cos(u)/nL, 0.12/nL, Math.sin(u)/nL]
+      });
+    }
+
+    // Top: dome-ish disk with subtle pinch crease.
+    for (let i = 0; i < topN; i++) {
+      const u = Math.random() * Math.PI * 2;
+      const t = Math.sqrt(Math.random());
+      const r = t * 0.87;
+      const x = Math.cos(u) * r;
+      const z = Math.sin(u) * r;
+      const creaseDepth = 0.20 * Math.exp(-(x * x) * 7);
+      const y = 1.26 - creaseDepth;
+      // Normal tilts slightly outward from the crease.
+      const slope = 2 * x * 7 * 0.20 * Math.exp(-(x * x) * 7);
+      const nx = slope, ny = 1, nL = Math.hypot(nx, ny);
+      points.push({ p: [x, y, z], n: [nx/nL, ny/nL, 0] });
+    }
+
+    return points;
+  }
+
+  const hatBase = buildHat();
+
+  // ---- Particle state ----
+  const particles = hatBase.map(h => {
+    const outScale = 1.7 + Math.random() * 1.3;
+    return {
+      hx: h.p[0], hy: h.p[1], hz: h.p[2],
+      nx: h.n[0], ny: h.n[1], nz: h.n[2],
+      dx: h.p[0] * outScale + (Math.random() - 0.5) * 1.0,
+      dy: h.p[1] * outScale + Math.random() * 1.5 + 0.1,
+      dz: h.p[2] * outScale + (Math.random() - 0.5) * 1.0,
+      stagger: Math.random() * 0.40,
+      size:    0.7 + Math.random() * 0.7,
+      seed:    Math.random() * 1000,
+      swirl:   Math.random() * Math.PI * 2
+    };
+  });
+
+  // ---- Embers (post-reform orbiters) ----
+  const embers = [];
+  function spawnEmbers(count) {
+    for (let i = 0; i < count; i++) {
+      embers.push({
+        angle: Math.random() * Math.PI * 2,
+        speed: (0.35 + Math.random() * 0.55) * (Math.random() < 0.5 ? -1 : 1),
+        radius: 1.35 + Math.random() * 1.25,
+        rBreath: 0.08 + Math.random() * 0.18,
+        rFreq: 0.4 + Math.random() * 0.6,
+        yBase: -0.05 + Math.random() * 1.3,
+        yAmp:  0.10 + Math.random() * 0.25,
+        yPhase: Math.random() * Math.PI * 2,
+        yFreq: 0.35 + Math.random() * 0.7,
+        size: 0.8 + Math.random() * 0.7,
+        life: 0,
+        maxLife: 5 + Math.random() * 5,
+        fadeIn: 0.5,
+        fadeOut: 1.6,
+        trail: []
+      });
+    }
+  }
+
+  // ---- Math helpers ----
+  function rotY(p, a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    return [c * p[0] + s * p[2], p[1], -s * p[0] + c * p[2]];
+  }
+  function rotX(p, a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    return [p[0], c * p[1] - s * p[2], s * p[1] + c * p[2]];
+  }
+  function smooth(t) { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); }
+
+  // ---- Animation state ----
+  let rotation = -0.45;
+  let rotSpeed = 0.42;
+  let dissolveAmount = 0;
+  let cycleTime = -1;
+  let embersSpawned = false;
+  let lastT = performance.now();
+
+  function step(now) {
+    const dt = Math.min(0.05, (now - lastT) / 1000);
+    lastT = now;
+
+    let speedTarget = 0.42;
+    let targetDis = 0;
+
+    if (cycleTime >= 0) {
+      cycleTime += dt;
+      if (cycleTime < 1.0) {
+        // Phase 1: dissolve out, slow spin
+        targetDis = smooth(cycleTime / 1.0);
+        speedTarget = 0.42 * (1 - targetDis * 0.92);
+      } else if (cycleTime < 2.1) {
+        // Phase 2: drift in cloud
+        targetDis = 1;
+        speedTarget = 0.04;
+      } else if (cycleTime < 3.3) {
+        // Phase 3: reform, ramp spin back
+        targetDis = 1 - smooth((cycleTime - 2.1) / 1.2);
+        speedTarget = 0.04 + 0.38 * (1 - targetDis);
+      } else {
+        targetDis = 0;
+        speedTarget = 0.42;
+        if (cycleTime > 3.7) {
+          cycleTime = -1;
+          embersSpawned = false;
+        }
+      }
+
+      if (!embersSpawned && cycleTime > 0.75) {
+        spawnEmbers(22);
+        embersSpawned = true;
+      }
+    }
+
+    dissolveAmount += (targetDis - dissolveAmount) * Math.min(1, dt * 7);
+    rotSpeed += (speedTarget - rotSpeed) * Math.min(1, dt * 4);
+    rotation += rotSpeed * dt;
+
+    for (let i = embers.length - 1; i >= 0; i--) {
+      const e = embers[i];
+      e.life += dt;
+      e.angle += e.speed * dt;
+      if (e.life > e.maxLife) embers.splice(i, 1);
+    }
+
+    render(now);
+    requestAnimationFrame(step);
+  }
+
+  function render(now) {
+    const dis = dissolveAmount;
+    ctx.clearRect(0, 0, W, H);
+    const cx = W / 2, cy = H / 2;
+
+    // Inner ambient glow behind the hat
+    {
+      const r = Math.max(W, H) * 0.52;
+      const g = ctx.createRadialGradient(cx, cy * 0.92, 0, cx, cy * 0.92, r);
+      g.addColorStop(0,    'rgba(120, 22, 30, 0.18)');
+      g.addColorStop(0.50, 'rgba(54, 10, 18, 0.06)');
+      g.addColorStop(1,    'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    const fov = 5;
+    const tiltX = 0.30; // tilt so viewer looks slightly down on the hat
+
+    // Project all hat particles
+    const projected = [];
+    // Keep some swirl during fully dissolved phase too
+    const turbPeak = Math.max(Math.sin(dis * Math.PI), dis * 0.55);
+
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      const localD = smooth(Math.max(0, Math.min(1, dis * 1.4 - p.stagger)));
+
+      let x = p.hx + (p.dx - p.hx) * localD;
+      let y = p.hy + (p.dy - p.hy) * localD;
+      let z = p.hz + (p.dz - p.hz) * localD;
+
+      if (turbPeak > 0.01) {
+        const a = now * 0.0008 + p.seed * 0.01;
+        const amp = 0.45 * turbPeak;
+        x += Math.sin(a * 1.40 + p.swirl) * amp;
+        y += Math.cos(a * 1.05 + p.swirl * 1.3) * amp * 0.7;
+        z += Math.sin(a * 1.20 + p.swirl * 0.7) * amp;
+      }
+
+      y -= 0.55; // center vertically
+
+      let pos = rotY([x, y, z], rotation);
+      pos = rotX(pos, tiltX);
+      let n   = rotY([p.nx, p.ny, p.nz], rotation);
+      n   = rotX(n, tiltX);
+
+      const zCam = pos[2] + fov;
+      if (zCam < 0.2) continue;
+      const persp = fov / zCam;
+      const sx = cx + pos[0] * scale * persp;
+      const sy = cy + pos[1] * scale * persp;
+
+      projected.push({ sx, sy, z: pos[2], persp, n, p, localD });
+    }
+
+    // Back to front so closer particles overlay
+    projected.sort((a, b) => a.z - b.z);
+
+    // Soft contact shadow on the (implied) ground
+    if (dis < 0.7) {
+      const sAlpha = (1 - dis / 0.7) * 0.34;
+      ctx.save();
+      ctx.translate(cx, cy + scale * 0.78);
+      ctx.scale(1.35, 0.32);
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, scale * 1.75);
+      g.addColorStop(0,    `rgba(0,0,0,${sAlpha})`);
+      g.addColorStop(0.55, `rgba(0,0,0,${sAlpha * 0.3})`);
+      g.addColorStop(1,    'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(0, 0, scale * 1.75, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // ---- Particle rendering (additive) ----
+    ctx.globalCompositeOperation = 'lighter';
+    const Lx = -0.30, Ly = 0.80, Lz = 0.52; // soft light, front-top-left
+    const sizeScale = scale * 0.022;
+
+    for (let i = 0; i < projected.length; i++) {
+      const pp = projected[i];
+      const p = pp.p;
+
+      const dot = pp.n[0]*Lx + pp.n[1]*Ly + pp.n[2]*Lz;
+      const baseLight = 0.20 + Math.max(0, dot) * 0.80;
+      // When dissolved, lighting flattens (particles are self-luminous embers)
+      const light = baseLight * (1 - pp.localD * 0.55) + 0.72 * pp.localD;
+
+      const drawSize = (p.size + pp.localD * 0.25) * Math.max(0.55, pp.persp) * sizeScale * 4.4;
+      const emberMix = Math.max(Math.sin(pp.localD * Math.PI), pp.localD * 0.40);
+
+      // Red base layer
+      const redAlpha = light * (0.60 + 0.30 * pp.persp) * (1 - emberMix * 0.45);
+      ctx.globalAlpha = Math.min(1, redAlpha);
+      ctx.drawImage(redSprite, pp.sx - drawSize, pp.sy - drawSize, drawSize * 2, drawSize * 2);
+
+      // Ember overlay (mid-dissolve glow)
+      if (emberMix > 0.04) {
+        const eAlpha = light * emberMix * 0.55;
+        const es = drawSize * 0.85;
+        ctx.globalAlpha = Math.min(1, eAlpha);
+        ctx.drawImage(emberSprite, pp.sx - es, pp.sy - es, es * 2, es * 2);
+      }
+    }
+
+    // ---- Orbital embers ----
+    for (let i = 0; i < embers.length; i++) {
+      const e = embers[i];
+      const r = e.radius + Math.sin(e.life * e.rFreq + e.yPhase) * e.rBreath;
+      const x = Math.cos(e.angle) * r;
+      const z = Math.sin(e.angle) * r;
+      const y = e.yBase + Math.sin(e.life * e.yFreq + e.yPhase) * e.yAmp - 0.55;
+
+      let pos = rotY([x, y, z], rotation * 0.35);
+      pos = rotX(pos, tiltX);
+
+      const zCam = pos[2] + fov;
+      if (zCam < 0.2) continue;
+      const persp = fov / zCam;
+      const sx = cx + pos[0] * scale * persp;
+      const sy = cy + pos[1] * scale * persp;
+
+      e.trail.push({ sx, sy });
+      if (e.trail.length > 14) e.trail.shift();
+
+      let alpha = 1;
+      if (e.life < e.fadeIn) alpha = e.life / e.fadeIn;
+      if (e.life > e.maxLife - e.fadeOut) alpha = Math.max(0, (e.maxLife - e.life) / e.fadeOut);
+
+      // Faint trail
+      for (let j = 0; j < e.trail.length - 1; j++) {
+        const t = e.trail[j];
+        const tt = j / e.trail.length;
+        const ta = Math.pow(tt, 1.8) * alpha * 0.35;
+        const ts = e.size * persp * sizeScale * (0.7 + tt * 1.5);
+        ctx.globalAlpha = ta;
+        ctx.drawImage(emberSprite, t.sx - ts, t.sy - ts, ts * 2, ts * 2);
+      }
+
+      // Core
+      const coreSize = e.size * persp * sizeScale * 3.0;
+      ctx.globalAlpha = alpha * 0.85;
+      ctx.drawImage(emberSprite, sx - coreSize, sy - coreSize, coreSize * 2, coreSize * 2);
+      ctx.globalAlpha = alpha * 0.55;
+      const gs = coreSize * 0.55;
+      ctx.drawImage(goldSprite, sx - gs, sy - gs, gs * 2, gs * 2);
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  // ---- Interaction ----
+  function startCycle() {
+    if (reducedMotion) return;
+    if (cycleTime < 0) {
+      cycleTime = 0.0001;
+      embersSpawned = false;
+    }
+  }
+  stage.addEventListener('mouseenter', startCycle);
+  stage.addEventListener('click', startCycle);
+  stage.addEventListener('touchstart', (e) => { e.preventDefault(); startCycle(); }, { passive: false });
+  stage.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startCycle(); }
+  });
+
+  // ---- Boot ----
+  resize();
+  if (reducedMotion) {
+    rotation = -0.45;
+    dissolveAmount = 0;
+    render(performance.now());
+  } else {
+    requestAnimationFrame(step);
+  }
+})();
+</script>
+</body>
+</html>

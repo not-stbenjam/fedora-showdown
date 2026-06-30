@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fedora Spin</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(to bottom, #0a0a1a, #1a1a3a);
+            color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2rem;
+            padding: 2rem;
+            text-align: center;
+        }
+
+        .caption {
+            font-size: 1.2rem;
+            opacity: 0.8;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        canvas {
+            max-width: 100%;
+            max-height: 80vh;
+            display: block;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            canvas {
+                animation: none !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <canvas id="hatCanvas"></canvas>
+        <div class="caption">A moment of elegance</div>
+    </div>
+
+    <script>
+        // Scene setup
+        const canvas = document.getElementById('hatCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Responsive sizing
+        function resizeCanvas() {
+            const maxWidth = window.innerWidth * 0.8;
+            const maxHeight = window.innerHeight * 0.7;
+            const size = Math.min(maxWidth, maxHeight, 600);
+            canvas.width = size;
+            canvas.height = size;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Hat geometry (simplified fedora-like shape)
+        const hatPoints = [];
+        const hatFaces = [];
+        const hatNormals = [];
+        const hatColors = [];
+        
+        // Generate hat geometry
+        function createHatGeometry() {
+            const segments = 32;
+            const stacks = 16;
+            const brimWidth = 0.8;
+            const crownHeight = 0.6;
+            const crownRadius = 0.4;
+            
+            // Crown
+            for (let stack = 0; stack <= stacks; stack++) {
+                const v = stack / stacks;
+                const radius = crownRadius * (1 - v * 0.3);
+                const y = crownHeight * (0.5 - v);
+                
+                for (let seg = 0; seg <= segments; seg++) {
+                    const u = seg / segments;
+                    const angle = u * Math.PI * 2;
+                    const x = radius * Math.cos(angle);
+                    const z = radius * Math.sin(angle);
+                    
+                    hatPoints.push([x, y, z]);
+                    
+                    if (stack > 0 && seg > 0) {
+                        const idx = hatPoints.length - 1;
+                        hatFaces.push([
+                            idx, idx - 1, idx - segments - 1,
+                            idx - segments - 1, idx - segments - 2, idx - 1
+                        ]);
+                    }
+                }
+            }
+            
+            // Brim
+            const brimStart = hatPoints.length;
+            for (let seg = 0; seg <= segments; seg++) {
+                const u = seg / segments;
+                const angle = u * Math.PI * 2;
+                
+                // Inner edge
+                const x1 = crownRadius * Math.cos(angle);
+                const z1 = crownRadius * Math.sin(angle);
+                hatPoints.push([x1, 0, z1]);
+                
+                // Outer edge
+                const x2 = brimWidth * Math.cos(angle);
+                const z2 = brimWidth * Math.sin(angle);
+                hatPoints.push([x2, -0.1, z2]);
+                
+                if (seg > 0) {
+                    const idx = hatPoints.length - 1;
+                    hatFaces.push([
+                        idx, idx - 1, idx - 3,
+                        idx - 3, idx - 2, idx - 1
+                    ]);
+                }
+            }
+            
+            // Calculate normals
+            for (const face of hatFaces) {
+                const p0 = hatPoints[face[0]];
+                const p1 = hatPoints[face[1]];
+                const p2 = hatPoints[face[2]];
+                
+                const v1 = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+                const v2 = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
+                
+                const normal = [
+                    v1[1] * v2[2] - v1[2] * v2[1],
+                    v1[2] * v2[0] - v1[0] * v2[2],
+                    v1[0] * v2[1] - v1[1] * v2[0]
+                ];
+                
+                const len = Math.sqrt(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
+                if (len > 0) {
+                    normal[0] /= len;
+                    normal[1] /= len;
+                    normal[2] /= len;
+                }
+                
+                hatNormals.push(normal);
+                
+                // Color based on position
+                const color = [
+                    0.8 + normal[0] * 0.1,
+                    0.6 + normal[1] * 0.1,
+                    0.5 + normal[2] * 0.1
+                ];
+                hatColors.push(color);
+            }
+        }
+        
+        createHatGeometry();
+
+        // Camera and lighting
+        let camera = { x: 0, y: 0, z: 3 };
+        let lightDir = [0.5, 1, -1];
+        
+        // Animation state
+        let angle = 0;
+        let spinSpeed = 0.008;
+        let targetSpeed = 0.008;
+        let particles = [];
+        let isExploding = false;
+        let explosionProgress = 0;
+        let orbitingParticles = [];
+        
+        // Check for reduced motion preference
+        const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (prefersReducedMotion) {
+            spinSpeed = 0;
+            targetSpeed = 0;
+        }
+
+        // Event listeners
+        canvas.addEventListener('mouseenter', startExplosion);
+        canvas.addEventListener('touchstart', startExplosion);
+        canvas.addEventListener('click', startExplosion);
+        
+        function startExplosion() {
+            if (isExploding || prefersReducedMotion) return;
+            
+            isExploding = true;
+            explosionProgress = 0;
+            targetSpeed = 0.002;
+            
+            // Create particles from hat geometry
+            particles = [];
+            for (let i = 0; i < hatPoints.length; i += 3) {
+                const point = hatPoints[i];
+                particles.push({
+                    x: point[0],
+                    y: point[1],
+                    z: point[2],
+                    vx: (Math.random() - 0.5) * 0.02,
+                    vy: (Math.random() - 0.5) * 0.02,
+                    vz: (Math.random() - 0.5) * 0.02,
+                    size: Math.random() * 1.5 + 0.5,
+                    alpha: 1,
+                    glow: Math.random() * 0.5 + 0.5
+                });
+            }
+            
+            // Some particles will orbit afterward
+            orbitingParticles = [];
+            for (let i = 0; i < 20; i++) {
+                orbitingParticles.push({
+                    angle: Math.random() * Math.PI * 2,
+                    radius: 1.2 + Math.random() * 0.5,
+                    speed: (Math.random() * 0.01 + 0.005) * (Math.random() > 0.5 ? 1 : -1),
+                    y: Math.random() * 0.5 - 0.25,
+                    size: Math.random() * 1 + 0.5,
+                    glow: Math.random() * 0.3 + 0.7
+                });
+            }
+        }
+
+        // Rendering
+        function render() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Set up 3D projection
+            const fov = 500;
+            const aspect = canvas.width / canvas.height;
+            
+            if (!isExploding) {
+                // Normal hat rendering
+                angle += spinSpeed;
+                
+                // Draw hat
+                for (let i = 0; i < hatFaces.length; i++) {
+                    const face = hatFaces[i];
+                    const normal = hatNormals[i];
+                    const color = hatColors[i];
+                    
+                    // Calculate lighting
+                    const light = Math.max(0, 
+                        normal[0] * lightDir[0] + 
+                        normal[1] * lightDir[1] + 
+                        normal[2] * lightDir[2]
+                    );
+                    
+                    const shade = light * 0.7 + 0.3;
+                    
+                    // Project points
+                    const points2d = face.map(idx => {
+                        const p = hatPoints[idx];
+                        
+                        // Rotate
+                        const rotated = rotatePoint(p, angle);
+                        
+                        // Project
+                        const scale = fov / (fov + rotated[2] + camera.z);
+                        const x = rotated[0] * scale * 100 + canvas.width / 2;
+                        const y = rotated[1] * scale * 100 + canvas.height / 2;
+                        
+                        return { x, y };
+                    });
+                    
+                    // Draw face
+                    ctx.beginPath();
+                    ctx.moveTo(points2d[0].x, points2d[0].y);
+                    for (let j = 1; j < points2d.length; j++) {
+                        ctx.lineTo(points2d[j].x, points2d[j].y);
+                    }
+                    ctx.closePath();
+                    
+                    ctx.fillStyle = `rgba(${Math.floor(color[0] * 255 * shade)}, 
+                                         ${Math.floor(color[1] * 255 * shade)}, 
+                                         ${Math.floor(color[2] * 255 * shade)}, 1)`;
+                    ctx.fill();
+                }
+                
+                // Draw orbiting particles
+                ctx.globalCompositeOperation = 'lighter';
+                for (const p of orbitingParticles) {
+                    p.angle += p.speed;
+                    
+                    const x = Math.cos(p.angle) * p.radius;
+                    const z = Math.sin(p.angle) * p.radius;
+                    
+                    const rotated = rotatePoint([x, p.y, z], angle);
+                    const scale = fov / (fov + rotated[2] + camera.z);
+                    const px = rotated[0] * scale * 100 + canvas.width / 2;
+                    const py = rotated[1] * scale * 100 + canvas.height / 2;
+                    
+                    const gradient = ctx.createRadialGradient(px, py, 0, px, py, p.size * 2);
+                    gradient.addColorStop(0, `rgba(255, 200, 150, ${p.glow})`);
+                    gradient.addColorStop(1, `rgba(255, 100, 50, 0)`);
+                    
+                    ctx.fillStyle = gradient;
+                    ctx.beginPath();
+                    ctx.arc(px, py, p.size * 1.5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.globalCompositeOperation = 'source-over';
+            } else {
+                // Particle explosion animation
+                explosionProgress += 0.01;
+                
+                if (explosionProgress < 1) {
+                    // Explode particles outward
+                    for (const p of particles) {
+                        p.x += p.vx * 2;
+                        p.y += p.vy * 2;
+                        p.z += p.vz * 2;
+                        p.alpha = 1 - explosionProgress * 0.5;
+                    }
+                } else if (explosionProgress < 2) {
+                    // Swirl around
+                    const progress = (explosionProgress - 1) / 1;
+                    for (let i = 0; i < particles.length; i++) {
+                        const p = particles[i];
+                        
+                        // Add some swirling motion
+                        const centerX = 0;
+                        const centerZ = 0;
+                        const dx = p.x - centerX;
+                        const dz = p.z - centerZ;
+                        const dist = Math.sqrt(dx * dx + dz * dz);
+                        
+                        if (dist > 0) {
+                            const angle = Math.atan2(dz, dx) + 0.02;
+                            const targetX = centerX + Math.cos(angle) * dist * 0.98;
+                            const targetZ = centerZ + Math.sin(angle) * dist * 0.98;
+                            
+                            p.x += (targetX - p.x) * 0.05;
+                            p.z += (targetZ - p.z) * 0.05;
+                        }
+                        
+                        p.y += Math.sin(explosionProgress * 5 + i * 0.1) * 0.005;
+                    }
+                } else if (explosionProgress < 3) {
+                    // Reform hat
+                    const progress = (explosionProgress - 2) / 1;
+                    for (let i = 0; i < particles.length; i++) {
+                        const target = hatPoints[i];
+                        const p = particles[i];
+                        
+                        p.x += (target[0] - p.x) * 0.05;
+                        p.y += (target[1] - p.y) * 0.05;
+                        p.z += (target[2] - p.z) * 0.05;
+                        
+                        p.alpha = 0.5 + progress * 0.5;
+                    }
+                } else {
+                    // Animation complete
+                    isExploding = false;
+                    explosionProgress = 0;
+                    spinSpeed = targetSpeed;
+                }
+                
+                // Draw particles
+                ctx.globalCompositeOperation = 'lighter';
+                for (const p of particles) {
+                    const rotated = rotatePoint([p.x, p.y, p.z], angle);
+                    const scale = fov / (fov + rotated[2] + camera.z);
+                    const px = rotated[0] * scale * 100 + canvas.width / 2;
+                    const py = rotated[1] * scale * 100 + canvas.height / 2;
+                    
+                    if (px >= 0 && px <= canvas.width && py >= 0 && py <= canvas.height) {
+                        const gradient = ctx.createRadialGradient(px, py, 0, px, py, p.size * 2);
+                        gradient.addColorStop(0, `rgba(255, 200, 150, ${p.alpha * p.glow})`);
+                        gradient.addColorStop(1, `rgba(255, 100, 50, 0)`);
+                        
+                        ctx.fillStyle = gradient;
+                        ctx.beginPath();
+                        ctx.arc(px, py, p.size * 1.5, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+                
+                // Draw orbiting particles during explosion
+                for (const p of orbitingParticles) {
+                    p.angle += p.speed;
+                    
+                    const x = Math.cos(p.angle) * p.radius;
+                    const z = Math.sin(p.angle) * p.radius;
+                    
+                    const rotated = rotatePoint([x, p.y, z], angle);
+                    const scale = fov / (fov + rotated[2] + camera.z);
+                    const px = rotated[0] * scale * 100 + canvas.width / 2;
+                    const py = rotated[1] * scale * 100 + canvas.height / 2;
+                    
+                    const gradient = ctx.createRadialGradient(px, py, 0, px, py, p.size * 2);
+                    gradient.addColorStop(0, `rgba(255, 200, 150, ${p.glow})`);
+                    gradient.addColorStop(1, `rgba(255, 100, 50, 0)`);
+                    
+                    ctx.fillStyle = gradient;
+                    ctx.beginPath();
+                    ctx.arc(px, py, p.size * 1.5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                
+                ctx.globalCompositeOperation = 'source-over';
+            }
+            
+            requestAnimationFrame(render);
+        }
+        
+        // Helper function to rotate a 3D point
+        function rotatePoint(point, angle) {
+            const [x, y, z] = point;
+            
+            // Rotate around Y axis
+            const cosA = Math.cos(angle);
+            const sinA = Math.sin(angle);
+            
+            return [
+                x * cosA - z * sinA,
+                y,
+                x * sinA + z * cosA
+            ];
+        }
+        
+        // Start animation
+        render();
+    </script>
+</body>
+</html>
