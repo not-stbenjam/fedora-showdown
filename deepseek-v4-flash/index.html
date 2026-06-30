@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Red Hat Fedora</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#07080a;overflow:hidden;font-family:Georgia,'Times New Roman',serif}
+#container{width:100%;height:100%;position:relative}
+#caption{
+  position:absolute;bottom:10%;left:0;width:100%;text-align:center;
+  color:#b8936a;font-size:clamp(1rem,3vw,1.8rem);
+  letter-spacing:0.35em;text-transform:uppercase;
+  text-shadow:0 0 24px rgba(139,26,26,0.35),0 0 60px rgba(139,26,26,0.15);
+  pointer-events:none;font-weight:300
+}
+#caption small{display:block;font-size:clamp(0.5rem,1vw,0.7rem);letter-spacing:0.5em;opacity:0.5;margin-top:0.6em}
+#hint{
+  position:absolute;bottom:4%;left:0;width:100%;text-align:center;
+  color:rgba(255,255,255,0.2);font-size:clamp(0.5rem,1.2vw,0.75rem);
+  letter-spacing:0.2em;pointer-events:none;
+  font-family:'Helvetica Neue',Arial,sans-serif;transition:opacity 0.8s
+}
+@media(prefers-reduced-motion:reduce){
+  #hint{display:none}
+  #caption{text-shadow:0 0 12px rgba(139,26,26,0.2)}
+}
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="container"></div>
+<div id="caption">Red Hat<small>Fedora</small></div>
+<div id="hint">&#9679; hover to reveal &#9679;</div>
+<script type="module">
+import * as THREE from 'three';
+
+// ── Reduced motion ──────────────────────────────────────────
+const rmq = window.matchMedia('(prefers-reduced-motion: reduce)');
+const reducedMotion = rmq.matches;
+
+// ── Scene ───────────────────────────────────────────────────
+const container = document.getElementById('container');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x07080a);
+scene.fog = new THREE.Fog(0x07080a, 8, 18);
+
+const camera = new THREE.PerspectiveCamera(30, container.clientWidth/container.clientHeight, 0.1, 30);
+camera.position.set(2.8, 3.2, 7.2);
+camera.lookAt(0, 1.2, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(container.clientWidth, container.clientHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
+container.appendChild(renderer.domElement);
+
+// ── Lighting ────────────────────────────────────────────────
+const ambient = new THREE.AmbientLight(0x222244, 0.5);
+scene.add(ambient);
+
+const envLight = new THREE.HemisphereLight(0x4466aa, 0x221111, 0.6);
+scene.add(envLight);
+
+const keyLight = new THREE.DirectionalLight(0xffd8b0, 2.2);
+keyLight.position.set(4, 8, 5);
+keyLight.castShadow = true;
+keyLight.shadow.mapSize.width = 1024;
+keyLight.shadow.mapSize.height = 1024;
+keyLight.shadow.camera.near = 0.1;
+keyLight.shadow.camera.far = 20;
+keyLight.shadow.camera.left = -5;
+keyLight.shadow.camera.right = 5;
+keyLight.shadow.camera.top = 5;
+keyLight.shadow.camera.bottom = -5;
+scene.add(keyLight);
+
+const fillLight = new THREE.DirectionalLight(0x8899ff, 0.6);
+fillLight.position.set(-3, 2, 4);
+scene.add(fillLight);
+
+const rimLight = new THREE.DirectionalLight(0xff8855, 0.8);
+rimLight.position.set(-1, 3, -5);
+scene.add(rimLight);
+
+const bottomGlow = new THREE.PointLight(0x661122, 0.4, 6);
+bottomGlow.position.set(0, -1, 0);
+scene.add(bottomGlow);
+
+// ── Ground ──────────────────────────────────────────────────
+const groundGeom = new THREE.CircleGeometry(6, 48);
+const groundMat = new THREE.MeshStandardMaterial({
+  color: 0x111318,
+  roughness: 0.8,
+  metalness: 0.1,
+  transparent: true,
+  opacity: 0.8,
+  side: THREE.DoubleSide,
+});
+const ground = new THREE.Mesh(groundGeom, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -0.15;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// subtle gradient ring under the hat
+const glowRingGeom = new THREE.RingGeometry(0.1, 2.8, 64);
+const glowRingMat = new THREE.MeshBasicMaterial({
+  color: 0x441111,
+  transparent: true,
+  opacity: 0.3,
+  side: THREE.DoubleSide,
+  depthWrite: false,
+});
+const glowRing = new THREE.Mesh(glowRingGeom, glowRingMat);
+glowRing.rotation.x = -Math.PI / 2;
+glowRing.position.y = -0.1;
+scene.add(glowRing);
+
+// ── Build the Fedora ────────────────────────────────────────
+const hatGroup = new THREE.Group();
+
+// Crown — LatheGeometry
+const crownPts = [
+  new THREE.Vector2(0, 2.55),
+  new THREE.Vector2(0.35, 2.42),
+  new THREE.Vector2(0.75, 2.38),
+  new THREE.Vector2(1.12, 2.36),
+  new THREE.Vector2(1.30, 2.30),
+  new THREE.Vector2(1.33, 2.00),
+  new THREE.Vector2(1.37, 1.60),
+  new THREE.Vector2(1.42, 1.20),
+  new THREE.Vector2(1.46, 0.80),
+  new THREE.Vector2(1.48, 0.40),
+  new THREE.Vector2(1.50, 0.15),
+];
+const crownGeom = new THREE.LatheGeometry(crownPts, 72);
+crownGeom.computeVertexNormals();
+
+const hatColor = 0x8b1a1a;
+const hatMat = new THREE.MeshStandardMaterial({
+  color: hatColor,
+  roughness: 0.55,
+  metalness: 0.35,
+  side: THREE.DoubleSide,
+  envMapIntensity: 0.6,
+});
+const crown = new THREE.Mesh(crownGeom, hatMat);
+crown.castShadow = true;
+crown.receiveShadow = true;
+hatGroup.add(crown);
+
+// Brim — RingGeometry with thickness
+const brimGeom = new THREE.RingGeometry(1.45, 3.05, 72, 2);
+const brimMat = new THREE.MeshStandardMaterial({
+  color: hatColor,
+  roughness: 0.55,
+  metalness: 0.35,
+  side: THREE.DoubleSide,
+  envMapIntensity: 0.6,
+});
+const brim = new THREE.Mesh(brimGeom, brimMat);
+brim.rotation.x = -Math.PI / 2;
+brim.position.y = 0.10;
+brim.castShadow = true;
+brim.receiveShadow = true;
+hatGroup.add(brim);
+
+// Brim underside
+const brimUnderGeom = new THREE.RingGeometry(1.45, 3.0, 72, 2);
+const brimUnderMat = new THREE.MeshStandardMaterial({
+  color: 0x551111,
+  roughness: 0.7,
+  metalness: 0.2,
+  side: THREE.DoubleSide,
+});
+const brimUnder = new THREE.Mesh(brimUnderGeom, brimUnderMat);
+brimUnder.rotation.x = Math.PI / 2;
+brimUnder.position.y = 0.02;
+hatGroup.add(brimUnder);
+
+// Hat band
+const bandGeom = new THREE.TorusGeometry(1.505, 0.09, 12, 72);
+const bandMat = new THREE.MeshStandardMaterial({
+  color: 0x1a0808,
+  roughness: 0.6,
+  metalness: 0.1,
+});
+const band = new THREE.Mesh(bandGeom, bandMat);
+band.rotation.x = Math.PI / 2;
+band.position.y = 0.30;
+band.castShadow = true;
+hatGroup.add(band);
+
+// Band buckle
+const buckleGeom = new THREE.BoxGeometry(0.25, 0.18, 0.06);
+const buckleMat = new THREE.MeshStandardMaterial({
+  color: 0x444444,
+  roughness: 0.3,
+  metalness: 0.8,
+});
+const buckle = new THREE.Mesh(buckleGeom, buckleMat);
+buckle.position.set(1.50, 0.30, 0.06);
+hatGroup.add(buckle);
+
+// Crown dimple detail – small cylinder indentation on top
+const dimpleGeom = new THREE.SphereGeometry(0.35, 16, 16, 0, 2*Math.PI, 0, 0.5);
+const dimpleMat = new THREE.MeshStandardMaterial({
+  color: 0x6a1010,
+  roughness: 0.7,
+  metalness: 0.2,
+});
+const dimple = new THREE.Mesh(dimpleGeom, dimpleMat);
+dimple.position.set(0, 2.55, 0);
+dimple.scale.set(1, 0.3, 1);
+hatGroup.add(dimple);
+
+scene.add(hatGroup);
+hatGroup.position.y = 1.2;
+
+// ── Ember particle texture ──────────────────────────────────
+function makeGlowTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.15, 'rgba(255,220,150,0.9)');
+  g.addColorStop(0.4, 'rgba(255,160,60,0.6)');
+  g.addColorStop(0.7, 'rgba(200,60,20,0.25)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0,0,64,64);
+  return new THREE.CanvasTexture(c);
+}
+const glowTex = makeGlowTexture();
+
+// ── Sample points from hat surface ──────────────────────────
+function samplePointsFromGeom(geom, count) {
+  const pos = geom.getAttribute('position');
+  const idx = geom.index;
+  const verts = [];
+  if (idx) {
+    for (let i = 0; i < idx.count; i += 3) {
+      const a = new THREE.Vector3().fromBufferAttribute(pos, idx.getX(i));
+      const b = new THREE.Vector3().fromBufferAttribute(pos, idx.getX(i+1));
+      const c = new THREE.Vector3().fromBufferAttribute(pos, idx.getX(i+2));
+      verts.push(a,b,c);
+    }
+  } else {
+    for (let i = 0; i < pos.count; i += 3) {
+      verts.push(
+        new THREE.Vector3().fromBufferAttribute(pos, i),
+        new THREE.Vector3().fromBufferAttribute(pos, i+1),
+        new THREE.Vector3().fromBufferAttribute(pos, i+2)
+      );
+    }
+  }
+  const tris = Math.floor(verts.length / 3);
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    const t = Math.floor(Math.random() * tris) * 3;
+    const a = verts[t], b = verts[t+1], c = verts[t+2];
+    let u = Math.random(), v = Math.random();
+    if (u + v > 1) { u = 1 - u; v = 1 - v; }
+    const p = new THREE.Vector3().copy(a)
+      .addScaledVector(new THREE.Vector3().copy(b).sub(a), u)
+      .addScaledVector(new THREE.Vector3().copy(c).sub(a), v);
+    out.push(p);
+  }
+  return out;
+}
+
+const PARTICLE_COUNT = reducedMotion ? 0 : 5000;
+let particleSystem = null;
+let particleData = null;
+
+function initParticles() {
+  if (PARTICLE_COUNT === 0) return;
+
+  // Gather meshes to sample from
+  const meshes = [crown, brim, band];
+  const allSamples = [];
+  const counts = [Math.floor(PARTICLE_COUNT * 0.55), Math.floor(PARTICLE_COUNT * 0.35), Math.floor(PARTICLE_COUNT * 0.1)];
+  
+  for (let i = 0; i < meshes.length; i++) {
+    const samples = samplePointsFromGeom(meshes[i].geometry, counts[i]);
+    // Transform from local to world
+    const m = meshes[i].matrixWorld;
+    for (const p of samples) {
+      p.applyMatrix4(m);
+      // shift to hatGroup local space (inverse of hatGroup world)
+      p.applyMatrix4(hatGroup.matrixWorld.clone().invert());
+    }
+    allSamples.push(...samples);
+  }
+
+  const positions = new Float32Array(allSamples.length * 3);
+  const origPositions = new Float32Array(allSamples.length * 3);
+  const scatterDirs = new Float32Array(allSamples.length * 3);
+  const colors = new Float32Array(allSamples.length * 3);
+  const sizes = new Float32Array(allSamples.length);
+
+  const emberColors = [
+    new THREE.Color(0xff6633),
+    new THREE.Color(0xff8844),
+    new THREE.Color(0xffaa44),
+    new THREE.Color(0xff4400),
+    new THREE.Color(0xffcc66),
+    new THREE.Color(0xff5544),
+  ];
+
+  for (let i = 0; i < allSamples.length; i++) {
+    const p = allSamples[i];
+    positions[i*3] = origPositions[i*3] = p.x;
+    positions[i*3+1] = origPositions[i*3+1] = p.y;
+    positions[i*3+2] = origPositions[i*3+2] = p.z;
+
+    // Random scatter direction
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.random() * Math.PI;
+    const r = 2 + Math.random() * 4;
+    scatterDirs[i*3] = Math.sin(phi) * Math.cos(theta) * r;
+    scatterDirs[i*3+1] = Math.sin(phi) * Math.sin(theta) * r + 1.5;
+    scatterDirs[i*3+2] = Math.cos(phi) * r;
+
+    const c = emberColors[Math.floor(Math.random() * emberColors.length)];
+    colors[i*3] = c.r;
+    colors[i*3+1] = c.g;
+    colors[i*3+2] = c.b;
+
+    sizes[i] = 0.06 + Math.random() * 0.12;
+  }
+
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geom.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+
+  const mat = new THREE.PointsMaterial({
+    size: 0.15,
+    map: glowTex,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    transparent: true,
+    opacity: 0,
+    vertexColors: true,
+    sizeAttenuation: true,
+  });
+
+  particleSystem = new THREE.Points(geom, mat);
+  // Child of hatGroup so particles inherit rotation & position
+  hatGroup.add(particleSystem);
+  // Ensure particles start invisible
+  mat.opacity = 0;
+
+  particleData = {
+    positions,
+    origPositions,
+    scatterDirs,
+    colors,
+    sizes,
+    count: allSamples.length,
+  };
+}
+
+// Init after setting up hat world matrix
+// Force matrix update
+hatGroup.updateMatrixWorld(true);
+initParticles();
+
+// ── Animation state ─────────────────────────────────────────
+const STATE = { IDLE:0, DISSOLVING:1, SWIRLING:2, REFORMING:3, ORBITING:4 };
+let state = STATE.IDLE;
+let stateTime = 0;
+let lastDissolveEnd = 0;
+let reformStartPositions = null;
+let orbitingIndices = [];
+let orbitAngles = [];
+let orbitSpeeds = [];
+let orbitYOffsets = [];
+let orbitRadius = 2.2;
+let baseRotationSpeed = reducedMotion ? 0 : 0.4;
+let currentRotationSpeed = baseRotationSpeed;
+
+// ── Particle animation helpers ──────────────────────────────
+function lerp(a, b, t) { return a + (b - a) * t; }
+function easeInOut(t) { return t < 0.5 ? 2*t*t : -1+(4-2*t)*t; }
+function easeOut(t) { return 1 - (1-t)*(1-t); }
+function easeIn(t) { return t*t; }
+
+const DISSOLVE_DURATION = 1.8;
+const SWIRL_DURATION = 2.0;
+const REFORM_DURATION = 1.8;
+const ORBIT_DURATION = 3.5;
+
+const posAttr = particleSystem ? particleSystem.geometry.getAttribute('position') : null;
+
+function triggerDissolve() {
+  if (reducedMotion || state !== STATE.IDLE) return;
+  state = STATE.DISSOLVING;
+  stateTime = 0;
+  
+  // Pick orbiting particles for later
+  const n = particleData.count;
+  const numOrbit = Math.min(80, Math.floor(n * 0.015));
+  orbitingIndices = [];
+  const used = new Set();
+  while (orbitingIndices.length < numOrbit) {
+    const idx = Math.floor(Math.random() * n);
+    if (!used.has(idx)) { used.add(idx); orbitingIndices.push(idx); }
+  }
+  orbitAngles = orbitingIndices.map(() => Math.random() * Math.PI * 2);
+  orbitSpeeds = orbitingIndices.map(() => 0.6 + Math.random() * 0.8);
+  orbitYOffsets = orbitingIndices.map(() => -0.5 + Math.random() * 1.5);
+}
+
+function updateParticles(dt) {
+  if (!particleSystem || state === STATE.IDLE) return;
+
+  stateTime += dt;
+  const pos = posAttr.array;
+  const n = particleData.count;
+  const mat = particleSystem.material;
+
+  if (state === STATE.DISSOLVING) {
+    const progress = Math.min(stateTime / DISSOLVE_DURATION, 1);
+    const eased = easeOut(progress);
+    
+    // Fade hat mesh out
+    const hatOpacity = 1 - eased;
+    setHatOpacity(hatOpacity);
+    
+    // Fade particles in
+    mat.opacity = eased * 0.9;
+    
+    // Move particles outward from original (hat-local) positions
+    for (let i = 0; i < n; i++) {
+      const i3 = i * 3;
+      pos[i3] = lerp(particleData.origPositions[i3], particleData.origPositions[i3] + particleData.scatterDirs[i3], eased);
+      pos[i3+1] = lerp(particleData.origPositions[i3+1], particleData.origPositions[i3+1] + particleData.scatterDirs[i3+1], eased);
+      pos[i3+2] = lerp(particleData.origPositions[i3+2], particleData.origPositions[i3+2] + particleData.scatterDirs[i3+2], eased);
+    }
+    
+    if (progress >= 1) {
+      state = STATE.SWIRLING;
+      stateTime = 0;
+    }
+  }
+  else if (state === STATE.SWIRLING) {
+    const progress = Math.min(stateTime / SWIRL_DURATION, 1);
+    // Particles swirl in a cloud
+    for (let i = 0; i < n; i++) {
+      const i3 = i * 3;
+      const scatterX = particleData.origPositions[i3] + particleData.scatterDirs[i3];
+      const scatterY = particleData.origPositions[i3+1] + particleData.scatterDirs[i3+1];
+      const scatterZ = particleData.origPositions[i3+2] + particleData.scatterDirs[i3+2];
+      
+      // Swirl motion: rotate around Y, bob up/down
+      const angle = stateTime * (0.3 + (i % 10) * 0.05) + i * 0.01;
+      const swirlRad = 1.5 + Math.sin(i * 0.5) * 1.0;
+      const swirlX = Math.cos(angle) * swirlRad;
+      const swirlZ = Math.sin(angle) * swirlRad;
+      const swirlY = Math.sin(stateTime * 0.5 + i * 0.1) * 1.2 + 0.5;
+      
+      // Blend between scatter position and swirl position
+      const blend = Math.min(progress * 2, 1);
+      const easeB = easeInOut(blend);
+      
+      pos[i3] = lerp(scatterX, swirlX, easeB);
+      pos[i3+1] = lerp(scatterY, swirlY, easeB);
+      pos[i3+2] = lerp(scatterZ, swirlZ, easeB);
+    }
+    mat.opacity = 0.9;
+    
+    if (progress >= 1) {
+      // Save current positions as the start of reform (avoids visual pop)
+      reformStartPositions = new Float32Array(pos);
+      state = STATE.REFORMING;
+      stateTime = 0;
+    }
+  }
+  else if (state === STATE.REFORMING) {
+    const progress = Math.min(stateTime / REFORM_DURATION, 1);
+    const eased = easeInOut(progress);
+    
+    // Return particles to original positions (lerp from saved swirl positions)
+    for (let i = 0; i < n; i++) {
+      const i3 = i * 3;
+      pos[i3] = lerp(reformStartPositions[i3], particleData.origPositions[i3], eased);
+      pos[i3+1] = lerp(reformStartPositions[i3+1], particleData.origPositions[i3+1], eased);
+      pos[i3+2] = lerp(reformStartPositions[i3+2], particleData.origPositions[i3+2], eased);
+    }
+    
+    // Fade hat back in
+    const hatOpacity = eased;
+    setHatOpacity(hatOpacity);
+    mat.opacity = (1 - eased) * 0.9;
+    
+    if (progress >= 1) {
+      state = STATE.ORBITING;
+      stateTime = 0;
+    }
+  }
+  else if (state === STATE.ORBITING) {
+    const progress = Math.min(stateTime / ORBIT_DURATION, 1);
+    
+    // Most particles stay at original positions
+    for (let i = 0; i < n; i++) {
+      const i3 = i * 3;
+      pos[i3] = particleData.origPositions[i3];
+      pos[i3+1] = particleData.origPositions[i3+1];
+      pos[i3+2] = particleData.origPositions[i3+2];
+    }
+    
+    // Orbiting particles
+    const orbitFade = Math.min(1, (1 - progress) * 3);
+    
+    for (let k = 0; k < orbitingIndices.length; k++) {
+      const i = orbitingIndices[k];
+      const i3 = i * 3;
+      orbitAngles[k] += dt * orbitSpeeds[k];
+      const a = orbitAngles[k];
+      const r = orbitRadius * (0.7 + 0.3 * Math.sin(a * 0.5));
+      const yOff = orbitYOffsets[k] + Math.sin(a * 1.7) * 0.4;
+      
+      pos[i3] = Math.cos(a) * r;
+      pos[i3+1] = 1.2 + yOff;
+      pos[i3+2] = Math.sin(a) * r;
+    }
+    
+    setHatOpacity(1);
+    mat.opacity = orbitFade * 0.8;
+    
+    if (progress >= 1) {
+      mat.opacity = 0;
+      state = STATE.IDLE;
+      setHatOpacity(1);
+      // Reset particle positions
+      for (let i = 0; i < n; i++) {
+        const i3 = i * 3;
+        pos[i3] = particleData.origPositions[i3];
+        pos[i3+1] = particleData.origPositions[i3+1];
+        pos[i3+2] = particleData.origPositions[i3+2];
+      }
+      currentRotationSpeed = baseRotationSpeed;
+    }
+  }
+  
+  posAttr.needsUpdate = true;
+}
+
+function setHatOpacity(opacity) {
+  hatGroup.children.forEach(child => {
+    if (child.material) {
+      if (Array.isArray(child.material)) {
+        child.material.forEach(m => { m.transparent = true; m.opacity = opacity; });
+      } else {
+        child.material.transparent = true;
+        child.material.opacity = opacity;
+      }
+    }
+  });
+}
+
+// ── Hover / Tap ─────────────────────────────────────────────
+let isHovering = false;
+
+renderer.domElement.addEventListener('pointerenter', () => {
+  isHovering = true;
+  triggerDissolve();
+});
+renderer.domElement.addEventListener('pointerleave', () => {
+  isHovering = false;
+});
+
+// Touch
+renderer.domElement.addEventListener('touchstart', (e) => {
+  if (!isHovering) {
+    isHovering = true;
+    triggerDissolve();
+  }
+});
+
+// ── Reduced motion listener ─────────────────────────────────
+rmq.addEventListener('change', (e) => {
+  // Page reload would be cleaner but this handles runtime changes minimally
+  if (e.matches && particleSystem) {
+    particleSystem.material.opacity = 0;
+    setHatOpacity(1);
+    state = STATE.IDLE;
+    currentRotationSpeed = 0;
+  }
+});
+
+// ── Animation loop ──────────────────────────────────────────
+let lastTime = 0;
+
+function animate(time) {
+  requestAnimationFrame(animate);
+  
+  const dt = lastTime ? Math.min((time - lastTime) / 1000, 0.05) : 0.016;
+  lastTime = time;
+  
+  // Spin the hat
+  if (!reducedMotion) {
+    // Slow down during dissolve/reform
+    if (state === STATE.DISSOLVING || state === STATE.SWIRLING || state === STATE.REFORMING) {
+      currentRotationSpeed = lerp(currentRotationSpeed, 0.08, dt * 3);
+    } else if (state === STATE.ORBITING) {
+      currentRotationSpeed = lerp(currentRotationSpeed, 0.12, dt * 2);
+    } else {
+      currentRotationSpeed = lerp(currentRotationSpeed, baseRotationSpeed, dt * 2);
+    }
+    hatGroup.rotation.y += dt * currentRotationSpeed;
+    
+    // Gentle bobbing
+    hatGroup.position.y = 1.2 + Math.sin(time * 0.0003) * 0.04;
+  }
+  
+  // Pulse the glow ring
+  glowRing.material.opacity = 0.2 + Math.sin(time * 0.0005) * 0.1;
+  glowRing.scale.setScalar(1 + Math.sin(time * 0.0004) * 0.03);
+  
+  // Update particles
+  updateParticles(dt);
+  
+  // Render
+  renderer.render(scene, camera);
+}
+
+// ── Resize ──────────────────────────────────────────────────
+function onResize() {
+  const w = container.clientWidth;
+  const h = container.clientHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+}
+window.addEventListener('resize', onResize);
+
+// ── Start ───────────────────────────────────────────────────
+animate(0);
+
+// Reset hat meshes to full opacity (particles stay at 0 from initParticles)
+hatGroup.children.forEach(child => {
+  if (child.material && !child.isPoints) {
+    if (Array.isArray(child.material)) {
+      child.material.forEach(m => { m.transparent = true; m.opacity = 1; });
+    } else {
+      child.material.transparent = true;
+      child.material.opacity = 1;
+    }
+  }
+});
+
+console.log('🪄  Red Hat Fedora — hover to reveal the embers');
+</script>
+</body>
+</html>

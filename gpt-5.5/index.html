@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ember Fedora</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --text: #fff3ec;
+      --muted: rgba(255, 231, 219, 0.66);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+    }
+
+    body {
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 50% 38%, rgba(164, 31, 43, 0.2), transparent 28rem),
+        radial-gradient(circle at 23% 72%, rgba(18, 90, 106, 0.14), transparent 26rem),
+        radial-gradient(circle at 74% 19%, rgba(232, 119, 71, 0.08), transparent 22rem),
+        linear-gradient(145deg, #08090f 0%, #0a0d14 44%, #030408 100%);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .scene {
+      position: relative;
+      min-height: 100svh;
+      display: grid;
+      place-items: center;
+      isolation: isolate;
+      overflow: hidden;
+    }
+
+    .scene::before {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+      content: "";
+      background:
+        radial-gradient(ellipse at center, transparent 0%, transparent 47%, rgba(0, 0, 0, 0.52) 100%),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.03), transparent 28%, rgba(0, 0, 0, 0.18));
+      mix-blend-mode: multiply;
+    }
+
+    canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: manipulation;
+      cursor: pointer;
+    }
+
+    .caption-wrap {
+      position: absolute;
+      left: 50%;
+      top: calc(50% + clamp(7rem, 18vh, 10.5rem));
+      z-index: 2;
+      width: min(88vw, 32rem);
+      transform: translateX(-50%);
+      pointer-events: none;
+      text-align: center;
+    }
+
+    .caption {
+      margin: 0;
+      color: var(--muted);
+      font-size: clamp(0.74rem, 1.7vw, 0.92rem);
+      font-weight: 560;
+      letter-spacing: 0.18em;
+      line-height: 1.5;
+      text-transform: uppercase;
+      text-shadow: 0 0 22px rgba(190, 41, 53, 0.32);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      canvas {
+        cursor: default;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="scene" aria-label="Dark hero scene with a red fedora rendered from glowing particles.">
+    <canvas id="fedora" aria-hidden="true"></canvas>
+    <div class="caption-wrap">
+      <p class="caption">Ember Fedora</p>
+    </div>
+  </main>
+
+  <script>
+    (() => {
+      const canvas = document.getElementById("fedora");
+      const ctx = canvas.getContext("2d", { alpha: true });
+      const reduceQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+      const TAU = Math.PI * 2;
+      const DURATION = 6200;
+      const BASE_SPIN = 0.00042;
+      const SLOW_SPIN = 0.000075;
+
+      let width = 0;
+      let height = 0;
+      let dpr = 1;
+      let unit = 120;
+      let centerX = 0;
+      let centerY = 0;
+      let particles = [];
+      let orbiters = [];
+      let sprites = {};
+      let spin = -0.24;
+      let spinVelocity = BASE_SPIN;
+      let effectStart = -Infinity;
+      let lastFrame = 0;
+      let running = false;
+      let reducedMotion = reduceQuery.matches;
+
+      const colors = {
+        red: [184, 25, 41],
+        redDeep: [112, 11, 24],
+        redDark: [72, 9, 18],
+        redHot: [232, 58, 65],
+        band: [25, 18, 24],
+        bandWarm: [49, 18, 25],
+        ember: [255, 128, 66]
+      };
+
+      function mulberry32(seed) {
+        return function random() {
+          let t = seed += 0x6D2B79F5;
+          t = Math.imul(t ^ (t >>> 15), t | 1);
+          t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+      }
+
+      function clamp(value, min, max) {
+        return Math.max(min, Math.min(max, value));
+      }
+
+      function lerp(a, b, t) {
+        return a + (b - a) * t;
+      }
+
+      function smooth(t) {
+        return t * t * (3 - 2 * t);
+      }
+
+      function smoother(t) {
+        return t * t * t * (t * (t * 6 - 15) + 10);
+      }
+
+      function colorMix(a, b, t) {
+        return [
+          Math.round(lerp(a[0], b[0], t)),
+          Math.round(lerp(a[1], b[1], t)),
+          Math.round(lerp(a[2], b[2], t))
+        ];
+      }
+
+      function rgba(color, alpha) {
+        return `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${alpha})`;
+      }
+
+      function makeSprite(color, coreAlpha, glowAlpha, radius) {
+        const size = radius * 2;
+        const sprite = document.createElement("canvas");
+        const sctx = sprite.getContext("2d");
+        sprite.width = size;
+        sprite.height = size;
+
+        const gradient = sctx.createRadialGradient(radius, radius, 0, radius, radius, radius);
+        gradient.addColorStop(0, rgba(color, coreAlpha));
+        gradient.addColorStop(0.2, rgba(color, coreAlpha * 0.78));
+        gradient.addColorStop(0.52, rgba(color, glowAlpha));
+        gradient.addColorStop(1, rgba(color, 0));
+        sctx.fillStyle = gradient;
+        sctx.fillRect(0, 0, size, size);
+
+        return sprite;
+      }
+
+      function rebuildSprites() {
+        sprites = {
+          red: makeSprite(colors.red, 0.94, 0.16, 18),
+          redDeep: makeSprite(colors.redDeep, 0.88, 0.1, 16),
+          redDark: makeSprite(colors.redDark, 0.84, 0.08, 15),
+          redHot: makeSprite(colors.redHot, 0.98, 0.24, 20),
+          band: makeSprite(colors.band, 0.82, 0.04, 13),
+          bandWarm: makeSprite(colors.bandWarm, 0.86, 0.08, 14),
+          ember: makeSprite(colors.ember, 0.95, 0.36, 22)
+        };
+      }
+
+      function addParticle(list, random, x, y, z, key, size, heat) {
+        const outward = Math.atan2(z, x) + (random() - 0.5) * 1.1;
+        const baseDistance = Math.hypot(x, z);
+        const scatterDistance = 1.15 + random() * 1.95 + baseDistance * 0.5;
+        const rise = 0.15 + random() * 1.35 + Math.max(0, y) * 0.3;
+
+        list.push({
+          x,
+          y,
+          z,
+          key,
+          size,
+          heat,
+          alpha: 0.58 + random() * 0.34,
+          seed: random() * TAU,
+          swirl: 0.72 + random() * 0.72,
+          sx: x + Math.cos(outward) * scatterDistance + (random() - 0.5) * 0.46,
+          sy: y + rise + (random() - 0.5) * 0.95,
+          sz: z + Math.sin(outward) * scatterDistance + (random() - 0.5) * 0.68
+        });
+      }
+
+      function buildHat() {
+        const random = mulberry32(551970);
+        const list = [];
+        const area = width * height;
+        const count = clamp(Math.floor(area / 260), 3600, 6900);
+        const brimCount = Math.floor(count * 0.38);
+        const edgeCount = Math.floor(count * 0.13);
+        const crownCount = Math.floor(count * 0.25);
+        const topCount = Math.floor(count * 0.13);
+        const bandCount = count - brimCount - edgeCount - crownCount - topCount;
+
+        for (let i = 0; i < brimCount; i += 1) {
+          const r = Math.sqrt(random());
+          const theta = random() * TAU;
+          const x = Math.cos(theta) * 1.72 * r;
+          const z = Math.sin(theta) * 0.55 * r;
+          const lip = Math.pow(Math.abs(x) / 1.72, 2.2) * 0.08;
+          const dip = -0.1 * (z / 0.55);
+          const y = -0.37 + lip + dip + (random() - 0.5) * 0.032;
+          const shade = clamp(0.22 + r * 0.3 + (z / 0.55) * 0.12, 0, 1);
+          const key = random() > 0.78 ? "redHot" : (shade > 0.46 ? "red" : "redDeep");
+          addParticle(list, random, x, y, z, key, 1.15 + random() * 1.15, random());
+        }
+
+        for (let i = 0; i < edgeCount; i += 1) {
+          const theta = random() * TAU;
+          const r = 0.92 + random() * 0.13;
+          const x = Math.cos(theta) * 1.78 * r;
+          const z = Math.sin(theta) * 0.58 * r;
+          const y = -0.4 + Math.pow(Math.abs(x) / 1.78, 2.4) * 0.11 - 0.13 * (z / 0.58);
+          const key = z < -0.05 && random() > 0.42 ? "redHot" : "redDeep";
+          addParticle(list, random, x, y, z, key, 1.2 + random() * 1.2, 0.6 + random() * 0.4);
+        }
+
+        for (let i = 0; i < crownCount; i += 1) {
+          const v = random();
+          const theta = random() * TAU;
+          const y = -0.18 + v * 0.86;
+          const taper = 1 - v * 0.21;
+          const frontDent = Math.exp(-Math.pow((Math.sin(theta) + 0.84) / 0.32, 2)) * Math.exp(-Math.pow((v - 0.58) / 0.34, 2));
+          const sidePinch = Math.exp(-Math.pow(Math.abs(Math.cos(theta)) - 0.24, 2) / 0.06) * Math.exp(-Math.pow((v - 0.68) / 0.28, 2));
+          const rx = (0.9 * taper) * (1 - frontDent * 0.1 - sidePinch * 0.09);
+          const rz = (0.43 * taper) * (1 - frontDent * 0.22);
+          const x = Math.cos(theta) * rx + (random() - 0.5) * 0.026;
+          const z = Math.sin(theta) * rz + frontDent * 0.035;
+          const key = v > 0.72 && random() > 0.48 ? "redHot" : (Math.sin(theta) < -0.35 ? "red" : "redDeep");
+          addParticle(list, random, x, y, z, key, 1.1 + random() * 1.1, random());
+        }
+
+        for (let i = 0; i < topCount; i += 1) {
+          const r = Math.sqrt(random());
+          const theta = random() * TAU;
+          const x = Math.cos(theta) * 0.73 * r;
+          const z = Math.sin(theta) * 0.34 * r;
+          const crease = Math.cos(theta * 2) * 0.025 * (1 - r);
+          const y = 0.61 + (1 - r * r) * 0.11 - crease + (random() - 0.5) * 0.018;
+          const key = random() > 0.35 ? "red" : "redHot";
+          addParticle(list, random, x, y, z, key, 1.04 + random() * 1.06, 0.45 + random() * 0.55);
+        }
+
+        for (let i = 0; i < bandCount; i += 1) {
+          const theta = random() * TAU;
+          const v = random();
+          const y = -0.105 + v * 0.17 + (random() - 0.5) * 0.018;
+          const rx = 0.83 - v * 0.035;
+          const rz = 0.39 - v * 0.02;
+          const x = Math.cos(theta) * rx;
+          const z = Math.sin(theta) * rz;
+          const key = Math.sin(theta) < -0.18 && random() > 0.18 ? "bandWarm" : "band";
+          addParticle(list, random, x, y, z, key, 1.05 + random() * 0.95, random() * 0.35);
+        }
+
+        particles = list;
+        orbiters = [];
+        for (let i = 0; i < 42; i += 1) {
+          const source = particles[Math.floor(random() * particles.length)];
+          orbiters.push({
+            key: source.key === "band" || source.key === "bandWarm" ? "redDeep" : (random() > 0.55 ? "ember" : source.key),
+            angle: random() * TAU,
+            phase: random() * TAU,
+            speed: 0.55 + random() * 0.55,
+            radiusX: 1.05 + random() * 0.82,
+            radiusZ: 0.38 + random() * 0.55,
+            y: -0.2 + random() * 0.82,
+            size: 1.05 + random() * 1.35
+          });
+        }
+      }
+
+      function resize() {
+        const nextDpr = Math.min(window.devicePixelRatio || 1, 2);
+        const nextWidth = Math.max(1, window.innerWidth);
+        const nextHeight = Math.max(1, window.innerHeight);
+
+        dpr = nextDpr;
+        width = nextWidth;
+        height = nextHeight;
+        canvas.width = Math.round(width * dpr);
+        canvas.height = Math.round(height * dpr);
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        unit = clamp(Math.min(width, height) * 0.18, 58, 168);
+        centerX = width * 0.5;
+        centerY = height * 0.42;
+        buildHat();
+        requestRender();
+      }
+
+      function drawAtmosphere(now) {
+        ctx.clearRect(0, 0, width, height);
+
+        const breathing = reducedMotion ? 0 : Math.sin(now * 0.0006) * 0.04;
+        let gradient = ctx.createRadialGradient(
+          centerX,
+          centerY - unit * 0.24,
+          unit * 0.14,
+          centerX,
+          centerY,
+          unit * (2.35 + breathing)
+        );
+        gradient.addColorStop(0, "rgba(255, 94, 89, 0.12)");
+        gradient.addColorStop(0.36, "rgba(175, 30, 45, 0.075)");
+        gradient.addColorStop(0.72, "rgba(18, 55, 70, 0.035)");
+        gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, width, height);
+
+        ctx.save();
+        ctx.translate(centerX, centerY + unit * 0.72);
+        ctx.scale(unit * 1.72, unit * 0.24);
+        gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+        gradient.addColorStop(0, "rgba(0, 0, 0, 0.42)");
+        gradient.addColorStop(0.45, "rgba(89, 9, 19, 0.16)");
+        gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(0, 0, 1, 0, TAU);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      function localForParticle(p, phase, now) {
+        if (reducedMotion || phase < 0 || phase >= 0.91) {
+          return { x: p.x, y: p.y, z: p.z };
+        }
+
+        if (phase < 0.2) {
+          const t = smoother(phase / 0.2);
+          const ember = Math.sin(now * 0.006 + p.seed) * 0.025 * t;
+          return {
+            x: lerp(p.x, p.sx, t) + ember,
+            y: lerp(p.y, p.sy, t) + Math.abs(ember) * 1.8,
+            z: lerp(p.z, p.sz, t) - ember * 0.6
+          };
+        }
+
+        if (phase < 0.56) {
+          const t = (phase - 0.2) / 0.36;
+          return swirlPosition(p, t, now);
+        }
+
+        if (phase < 0.91) {
+          const t = smoother((phase - 0.56) / 0.35);
+          const swirl = swirlPosition(p, 1 + t * 0.23, now);
+          return {
+            x: lerp(swirl.x, p.x, t),
+            y: lerp(swirl.y, p.y, t),
+            z: lerp(swirl.z, p.z, t)
+          };
+        }
+
+        return { x: p.x, y: p.y, z: p.z };
+      }
+
+      function swirlPosition(p, t, now) {
+        const radius = Math.hypot(p.sx, p.sz);
+        const baseAngle = Math.atan2(p.sz, p.sx);
+        const turn = t * TAU * p.swirl;
+        const flutter = Math.sin(t * TAU * 1.7 + p.seed + now * 0.0014) * 0.18;
+        const angle = baseAngle + turn + flutter;
+        const pulse = 1 + Math.sin(t * TAU * 2.3 + p.seed) * 0.08;
+
+        return {
+          x: Math.cos(angle) * radius * pulse,
+          y: p.sy + Math.sin(t * TAU * 1.25 + p.seed) * 0.36,
+          z: Math.sin(angle) * radius * pulse
+        };
+      }
+
+      function rotatePoint(point, angle, tilt) {
+        const ca = Math.cos(angle);
+        const sa = Math.sin(angle);
+        const ct = Math.cos(tilt);
+        const st = Math.sin(tilt);
+
+        const x1 = point.x * ca + point.z * sa;
+        const z1 = point.z * ca - point.x * sa;
+        const y1 = point.y * ct - z1 * st;
+        const z2 = point.y * st + z1 * ct;
+
+        return { x: x1, y: y1, z: z2 };
+      }
+
+      function project(point) {
+        const depth = 4.4;
+        const perspective = depth / (depth - point.z);
+        return {
+          x: centerX + point.x * unit * perspective,
+          y: centerY - point.y * unit * perspective,
+          scale: perspective,
+          z: point.z
+        };
+      }
+
+      function drawParticle(sprite, x, y, size, alpha) {
+        const drawSize = size * unit * 0.017;
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(sprite, x - drawSize, y - drawSize, drawSize * 2, drawSize * 2);
+      }
+
+      function drawHat(now, phase) {
+        const active = phase >= 0 && phase < 0.91;
+        const glowLift = active ? Math.sin(Math.min(phase / 0.7, 1) * Math.PI) : 0;
+        const tilt = -0.36;
+        const drawList = [];
+
+        for (let i = 0; i < particles.length; i += 1) {
+          const particle = particles[i];
+          const local = localForParticle(particle, phase, now);
+          const rotated = rotatePoint(local, spin, tilt);
+          const projected = project(rotated);
+          const depthAlpha = clamp(0.62 + rotated.z * 0.18, 0.36, 1);
+          const heat = active && particle.heat > 0.72 && phase > 0.08 && phase < 0.74;
+          const key = heat ? "ember" : particle.key;
+          const flare = heat ? 1.3 : 1;
+          const reformCrisp = phase > 0.78 ? smooth((phase - 0.78) / 0.13) * 0.2 : 0;
+          drawList.push({
+            x: projected.x,
+            y: projected.y,
+            z: rotated.z,
+            size: particle.size * projected.scale * (1 + glowLift * 0.36) * flare,
+            alpha: clamp((particle.alpha + reformCrisp) * depthAlpha * (1 + glowLift * 0.34), 0.18, 0.98),
+            key
+          });
+        }
+
+        drawList.sort((a, b) => a.z - b.z);
+
+        ctx.save();
+        ctx.globalCompositeOperation = active && phase < 0.76 ? "lighter" : "source-over";
+        for (let i = 0; i < drawList.length; i += 1) {
+          const item = drawList[i];
+          if (item.x < -40 || item.x > width + 40 || item.y < -40 || item.y > height + 40) {
+            continue;
+          }
+          drawParticle(sprites[item.key], item.x, item.y, item.size, item.alpha);
+        }
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      }
+
+      function orbitPosition(orbiter, now, trailStep) {
+        const t = now * 0.00058 * orbiter.speed - trailStep * 0.075 + orbiter.angle;
+        const radiusPulse = 1 + Math.sin(t * 1.8 + orbiter.phase) * 0.045;
+        return {
+          x: Math.cos(t) * orbiter.radiusX * radiusPulse,
+          y: orbiter.y + Math.sin(t * 1.35 + orbiter.phase) * 0.18,
+          z: Math.sin(t) * orbiter.radiusZ * radiusPulse
+        };
+      }
+
+      function drawOrbiters(now, intensity) {
+        if (reducedMotion || intensity <= 0.001) {
+          return;
+        }
+
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        for (let i = 0; i < orbiters.length; i += 1) {
+          const orbiter = orbiters[i];
+          let previous = null;
+
+          for (let step = 8; step >= 0; step -= 1) {
+            const local = orbitPosition(orbiter, now, step);
+            const rotated = rotatePoint(local, spin * 0.26 + orbiter.phase * 0.08, -0.34);
+            const projected = project(rotated);
+            const alpha = intensity * (1 - step / 9) * 0.42;
+
+            if (previous) {
+              ctx.globalAlpha = alpha * 0.62;
+              ctx.strokeStyle = orbiter.key === "ember" ? "rgba(255, 130, 70, 0.45)" : "rgba(222, 48, 58, 0.34)";
+              ctx.lineWidth = clamp(unit * 0.008 * projected.scale, 0.55, 1.6);
+              ctx.beginPath();
+              ctx.moveTo(previous.x, previous.y);
+              ctx.lineTo(projected.x, projected.y);
+              ctx.stroke();
+            }
+
+            if (step === 0) {
+              drawParticle(
+                sprites[orbiter.key],
+                projected.x,
+                projected.y,
+                orbiter.size * projected.scale,
+                clamp(intensity * 0.8, 0, 0.86)
+              );
+            }
+
+            previous = projected;
+          }
+        }
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      }
+
+      function render(now) {
+        drawAtmosphere(now);
+
+        const age = now - effectStart;
+        const phase = !reducedMotion && age >= 0 && age <= DURATION ? age / DURATION : -1;
+        const active = phase >= 0;
+        const targetVelocity = reducedMotion ? 0 : (active && phase < 0.78 ? SLOW_SPIN : BASE_SPIN);
+        const delta = lastFrame ? Math.min(48, now - lastFrame) : 16;
+        lastFrame = now;
+
+        spinVelocity += (targetVelocity - spinVelocity) * Math.min(1, delta / 420);
+        if (!reducedMotion) {
+          spin += spinVelocity * delta;
+        } else {
+          spin = -0.22;
+        }
+
+        drawHat(now, phase);
+
+        const orbitAge = now - (effectStart + DURATION * 0.88);
+        const orbitIntensity = effectStart > 0 && orbitAge > 0 ? smoother(clamp(orbitAge / 1100, 0, 1)) : 0;
+        drawOrbiters(now, orbitIntensity);
+      }
+
+      function loop(now) {
+        running = false;
+        render(now);
+        if (!reducedMotion) {
+          requestRender();
+        }
+      }
+
+      function requestRender() {
+        if (!running) {
+          running = true;
+          requestAnimationFrame(loop);
+        }
+      }
+
+      function triggerEffect() {
+        if (reducedMotion) {
+          return;
+        }
+        const now = performance.now();
+        if (now - effectStart < DURATION * 0.9) {
+          return;
+        }
+        effectStart = now;
+        requestRender();
+      }
+
+      reduceQuery.addEventListener("change", (event) => {
+        reducedMotion = event.matches;
+        effectStart = -Infinity;
+        lastFrame = 0;
+        requestRender();
+      });
+
+      canvas.addEventListener("pointerenter", triggerEffect);
+      canvas.addEventListener("pointerdown", triggerEffect);
+      canvas.addEventListener("click", triggerEffect);
+      window.addEventListener("resize", resize, { passive: true });
+
+      rebuildSprites();
+      resize();
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Fedora - Red Hat Experience</title>
+  <style>
+    /* Premium Elegant Dark Aesthetic */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
+    body {
+      background-color: #030206;
+      color: #f7f7f7;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      width: 100vw;
+      user-select: none;
+    }
+
+    /* Outer layout wrapper */
+    .scene-container {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100%;
+      max-width: 600px;
+      max-height: 600px;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* Ambient spotlight glow behind the canvas */
+    .ambient-glow {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 340px;
+      height: 340px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(230, 2, 2, 0.08) 0%, rgba(230, 2, 2, 0) 70%);
+      filter: blur(55px);
+      pointer-events: none;
+      z-index: 1;
+      animation: pulse 9s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        transform: translate(-50%, -50%) scale(0.92);
+        opacity: 0.75;
+      }
+      50% {
+        transform: translate(-50%, -50%) scale(1.08);
+        opacity: 1;
+      }
+    }
+
+    canvas {
+      position: relative;
+      z-index: 2;
+      display: block;
+      width: 100%;
+      max-width: 500px;
+      height: auto;
+      aspect-ratio: 1 / 1;
+    }
+
+    /* Subtitle & captions */
+    .caption-container {
+      margin-top: 10px;
+      text-align: center;
+      z-index: 2;
+      pointer-events: none;
+      transition: opacity 0.5s ease;
+    }
+
+    h1 {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.45em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.9);
+      margin-bottom: 7px;
+      text-shadow: 0 0 10px rgba(230, 2, 2, 0.25);
+    }
+
+    p {
+      font-size: 10px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.38);
+      transition: color 0.3s ease;
+    }
+
+    /* Accessibility state indicator */
+    .motion-toggle-indicator {
+      position: absolute;
+      bottom: 25px;
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      color: rgba(255, 255, 255, 0.15);
+      text-transform: uppercase;
+      pointer-events: none;
+      display: none;
+    }
+
+    /* Render indicator only if user prefers reduced motion */
+    @media (prefers-reduced-motion: reduce) {
+      .motion-toggle-indicator {
+        display: block;
+      }
+      .motion-toggle-indicator::after {
+        content: "Accessibility Mode: Reduced Motion Active";
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="scene-container">
+    <!-- Ambient back-lighting glow -->
+    <div class="ambient-glow"></div>
+    
+    <!-- Razor sharp high-DPI WebGL/2D simulation canvas -->
+    <canvas id="canvas"></canvas>
+    
+    <!-- Captions -->
+    <div class="caption-container">
+      <h1>Fedora 3D</h1>
+      <p id="hint">Hover or tap to dissolve</p>
+    </div>
+  </div>
+
+  <div class="motion-toggle-indicator"></div>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const hintText = document.getElementById('hint');
+
+    let centerX = 250;
+    let centerY = 250;
+    let frameCount = 0;
+    let globalSpinAngle = 0;
+    let spinSpeed = 0.012;
+    let state = 'NORMAL'; // 'NORMAL', 'DISSOLVING', 'SWIRLING', 'REFORMING'
+    let globalTimer = 0;
+    let stateTimer = 0;
+    let isInteracting = false;
+    let isTriggered = false;
+
+    // Check system preference for reduced motion
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+    class Particle {
+      constructor(x0, y0, z0, type) {
+        this.x0 = x0;
+        this.y0 = y0;
+        this.z0 = z0;
+        this.type = type; // 'brim', 'ribbon', 'crown-side', 'crown-top', 'orbit'
+        
+        // Dynamic coordinates
+        this.x = x0;
+        this.y = y0;
+        this.z = z0;
+        
+        // Physics velocities
+        this.vx = 0;
+        this.vy = 0;
+        this.vz = 0;
+        
+        this.blend = 0;
+        this.peelTime = 0;
+        this.noiseOffset = Math.random() * 100;
+        this.swirlDir = Math.random() < 0.5 ? 1 : -1;
+        this.size = Math.random() * 1.2 + 0.7; // size in CSS pixels
+        
+        // Path trails for high-energy orbiting elements
+        this.history = [];
+        this.maxHistory = 10;
+
+        // Custom cascading peeling triggers based on height (peels brim first)
+        if (type !== 'orbit') {
+          const yMin = -22;
+          const yMax = 82;
+          const normY = Math.max(0, Math.min(1, (this.y0 - yMin) / (yMax - yMin)));
+          this.peelTime = normY * 0.65 + Math.random() * 0.12; 
+        }
+      }
+    }
+
+    const particles = [];
+
+    function initParticles() {
+      particles.length = 0;
+
+      // 1. Brim Part (2400 particles, elliptical with center hole, curled sides)
+      const BRIM_COUNT = 2400;
+      for (let i = 0; i < BRIM_COUNT; i++) {
+        const u = 0.43 + 0.57 * Math.sqrt(Math.random());
+        const v = Math.random() * Math.PI * 2;
+        const rx = 100;
+        const rz = 125;
+        
+        const x0 = rx * u * Math.cos(v);
+        const z0 = rz * u * Math.sin(v);
+        
+        // Curvature math: sides rise, front/back dip, slight rear incline
+        const y0 = -Math.cos(2 * v) * 16 * u * u - Math.sin(v) * 6 * u;
+        
+        particles.push(new Particle(x0, y0, z0, 'brim'));
+      }
+
+      // 2. Satin Ribbon Part (550 particles, wraps perfectly around crown junction)
+      const RIBBON_COUNT = 550;
+      for (let i = 0; i < RIBBON_COUNT; i++) {
+        const t = Math.random();
+        const v = Math.random() * Math.PI * 2;
+        const h = 2 + 10 * t;
+        
+        const rx = 48.4;
+        const rz = 58.4;
+        const x0 = rx * Math.cos(v);
+        const z0 = rz * Math.sin(v);
+        
+        const yBase = -Math.cos(2 * v) * 16 * 0.43 * 0.43 - Math.sin(v) * 6 * 0.43;
+        const y0 = yBase + h;
+        
+        particles.push(new Particle(x0, y0, z0, 'ribbon'));
+      }
+
+      // 3. Crown Sides (1800 particles, tall vertical tapered cylinder with local pinches)
+      const CROWN_SIDES_COUNT = 1800;
+      for (let i = 0; i < CROWN_SIDES_COUNT; i++) {
+        const t = Math.random();
+        const v = Math.random() * Math.PI * 2;
+        
+        const scale = 1.0 - 0.22 * t * t;
+        // Fedora shape pinch on four vertical side-corners
+        const pinch = 1.0 - 0.17 * Math.sin(t * Math.PI) * Math.sin(t * Math.PI) * Math.sin(2 * v) * Math.sin(2 * v);
+        
+        const rx = 48 * scale * pinch;
+        const rz = 58 * scale * pinch;
+        const x0 = rx * Math.cos(v);
+        const z0 = rz * Math.sin(v);
+        
+        const yBase = -Math.cos(2 * v) * 16 * 0.43 * 0.43 - Math.sin(v) * 6 * 0.43;
+        const y0 = yBase + 10 + t * 65;
+        
+        particles.push(new Particle(x0, y0, z0, 'crown-side'));
+      }
+
+      // 4. Crown Top Cap (850 particles, dual lobes with central folding crease)
+      const CROWN_TOP_COUNT = 850;
+      for (let i = 0; i < CROWN_TOP_COUNT; i++) {
+        const r = Math.sqrt(Math.random());
+        const v = Math.random() * Math.PI * 2;
+        
+        // Edge boundaries correspond with crown sides top limit
+        const rx = 37.44 * r;
+        const rz = 45.24 * r;
+        const x0 = rx * Math.cos(v);
+        const z0 = rz * Math.sin(v);
+        
+        const yBase = -Math.cos(2 * v) * 16 * 0.43 * 0.43 - Math.sin(v) * 6 * 0.43;
+        const foldFactor = 1.0 - r * r;
+        // Central crease folding along the front-back (v=PI/2, v=3PI/2) axis
+        const y0 = yBase + 75 - 14 * foldFactor + 12 * foldFactor * Math.cos(2 * v);
+        
+        particles.push(new Particle(x0, y0, z0, 'crown-top'));
+      }
+
+      // 5. Ambient Orbiters (150 active particles, creating continuous trailing glow around coordinates)
+      const ORBIT_COUNT = 150;
+      for (let i = 0; i < ORBIT_COUNT; i++) {
+        const p = new Particle(0, 0, 0, 'orbit');
+        
+        p.orbitAngle = Math.random() * Math.PI * 2;
+        p.orbitSpeed = (Math.random() * 0.3 + 0.6) * (Math.random() < 0.5 ? 1 : -1);
+        p.orbitRadiusOffset = Math.random() * 55 - 15; // Orbits beautifully at radius 95 to 150
+        p.orbitHeightBase = Math.random() * 95 - 20;  // Floats vertically along the crown & brim
+        p.x = (105 + p.orbitRadiusOffset) * Math.cos(p.orbitAngle);
+        p.z = (105 + p.orbitRadiusOffset) * Math.sin(p.orbitAngle);
+        p.y = p.orbitHeightBase;
+        
+        particles.push(p);
+      }
+    }
+
+    // Dynamic resolution handling with responsive Canvas sizing
+    function resize() {
+      const size = Math.min(window.innerWidth - 44, 480);
+      canvas.style.width = size + 'px';
+      canvas.style.height = size + 'px';
+      
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = size * dpr;
+      canvas.height = size * dpr;
+      
+      ctx.scale(dpr, dpr);
+      
+      centerX = size / 2;
+      centerY = size / 2 + 10;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // Linearly interpolate values
+    function lerp(start, end, amt) {
+      return (1 - amt) * start + amt * end;
+    }
+
+    // Trigger state changes
+    function triggerDissolveCycle() {
+      if (state === 'NORMAL') {
+        state = 'DISSOLVING';
+        globalTimer = 0;
+        hintText.innerText = "Dissolving...";
+        hintText.style.color = "rgba(255, 60, 60, 0.7)";
+      }
+    }
+
+    function interactionStart() {
+      isInteracting = true;
+      if (!isTriggered) {
+        isTriggered = true;
+        triggerDissolveCycle();
+      }
+    }
+
+    function interactionEnd() {
+      isInteracting = false;
+      if (state === 'NORMAL') {
+        isTriggered = false;
+      }
+    }
+
+    // Setup interactive hooks for desktop and mobile
+    const container = document.querySelector('.scene-container');
+    container.addEventListener('mouseenter', interactionStart);
+    container.addEventListener('mouseleave', interactionEnd);
+    
+    // Support lightweight touch actions
+    container.addEventListener('touchstart', (e) => {
+      interactionStart();
+    }, { passive: true });
+    
+    container.addEventListener('touchend', () => {
+      interactionEnd();
+    }, { passive: true });
+
+    // Initial load
+    initParticles();
+
+    // Constant parameters
+    const Fov = 350;
+    const TiltAngle = 0.35; // Slight forward angle downward gaze
+
+    function update() {
+      frameCount++;
+      const isMotionReduced = prefersReducedMotion.matches;
+
+      // Update state machines
+      if (state === 'DISSOLVING') {
+        const targetSpin = isMotionReduced ? 0.0005 : 0.0015;
+        spinSpeed = lerp(spinSpeed, targetSpin, 0.04);
+        globalTimer += 0.0065; // ~2.5 second peel sequence
+        
+        if (globalTimer >= 1.0) {
+          globalTimer = 1.0;
+          state = 'SWIRLING';
+          stateTimer = 0;
+          hintText.innerText = "Swirling like embers...";
+        }
+      } else if (state === 'SWIRLING') {
+        const targetSpin = isMotionReduced ? 0.0003 : 0.0008;
+        spinSpeed = lerp(spinSpeed, targetSpin, 0.04);
+        stateTimer++;
+        
+        // Wait ~2 seconds in swirling nebula state
+        if (stateTimer > 120) {
+          state = 'REFORMING';
+          hintText.innerText = "Flowing back together...";
+          hintText.style.color = "rgba(255, 120, 120, 0.6)";
+        }
+      } else if (state === 'REFORMING') {
+        const targetSpin = isMotionReduced ? 0.002 : 0.012;
+        spinSpeed = lerp(spinSpeed, targetSpin, 0.03);
+        globalTimer -= 0.014; // Swift magnetic re-assembly
+        
+        if (globalTimer <= 0.0) {
+          globalTimer = 0.0;
+          state = 'NORMAL';
+          hintText.innerText = "Hover or tap to dissolve";
+          hintText.style.color = "rgba(255, 255, 255, 0.38)";
+          if (!isInteracting) {
+            isTriggered = false; // allow re-trigger on next touch release
+          }
+        }
+      } else { // STATE === 'NORMAL'
+        const targetSpin = isMotionReduced ? 0.002 : 0.012;
+        spinSpeed = lerp(spinSpeed, targetSpin, 0.05);
+      }
+
+      globalSpinAngle += spinSpeed;
+
+      const cosY = Math.cos(globalSpinAngle);
+      const sinY = Math.sin(globalSpinAngle);
+      const cosX = Math.cos(TiltAngle);
+      const sinX = Math.sin(TiltAngle);
+
+      // Loop through all active elements and update 3D positions
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+
+        // 1. Update individual particle peel boundaries
+        if (p.type !== 'orbit') {
+          if (state === 'DISSOLVING' || state === 'SWIRLING') {
+            const indBlend = Math.max(0, Math.min(1, (globalTimer - p.peelTime) * 3.3));
+            p.blend = lerp(p.blend, indBlend, 0.08);
+          } else if (state === 'REFORMING') {
+            // Re-assembling pulls uniformly inside a gravitational rush
+            p.blend = lerp(p.blend, globalTimer, 0.12);
+          } else {
+            p.blend = lerp(p.blend, 0, 0.15);
+          }
+        }
+
+        // 2. Calculate coordinates targets for normal/perturbed states
+        let targetX, targetY, targetZ;
+        
+        // Hat static state coordinates
+        const hx = p.x0 * cosY - p.z0 * sinY;
+        const hz = p.x0 * sinY + p.z0 * cosY;
+        const hy = p.y0;
+
+        if (p.type === 'orbit') {
+          // Continuous orbit surrounding the whole perimeter
+          const speedMultiplier = isMotionReduced ? 0.18 : 1.0;
+          const alpha = p.orbitAngle + frameCount * 0.014 * p.orbitSpeed * speedMultiplier;
+          targetX = (110 + p.orbitRadiusOffset) * Math.cos(alpha);
+          targetZ = (110 + p.orbitRadiusOffset) * Math.sin(alpha);
+          targetY = p.orbitHeightBase + Math.sin(alpha * 1.8) * 16;
+        } else {
+          // Dynamic swirling embers values
+          const swirlRMult = isMotionReduced ? 0.25 : 1.0;
+          const swirlHMult = isMotionReduced ? 0.2 : 1.0;
+          
+          const swirlAlpha = p.noiseOffset * Math.PI * 2 + frameCount * (isMotionReduced ? 0.005 : 0.016) * p.swirlDir;
+          const swirlRadius = (120 + Math.sin(p.noiseOffset * 8) * 45) * swirlRMult;
+          
+          const sx = swirlRadius * Math.cos(swirlAlpha);
+          const sz = swirlRadius * Math.sin(swirlAlpha);
+          const sy = p.y0 + (45 + Math.sin(frameCount * 0.008 + p.noiseOffset * 4) * 25) * swirlHMult;
+
+          // Merge spatial coords
+          targetX = hx * (1 - p.blend) + sx * p.blend;
+          targetY = hy * (1 - p.blend) + sy * p.blend;
+          targetZ = hz * (1 - p.blend) + sz * p.blend;
+        }
+
+        // Steering physics update
+        const ease = state === 'REFORMING' ? 0.14 : 0.08;
+        const dx = targetX - p.x;
+        const dy = targetY - p.y;
+        const dz = targetZ - p.z;
+
+        p.vx += dx * ease - p.vx * 0.18;
+        p.vy += dy * ease - p.vy * 0.18;
+        p.vz += dz * ease - p.vz * 0.18;
+
+        p.x += p.vx;
+        p.y += p.vy;
+        p.z += p.vz;
+
+        // Perform camera space operations
+        // Rotate around Y
+        const rx = p.x;
+        const rz = p.z;
+        const ry = p.y;
+
+        // Apply X-tilt to find coordinates on screen space projection
+        p.projY_3D = ry * cosX - rz * sinX;
+        p.finalZ = ry * sinX + rz * cosX; // Used for Painter's Algorithm depth-sorting
+        p.projX_3D = rx;
+      }
+
+      // Painter's Algorithm: Sort by Z depth descending (farthest rendered first)
+      particles.sort((a, b) => b.finalZ - a.finalZ);
+    }
+
+    function render() {
+      // Clean background frame
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const cosY = Math.cos(globalSpinAngle);
+      const sinY = Math.sin(globalSpinAngle);
+      const cosX = Math.cos(TiltAngle);
+      const sinX = Math.sin(TiltAngle);
+
+      const isMotionReduced = prefersReducedMotion.matches;
+
+      // Draw all elements in 3D sorted order
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+
+        // 3D Perspective Scaling
+        const scale = Fov / (Fov + p.finalZ);
+        const zoom = 1.35;
+        const projX = p.projX_3D * scale * zoom + centerX;
+        const projY = -p.projY_3D * scale * zoom + centerY; // Invert coordinates
+
+        // Prevent drawing anything off outer viewport edges
+        if (projX < -30 || projX > canvas.width + 30 || projY < -30 || projY > canvas.height + 30) {
+          continue;
+        }
+
+        // 3D Diffuse Shading (Calculated regarding constant lighting coordinates)
+        let nx = 0, ny = 1, nz = 0;
+        
+        if (p.type === 'crown-side') {
+          const len = Math.sqrt(p.x0 * p.x0 + p.z0 * p.z0) || 1;
+          nx = p.x0 / len;
+          nz = p.z0 / len;
+          ny = 0.1;
+        } else if (p.type === 'brim') {
+          const len = Math.sqrt(p.x0 * p.x0 + p.z0 * p.z0) || 1;
+          nx = (p.x0 / len) * 0.12;
+          nz = (p.z0 / len) * 0.12;
+          ny = 0.94;
+        } else if (p.type === 'ribbon') {
+          const len = Math.sqrt(p.x0 * p.x0 + p.z0 * p.z0) || 1;
+          nx = p.x0 / len;
+          nz = p.z0 / len;
+          ny = 0;
+        } else if (p.type === 'crown-top') {
+          ny = 0.96;
+          const len = Math.sqrt(p.x0 * p.x0 + p.z0 * p.z0) || 1;
+          nx = (p.x0 / len) * 0.08;
+          nz = (p.z0 / len) * 0.08;
+        }
+
+        // Rotate normal with parent Fedora
+        const rnx = nx * cosY - nz * sinY;
+        const rnz = nx * sinY + nz * cosY;
+        const rny = ny;
+
+        // Apply global X tilt to normal coordinates
+        const rny_t = rny * cosX - rnz * sinX;
+        const rnz_t = rny * sinX + rnz * cosX;
+
+        // Light direction: fixed in top-front-left camera space coordinate
+        const lx = -0.5, ly = 0.75, lz = -0.4;
+        const dot = rnx * lx + rny_t * ly + rnz_t * lz;
+        const intensity = Math.min(1.0, Math.max(0.02, 0.45 + 0.55 * dot));
+
+        // Formulate dynamic shades
+        let r, g, b, alphaIdx;
+
+        if (p.type === 'orbit') {
+          // Bright white-gold ember highlights
+          r = 255;
+          g = Math.floor(165 + intensity * 60 + Math.sin(frameCount * 0.1 + p.noiseOffset) * 20);
+          b = Math.floor(45 + intensity * 25);
+          alphaIdx = isMotionReduced ? 0.35 : 0.88;
+        } else if (p.type === 'ribbon') {
+          // Velvet maroon black
+          r = Math.floor(48 * intensity + 20);
+          g = Math.floor(12 * intensity + 6);
+          b = Math.floor(18 * intensity + 8);
+          alphaIdx = 0.95;
+        } else {
+          // Glowing vibrant Red Hat crimson
+          r = Math.floor(190 + 65 * intensity);
+          g = Math.floor(8 + 22 * intensity);
+          b = Math.floor(12 + 22 * intensity);
+          alphaIdx = 0.92;
+        }
+
+        // Morph color & transparency parameters as element dissolves
+        if (p.type !== 'orbit' && p.blend > 0) {
+          alphaIdx *= (1.0 - p.blend * 0.78); 
+          // Animate color channels from deep red into bright orange-hot embers
+          r = Math.floor(r * (1 - p.blend) + 255 * p.blend);
+          g = Math.floor(g * (1 - p.blend) + (115 + Math.sin(frameCount * 0.07 + p.noiseOffset) * 35) * p.blend);
+          b = Math.floor(b * (1 - p.blend) + 20 * p.blend);
+        }
+
+        let finalSize = p.size * scale * zoom;
+        if (p.type !== 'orbit' && p.blend > 0) {
+          // Subtly expand dissolving particle sizes to mock volumetric ignition
+          finalSize *= (1.0 + p.blend * 0.35);
+        }
+
+        // Optimization: Paint tiny elements as rectangles to maintain 60FPS on low-power architectures
+        if (finalSize < 1.4) {
+          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alphaIdx})`;
+          ctx.fillRect(projX - finalSize, projY - finalSize, finalSize * 2, finalSize * 2);
+        } else {
+          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alphaIdx})`;
+          ctx.beginPath();
+          ctx.arc(projX, projY, finalSize, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Draw trail lines beautifully for golden satellite orbiters
+        if (p.type === 'orbit' && !isMotionReduced) {
+          p.history.push({ x: projX, y: projY });
+          if (p.history.length > p.maxHistory) {
+            p.history.shift();
+          }
+
+          if (p.history.length > 1) {
+            ctx.beginPath();
+            ctx.moveTo(p.history[0].x, p.history[0].y);
+            for (let h = 1; h < p.history.length; h++) {
+              ctx.lineTo(p.history[h].x, p.history[h].y);
+            }
+            ctx.strokeStyle = `rgba(255, 175, 50, ${intensity * 0.26})`;
+            ctx.lineWidth = finalSize * 0.75;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+          }
+        }
+      }
+    }
+
+    // Engine Loop
+    function loop() {
+      update();
+      render();
+      requestAnimationFrame(loop);
+    }
+    
+    // Start loop
+    loop();
+  </script>
+</body>
+</html>

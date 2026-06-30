@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Red Hat Fedora</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background:#0a0a0c;
+    overflow:hidden;
+    font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+    height:100vh; width:100vw;
+    cursor:pointer;
+    -webkit-tap-highlight-color:transparent;
+    user-select:none;
+  }
+  canvas {
+    display:block;
+    position:fixed;
+    top:0; left:0;
+    width:100%; height:100%;
+  }
+  .caption {
+    position:fixed; bottom:10vh; left:50%;
+    transform:translateX(-50%);
+    color:rgba(220,180,160,0.7);
+    font-size:clamp(0.85rem, 1.5vw, 1.1rem);
+    letter-spacing:0.25em;
+    text-transform:uppercase;
+    pointer-events:none;
+    transition:opacity 0.8s;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="caption">Red Hat</div>
+<script>
+(function() {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const caption = document.querySelector('.caption');
+
+  let W, H, cx, cy;
+
+  // ── reduced motion ──────────────────────────
+  const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+  let reducedMotion = mq.matches;
+  mq.addEventListener('change', e => { reducedMotion = e.matches; });
+
+  // ── resize ──────────────────────────────────
+  function resize() {
+    W = canvas.width  = window.innerWidth * devicePixelRatio;
+    H = canvas.height = window.innerHeight * devicePixelRatio;
+    cx = W / 2; cy = H / 2;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ── fedora geometry (local space) ───────────
+  function fedoraPoints() {
+    const pts = [];
+
+    // brim — concentric rings with slight upward curl at outer edge
+    const brimInner = 0.68, brimOuter = 1.85, brimRings = 14;
+    for (let r = 0; r < brimRings; r++) {
+      const t = r / (brimRings - 1);
+      const radius = brimInner + (brimOuter - brimInner) * t;
+      const y = -0.10 + 0.06 * Math.pow(t, 2.5);
+      const n = Math.floor(48 + radius * 28);
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2 + r * 0.04;
+        pts.push({ x:Math.cos(a)*radius, y, z:Math.sin(a)*radius, type:'brim' });
+      }
+    }
+
+    // crown body — tapered, pinched on sides, with fedora front-to-back dent
+    const crownSteps = 22, crownPerRing = 44;
+    for (let h = 0; h < crownSteps; h++) {
+      const t = h / (crownSteps - 1);
+      const baseY = -0.04;
+      const y = baseY + t * 0.92;
+      const taper = 1 - t * 0.22;
+      const pinchAmp = 0.12 * Math.pow(t, 1.3);
+      const n = Math.floor(crownPerRing * (1 - t * 0.15));
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2 + h * 0.05;
+        const r = 0.66 * taper * (1 - pinchAmp * Math.abs(Math.cos(a)));
+        const elong = 1 + 0.04 * (1 - t);
+        const sx = Math.cos(a) * r * (1 - pinchAmp * 0.5);
+        const sz = Math.sin(a) * r * elong;
+        const isBand = t < 0.11;
+        pts.push({ x:sx, y, z:sz, type:isBand?'hatband':'crown' });
+      }
+    }
+
+    // crown top — domed with center dent (front-to-back crease)
+    const topRings = 8, topBaseR = 0.55;
+    for (let r = 0; r < topRings; r++) {
+      const t = r / (topRings - 1);
+      const radius = topBaseR * (1 - t);
+      const n = Math.max(6, Math.floor(28 * (1 - t * 0.6)));
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        const dentFactor = 1 - 0.45 * Math.abs(Math.sin(a)) * Math.pow(1 - t, 1.5);
+        const fy = 0.88 + (1 - t * t) * 0.12 * dentFactor;
+        const sx = Math.cos(a) * radius * (1 - 0.08 * Math.abs(Math.sin(a)));
+        pts.push({ x:sx, y:fy, z:Math.sin(a)*radius, type:'crown' });
+      }
+    }
+
+    // hatband accent ring
+    for (let i = 0; i < 36; i++) {
+      const a = (i / 36) * Math.PI * 2;
+      pts.push({ x:Math.cos(a)*0.67, y:0.015, z:Math.sin(a)*0.67, type:'hatband' });
+    }
+
+    return pts;
+  }
+
+  // ── particle storage ─────────────────────────
+  const localRest = fedoraPoints();
+  const particleCount = localRest.length;
+  const pos = new Float32Array(particleCount * 3);
+  const vel = new Float32Array(particleCount * 3);
+  for (let i = 0; i < particleCount; i++) {
+    const p = localRest[i];
+    pos[i*3]=p.x; pos[i*3+1]=p.y; pos[i*3+2]=p.z;
+  }
+
+  // ── orbiting embers (post-reform) ────────────
+  const MAX_EMBERS = 50;
+  const TRAIL_LEN   = 8;
+  const emberPos    = new Float32Array(MAX_EMBERS * 3);
+  const emberTrail  = new Float32Array(MAX_EMBERS * TRAIL_LEN * 2); // screen-space trail [x,y] per step
+  const emberData   = new Array(MAX_EMBERS);
+  let activeEmbers  = 0;
+
+  // ── state machine ────────────────────────────
+  const IDLE = 0, DISSOLVING = 1, SWIRLING = 2, RETURNING = 3;
+  let phase        = IDLE;
+  let phaseTimer   = 0;
+  let rotationY    = 0;
+  let spinSpeed    = reducedMotion ? 0 : 0.008;
+  let targetSpin   = spinSpeed;
+  let hovering     = false;
+  const DISSOLVE_DURATION = 1.6;
+  const RETURN_TIMEOUT    = 6.0; // safety timeout
+
+  // ── helpers ──────────────────────────────────
+  function rotY(x, y, z, a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    return { x:x*c+z*s, y, z:-x*s+z*c };
+  }
+  function dist3(ax,ay,az,bx,by,bz) {
+    const dx=ax-bx, dy=ay-by, dz=az-bz;
+    return Math.sqrt(dx*dx+dy*dy+dz*dz);
+  }
+  function lerp(a,b,t) { return a+(b-a)*t; }
+
+  // ── ember spawning / cleanup ────────────────
+  function spawnEmbers() {
+    activeEmbers = MAX_EMBERS;
+    for (let i = 0; i < MAX_EMBERS; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const orbitR = 1.4 + Math.random() * 2.2;
+      const orbitY = -0.3 + Math.random() * 1.2;
+      emberPos[i*3]=Math.cos(a)*orbitR; emberPos[i*3+1]=orbitY; emberPos[i*3+2]=Math.sin(a)*orbitR;
+      // init trail
+      for (let t = 0; t < TRAIL_LEN; t++) {
+        emberTrail[i*TRAIL_LEN*2 + t*2]   = -9999;
+        emberTrail[i*TRAIL_LEN*2 + t*2+1] = -9999;
+      }
+      emberData[i] = {
+        orbitR, orbitY,
+        orbitSpd: (0.35 + Math.random() * 0.85) * (Math.random() < 0.5 ? 1 : -1),
+        phase: a,
+        life: 3.5 + Math.random() * 7,
+        size: 0.6 + Math.random() * 1.2,
+      };
+    }
+  }
+
+  function fadeEmbers(dt) {
+    for (let i = 0; i < activeEmbers; i++) {
+      emberData[i].life -= dt;
+      if (emberData[i].life <= 0) {
+        const last = activeEmbers - 1;
+        if (i !== last) {
+          emberPos[i*3]=emberPos[last*3]; emberPos[i*3+1]=emberPos[last*3+1]; emberPos[i*3+2]=emberPos[last*3+2];
+          for (let t=0; t<TRAIL_LEN; t++) {
+            emberTrail[i*TRAIL_LEN*2+t*2]  =emberTrail[last*TRAIL_LEN*2+t*2];
+            emberTrail[i*TRAIL_LEN*2+t*2+1]=emberTrail[last*TRAIL_LEN*2+t*2+1];
+          }
+          emberData[i] = emberData[last];
+        }
+        activeEmbers--;
+        i--;
+      }
+    }
+  }
+
+  // ── projection ───────────────────────────────
+  function project(x, y, z) {
+    const d = z + 5.5;
+    const s = Math.min(W, H) * 0.18 / d;
+    return { sx:cx + x*s, sy:cy - y*s, scale:s, depth:d };
+  }
+
+  // ── main loop ────────────────────────────────
+  let lastTime = performance.now();
+
+  function update(now) {
+    let dt = (now - lastTime) / 1000;
+    if (dt <= 0) dt = 0.016;
+    if (dt > 0.1) dt = 0.1;
+    lastTime = now;
+
+    // smooth spin
+    spinSpeed += (targetSpin - spinSpeed) * Math.min(1, dt * 4);
+    rotationY += spinSpeed * (reducedMotion ? 0.3 : 1);
+
+    // ── phase transitions ────────────────────
+    phaseTimer += dt;
+
+    if (phase === DISSOLVING && phaseTimer > DISSOLVE_DURATION) {
+      phase = SWIRLING; phaseTimer = 0;
+    }
+    if (phase === RETURNING) {
+      let allSettled = true;
+      for (let i = 0; i < particleCount; i++) {
+        const wr = rotY(localRest[i].x, localRest[i].y, localRest[i].z, rotationY);
+        if (dist3(pos[i*3],pos[i*3+1],pos[i*3+2],wr.x,wr.y,wr.z) > 0.15) {
+          allSettled = false; break;
+        }
+      }
+      if ((allSettled && phaseTimer > 1.2) || phaseTimer > RETURN_TIMEOUT) {
+        phase = IDLE; phaseTimer = 0;
+        for (let i = 0; i < particleCount; i++) {
+          const wr = rotY(localRest[i].x, localRest[i].y, localRest[i].z, rotationY);
+          pos[i*3]=wr.x; pos[i*3+1]=wr.y; pos[i*3+2]=wr.z;
+          vel[i*3]=vel[i*3+1]=vel[i*3+2]=0;
+        }
+        spawnEmbers();
+        targetSpin = reducedMotion ? 0 : 0.008;
+        caption.style.opacity = '1';
+      }
+    }
+
+    // ── update hat particles ────────────────
+    for (let i = 0; i < particleCount; i++) {
+      const wr = rotY(localRest[i].x, localRest[i].y, localRest[i].z, rotationY);
+      const ix3=i*3, iy3=i*3+1, iz3=i*3+2;
+
+      if (phase === IDLE) {
+        pos[ix3]=wr.x; pos[iy3]=wr.y; pos[iz3]=wr.z;
+        vel[ix3]=vel[iy3]=vel[iz3]=0;
+      } else if (phase === DISSOLVING) {
+        const progress = Math.min(1, phaseTimer / DISSOLVE_DURATION);
+        const ease = progress * progress;
+        const dx=pos[ix3], dy=pos[iy3], dz=pos[iz3];
+        const dist = Math.sqrt(dx*dx+dy*dy+dz*dz)+0.01;
+        const nx=dx/dist, ny=dy/dist, nz=dz/dist;
+        const force = 3.5 * ease;
+        vel[ix3] += (nx*force - dz*force*0.5/Math.sqrt(dx*dx+dz*dz+0.01) + (Math.random()-0.5)*1.2)*dt*4;
+        vel[iy3] += (ny*force*0.3 + (Math.random()-0.3)*1.0 + 0.6*ease)*dt*4;
+        vel[iz3] += (nz*force + dx*force*0.5/Math.sqrt(dx*dx+dz*dz+0.01) + (Math.random()-0.5)*1.2)*dt*4;
+        vel[ix3]*=0.96; vel[iy3]*=0.96; vel[iz3]*=0.96;
+        pos[ix3]+=vel[ix3]*dt; pos[iy3]+=vel[iy3]*dt; pos[iz3]+=vel[iz3]*dt;
+      } else if (phase === SWIRLING) {
+        const dx=pos[ix3], dz=pos[iz3];
+        const dist = Math.sqrt(dx*dx+dz*dz)+0.01;
+        const tx=-dz/dist, tz=dx/dist;
+        const spd = 0.8 + Math.random()*0.4;
+        vel[ix3] += (tx*spd - vel[ix3])*dt*2;
+        vel[iy3] += ((Math.random()-0.5)*0.4 - vel[iy3])*dt*2;
+        vel[iz3] += (tz*spd - vel[iz3])*dt*2;
+        vel[ix3] -= dx/dist*0.15*dt;
+        vel[iz3] -= dz/dist*0.15*dt;
+        vel[ix3]*=0.98; vel[iy3]*=0.98; vel[iz3]*=0.98;
+        pos[ix3]+=vel[ix3]*dt; pos[iy3]+=vel[iy3]*dt; pos[iz3]+=vel[iz3]*dt;
+      } else if (phase === RETURNING) {
+        const ddx=wr.x-pos[ix3], ddy=wr.y-pos[iy3], ddz=wr.z-pos[iz3];
+        vel[ix3] += (ddx*12 - vel[ix3]*5)*dt;
+        vel[iy3] += (ddy*12 - vel[iy3]*5)*dt;
+        vel[iz3] += (ddz*12 - vel[iz3]*5)*dt;
+        pos[ix3]+=vel[ix3]*dt; pos[iy3]+=vel[iy3]*dt; pos[iz3]+=vel[iz3]*dt;
+      }
+    }
+
+    // ── update embers + trails ──────────────
+    for (let i = 0; i < activeEmbers; i++) {
+      const d = emberData[i];
+      d.phase += d.orbitSpd * dt;
+      const tx = Math.cos(d.phase) * d.orbitR;
+      const tz = Math.sin(d.phase) * d.orbitR;
+      const ty = d.orbitY + Math.sin(d.phase*2.3+i)*0.25;
+      emberPos[i*3]   += (tx - emberPos[i*3])*dt*3;
+      emberPos[i*3+1] += (ty - emberPos[i*3+1])*dt*3;
+      emberPos[i*3+2] += (tz - emberPos[i*3+2])*dt*3;
+      // shift trail
+      const proj = project(emberPos[i*3], emberPos[i*3+1], emberPos[i*3+2]);
+      const tb = i*TRAIL_LEN*2;
+      for (let t = TRAIL_LEN-1; t > 0; t--) {
+        emberTrail[tb+t*2]   = emberTrail[tb+(t-1)*2];
+        emberTrail[tb+t*2+1] = emberTrail[tb+(t-1)*2+1];
+      }
+      emberTrail[tb]   = proj.sx;
+      emberTrail[tb+1] = proj.sy;
+    }
+    fadeEmbers(dt);
+
+    render();
+    requestAnimationFrame(update);
+  }
+
+  // ── render ──────────────────────────────────
+  function render() {
+    ctx.clearRect(0, 0, W, H);
+
+    // ambient background glow
+    const bgGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.min(W,H)*0.55);
+    bgGrad.addColorStop(0, 'rgba(40,10,5,0.25)');
+    bgGrad.addColorStop(0.5, 'rgba(15,3,1,0.08)');
+    bgGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // floor shadow under the hat
+    if (phase === IDLE || phase === RETURNING) {
+      const shadowAlpha = phase === IDLE ? 0.35 : lerp(0.05, 0.35, Math.min(1, phaseTimer/2));
+      const shadowProj = project(0, -0.35, 0);
+      const shadowW = Math.min(W,H) * 0.13;
+      const shadowH = shadowW * 0.35;
+      const shadowGrad = ctx.createRadialGradient(shadowProj.sx, shadowProj.sy, 0, shadowProj.sx, shadowProj.sy, shadowW);
+      shadowGrad.addColorStop(0, `rgba(0,0,0,${shadowAlpha})`);
+      shadowGrad.addColorStop(0.6, `rgba(0,0,0,${shadowAlpha*0.4})`);
+      shadowGrad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = shadowGrad;
+      ctx.beginPath();
+      ctx.ellipse(shadowProj.sx, shadowProj.sy, shadowW, shadowH, 0, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    // collect all drawable items
+    const items = [];
+
+    // hat particles
+    for (let i = 0; i < particleCount; i++) {
+      const p = project(pos[i*3], pos[i*3+1], pos[i*3+2]);
+      if (p.depth < 0.3) continue;
+      items.push({
+        ...p,
+        type: localRest[i].type,
+        isHat: true,
+      });
+    }
+
+    // ember trails
+    for (let i = 0; i < activeEmbers; i++) {
+      const d = emberData[i];
+      const lifeRatio = Math.max(0, emberData[i].life / 10);
+      const p = project(emberPos[i*3], emberPos[i*3+1], emberPos[i*3+2]);
+      if (p.depth < 0.3) continue;
+      const emSize = p.scale * 2.5 * d.size;
+
+      // draw trail segments (behind ember, sorted by depth)
+      const tb = i*TRAIL_LEN*2;
+      for (let t = TRAIL_LEN-1; t >= 1; t--) {
+        const tx = emberTrail[tb+t*2], ty = emberTrail[tb+t*2+1];
+        if (tx < 0 || ty < 0) continue;
+        const trailAlpha = lifeRatio * (1 - t/TRAIL_LEN) * 0.45;
+        const tSize = emSize * (1 - t/TRAIL_LEN*0.7);
+        items.push({
+          sx: tx, sy: ty,
+          scale: p.scale,
+          depth: p.depth + t * 0.05, // push trails behind
+          type: 'emberTrail',
+          trailAlpha,
+          tSize,
+        });
+      }
+
+      items.push({
+        ...p,
+        type: 'ember',
+        emberLife: lifeRatio,
+        emSize,
+      });
+    }
+
+    // sort back-to-front
+    items.sort((a, b) => b.depth - a.depth);
+
+    // draw
+    for (const it of items) {
+      if (it.type === 'emberTrail') {
+        const grad = ctx.createRadialGradient(it.sx, it.sy, 0, it.sx, it.sy, it.tSize);
+        grad.addColorStop(0, `rgba(255,140,40,${it.trailAlpha})`);
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(it.sx, it.sy, it.tSize, 0, Math.PI*2);
+        ctx.fill();
+      } else if (it.type === 'ember') {
+        const life = it.emberLife || 0.5;
+        const grad = ctx.createRadialGradient(it.sx, it.sy, 0, it.sx, it.sy, it.emSize);
+        grad.addColorStop(0, `rgba(255,190,90,${0.92*life})`);
+        grad.addColorStop(0.15, `rgba(255,100,30,${0.7*life})`);
+        grad.addColorStop(0.45, `rgba(200,30,5,${0.35*life})`);
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(it.sx, it.sy, it.emSize, 0, Math.PI*2);
+        ctx.fill();
+      } else if (it.type === 'hatband') {
+        const size = Math.max(0.8, it.scale * 2.0);
+        const alpha = Math.min(1, 0.8 + it.scale * 0.002);
+        const grad = ctx.createRadialGradient(it.sx, it.sy, 0, it.sx, it.sy, size*1.8);
+        grad.addColorStop(0, `rgba(40,20,18,${alpha})`);
+        grad.addColorStop(0.5, `rgba(20,8,6,${alpha*0.8})`);
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(it.sx, it.sy, size*1.8, 0, Math.PI*2);
+        ctx.fill();
+      } else {
+        // brim / crown
+        const size = Math.max(0.8, it.scale * 2.8);
+        const alpha = Math.min(1, 0.85 + it.scale * 0.002);
+        const grad = ctx.createRadialGradient(it.sx, it.sy, 0, it.sx, it.sy, size*2.2);
+        grad.addColorStop(0, `rgba(240,90,40,${alpha*0.95})`);
+        grad.addColorStop(0.15, `rgba(210,40,15,${alpha*0.9})`);
+        grad.addColorStop(0.45, `rgba(160,20,8,${alpha*0.7})`);
+        grad.addColorStop(0.8, `rgba(80,5,2,${alpha*0.25})`);
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(it.sx, it.sy, size*2.2, 0, Math.PI*2);
+        ctx.fill();
+        // bright core
+        const core = ctx.createRadialGradient(it.sx, it.sy, 0, it.sx, it.sy, size*0.5);
+        core.addColorStop(0, `rgba(255,180,130,${alpha*0.5})`);
+        core.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = core;
+        ctx.beginPath();
+        ctx.arc(it.sx, it.sy, size*0.5, 0, Math.PI*2);
+        ctx.fill();
+      }
+    }
+
+    // vignette
+    const vignette = ctx.createRadialGradient(cx, cy, Math.min(W,H)*0.4, cx, cy, Math.max(W,H)*0.75);
+    vignette.addColorStop(0, 'rgba(0,0,0,0)');
+    vignette.addColorStop(1, 'rgba(0,0,0,0.5)');
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // ── interaction ──────────────────────────────
+  function onHoverStart() {
+    if (hovering) return;
+    hovering = true;
+    if (phase === IDLE) {
+      phase = DISSOLVING;
+      phaseTimer = 0;
+      targetSpin = reducedMotion ? 0 : 0.001;
+      caption.style.opacity = '0.4';
+      for (let i = 0; i < particleCount; i++) {
+        const dx=pos[i*3], dy=pos[i*3+1], dz=pos[i*3+2];
+        const dist = Math.sqrt(dx*dx+dy*dy+dz*dz)+0.01;
+        vel[i*3]   = dx/dist*(0.3+Math.random()*0.6);
+        vel[i*3+1] = dy/dist*(0.1+Math.random()*0.3)+Math.random()*0.4;
+        vel[i*3+2] = dz/dist*(0.3+Math.random()*0.6);
+      }
+    }
+  }
+
+  function onHoverEnd() {
+    if (!hovering) return;
+    hovering = false;
+    if (phase === DISSOLVING || phase === SWIRLING) {
+      phase = RETURNING;
+      phaseTimer = 0;
+    }
+  }
+
+  canvas.addEventListener('mouseenter', onHoverStart);
+  canvas.addEventListener('touchstart', e => { e.preventDefault(); onHoverStart(); }, { passive:false });
+  canvas.addEventListener('mouseleave', onHoverEnd);
+  canvas.addEventListener('touchend', onHoverEnd);
+
+  // ── start ────────────────────────────────────
+  requestAnimationFrame(update);
+})();
+</script>
+</body>
+</html>

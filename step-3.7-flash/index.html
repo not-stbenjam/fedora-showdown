@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Red Hat · Fedora</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{
+    width:100%;height:100%;overflow:hidden;
+    background:#08080c;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    -webkit-tap-highlight-color:transparent;
+  }
+  canvas{display:block;position:absolute;top:0;left:0}
+  .caption{
+    position:absolute;bottom:10%;width:max-content;max-width:90%;
+    left:50%;transform:translateX(-50%);
+    text-align:center;pointer-events:none;user-select:none;z-index:2;
+  }
+  .caption h1{
+    font-weight:300;letter-spacing:.45em;text-transform:uppercase;
+    font-size:clamp(.9rem,1.4vw,1.2rem);color:#eee;opacity:.9;
+  }
+  .caption p{
+    margin-top:.6em;font-weight:300;letter-spacing:.3em;text-transform:uppercase;
+    font-size:clamp(.65rem,.85vw,.8rem);color:#bbb;opacity:.4;
+  }
+  @media(prefers-reduced-motion:reduce){
+    .caption h1{letter-spacing:.2em}
+  }
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="Animated Red Hat fedora"></canvas>
+<div class="caption" aria-hidden="true">
+  <h1>Red Hat</h1>
+  <p>infinite possibilities</p>
+</div>
+
+<script>
+(function () {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  let W, H, dpr, hatScale;
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const raw = Math.min(W, H);
+    hatScale = Math.min(raw * 0.004, 2.2);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  /* ---- Offscreen hat for particle sampling ---- */
+  const off = document.createElement('canvas');
+  off.width = 240; off.height = 180;
+  const octx = off.getContext('2d');
+
+  (function buildOffscreenHat() {
+    octx.translate(120, 130);
+    octx.fillStyle = '#181818';
+    octx.beginPath();
+    octx.ellipse(0, 0, 85, 15, 0, 0, Math.PI * 2);
+    octx.fill();
+
+    octx.fillStyle = '#1a1a1a';
+    octx.beginPath();
+    octx.moveTo(-42, -5);
+    octx.bezierCurveTo(-44, -55, -26, -115, 0, -130);
+    octx.bezierCurveTo(26, -115, 44, -55, 42, -5);
+    octx.closePath();
+    octx.fill();
+
+    octx.fillStyle = '#151515';
+    octx.beginPath();
+    octx.moveTo(-35, -6);
+    octx.bezierCurveTo(-26, -55, 0, -110, 0, -132);
+    octx.bezierCurveTo(0, -110, 26, -55, 35, -6);
+    octx.closePath();
+    octx.fill();
+
+    octx.fillStyle = '#cc1100';
+    octx.beginPath();
+    octx.ellipse(0, -7, 43, 10, 0, 0, Math.PI * 2);
+    octx.fill();
+  })();
+
+  const idata = octx.getImageData(0, 0, off.width, off.height).data;
+  const hatBase = [];
+  for (let y = 0; y < off.height; y++) {
+    for (let x = 0; x < off.width; x++) {
+      const i = (y * off.width + x) * 4;
+      if (idata[i] + idata[i+1] + idata[i+2] + idata[i+3] > 0) {
+        hatBase.push({ x: x - 120, y: y - 130 });
+      }
+    }
+  }
+  for (let i = hatBase.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [hatBase[i], hatBase[j]] = [hatBase[j], hatBase[i]];
+  }
+
+  /* ---- Particles ---- */
+  const PARTICLE_COUNT = Math.min(hatBase.length, 1500);
+  const particles = [];
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    const p = hatBase[i % hatBase.length];
+    particles.push({
+      tx: p.x, ty: p.y,
+      x: p.x, y: p.y,
+      vx: 0, vy: 0
+    });
+  }
+
+  /* ---- Glow sprite ---- */
+  const sprSize = 64;
+  const spr = document.createElement('canvas');
+  spr.width = spr.height = sprSize;
+  const sctx = spr.getContext('2d');
+  const mid = sprSize / 2;
+  const sg = sctx.createRadialGradient(mid, mid, 0, mid, mid, mid);
+  sg.addColorStop(0, '#ffffff');
+  sg.addColorStop(0.12, '#fff3e0');
+  sg.addColorStop(0.35, '#ffcc80');
+  sg.addColorStop(0.7, 'rgba(255,120,30,0.25)');
+  sg.addColorStop(1, 'rgba(255,80,0,0)');
+  sctx.fillStyle = sg;
+  sctx.fillRect(0, 0, sprSize, sprSize);
+
+  /* ---- Orbiters ---- */
+  const orbiters = [];
+  function initOrbiters() {
+    orbiters.length = 0;
+    for (let i = 0; i < 9; i++) {
+      orbiters.push({
+        a: Math.random() * Math.PI * 2,
+        r: 70 + Math.random() * 90,
+        speed: 0.2 + Math.random() * 0.5,
+        yAmp: 35 + Math.random() * 60,
+        yOff: (Math.random() - 0.5) * 20,
+        size: 2 + Math.random() * 2.5,
+        alpha: 0.4 + Math.random() * 0.5,
+        trail: []
+      });
+    }
+  }
+  initOrbiters();
+
+  /* ---- State machine ---- */
+  const STATE = { IDLE: 'idle', DISSOLVING: 'dissolving', SWIRLING: 'swirling', REFORMING: 'reforming', ORBITING: 'orbiting', LEAVING: 'leaving' };
+  let state = reducedMotion ? STATE.IDLE : STATE.IDLE;
+  let stateTime = 0;
+  let isActive = false;
+  let spinAngle = 0;
+  let spinSpeed = 0.7; // rad/s
+  let orbiterOpacity = 0;
+  let dissolvingBurst = false;
+  let frameCount = 0;
+
+  const FRAMES = {
+    [STATE.DISSOLVING]: 30,
+    [STATE.SWIRLING]: 84,
+    [STATE.REFORMING]: 48
+  };
+
+  function allSettled() {
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      const p = particles[i];
+      if (Math.abs(p.x - p.tx) + Math.abs(p.y - p.ty) > 0.5) return false;
+    }
+    return true;
+  }
+
+  function startEffect() {
+    if (reducedMotion) return;
+    isActive = true;
+    if (state === STATE.IDLE || state === STATE.ORBITING) {
+      state = STATE.DISSOLVING;
+      stateTime = 0;
+      dissolvingBurst = false;
+    }
+  }
+
+  function stopEffect() { isActive = false; }
+
+  canvas.addEventListener('mouseenter', startEffect);
+  canvas.addEventListener('mouseleave', stopEffect);
+  canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    startEffect();
+  }, { passive: false });
+  canvas.addEventListener('touchend', () => {
+    clearTimeout(canvas._leaveTimer);
+    canvas._leaveTimer = setTimeout(stopEffect, 2500);
+  });
+
+  /* ---- Draw functions ---- */
+  function drawBackground() {
+    const g = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, Math.max(W, H) * 0.8);
+    g.addColorStop(0, '#1a1c24');
+    g.addColorStop(0.5, '#12131a');
+    g.addColorStop(1, '#08080c');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  function drawSolidHat(spinX) {
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 20);
+    ctx.scale(spinX * hatScale, hatScale);
+
+    // soft ground shadow
+    ctx.save(); ctx.scale(1.3, 1);
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    ctx.beginPath(); ctx.ellipse(0, 12, 75, 18, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+
+    // brim
+    ctx.fillStyle = '#181818';
+    ctx.beginPath(); ctx.ellipse(0, 0, 80, 14, 0, 0, Math.PI * 2); ctx.fill();
+
+    // crown
+    ctx.fillStyle = '#1b1b1b';
+    ctx.beginPath();
+    ctx.moveTo(-42, -4);
+    ctx.bezierCurveTo(-44, -55, -26, -115, 0, -130);
+    ctx.bezierCurveTo(26, -115, 44, -55, 42, -4);
+    ctx.closePath(); ctx.fill();
+
+    // crease
+    ctx.fillStyle = '#141414';
+    ctx.beginPath();
+    ctx.moveTo(-35, -6);
+    ctx.bezierCurveTo(-26, -55, 0, -110, 0, -132);
+    ctx.bezierCurveTo(0, -110, 26, -55, 35, -6);
+    ctx.closePath(); ctx.fill();
+
+    // ribbon
+    ctx.fillStyle = '#cc1100';
+    ctx.beginPath(); ctx.ellipse(0, -7, 43, 10, 0, 0, Math.PI * 2); ctx.fill();
+
+    // subtle brushed highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.025)';
+    ctx.beginPath(); ctx.ellipse(-10, -60, 20, 30, -0.2, 0, Math.PI * 2); ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawParticles(spinX) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      const p = particles[i];
+      const sx = W/2 + p.x * spinX * hatScale;
+      const sy = (H/2 - 20) + p.y * hatScale;
+      const d = Math.abs(p.x - p.tx) + Math.abs(p.y - p.ty);
+      const t = Math.min(d / 30, 1);
+      const size = 4 + t * 10;
+      ctx.globalAlpha = 0.15 + t * 0.55;
+      ctx.drawImage(spr, sx - size/2, sy - size/2, size, size);
+    }
+    ctx.restore();
+  }
+
+  function drawOrbiters(spinX) {
+    if (orbiterOpacity < 0.01) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+
+    const cx = W / 2;
+    const cy = H / 2 - 20;
+
+    for (let o of orbiters) {
+      const px = cx + Math.cos(o.a) * o.r * spinX * hatScale;
+      const py = cy + (Math.sin(o.a) * o.yAmp + o.yOff) * hatScale;
+      o.trail.push({ x: px, y: py });
+      if (o.trail.length > 22) o.trail.shift();
+
+      if (o.trail.length > 1) {
+        ctx.beginPath();
+        ctx.moveTo(o.trail[0].x, o.trail[0].y);
+        for (let j = 1; j < o.trail.length; j++) {
+          ctx.lineTo(o.trail[j].x, o.trail[j].y);
+        }
+        ctx.strokeStyle = `rgba(255,180,120,${orbiterOpacity * o.alpha * 0.35})`;
+        ctx.lineWidth = 1.5;
+        ctx.lineCap = 'round';
+        ctx.stroke();
+      }
+
+      const hx = px, hy = py;
+      ctx.globalAlpha = orbiterOpacity * o.alpha;
+      const s = o.size * 7;
+      ctx.drawImage(spr, hx - s/2, hy - s/2, s, s);
+    }
+    ctx.restore();
+  }
+
+  /* ---- Main loop ---- */
+  function update() {
+    frameCount++;
+
+    // spin speed targets
+    const spinTargets = {
+      [STATE.IDLE]: 0.8,
+      [STATE.DISSOLVING]: 0.15,
+      [STATE.SWIRLING]: 0.04,
+      [STATE.REFORMING]: 0.9,
+      [STATE.ORBITING]: 0.4,
+      [STATE.LEAVING]: 0.8
+    };
+    spinSpeed += ((spinTargets[state] || 0.8) - spinSpeed) * 0.08;
+    spinAngle += spinSpeed * 0.016; // assumption ~60fps
+    const spinX = Math.cos(spinAngle);
+
+    // particle forces
+    if (state === STATE.DISSOLVING && !dissolvingBurst) {
+      for (let p of particles) {
+        const d = Math.hypot(p.tx, p.ty) || 1;
+        p.vx += (p.tx / d) * 200 + (Math.random() - 0.5) * 140;
+        p.vy += (p.ty / d) * 200 + (Math.random() - 0.5) * 140;
+      }
+      dissolvingBurst = true;
+    }
+
+    if (state === STATE.SWIRLING) {
+      for (let p of particles) {
+        const dx = p.x, dy = p.y, d = Math.hypot(dx, dy) || 1;
+        p.vx += (-dy / d * 80 + (Math.random() - 0.5) * 70);
+        p.vy += (dx / d * 80 + (Math.random() - 0.5) * 70);
+        p.vx += (p.tx - p.x) * 6;
+        p.vy += (p.ty - p.y) * 6;
+      }
+    }
+
+    if (state === STATE.REFORMING) {
+      for (let p of particles) {
+        p.vx += (p.tx - p.x) * 0.4;
+        p.vy += (p.ty - p.y) * 0.4;
+      }
+      if (stateTime > 24 && allSettled()) {
+        state = STATE.ORBITING;
+        stateTime = 0;
+      }
+    }
+
+    for (let p of particles) {
+      p.vx *= 0.9; p.vy *= 0.9;
+      p.x += p.vx; p.y += p.vy;
+    }
+
+    // state timer
+    const maxF = FRAMES[state];
+    if (state === STATE.DISSOLVING || state === STATE.SWIRLING) {
+      if (++stateTime >= maxF) {
+        state = state === STATE.DISSOLVING ? STATE.SWIRLING : STATE.REFORMING;
+        stateTime = 0;
+      }
+    }
+
+    if (state === STATE.ORBITING) {
+      orbiterOpacity = Math.min(orbiterOpacity + 0.04, 1);
+      if (!isActive) { state = STATE.LEAVING; stateTime = 0; }
+    }
+
+    if (state === STATE.LEAVING) {
+      orbiterOpacity = Math.max(orbiterOpacity - 0.03, 0);
+      if (orbiterOpacity <= 0) state = STATE.IDLE;
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    drawBackground();
+
+    ctx.save();
+    const spinX = Math.cos(spinAngle);
+    const cx = W / 2;
+    const cy = H / 2 - 20;
+
+    // ambient warm glow from above
+    const ag = ctx.createRadialGradient(cx, cy - 60, 0, cx, cy, 200 * hatScale);
+    ag.addColorStop(0, 'rgba(255,220,180,0.04)');
+    ag.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = ag;
+    ctx.beginPath(); ctx.arc(cx, cy - 60, 200 * hatScale, 0, Math.PI * 2); ctx.fill();
+
+    if (state === STATE.IDLE || state === STATE.ORBITING || state === STATE.LEAVING) {
+      drawSolidHat(spinX);
+    } else {
+      drawParticles(spinX);
+    }
+
+    if (state === STATE.IDLE || state === STATE.ORBITING || state === STATE.LEAVING) {
+      drawOrbiters(spinX);
+    }
+    ctx.restore();
+  }
+
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,457 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Red Hat Fedora - Elegant Particle Scene</title>
+    <style>
+        :root {
+            --bg-color: #0a0a0a;
+            --text-color: #e0e0e0;
+            --accent-color: #ff4d4d;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: var(--bg-color);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        canvas {
+            display: block;
+            cursor: pointer;
+        }
+
+        .ui-layer {
+            position: absolute;
+            bottom: 10%;
+            text-align: center;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .caption {
+            color: var(--text-color);
+            font-size: 0.9rem;
+            letter-spacing: 0.2rem;
+            text-transform: uppercase;
+            opacity: 0.6;
+            font-weight: 300;
+            transition: opacity 0.5s ease;
+        }
+
+        .ui-layer:hover .caption {
+            opacity: 0.9;
+        }
+
+        /* Respect reduced motion */
+        @media (prefers-reduced-motion: reduce) {
+            .caption {
+                transition: none;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="scene"></canvas>
+
+    <div class="ui-layer">
+        <div class="caption">Red Hat</div>
+    </div>
+
+    <script type="module">
+        // Minimal Three.js-like implementation using raw WebGL to ensure zero external dependencies
+        // and a tiny footprint.
+        
+        const canvas = document.getElementById('scene');
+        const gl = canvas.getContext('webgl', { antialias: true });
+
+        if (!gl) {
+            alert('WebGL not supported');
+        }
+
+        let width, height;
+        let particles = [];
+        let particleCount = 12000;
+        let state = 'idle'; // idle, dissolving, swirling, reforming, orbiting
+        let transitionProgress = 0;
+        let rotationY = 0;
+        let rotationX = 0.2;
+        let isHovered = false;
+        let reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        // Shader Source
+        const vsSource = `
+            attribute vec3 aPosition;
+            attribute vec3 aOrigin;
+            attribute vec3 aTarget;
+            attribute float aSize;
+            attribute vec3 aColor;
+
+            uniform mat4 uProjectionMatrix;
+            uniform mat4 uModelViewMatrix;
+            uniform float uTime;
+            uniform float uTransition; // 0 to 1
+            uniform float uDissolveMode; // 0: idle, 1: dissolving, 2: swirling, 3: reforming
+
+            varying vec3 vColor;
+            varying float vAlpha;
+
+            // Pseudo-random function
+            float hash(float n) { return fract(sin(n) * 43758.5453123); }
+
+            void main() {
+                vColor = aColor;
+                
+                vec3 pos = aOrigin;
+                float alpha = 1.0;
+
+                if (uDissolveMode > 0.5) {
+                    // Dissolving/Swirling/Reforming logic
+                    if (uDissolveMode < 1.5) { // Dissolving
+                        float noise = hash(aOrigin.x + aOrigin.y + aOrigin.z + uTime) * 2.0;
+                        pos = aOrigin + (aTarget - aOrigin) * uTransition + (vec3(hash(uTime), hash(uTime+1.0), hash(uTime+2.0)) * noise * uTransition);
+                        alpha = 1.0 - (uTransition * 0.5);
+                    } else if (uDissolveMode < 2.5) { // Swirling
+                        float angle = uTime * 0.5 + hash(aOrigin.x) * 6.28;
+                        float dist = length(aOrigin.xz) * 2.0;
+                        pos = aOrigin * 0.5 + vec3(cos(angle) * dist, sin(uTime * 0.2) * 2.0, sin(angle) * dist);
+                        alpha = 0.8;
+                    } else { // Reforming
+                        pos = aTarget + (aOrigin - aTarget) * (1.0 - uTransition);
+                        alpha = 1.0;
+                    }
+                }
+
+                // Add slight rotation and movement
+                vec4 mvPosition = uModelViewMatrix * vec4(pos, 1.0);
+                gl_Position = uProjectionMatrix * mvPosition;
+                
+                // Size attenuation
+                gl_PointSize = aSize * (300.0 / -mvPosition.z);
+                vAlpha = alpha;
+            }
+        `;
+
+        const fsSource = `
+            precision mediump float;
+            varying vec3 vColor;
+            varying float vAlpha;
+
+            void main() {
+                float r = distance(gl_PointCoord, vec2(0.5));
+                if (r > 0.5) discard;
+                
+                // Soft glow effect
+                float glow = pow(1.0 - r * 2.0, 2.0);
+                gl_FragColor = vec4(vColor, vAlpha * glow);
+            }
+        `;
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error(gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        const program = gl.createProgram();
+        gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+        gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+        gl.linkProgram(program);
+        gl.useProgram(program);
+
+        // Geometry Generation
+        function generateHatGeometry() {
+            const positions = [];
+            const targets = [];
+            const colors = [];
+            const sizes = [];
+
+            const hatColor = [0.8, 0.1, 0.1]; // Red Hat Red
+            const emberColor = [1.0, 0.4, 0.2]; // Glowing orange/red
+
+            // 1. Brim (Disk)
+            for (let i = 0; i < 5000; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const radius = Math.sqrt(Math.random()) * 2.5;
+                const x = Math.cos(angle) * radius;
+                const z = Math.sin(angle) * radius;
+                const y = (Math.random() - 0.5) * 0.05;
+                
+                positions.push(x, y, z);
+                targets.push(x * 5, y * 5, z * 5); // Explosion target
+                colors.push(...hatColor);
+                sizes.push(1.5 + Math.random() * 2.0);
+            }
+
+            // 2. Crown (Cylinder + slightly pinched top)
+            for (let i = 0; i < 6000; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const h = Math.random() * 1.5;
+                const rBase = 1.0;
+                const rTop = 0.7;
+                // Pinch effect: radius decreases as height increases and curves in
+                const r = rBase - (h / 1.5) * (rBase - rTop) + Math.sin(h * 2.0) * 0.1;
+                
+                const x = Math.cos(angle) * r;
+                const z = Math.sin(angle) * r;
+                const y = h;
+
+                positions.push(x, y, z);
+                targets.push(x * 6, y * 4 + Math.sin(h*5)*2, z * 6);
+                colors.push(...hatColor);
+                sizes.push(1.0 + Math.random() * 1.5);
+            }
+
+            // 3. Top indent
+            for (let i = 0; i < 1000; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const r = Math.sqrt(Math.random()) * 0.7;
+                const x = Math.cos(angle) * r;
+                const z = Math.sin(angle) * r;
+                const y = 1.5 - (1.0 - r) * 0.3;
+
+                positions.push(x, y, z);
+                targets.push(x * 7, y * 3, z * 7);
+                colors.push(...hatColor);
+                sizes.push(1.0 + Math.random() * 1.5);
+            }
+
+            return {
+                pos: new Float32Array(positions),
+                target: new Float32Array(targets),
+                color: new Float32Array(colors),
+                size: new Float32Array(sizes)
+            };
+        }
+
+        const hatData = generateHatGeometry();
+
+        function createBuffer(gl, data, attributeName) {
+            const buffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+            const location = gl.getAttribLocation(program, attributeName);
+            gl.enableVertexAttribArray(location);
+            gl.vertexAttribPointer(location, data.length / hatData.pos.length / (data.length/hatData.pos.length), gl.FLOAT, false, 0, 0); 
+            // Note: The above pointer logic is simplified for this specific manual buffer creation
+            // In a real app, we'd use strides. I'll fix it in the loop.
+            return { buffer, location, size: data.length };
+        }
+
+        // Manual buffer assignment for specific attributes
+        const posBuf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, hatData.pos, gl.STATIC_DRAW);
+        const aPos = gl.getAttribLocation(program, 'aOrigin');
+
+        const targetBuf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, targetBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, hatData.target, gl.STATIC_DRAW);
+        const aTarget = gl.getAttribLocation(program, 'aTarget');
+
+        const colorBuf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, colorBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, hatData.color, gl.STATIC_DRAW);
+        const aColor = gl.getAttribLocation(program, 'aColor');
+
+        const sizeBuf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, sizeBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, hatData.size, gl.STATIC_DRAW);
+        const aSize = gl.getAttribLocation(program, 'aSize');
+
+        // A dummy attribute to pass the static "original" shape to the shader
+        const originBuf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, originBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, hatData.pos, gl.STATIC_DRAW);
+        const aOrigin = gl.getAttribLocation(program, 'aPosition');
+
+        // Uniform locations
+        const uProjLoc = gl.getUniformLocation(program, 'uProjectionMatrix');
+        const uMVLoc = gl.getUniformLocation(program, 'uModelViewMatrix');
+        const uTimeLoc = gl.getUniformLocation(program, 'uTime');
+        const uTransLoc = gl.getUniformLocation(program, 'uTransition');
+        const uModeLoc = gl.getUniformLocation(program, 'uDissolveMode');
+
+        // Matrix math helpers
+        function perspective(fovy, aspect, near, far) {
+            const f = 1.0 / Math.tan(fovy / 2);
+            const nf = 1 / (near - far);
+            return [
+                f / aspect, 0, 0, 0,
+                0, f, 0, 0,
+                0, 0, (far + near) * nf, -1,
+                0, 0, (2 * far * near) * nf, 0
+            ];
+        }
+
+        function identity() {
+            return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+        }
+
+        function rotateY(m, angle) {
+            const c = Math.cos(angle), s = Math.sin(angle);
+            const res = [...m];
+            res[0] = m[0] * c + m[8] * s;
+            res[2] = m[2] * c + m[10] * s;
+            res[8] = m[8] * c - m[0] * s;
+            res[10] = m[10] * c - m[2] * s;
+            return res;
+        }
+
+        function rotateX(m, angle) {
+            const c = Math.cos(angle), s = Math.sin(angle);
+            const res = [...m];
+            res[1] = m[1] * c - m[5] * s;
+            res[2] = m[2] * c - m[6] * s;
+            res[4] = m[4] * c + m[1] * s;
+            res[5] = m[5] * c + m[4] * s;
+            res[8] = m[8] * c - m[2] * s;
+            res[9] = m[9] * c - m[5] * s;
+            res[10] = m[10] * c + m[8] * s;
+            return res;
+        }
+
+        function resize() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width * window.devicePixelRatio;
+            canvas.height = height * window.devicePixelRatio;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+
+        // Input handling
+        canvas.addEventListener('mouseenter', () => {
+            if (reducedMotion) return;
+            isHovered = true;
+        });
+        canvas.addEventListener('mouseleave', () => {
+            isHovered = false;
+        });
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (reducedMotion) return;
+            isHovered = true;
+        }, {passive: false});
+        canvas.addEventListener('touchend', () => {
+            isHovered = false;
+        });
+
+        let lastTime = 0;
+        function render(time) {
+            const dt = (time - lastTime) * 0.001;
+            lastTime = time;
+            const t = time * 0.001;
+
+            // Animation State Machine
+            if (isHovered) {
+                if (state === 'idle') state = 'dissolving';
+                else if (state === 'dissolving') state = 'swirling';
+                else if (state === 'swirling') state = 'reforming';
+                else if (state === 'reforming') state = 'idle'; // Reset cycle
+
+                // Smoothly transition between states
+                if (state === 'dissolving' || state === 'swirling' || state === 'reforming') {
+                    transitionProgress += dt * 0.8;
+                    if (transitionProgress >= 1.0) {
+                        transitionProgress = 0;
+                        if (state === 'dissolving') state = 'swirling';
+                        else if (state === 'swirling') state = 'reforming';
+                        else if (state === 'reforming') state = 'idle';
+                    }
+                }
+            } else {
+                if (state !== 'idle') {
+                    // Automatically reform if not hovering
+                    if (state === 'swirling') state = 'reforming';
+                    else if (state === 'reforming') {
+                        transitionProgress += dt * 1.5;
+                        if (transitionProgress >= 1.0) {
+                            transitionProgress = 0;
+                            state = 'idle';
+                        }
+                    }
+                }
+            }
+
+            // Clear
+            gl.clearColor(0.04, 0.04, 0.04, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+            gl.enable(gl.BLEND);
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+
+            // Rotation
+            const rotSpeed = isHovered ? 0.2 : 0.8;
+            rotationY += dt * rotSpeed;
+            rotationX += dt * 0.1;
+
+            // Matrices
+            const proj = perspective(45 * Math.PI / 180, width / height, 0.1, 100.0);
+            let mv = identity();
+            mv = rotateX(mv, rotationX);
+            mv = rotateY(mv, rotationY);
+            // Move camera back
+            mv[14] = -8.0; 
+
+            // Set Uniforms
+            gl.uniformMatrix4fv(uProjLoc, false, proj);
+            gl.uniformMatrix4fv(uMVLoc, false, mv);
+            gl.uniform1f(uTimeLoc, t);
+            gl.uniform1f(uTransLoc, transitionProgress);
+
+            let mode = 0;
+            if (state === 'dissolving') mode = 1;
+            else if (state === 'swirling') mode = 2;
+            else if (state === 'reforming') mode = 3;
+            gl.uniform1f(uModeLoc, mode);
+
+            // Draw
+            gl.bindBuffer(gl.ARRAY_BUFFER, originBuf);
+            gl.enableVertexAttribArray(aOrigin);
+            gl.vertexAttribPointer(aOrigin, 3, gl.FLOAT, false, 0, 0);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+            gl.enableVertexAttribArray(aPos);
+            gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 0, 0);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, targetBuf);
+            gl.enableVertexAttribArray(aTarget);
+            gl.vertexAttribPointer(aTarget, 3, gl.FLOAT, false, 0, 0);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, colorBuf);
+            gl.enableVertexAttribArray(aColor);
+            gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, 0, 0);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, sizeBuf);
+            gl.enableVertexAttribArray(aSize);
+            gl.vertexAttribPointer(aSize, 1, gl.FLOAT, false, 0, 0);
+
+            gl.drawArrays(gl.POINTS, 0, hatData.pos.length / 3);
+
+            requestAnimationFrame(render);
+        }
+
+        requestAnimationFrame(render);
+    </script>
+</body>
+</html>
+```

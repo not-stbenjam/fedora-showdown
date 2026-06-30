@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Red Hat Fedora</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #080a0c;
+    color: #e5e7eb;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    overflow: hidden;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  canvas {
+    position: fixed;
+    inset: 0;
+    width: 100%; height: 100%;
+    z-index: 1;
+    touch-action: none;
+  }
+  .caption {
+    position: relative;
+    z-index: 2;
+    text-align: center;
+    pointer-events: none;
+    margin-top: 18vh;
+    user-select: none;
+  }
+  h1 {
+    font-size: clamp(1.1rem, 2.4vw, 1.6rem);
+    font-weight: 300;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    opacity: 0.9;
+    text-shadow: 0 2px 14px rgba(0,0,0,0.9);
+  }
+  p {
+    margin-top: 0.5rem;
+    font-size: clamp(0.75rem, 1.4vw, 0.95rem);
+    font-weight: 300;
+    opacity: 0.5;
+    letter-spacing: 0.08em;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    canvas { display: block; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="caption">
+  <h1>Red Hat</h1>
+  <p>Think Build Share</p>
+</div>
+<script>
+(function() {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const tilt = 0.28;
+  const distance = 520;
+  const fov = 860;
+  let cx, cy, baseScale = 1;
+
+  function updateSize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cx = window.innerWidth / 2;
+    cy = window.innerHeight / 2;
+    baseScale = Math.min(window.innerWidth, window.innerHeight) / 650;
+  }
+  updateSize();
+
+  function rotateY(p, a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    return { x: p.x*c - p.z*s, y: p.y, z: p.x*s + p.z*c };
+  }
+
+  function toCamera(p, yaw) {
+    let x = p.x, y = p.y, z = p.z;
+    if (yaw !== undefined) {
+      const c = Math.cos(yaw), s = Math.sin(yaw);
+      const x2 = x*c - z*s;
+      const z2 = x*s + z*c;
+      x = x2; z = z2;
+    }
+    const ct = Math.cos(tilt), st = Math.sin(tilt);
+    const y2 = y*ct - z*st;
+    const z2 = y*st + z*ct;
+    return { x, y: y2, z: z2 };
+  }
+
+  function perspective(cam) {
+    const s = (fov * baseScale) / (cam.z + distance);
+    return { x: cx + cam.x*s, y: cy + cam.y*s, z: cam.z, s };
+  }
+
+  // Hat mesh
+  function buildHat() {
+    const verts = [];
+    const faces = [];
+    const addV = v => { verts.push(v); return verts.length - 1; };
+    const addF = (a,b,c) => { faces.push([a,b,c]); };
+    const slices = 26;
+
+    const hCrown = 64;
+    const rBot = 54;
+    const rTop = 46;
+
+    // Crown rings
+    const crownRings = [];
+    const crownSteps = 2;
+    for (let i = 0; i < crownSteps; i++) {
+      const t = i / (crownSteps - 1);
+      const y = t * hCrown;
+      const r = rBot + (rTop - rBot) * t;
+      const ring = [];
+      for (let j = 0; j <= slices; j++) {
+        const a = (j / slices) * Math.PI * 2;
+        ring.push(addV({ x: Math.cos(a)*r, y, z: Math.sin(a)*r }));
+      }
+      crownRings.push(ring);
+    }
+    for (let i = 0; i < crownRings.length - 1; i++) {
+      for (let j = 0; j < slices; j++) {
+        addF(crownRings[i][j], crownRings[i+1][j], crownRings[i][j+1]);
+        addF(crownRings[i][j+1], crownRings[i+1][j], crownRings[i+1][j+1]);
+      }
+    }
+
+    // Dome top
+    let prevRing = crownRings[crownRings.length - 1];
+    const domeSteps = 3;
+    for (let i = 1; i <= domeSteps; i++) {
+      const phi = (i / domeSteps) * (Math.PI / 2);
+      const r = rTop * Math.cos(phi);
+      const y = hCrown + rTop * Math.sin(phi);
+      const ring = [];
+      for (let j = 0; j <= slices; j++) {
+        const a = (j / slices) * Math.PI * 2;
+        ring.push(addV({ x: Math.cos(a)*r, y, z: Math.sin(a)*r }));
+      }
+      for (let j = 0; j < slices; j++) {
+        addF(prevRing[j], ring[j], prevRing[j+1]);
+        addF(prevRing[j+1], ring[j], ring[j+1]);
+      }
+      prevRing = ring;
+    }
+
+    // Brim
+    const rInner = rBot;
+    const rOuter = 122;
+    const brimSteps = 3;
+    let prevBrim = crownRings[0];
+    for (let i = 1; i <= brimSteps; i++) {
+      const t = i / brimSteps;
+      const r = rInner + (rOuter - rInner) * t;
+      const y = 6 * t * t - 2;
+      const ring = [];
+      for (let j = 0; j <= slices; j++) {
+        const a = (j / slices) * Math.PI * 2;
+        ring.push(addV({ x: Math.cos(a)*r, y, z: Math.sin(a)*r }));
+      }
+      for (let j = 0; j < slices; j++) {
+        addF(prevBrim[j], ring[j], prevBrim[j+1]);
+        addF(prevBrim[j+1], ring[j], ring[j+1]);
+      }
+      prevBrim = ring;
+    }
+
+    return { verts, faces };
+  }
+
+  const mesh = buildHat();
+
+  function sampleSurface(n) {
+    const homes = [];
+    for (let i = 0; i < n; i++) {
+      const fi = Math.floor(Math.random() * mesh.faces.length);
+      const f = mesh.faces[fi];
+      const v0 = mesh.verts[f[0]];
+      const v1 = mesh.verts[f[1]];
+      const v2 = mesh.verts[f[2]];
+      let u = Math.random(), v = Math.random();
+      if (u + v > 1) { u = 1 - u; v = 1 - v; }
+      const w = 1 - u - v;
+      homes.push({
+        x: v0.x*w + v1.x*u + v2.x*v,
+        y: v0.y*w + v1.y*u + v2.y*v,
+        z: v0.z*w + v1.z*u + v2.z*v
+      });
+    }
+    return homes;
+  }
+
+  const NUM_PARTICLES = 1600;
+  const homes = sampleSurface(NUM_PARTICLES);
+  const particles = homes.map(h => ({
+    home: h,
+    pos: { x: 0, y: 0, z: 0 },
+    vel: { x: 0, y: 0, z: 0 },
+    target: { x: 0, y: 0, z: 0 },
+    active: false,
+    orbiting: false,
+    orbitCenter: null,
+    orbitAxis: null,
+    orbitSpeed: 0,
+    trail: [],
+    hue: 350 + Math.random()*30,
+    size: 1.2 + Math.random()*1.8,
+    delay: 0
+  }));
+
+  // Light
+  const lx = -0.45, ly = 0.75, lz = -0.45;
+  const llen = Math.sqrt(lx*lx + ly*ly + lz*lz);
+  const lnx = lx/llen, lny = ly/llen, lnz = lz/llen;
+
+  function renderHat(a, alpha) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    const camVerts = mesh.verts.map(v => toCamera(v, a));
+    const projVerts = camVerts.map(v => perspective(v));
+
+    const faced = mesh.faces.map((f, idx) => {
+      const c0 = camVerts[f[0]], c1 = camVerts[f[1]], c2 = camVerts[f[2]];
+      return {
+        f, idx,
+        z: (c0.z + c1.z + c2.z) / 3,
+        c0, c1, c2
+      };
+    });
+    // far to near: larger z first
+    faced.sort((a, b) => b.z - a.z);
+
+    for (let i = 0; i < faced.length; i++) {
+      const fd = faced[i];
+      const p0 = projVerts[fd.f[0]];
+      const p1 = projVerts[fd.f[1]];
+      const p2 = projVerts[fd.f[2]];
+
+      const v0 = fd.c0, v1 = fd.c1, v2 = fd.c2;
+      const ax = v1.x - v0.x, ay = v1.y - v0.y, az = v1.z - v0.z;
+      const bx_ = v2.x - v0.x, by_ = v2.y - v0.y, bz_ = v2.z - v0.z;
+      let nx = ay*bz_ - az*by_;
+      let ny = az*bx_ - ax*bz_;
+      let nz = ax*by_ - ay*bx_;
+      const nlen = Math.sqrt(nx*nx + ny*ny + nz*nz);
+      if (nlen === 0) continue;
+      nx /= nlen; ny /= nlen; nz /= nlen;
+
+      const dot = nx*lnx + ny*lny + nz*lnz;
+      const intensity = Math.max(0.12, dot);
+      const r = Math.floor(215 * intensity + 10);
+      const g = Math.floor(22 * intensity);
+      const b_ = Math.floor(22 * intensity);
+
+      ctx.fillStyle = `rgb(${r},${g},${b_})`;
+      ctx.beginPath();
+      ctx.moveTo(p0.x, p0.y);
+      ctx.lineTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  function renderParticles() {
+    const any = particles.some(p => p.active);
+    if (!any) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      if (!p.active) continue;
+      const cam = toCamera(p.pos);
+      const pr = perspective(cam);
+      const size = p.size * pr.s;
+      if (size <= 0) continue;
+
+      ctx.fillStyle = `hsla(${p.hue}, 100%, 60%, 0.18)`;
+      ctx.fillRect(pr.x - size, pr.y - size, size*2, size*2);
+      ctx.fillStyle = `hsla(${p.hue}, 100%, 78%, 0.75)`;
+      ctx.fillRect(pr.x - size*0.4, pr.y - size*0.4, size*0.8, size*0.8);
+
+      if (p.orbiting) {
+        p.trail.push({ x: pr.x, y: pr.y, s: pr.s });
+        if (p.trail.length > 12) p.trail.shift();
+        for (let t = 0; t < p.trail.length - 1; t++) {
+          const a1 = (t / p.trail.length) * 0.35;
+          ctx.beginPath();
+          ctx.moveTo(p.trail[t].x, p.trail[t].y);
+          ctx.lineTo(p.trail[t+1].x, p.trail[t+1].y);
+          ctx.strokeStyle = `hsla(${p.hue}, 100%, 72%, ${a1})`;
+          ctx.lineWidth = 1.2 * p.trail[t+1].s;
+          ctx.stroke();
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawShadow(alphaMul) {
+    const sp = perspective(toCamera({ x: 0, y: -28, z: 0 }));
+    const r = 100 * sp.s;
+    const g = ctx.createRadialGradient(sp.x, sp.y, 0, sp.x, sp.y, r);
+    g.addColorStop(0, `rgba(0,0,0,${0.30 * alphaMul})`);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(sp.x, sp.y + 12*sp.s, r*1.15, r*0.28, 0, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  const S_SOLID = 0;
+  const S_DISSOLVING = 1;
+  const S_SWIRLING = 2;
+  const S_RETURNING = 3;
+  const S_REFORMING = 4;
+
+  let state = S_SOLID;
+  let angle = 0;
+  let spinSpeed = 0.007;
+  let hatAngle = 0;
+  let hatAlpha = 1;
+  let dissolveTimer = 0;
+  let swirlTimer = 0;
+  let returnTimer = 0;
+  let reformTimer = 0;
+
+  function triggerDissolve() {
+    if (state !== S_SOLID || reducedMotion) return;
+    state = S_DISSOLVING;
+    dissolveTimer = 0;
+    hatAngle = angle;
+    particles.forEach(p => {
+      p.active = false;
+      p.orbiting = false;
+      p.trail = [];
+      p.delay = Math.random() * 22;
+      const t = rotateY(p.home, hatAngle);
+      p.pos.x = t.x; p.pos.y = t.y; p.pos.z = t.z;
+      p.target.x = t.x; p.target.y = t.y; p.target.z = t.z;
+      const cx = 0, cy = 34, cz = 0;
+      const dx = p.pos.x - cx, dy = p.pos.y - cy, dz = p.pos.z - cz;
+      const dlen = Math.sqrt(dx*dx + dy*dy + dz*dz) || 1;
+      const speed = 1.0 + Math.random() * 2.2;
+      p.vel.x = (dx/dlen)*speed + (Math.random()-0.5)*0.8;
+      p.vel.y = (dy/dlen)*speed + (Math.random()-0.5)*0.8;
+      p.vel.z = (dz/dlen)*speed + (Math.random()-0.5)*0.8;
+    });
+  }
+
+  function drawScene() {
+    ctx.fillStyle = '#080a0c';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const renderAngle = (state === S_SOLID) ? angle : hatAngle;
+
+    if (hatAlpha > 0.01) {
+      drawShadow(hatAlpha);
+      renderHat(renderAngle, hatAlpha);
+    }
+    renderParticles();
+  }
+
+  function tick() {
+    if (state === S_SOLID) {
+      angle += spinSpeed;
+    } else if (state === S_DISSOLVING) {
+      dissolveTimer++;
+      hatAlpha = Math.max(0, 1 - dissolveTimer / 42);
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        if (!p.active && dissolveTimer >= p.delay) p.active = true;
+        if (p.active) {
+          p.pos.x += p.vel.x;
+          p.pos.y += p.vel.y;
+          p.pos.z += p.vel.z;
+          p.vel.x *= 0.94;
+          p.vel.y *= 0.94;
+          p.vel.z *= 0.94;
+        }
+      }
+      if (hatAlpha <= 0 && dissolveTimer > 55) {
+        state = S_SWIRLING;
+        swirlTimer = 0;
+      }
+    } else if (state === S_SWIRLING) {
+      swirlTimer++;
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        if (!p.active) continue;
+        const dx = p.pos.x, dz = p.pos.z;
+        const dist = Math.sqrt(dx*dx + dz*dz) + 0.1;
+        const ang = Math.atan2(dz, dx);
+        p.vel.x += -Math.sin(ang) * 0.10 - (dx/dist) * 0.018;
+        p.vel.z += Math.cos(ang) * 0.10 - (dz/dist) * 0.018;
+        p.vel.y -= 0.032;
+        p.vel.x += (Math.random()-0.5)*0.28;
+        p.vel.y += (Math.random()-0.5)*0.28;
+        p.vel.z += (Math.random()-0.5)*0.28;
+        p.vel.x *= 0.965;
+        p.vel.y *= 0.965;
+        p.vel.z *= 0.965;
+        p.pos.x += p.vel.x;
+        p.pos.y += p.vel.y;
+        p.pos.z += p.vel.z;
+      }
+      if (swirlTimer > 150) {
+        state = S_RETURNING;
+        returnTimer = 0;
+      }
+    } else if (state === S_RETURNING) {
+      returnTimer++;
+      let allHome = true;
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        if (!p.active) continue;
+        const tx = p.target.x, ty = p.target.y, tz = p.target.z;
+        const dx = tx - p.pos.x, dy = ty - p.pos.y, dz = tz - p.pos.z;
+        const d2 = dx*dx + dy*dy + dz*dz;
+        if (d2 > 1.5) allHome = false;
+        p.vel.x += dx * 0.032;
+        p.vel.y += dy * 0.032;
+        p.vel.z += dz * 0.032;
+        p.vel.x += -p.pos.z * 0.011;
+        p.vel.z += p.pos.x * 0.011;
+        p.vel.x *= 0.90;
+        p.vel.y *= 0.90;
+        p.vel.z *= 0.90;
+        p.pos.x += p.vel.x;
+        p.pos.y += p.vel.y;
+        p.pos.z += p.vel.z;
+      }
+      if (allHome || returnTimer > 220) {
+        state = S_REFORMING;
+        reformTimer = 0;
+        // select orbiters
+        const active = particles.filter(p => p.active);
+        const count = Math.min(45, active.length);
+        for (let i = 0; i < count; i++) {
+          const p = active[i];
+          p.orbiting = true;
+          p.orbitCenter = { x: 0, y: 34, z: 0 };
+          const ox = Math.random()-0.5, oy = Math.random()-0.5, oz = Math.random()-0.5;
+          const olen = Math.sqrt(ox*ox + oy*oy + oz*oz) || 1;
+          p.orbitAxis = { x: ox/olen, y: oy/olen, z: oz/olen };
+          p.orbitSpeed = 0.012 + Math.random()*0.022;
+        }
+      }
+    } else if (state === S_REFORMING) {
+      reformTimer++;
+      hatAlpha = Math.min(1, reformTimer / 48);
+      let remaining = 0;
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        if (!p.active) continue;
+        if (p.orbiting) {
+          remaining++;
+          const dirx = p.pos.x - p.orbitCenter.x;
+          const diry = p.pos.y - p.orbitCenter.y;
+          const dirz = p.pos.z - p.orbitCenter.z;
+          const cosS = Math.cos(p.orbitSpeed);
+          const sinS = Math.sin(p.orbitSpeed);
+          const cx_ = p.orbitAxis.y*dirz - p.orbitAxis.z*diry;
+          const cy_ = p.orbitAxis.z*dirx - p.orbitAxis.x*dirz;
+          const cz_ = p.orbitAxis.x*diry - p.orbitAxis.y*dirx;
+          const dot = p.orbitAxis.x*dirx + p.orbitAxis.y*diry + p.orbitAxis.z*dirz;
+          p.pos.x = p.orbitCenter.x + dirx*cosS + cx_*sinS + p.orbitAxis.x*dot*(1-cosS);
+          p.pos.y = p.orbitCenter.y + diry*cosS + cy_*sinS + p.orbitAxis.y*dot*(1-cosS);
+          p.pos.z = p.orbitCenter.z + dirz*cosS + cz_*sinS + p.orbitAxis.z*dot*(1-cosS);
+        } else {
+          const dx = p.target.x - p.pos.x;
+          const dy = p.target.y - p.pos.y;
+          const dz = p.target.z - p.pos.z;
+          p.pos.x += dx * 0.18;
+          p.pos.y += dy * 0.18;
+          p.pos.z += dz * 0.18;
+          if (Math.abs(dx)+Math.abs(dy)+Math.abs(dz) < 0.8) {
+            p.active = false;
+          } else {
+            remaining++;
+          }
+        }
+      }
+      if (hatAlpha >= 1 && remaining <= 45) {
+        state = S_SOLID;
+        angle = hatAngle;
+      }
+    }
+  }
+
+  function loop() {
+    tick();
+    drawScene();
+    requestAnimationFrame(loop);
+  }
+
+  function drawStatic() {
+    updateSize();
+    ctx.fillStyle = '#080a0c';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    drawShadow(1);
+    renderHat(0, 1);
+  }
+
+  if (!reducedMotion) {
+    canvas.addEventListener('mouseenter', triggerDissolve);
+    canvas.addEventListener('click', triggerDissolve);
+    canvas.addEventListener('touchstart', (e) => { e.preventDefault(); triggerDissolve(); }, { passive: false });
+    loop();
+  } else {
+    drawStatic();
+  }
+
+  window.addEventListener('resize', () => {
+    updateSize();
+    if (reducedMotion) drawStatic();
+  });
+})();
+</script>
+</body>
+</html>

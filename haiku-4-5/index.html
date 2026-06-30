@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Red Hat Fedora - 3D Particle Animation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 50%, #0d0f24 100%);
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        #caption {
+            position: absolute;
+            bottom: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(220, 220, 240, 0.6);
+            font-size: 14px;
+            text-align: center;
+            z-index: 10;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+            letter-spacing: 0.5px;
+        }
+
+        #hint {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(180, 180, 200, 0.4);
+            font-size: 12px;
+            text-align: center;
+            z-index: 10;
+            pointer-events: none;
+            animation: fadeInOut 3s ease-in-out infinite;
+            letter-spacing: 0.3px;
+        }
+
+        @keyframes fadeInOut {
+            0%, 100% { opacity: 0.4; }
+            50% { opacity: 0.8; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            body {
+                animation: none !important;
+            }
+            #hint {
+                animation: none !important;
+                opacity: 0.3;
+            }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="caption">Red Hat Fedora</div>
+    <div id="hint">Hover or tap to dissolve into particles</div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+        let width = canvas.width = window.innerWidth;
+        let height = canvas.height = window.innerHeight;
+
+        // Reduce motion preference
+        const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        // State
+        let isDissolving = false;
+        let dissolveProgress = 0;
+        let particles = [];
+        let orbitalParticles = [];
+        let baseRotationZ = 0;
+        let baseRotationX = 0.3;
+        let spinSpeed = 0.008;
+        let targetSpinSpeed = 0.008;
+        let hasInteracted = false;
+
+        // Particle system
+        class Particle {
+            constructor(x, y, z, vx, vy, vz) {
+                this.x = x;
+                this.y = y;
+                this.z = z;
+                this.vx = vx;
+                this.vy = vy;
+                this.vz = vz;
+                this.life = 1;
+                this.maxLife = 1;
+                this.size = Math.random() * 2 + 0.5;
+                this.glow = Math.random() * 0.5 + 0.5;
+                this.hue = 15 + Math.random() * 30; // Red Hat red range
+            }
+
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.z += this.vz;
+                this.vy += 0.1; // gravity
+                this.vx *= 0.98; // air resistance
+                this.vy *= 0.98;
+                this.vz *= 0.98;
+                this.life -= 0.015;
+                this.glow *= 0.95;
+            }
+
+            draw(ctx, cx, cy, scale) {
+                if (this.life <= 0) return;
+
+                const screenX = cx + this.x * scale;
+                const screenY = cy + this.y * scale;
+                const alpha = Math.max(0, this.life);
+
+                const gradient = ctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, this.size * 2);
+                gradient.addColorStop(0, `rgba(220, 80, 40, ${alpha * 0.8})`);
+                gradient.addColorStop(0.5, `rgba(200, 40, 20, ${alpha * 0.4})`);
+                gradient.addColorStop(1, `rgba(200, 40, 20, 0)`);
+
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(screenX, screenY, this.size * 2, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Inner bright core
+                ctx.fillStyle = `rgba(255, 150, 100, ${alpha * this.glow})`;
+                ctx.beginPath();
+                ctx.arc(screenX, screenY, this.size * 0.6, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        class OrbitalParticle {
+            constructor(angle, distance) {
+                this.angle = angle;
+                this.distance = distance;
+                this.speed = Math.random() * 0.02 + 0.01;
+                this.life = 1;
+                this.size = Math.random() * 1.5 + 0.5;
+                this.trailPoints = [];
+            }
+
+            update(cx, cy) {
+                this.angle += this.speed;
+                this.life -= 0.003;
+
+                const x = cx + Math.cos(this.angle) * this.distance;
+                const y = cy + Math.sin(this.angle) * this.distance;
+
+                this.trailPoints.push({ x, y, life: 1 });
+                if (this.trailPoints.length > 20) {
+                    this.trailPoints.shift();
+                }
+
+                for (let p of this.trailPoints) {
+                    p.life -= 0.05;
+                }
+            }
+
+            draw(ctx, cx, cy) {
+                if (this.life <= 0) return;
+
+                // Draw trail
+                for (let i = 0; i < this.trailPoints.length; i++) {
+                    const p = this.trailPoints[i];
+                    const alpha = p.life * this.life * 0.3;
+                    ctx.fillStyle = `rgba(220, 80, 40, ${alpha})`;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, this.size * 0.5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // Draw particle
+                const x = cx + Math.cos(this.angle) * this.distance;
+                const y = cy + Math.sin(this.angle) * this.distance;
+
+                const gradient = ctx.createRadialGradient(x, y, 0, x, y, this.size * 1.5);
+                gradient.addColorStop(0, `rgba(255, 150, 100, ${this.life})`);
+                gradient.addColorStop(1, `rgba(220, 80, 40, 0)`);
+
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(x, y, this.size * 1.5, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = `rgba(255, 200, 150, ${this.life * 0.8})`;
+                ctx.beginPath();
+                ctx.arc(x, y, this.size * 0.8, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        // 3D fedora mesh vertices
+        function createFedoraGeometry() {
+            const vertices = [];
+
+            // Crown (top rounded part)
+            const crownRadius = 40;
+            const crownHeight = 35;
+            const segments = 32;
+
+            for (let i = 0; i < segments; i++) {
+                const angle = (i / segments) * Math.PI * 2;
+                const x = Math.cos(angle) * crownRadius;
+                const z = Math.sin(angle) * crownRadius;
+
+                // Crown surface - create a dome shape
+                for (let j = 0; j < 8; j++) {
+                    const heightFactor = j / 8;
+                    const radiusFactor = 1 - heightFactor * 0.3;
+                    const y = heightFactor * crownHeight;
+                    vertices.push({
+                        x: x * radiusFactor,
+                        y: y,
+                        z: z * radiusFactor,
+                        normal: [Math.cos(angle) * radiusFactor, heightFactor * 0.5, Math.sin(angle) * radiusFactor]
+                    });
+                }
+            }
+
+            // Brim
+            const brimRadius = 55;
+            const brimThickness = 2;
+            const brimY = -5;
+
+            for (let i = 0; i < segments; i++) {
+                const angle = (i / segments) * Math.PI * 2;
+                const x = Math.cos(angle) * brimRadius;
+                const z = Math.sin(angle) * brimRadius;
+
+                vertices.push({
+                    x: x,
+                    y: brimY,
+                    z: z,
+                    normal: [0, -1, 0]
+                });
+
+                vertices.push({
+                    x: x * 0.7,
+                    y: brimY + brimThickness,
+                    z: z * 0.7,
+                    normal: [0, 1, 0]
+                });
+            }
+
+            // Center top
+            vertices.push({
+                x: 0,
+                y: crownHeight + 5,
+                z: 0,
+                normal: [0, 1, 0]
+            });
+
+            return vertices;
+        }
+
+        const fedoraVertices = createFedoraGeometry();
+
+        function rotatePoint(point, angleX, angleY, angleZ) {
+            let x = point.x;
+            let y = point.y;
+            let z = point.z;
+
+            // Rotate around X
+            let cosX = Math.cos(angleX);
+            let sinX = Math.sin(angleX);
+            let y1 = y * cosX - z * sinX;
+            let z1 = y * sinX + z * cosX;
+
+            // Rotate around Y
+            let cosY = Math.cos(angleY);
+            let sinY = Math.sin(angleY);
+            let x2 = x * cosY + z1 * sinY;
+            let z2 = -x * sinY + z1 * cosY;
+
+            // Rotate around Z
+            let cosZ = Math.cos(angleZ);
+            let sinZ = Math.sin(angleZ);
+            let x3 = x2 * cosZ - y1 * sinZ;
+            let y3 = x2 * sinZ + y1 * cosZ;
+
+            return { x: x3, y: y3, z: z2 };
+        }
+
+        function projectPoint(point, centerX, centerY, scale = 1) {
+            const distance = 200;
+            const z = point.z + distance;
+            const perspective = distance / z;
+            const screenX = centerX + point.x * perspective * scale;
+            const screenY = centerY + point.y * perspective * scale;
+            const depth = z;
+
+            return { x: screenX, y: screenY, z: point.z, depth, perspective };
+        }
+
+        function drawFedora(centerX, centerY, rotZ, rotX, scale) {
+            const projected = [];
+
+            for (let vertex of fedoraVertices) {
+                const rotated = rotatePoint(vertex, rotX, 0, rotZ);
+                const proj = projectPoint(rotated, centerX, centerY, scale);
+                projected.push(proj);
+            }
+
+            // Sort by depth for painter's algorithm
+            projected.sort((a, b) => a.depth - b.depth);
+
+            // Draw with varying opacity and glow based on depth
+            for (let i = 0; i < projected.length; i++) {
+                const p = projected[i];
+                const depthFactor = (p.perspective - 0.8) / 0.5;
+                const alpha = Math.max(0.2, Math.min(1, 0.6 + depthFactor * 0.4));
+
+                if (i % 3 === 0) {
+                    // Draw connecting lines for structure
+                    if (i + 1 < projected.length) {
+                        const p2 = projected[i + 1];
+                        ctx.strokeStyle = `rgba(220, 80, 40, ${alpha * 0.3})`;
+                        ctx.lineWidth = 0.5;
+                        ctx.beginPath();
+                        ctx.moveTo(p.x, p.y);
+                        ctx.lineTo(p2.x, p2.y);
+                        ctx.stroke();
+                    }
+                }
+
+                // Draw points
+                const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 3);
+                gradient.addColorStop(0, `rgba(255, 120, 60, ${alpha * 0.8})`);
+                gradient.addColorStop(0.5, `rgba(220, 80, 40, ${alpha})`);
+                gradient.addColorStop(1, `rgba(180, 40, 20, ${alpha * 0.3})`);
+
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Glow
+                ctx.shadowColor = `rgba(255, 150, 100, ${alpha * 0.6})`;
+                ctx.shadowBlur = 8;
+                ctx.shadowOffsetX = 0;
+                ctx.shadowOffsetY = 0;
+            }
+
+            ctx.shadowColor = 'transparent';
+        }
+
+        function startDissolve() {
+            if (!prefersReducedMotion) {
+                isDissolving = true;
+                dissolveProgress = 0;
+                targetSpinSpeed = 0.001;
+
+                // Create particles
+                const centerX = width / 2;
+                const centerY = height / 2;
+
+                for (let i = 0; i < 200; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const distance = Math.random() * 60;
+                    const x = Math.cos(angle) * distance;
+                    const z = Math.sin(angle) * distance;
+                    const y = (Math.random() - 0.5) * 40;
+
+                    const speed = Math.random() * 2 + 1;
+                    const vx = Math.cos(angle) * speed + (Math.random() - 0.5) * 2;
+                    const vy = (Math.random() - 0.5) * 3;
+                    const vz = Math.sin(angle) * speed + (Math.random() - 0.5) * 2;
+
+                    particles.push(new Particle(x, y, z, vx, vy, vz));
+                }
+
+                // Schedule particle reformation
+                setTimeout(() => {
+                    if (particles.length === 0) {
+                        // Add orbital particles
+                        for (let i = 0; i < 8; i++) {
+                            orbitalParticles.push(new OrbitalParticle(Math.random() * Math.PI * 2, 80 + Math.random() * 40));
+                        }
+                    }
+                }, 2000);
+            }
+        }
+
+        function animate() {
+            // Clear with gradient background
+            const bgGradient = ctx.createLinearGradient(0, 0, width, height);
+            bgGradient.addColorStop(0, '#0a0e27');
+            bgGradient.addColorStop(0.5, '#1a1f3a');
+            bgGradient.addColorStop(1, '#0d0f24');
+            ctx.fillStyle = bgGradient;
+            ctx.fillRect(0, 0, width, height);
+
+            // Add some subtle stars
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+            for (let i = 0; i < 30; i++) {
+                const x = (baseRotationZ * 50 + i * 100) % width;
+                const y = (baseRotationX * 100 + i * 50) % height;
+                ctx.beginPath();
+                ctx.arc(x, y, 0.5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            const centerX = width / 2;
+            const centerY = height / 2;
+
+            // Update rotation
+            spinSpeed += (targetSpinSpeed - spinSpeed) * 0.05;
+            baseRotationZ += spinSpeed;
+
+            if (!isDissolving && particles.length === 0) {
+                // Draw fedora normally
+                drawFedora(centerX, centerY, baseRotationZ, baseRotationX, 1.2);
+
+                // Add ambient glow around fedora
+                const glowGradient = ctx.createRadialGradient(centerX, centerY, 20, centerX, centerY, 150);
+                glowGradient.addColorStop(0, 'rgba(220, 80, 40, 0.15)');
+                glowGradient.addColorStop(1, 'rgba(220, 80, 40, 0)');
+                ctx.fillStyle = glowGradient;
+                ctx.fillRect(centerX - 150, centerY - 150, 300, 300);
+            } else if (isDissolving && dissolveProgress < 1) {
+                // Blend between fedora and particles
+                const blendAlpha = 1 - dissolveProgress;
+                ctx.globalAlpha = blendAlpha;
+                drawFedora(centerX, centerY, baseRotationZ, baseRotationX, 1.2);
+                ctx.globalAlpha = 1;
+
+                dissolveProgress += 0.02;
+            }
+
+            // Update and draw particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.update();
+
+                // Swirl particles back toward center
+                const t = Math.min(1, (2 - dissolveProgress) * 0.5);
+                if (t > 0.3 && p.life > 0.2) {
+                    const angle = Math.atan2(p.y, p.x);
+                    const distance = Math.sqrt(p.x * p.x + p.y * p.y);
+                    const pullForce = Math.max(0, 1 - dissolveProgress * 2) * 0.3;
+
+                    p.vx -= Math.cos(angle) * pullForce;
+                    p.vy -= Math.sin(angle) * pullForce * 0.5;
+                }
+
+                p.draw(ctx, centerX, centerY, 1);
+
+                if (p.life <= 0) {
+                    particles.splice(i, 1);
+
+                    // Reform fedora when particles are gone
+                    if (particles.length === 0 && dissolveProgress >= 1) {
+                        isDissolving = false;
+                        dissolveProgress = 0;
+                        targetSpinSpeed = 0.008;
+                    }
+                }
+            }
+
+            // Update and draw orbital particles
+            for (let i = orbitalParticles.length - 1; i >= 0; i--) {
+                const p = orbitalParticles[i];
+                p.update(centerX, centerY);
+                p.draw(ctx, centerX, centerY);
+
+                if (p.life <= 0) {
+                    orbitalParticles.splice(i, 1);
+                }
+            }
+
+            requestAnimationFrame(animate);
+        }
+
+        // Event listeners
+        canvas.addEventListener('click', startDissolve);
+        canvas.addEventListener('touchstart', startDissolve);
+
+        canvas.addEventListener('mouseenter', () => {
+            if (!hasInteracted) {
+                hasInteracted = true;
+            }
+        });
+
+        window.addEventListener('resize', () => {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        });
+
+        // Start animation
+        animate();
+    </script>
+</body>
+</html>

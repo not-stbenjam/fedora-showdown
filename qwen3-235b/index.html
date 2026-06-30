@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fedora</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: #07070e;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  }
+  body {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at 50% 38%, #15152a 0%, #0b0b18 55%, #050510 100%);
+  }
+  canvas { display: block; cursor: pointer; touch-action: manipulation; }
+  .caption {
+    position: absolute; bottom: max(1.5rem, 5vh);
+    color: rgba(255,255,255,0.35);
+    font-size: clamp(0.65rem, 1.6vw, 0.85rem);
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+    user-select: none; pointer-events: none;
+    transition: opacity 0.8s ease;
+  }
+  .caption.fade { opacity: 0; }
+  @media (prefers-reduced-motion: reduce) {
+    .caption { display: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="caption" id="cap">hover or tap to interact</div>
+<script>
+(() => {
+'use strict';
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const cap = document.getElementById('cap');
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+let W, H, cx, cy, S;
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  cx = W / 2; cy = H / 2 - H * 0.03;
+  S = Math.min(W, H) * 0.26;
+}
+resize();
+window.addEventListener('resize', resize);
+
+/* ---- colours ---- */
+const C_RED      = [204, 31, 24];
+const C_DKRED    = [158, 22, 16];
+const C_BAND     = [18, 18, 24];
+const C_BANDHI   = [40, 40, 55];
+const C_BRIGHT   = [235, 55, 40];
+
+/* ---- build hat point cloud ---- */
+function buildHat() {
+  const pts = [];
+
+  /* brim — elliptical disk with thickness */
+  const brimSteps = 260;
+  for (let i = 0; i < brimSteps; i++) {
+    const a = (i / brimSteps) * Math.PI * 2;
+    const ca = Math.cos(a), sa = Math.sin(a);
+    const rx = 1.38, rz = 0.88;
+    // top / bottom face
+    for (const y of [-0.025, 0.025]) {
+      for (let r = 0.72; r <= 1.0; r += 0.06) {
+        const curl = r > 0.94 ? (r - 0.94) * 0.25 : 0;
+        pts.push({
+          x: ca * rx * r, y: y + curl * (y < 0 ? -1 : 1), z: sa * rz * r,
+          c: r > 0.96 ? C_DKRED : C_RED,
+          n: [0, y < 0 ? -1 : 1, 0], part: 'brim'
+        });
+      }
+    }
+    // edge
+    for (let t = -1; t <= 1; t += 0.4) {
+      pts.push({
+        x: ca * rx * 1.01, y: t * 0.025, z: sa * rz * 1.01,
+        c: C_DKRED, n: [ca, 0, sa], part: 'rim'
+      });
+    }
+  }
+
+  /* crown — stacked ellipses */
+  const layers = 14;
+  for (let li = 0; li < layers; li++) {
+    const t = li / (layers - 1);
+    const y = 0.06 + t * 0.68;
+    const rx = 0.88 - t * 0.30;
+    const rz = 0.58 - t * 0.22;
+    const crownSteps = 220;
+    for (let i = 0; i < crownSteps; i++) {
+      const a = (i / crownSteps) * Math.PI * 2;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      // Fedora pinch — compress left/right sides
+      const pinch = 1 - 0.13 * Math.pow(Math.abs(sa), 3.5);
+      // Top crease
+      let dy = 0;
+      if (t > 0.75) {
+        const fb = ca; // front-back
+        dy = -0.05 * (t - 0.75) * 4 * Math.max(0, fb) * ca * ca;
+      }
+      pts.push({
+        x: ca * rx * pinch, y: y + dy, z: sa * rz * pinch,
+        c: t > 0.82 ? C_DKRED : C_RED,
+        n: [ca * 0.55, 0.45, sa * 0.55], part: 'crown'
+      });
+    }
+  }
+
+  /* hat band — ribbon */
+  const bandY0 = 0.09, bandY1 = 0.22;
+  for (let li = 0; li <= 4; li++) {
+    const t = li / 4;
+    const y = bandY0 + (bandY1 - bandY0) * t;
+    const rx = 0.87 - t * 0.03, rz = 0.57 - t * 0.02;
+    const bandSteps = 280;
+    for (let i = 0; i < bandSteps; i++) {
+      const a = (i / bandSteps) * Math.PI * 2;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      const pinch = 1 - 0.13 * Math.pow(Math.abs(sa), 3.5);
+      pts.push({
+        x: ca * rx * pinch, y, z: sa * rz * pinch,
+        c: li === 1 || li === 3 ? C_BANDHI : C_BAND,
+        n: [ca, 0, sa], part: 'band'
+      });
+    }
+  }
+
+  /* top cap */
+  for (let i = 0; i < 320; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const rr = Math.random();
+    const ca = Math.cos(a), sa = Math.sin(a);
+    const pinch = 1 - 0.13 * Math.pow(Math.abs(sa), 3.5);
+    const dent = -0.04 * Math.max(0, ca) * ca * ca;
+    pts.push({
+      x: ca * 0.52 * rr * pinch,
+      y: 0.74 + dent + rr * 0.003,
+      z: sa * 0.34 * rr * pinch,
+      c: rr > 0.85 ? C_DKRED : C_RED,
+      n: [0, 1, 0], part: 'top'
+    });
+  }
+
+  return pts;
+}
+
+const hatSrc = buildHat();
+const N = hatSrc.length;
+
+/* ---- particles ---- */
+const particles = hatSrc.map((s, i) => ({
+  hx: s.x, hy: s.y, hz: s.z,        // home
+  cr: s.c[0], cg: s.c[1], cb: s.c[2], // colour
+  nx: s.n[0], ny: s.n[1], nz: s.n[2], // normal
+  x: s.x, y: s.y, z: s.z,            // current
+  // dissolve target (randomised per interaction)
+  dx: 0, dy: 0, dz: 0,
+  // swirl
+  sp: Math.random() * Math.PI * 2,
+  ss: 0.25 + Math.random() * 0.55,
+  sr: 0.08 + Math.random() * 0.25,
+  sa: (Math.random() - 0.5) * 0.4,
+  // orbit
+  op: Math.random() * Math.PI * 2,
+  osr: 0.15 + Math.random() * 0.35,
+  or: 1.3 + Math.random() * 0.7,
+  ot: (Math.random() - 0.5) * Math.PI * 0.5,
+  oy: (Math.random() - 0.5) * 0.8,
+  orbiting: false,
+  // visual
+  alpha: 1, size: 1.1 + Math.random() * 0.5,
+  glow: 0, trail: [],
+  // reform start
+  fx: 0, fy: 0, fz: 0,
+  // delay
+  del: Math.random() * 0.3,
+  idx: i
+}));
+
+/* ---- state ---- */
+const S_SPIN = 0, S_DISSOLVE = 1, S_SWIRL = 2, S_REFORM = 3, S_ORBIT = 4;
+let state = S_SPIN, sTime = 0;
+let angle = 0, aSpeed = 0.35, aSpeedTarget = 0.35;
+let interacting = false, reformNow = 0;
+let orbitSet = new Set();
+
+function randomDissolve() {
+  for (const p of particles) {
+    const th = Math.random() * Math.PI * 2;
+    const ph = Math.acos(2 * Math.random() - 1);
+    const d = 0.9 + Math.random() * 2.2;
+    p.dx = p.hx + Math.sin(ph) * Math.cos(th) * d;
+    p.dy = p.hy + Math.sin(ph) * Math.sin(th) * d;
+    p.dz = p.hz + Math.cos(ph) * d;
+    p.del = Math.random() * 0.28;
+    p.trail = []; p.orbiting = false;
+  }
+  orbitSet.clear();
+}
+
+randomDissolve();
+
+/* ---- 3-D helpers ---- */
+function rotY(x, y, z, a) {
+  const c = Math.cos(a), s = Math.sin(a);
+  return [x * c + z * s, y, -x * s + z * c];
+}
+function rotX(x, y, z, a) {
+  const c = Math.cos(a), s = Math.sin(a);
+  return [x, y * c - z * s, y * s + z * c];
+}
+const FOV = 3.8;
+const TILT = 0.18;
+function proj(x, y, z) {
+  const [rx, ry, rz] = rotX(x, y, z, TILT);
+  const zz = rz + FOV;
+  const sc = S * FOV / zz;
+  return { sx: cx + rx * sc, sy: cy - ry * sc, sz: zz, sc };
+}
+
+/* lighting */
+const L = (() => {
+  const v = [0.45, 0.75, -0.55];
+  const l = Math.hypot(...v);
+  return v.map(c => c / l);
+})();
+
+function light(nx, ny, nz) {
+  const rn = rotY(nx, ny, nz, angle);
+  const dot = Math.max(0, rn[0]*L[0] + rn[1]*L[1] + rn[2]*L[2]);
+  const amb = 0.22, dif = 0.72 * dot;
+  const rim = 0.25 * Math.pow(Math.max(0, -rn[2]*0.4 + rn[1]*0.15), 2);
+  return Math.min(1, amb + dif + rim);
+}
+
+/* ---- easings ---- */
+const ease = t => t < .5 ? 4*t*t*t : 1 - (-2*t+2)**3/2;
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp01 = t => Math.max(0, Math.min(1, t));
+
+/* ---- interaction ---- */
+function enter() {
+  if (reducedMotion) return;
+  if (state !== S_SPIN && state !== S_ORBIT) return;
+  interacting = true;
+  aSpeedTarget = 0.04;
+  state = S_DISSOLVE; sTime = 0;
+  randomDissolve();
+  cap.classList.add('fade');
+}
+function leave() { interacting = false; }
+
+canvas.addEventListener('mouseenter', enter);
+canvas.addEventListener('mouseleave', leave);
+canvas.addEventListener('touchstart', e => { e.preventDefault(); enter(); }, { passive: false });
+canvas.addEventListener('touchend', leave);
+
+/* ---- main loop ---- */
+let prev = performance.now();
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min((now - prev) / 1000, 0.05);
+  prev = now;
+
+  if (reducedMotion) { drawStatic(); return; }
+
+  /* speed */
+  aSpeed = lerp(aSpeed, aSpeedTarget, dt * 3.5);
+  angle += aSpeed * dt;
+  sTime += dt;
+
+  /* transitions */
+  if (state === S_DISSOLVE && sTime > 0.75) { state = S_SWIRL; sTime = 0; }
+  if (state === S_SWIRL) {
+    if ((!interacting && sTime > 0.45) || sTime > 5) {
+      state = S_REFORM; sTime = 0; reformNow = now;
+      for (const p of particles) { p.fx = p.x; p.fy = p.y; p.fz = p.z; }
+    }
+  }
+  if (state === S_REFORM && sTime > 1.8) {
+    /* pick orbiters */
+    const cnt = Math.round(N * 0.035);
+    const idx = [...Array(N).keys()].sort(() => Math.random() - 0.5).slice(0, cnt);
+    orbitSet = new Set(idx);
+    for (const i of idx) {
+      const p = particles[i];
+      p.orbiting = true;
+      p.op = Math.random() * Math.PI * 2;
+      p.trail = [];
+    }
+    state = S_ORBIT; sTime = 0;
+    aSpeedTarget = 0.35;
+    cap.classList.remove('fade');
+  }
+
+  /* update particles */
+  updatePart(dt, now);
+
+  /* draw */
+  draw(now);
+}
+
+function updatePart(dt, now) {
+  for (const p of particles) {
+    if (state === S_SPIN || state === S_ORBIT) {
+      if (p.orbiting) {
+        p.op += p.osr * dt;
+        const ox = Math.cos(p.op) * p.or;
+        const oy = p.oy + Math.sin(p.op * 0.6 + p.ot) * 0.35;
+        const oz = Math.sin(p.op) * p.or;
+        const [rx, ry, rz] = rotY(ox, oy, oz, angle * 0.15);
+        p.x = rx; p.y = ry; p.z = rz;
+        p.alpha = 0.55 + 0.3 * Math.sin(now * 0.002 + p.idx);
+        p.glow = 0.75;
+        p.trail.push([p.x, p.y, p.z]);
+        if (p.trail.length > 10) p.trail.shift();
+      } else {
+        p.x = p.hx; p.y = p.hy; p.z = p.hz;
+        p.alpha = 1; p.glow = 0; p.trail.length = 0;
+      }
+    }
+    else if (state === S_DISSOLVE) {
+      const t = ease(clamp01((sTime - p.del) / 0.5));
+      p.x = lerp(p.hx, p.dx, t);
+      p.y = lerp(p.hy, p.dy, t);
+      p.z = lerp(p.hz, p.dz, t);
+      p.glow = t * 0.55;
+      p.alpha = 1;
+      p.trail.length = 0;
+    }
+    else if (state === S_SWIRL) {
+      const st = sTime;
+      p.x = p.dx + Math.sin(st * p.ss + p.sp) * p.sr;
+      p.y = p.dy + Math.cos(st * p.ss * 0.65 + p.sp) * p.sr + p.sa * st * 0.08;
+      p.z = p.dz + Math.sin(st * p.ss * 0.45 + p.sp + 1) * p.sr;
+      p.glow = 0.45 + 0.15 * Math.sin(now * 0.003 + p.idx);
+      p.alpha = 0.88;
+      p.trail.push([p.x, p.y, p.z]);
+      if (p.trail.length > 5) p.trail.shift();
+    }
+    else if (state === S_REFORM) {
+      const t = ease(clamp01((sTime - p.del * 0.4) / 1.1));
+      p.x = lerp(p.fx, p.hx, t);
+      p.y = lerp(p.fy, p.hy, t);
+      p.z = lerp(p.fz, p.hz, t);
+      p.glow = (1 - t) * 0.35;
+      p.alpha = 0.65 + 0.35 * t;
+      if (t < 0.55) {
+        p.trail.push([p.x, p.y, p.z]);
+        if (p.trail.length > 4) p.trail.shift();
+      } else p.trail.length = 0;
+    }
+  }
+}
+
+/* ---- drawing ---- */
+function draw(now) {
+  ctx.clearRect(0, 0, W, H);
+
+  /* ambient radial */
+  const bg = ctx.createRadialGradient(cx, cy - S * 0.2, 0, cx, cy, S * 2.8);
+  bg.addColorStop(0, 'rgba(180,30,25,0.035)');
+  bg.addColorStop(0.4, 'rgba(120,20,18,0.018)');
+  bg.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  /* project all particles */
+  const buf = new Array(N);
+  for (let i = 0; i < N; i++) {
+    const p = particles[i];
+    const [rx, ry, rz] = rotY(p.x, p.y, p.z, angle);
+    const pr = proj(rx, ry, rz);
+    const li = light(p.nx, p.ny, p.nz);
+    const fogF = clamp01((rz + 1.2) * 0.12);
+    const r = Math.round(p.cr * li * (1 - fogF) + 8 * fogF);
+    const g = Math.round(p.cg * li * (1 - fogF) + 8 * fogF);
+    const b = Math.round(p.cb * li * (1 - fogF) + 12 * fogF);
+    buf[i] = {
+      sx: pr.sx, sy: pr.sy, sz: pr.sz, sc: pr.sc,
+      r, g, b, a: p.alpha, sz2: p.size, gl: p.glow,
+      trail: p.trail, orb: p.orbiting
+    };
+  }
+  buf.sort((a, b) => b.sz - a.sz);
+
+  /* shadow */
+  const shG = ctx.createRadialGradient(cx, cy + S * 0.55, 0, cx, cy + S * 0.55, S * 1.3);
+  shG.addColorStop(0, 'rgba(0,0,0,0.22)');
+  shG.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = shG;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + S * 0.55, S * 1.3, S * 0.12, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  /* trails */
+  ctx.globalCompositeOperation = 'lighter';
+  for (const b of buf) {
+    if (b.trail.length < 2) continue;
+    const tLen = b.trail.length;
+    for (let t = 0; t < tLen; t++) {
+      const [tx, ty, tz] = rotY(b.trail[t][0], b.trail[t][1], b.trail[t][2], angle);
+      const tp = proj(tx, ty, tz);
+      const f = t / tLen;
+      const a = f * b.a * 0.2;
+      const s = b.sz2 * 0.35 * f * (tp.sc / (S * FOV / 4.2));
+      if (a < 0.01 || s < 0.2) continue;
+      ctx.beginPath();
+      ctx.arc(tp.sx, tp.sy, Math.max(0.3, Math.min(s, 3)), 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${Math.min(255, b.r + 90)},${Math.min(255, b.g + 70)},${Math.min(255, b.b + 50)},${a})`;
+      ctx.fill();
+    }
+  }
+  ctx.globalCompositeOperation = 'source-over';
+
+  /* particles */
+  for (const b of buf) {
+    const s = Math.max(0.4, Math.min(b.sz2 * (b.sc / (S * FOV / 4.5)), 4));
+
+    /* glow halo */
+    if (b.gl > 0.08) {
+      const gr = s * 5 * b.gl;
+      const gg = ctx.createRadialGradient(b.sx, b.sy, 0, b.sx, b.sy, gr);
+      gg.addColorStop(0, `rgba(${Math.min(255, b.r + 110)},${Math.min(255, b.g + 80)},${Math.min(255, b.b + 60)},${b.gl * b.a * 0.35})`);
+      gg.addColorStop(1, `rgba(${b.r},${b.g},${b.b},0)`);
+      ctx.beginPath();
+      ctx.arc(b.sx, b.sy, gr, 0, Math.PI * 2);
+      ctx.fillStyle = gg;
+      ctx.fill();
+    }
+
+    /* core */
+    ctx.beginPath();
+    ctx.arc(b.sx, b.sy, s, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${b.r},${b.g},${b.b},${b.a})`;
+    ctx.fill();
+
+    /* specular highlight */
+    if (s > 1 && b.a > 0.6) {
+      ctx.beginPath();
+      ctx.arc(b.sx - s * 0.25, b.sy - s * 0.3, s * 0.25, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255,210,190,${0.12 * b.a})`;
+      ctx.fill();
+    }
+  }
+}
+
+/* ---- reduced motion static draw ---- */
+function drawStatic() {
+  ctx.clearRect(0, 0, W, H);
+  const bg = ctx.createRadialGradient(cx, cy - S * 0.2, 0, cx, cy, S * 2.8);
+  bg.addColorStop(0, 'rgba(180,30,25,0.035)');
+  bg.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  const a = 0.35;
+  const buf = [];
+  for (const s of hatSrc) {
+    const [rx, ry, rz] = rotY(s.x, s.y, s.z, a);
+    const pr = proj(rx, ry, rz);
+    const li = light(s.n[0], s.n[1], s.n[2]);
+    buf.push({ sx: pr.sx, sy: pr.sy, sz: pr.sz, sc: pr.sc,
+      r: Math.round(s.c[0] * li), g: Math.round(s.c[1] * li), b: Math.round(s.c[2] * li) });
+  }
+  buf.sort((a, b) => b.sz - a.sz);
+
+  const shG = ctx.createRadialGradient(cx, cy + S * 0.55, 0, cx, cy + S * 0.55, S * 1.3);
+  shG.addColorStop(0, 'rgba(0,0,0,0.18)');
+  shG.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = shG;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + S * 0.55, S * 1.3, S * 0.12, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  for (const b of buf) {
+    const s = Math.max(0.5, Math.min(1.6 * (b.sc / (S * FOV / 4.5)), 3));
+    ctx.beginPath();
+    ctx.arc(b.sx, b.sy, s, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${b.r},${b.g},${b.b},0.88)`;
+    ctx.fill();
+  }
+}
+
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

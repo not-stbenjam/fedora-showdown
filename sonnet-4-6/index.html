@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Red Hat</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html,body{
+  width:100%;height:100%;
+  background:#06060f;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  overflow:hidden;
+  font-family:'Georgia',serif
+}
+#hero{
+  display:flex;flex-direction:column;
+  align-items:center;
+  cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+  user-select:none
+}
+@media(prefers-reduced-motion:reduce){
+  #hero:hover canvas{filter:brightness(1.2);transition:filter .4s}
+}
+canvas{display:block}
+.caption{
+  margin-top:18px;
+  color:rgba(210,204,232,.28);
+  font-size:clamp(.58rem,1.7vw,.76rem);
+  letter-spacing:.36em;
+  text-transform:uppercase
+}
+</style>
+</head>
+<body>
+<div id="hero">
+  <canvas id="c"></canvas>
+  <p class="caption">Red Hat Enterprise Linux</p>
+</div>
+<script>
+(function(){
+  const cv  = document.getElementById('c');
+  const ctx = cv.getContext('2d');
+  const hero = document.getElementById('hero');
+  const RM  = matchMedia('(prefers-reduced-motion:reduce)').matches;
+
+  /* ── Canvas sizing ─────────────────────────────────────────────────── */
+  let W, H, CX, CY, SC;
+  function resize(){
+    const mw = Math.min(innerWidth * .92, 560);
+    const mh = innerHeight * .72;
+    SC = Math.min(mw, mh / .75) / 560;
+    W  = cv.width  = Math.round(SC * 560);
+    H  = cv.height = Math.round(SC * 420);
+    CX = W / 2;
+    CY = H * .44;
+  }
+  addEventListener('resize', resize); resize();
+
+  /* ── 3-D math ──────────────────────────────────────────────────────── */
+  const FOV  = 600;
+  const TILT = .28;   // X-axis viewing angle
+  const CAM  = 280;   // camera offset
+  const cosT = Math.cos(TILT), sinT = Math.sin(TILT);
+
+  function project(x, y, z){
+    const ty = y*cosT - z*sinT;
+    const tz = y*sinT + z*cosT;
+    const s  = FOV / (FOV + tz + CAM);
+    return { px: CX + x*s*SC, py: CY + ty*s*SC, s, d: tz };
+  }
+
+  function rotY(x, y, z, a){
+    const c = Math.cos(a), s = Math.sin(a);
+    return [ x*c - z*s, y, x*s + z*c ];
+  }
+
+  /* ── Hat geometry ──────────────────────────────────────────────────── */
+  const BO  = 185;          // brim outer radius
+  const BI  =  91;          // brim inner = crown base radius
+  const CT  =  69;          // crown top radius
+  const CH  = 112;          // crown height
+  const BH  =  17;          // hat-band height
+  const YBR =  36;          // brim y-position (3-D, y-up)
+  const YTP = YBR - CH;     // crown top y
+  const SEG = 64;            // circle segments
+
+  function ring(r, y, rot){
+    const pts = [];
+    for(let i = 0; i <= SEG; i++){
+      const t = i / SEG * Math.PI * 2;
+      const [rx,, rz] = rotY(r * Math.cos(t), y, r * Math.sin(t), rot);
+      pts.push(project(rx, y, rz));
+    }
+    return pts;
+  }
+
+  /* ── Draw solid hat ────────────────────────────────────────────────── */
+  function drawHat(rot, alpha){
+    if(alpha <= .01) return;
+    ctx.save();
+    if(alpha < 1) ctx.globalAlpha = alpha;
+
+    const bO  = ring(BO,    YBR, rot);
+    const bIcB = ring(BI,   YBR, rot);   // brim inner = crown base
+    const cT  = ring(CT,    YTP, rot);
+    const bdT = ring(BI+2,  YBR-BH, rot);
+    const bdB = ring(BI+2,  YBR,    rot);
+
+    const pcB = project(0, YBR, 0);
+    const pcT = project(0, YTP, 0);
+
+    /* ground glow */
+    const gy = pcB.py + SC * 30;
+    const gg = ctx.createRadialGradient(CX, gy, 0, CX, gy, SC * 155);
+    gg.addColorStop(0, 'rgba(150,0,0,.17)');
+    gg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = gg;
+    ctx.beginPath();
+    ctx.ellipse(CX, gy, SC*155, SC*24, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    /* brim — evenodd annular disc */
+    ctx.beginPath();
+    bO.forEach((p,i) => i ? ctx.lineTo(p.px,p.py) : ctx.moveTo(p.px,p.py));
+    ctx.closePath();
+    [...bIcB].reverse().forEach((p,i) => i ? ctx.lineTo(p.px,p.py) : ctx.moveTo(p.px,p.py));
+    ctx.closePath();
+    const bg = ctx.createRadialGradient(pcB.px, pcB.py, SC*BI*.25, pcB.px, pcB.py, SC*BO);
+    bg.addColorStop(0,   '#c71414');
+    bg.addColorStop(.55, '#a40a0a');
+    bg.addColorStop(1,   '#660000');
+    ctx.fillStyle = bg;
+    ctx.fill('evenodd');
+    ctx.beginPath();
+    bO.forEach((p,i) => i ? ctx.lineTo(p.px,p.py) : ctx.moveTo(p.px,p.py));
+    ctx.closePath();
+    ctx.strokeStyle = 'rgba(145,14,14,.6)';
+    ctx.lineWidth = .9;
+    ctx.stroke();
+
+    /* crown mantle — sorted quads */
+    const cf = [];
+    for(let i = 0; i < SEG; i++){
+      const ma  = (i/SEG + .5/SEG) * Math.PI*2 + rot;
+      const lit = Math.max(.07, -(Math.cos(ma)*(-.4) + Math.sin(ma)*(-.7)));
+      const d   = (bIcB[i].d + bIcB[i+1].d + cT[i].d + cT[i+1].d) * .25;
+      cf.push({ b1:bIcB[i], b2:bIcB[i+1], t1:cT[i], t2:cT[i+1], d, lit });
+    }
+    cf.sort((a,b) => b.d - a.d);
+    for(const { b1, b2, t1, t2, lit } of cf){
+      ctx.beginPath();
+      ctx.moveTo(b1.px,b1.py); ctx.lineTo(b2.px,b2.py);
+      ctx.lineTo(t2.px,t2.py); ctx.lineTo(t1.px,t1.py);
+      ctx.closePath();
+      const r = Math.round(182*lit + 16);
+      ctx.fillStyle = `rgb(${r},${Math.round(r*.07)},0)`;
+      ctx.fill();
+    }
+
+    /* hat band — darker sorted quads */
+    const bf = [];
+    for(let i = 0; i < SEG; i++){
+      const ma  = (i/SEG + .5/SEG) * Math.PI*2 + rot;
+      const lit = Math.max(.05, -(Math.cos(ma)*(-.4) + Math.sin(ma)*(-.7)));
+      const d   = (bdB[i].d + bdB[i+1].d + bdT[i].d + bdT[i+1].d) * .25;
+      bf.push({ b1:bdB[i], b2:bdB[i+1], t1:bdT[i], t2:bdT[i+1], d, lit });
+    }
+    bf.sort((a,b) => b.d - a.d);
+    for(const { b1, b2, t1, t2, lit } of bf){
+      ctx.beginPath();
+      ctx.moveTo(b1.px,b1.py); ctx.lineTo(b2.px,b2.py);
+      ctx.lineTo(t2.px,t2.py); ctx.lineTo(t1.px,t1.py);
+      ctx.closePath();
+      const v = Math.round(50*lit + 4);
+      ctx.fillStyle = `rgb(${v},${v},${v})`;
+      ctx.fill();
+    }
+
+    /* crown top cap */
+    ctx.beginPath();
+    cT.forEach((p,i) => i ? ctx.lineTo(p.px,p.py) : ctx.moveTo(p.px,p.py));
+    ctx.closePath();
+    const tg = ctx.createRadialGradient(pcT.px-SC*16, pcT.py-SC*8, 0, pcT.px, pcT.py, SC*CT);
+    tg.addColorStop(0,  '#d51a1a');
+    tg.addColorStop(.5, '#b30b0b');
+    tg.addColorStop(1,  '#740505');
+    ctx.fillStyle = tg;
+    ctx.fill();
+
+    /* specular highlight */
+    const sx = pcT.px - SC*21, sy = pcT.py - SC*13;
+    const sg = ctx.createRadialGradient(sx, sy, 0, sx, sy, SC*54);
+    sg.addColorStop(0, 'rgba(255,170,170,.32)');
+    sg.addColorStop(1, 'rgba(255,45,45,0)');
+    ctx.fillStyle = sg;
+    ctx.beginPath();
+    ctx.ellipse(sx, sy, SC*50, SC*27, -.35, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  /* ── Particle system ───────────────────────────────────────────────── */
+  const NP = RM ? 0 : 1100;
+  const NO = RM ? 0 : 7;
+
+  function sampleSurface(n){
+    const pts = [];
+    /* crown mantle */
+    for(let i = 0; i < n*.32; i++){
+      const t = Math.random()*Math.PI*2, h = Math.random();
+      const r = BI + (CT - BI)*h;
+      pts.push([ r*Math.cos(t), YBR - h*CH, r*Math.sin(t) ]);
+    }
+    /* crown top cap */
+    for(let i = 0; i < n*.12; i++){
+      const t = Math.random()*Math.PI*2, r = Math.sqrt(Math.random())*CT;
+      pts.push([ r*Math.cos(t), YTP, r*Math.sin(t) ]);
+    }
+    /* brim top surface */
+    for(let i = 0; i < n*.42; i++){
+      const t = Math.random()*Math.PI*2;
+      const r = BI + Math.pow(Math.random(), .55) * (BO - BI);
+      pts.push([ r*Math.cos(t), YBR, r*Math.sin(t) ]);
+    }
+    /* hat band */
+    for(let i = 0; i < n*.14; i++){
+      const t = Math.random()*Math.PI*2, h = Math.random()*BH;
+      pts.push([ (BI+2)*Math.cos(t), YBR-h, (BI+2)*Math.sin(t) ]);
+    }
+    while(pts.length < n) pts.push(pts[Math.floor(Math.random()*pts.length)]);
+    return pts.slice(0, n);
+  }
+
+  const surf = NP ? sampleSurface(NP) : [];
+
+  /* typed arrays for perf */
+  const phx = new Float32Array(NP), phy = new Float32Array(NP), phz = new Float32Array(NP);
+  const pax = new Float32Array(NP), pay = new Float32Array(NP), paz = new Float32Array(NP);
+  const pvx = new Float32Array(NP), pvy = new Float32Array(NP), pvz = new Float32Array(NP);
+  const pex = new Float32Array(NP), pey = new Float32Array(NP), pez = new Float32Array(NP);
+  const pcol = [], psz = new Float32Array(NP), pdp = new Float32Array(NP);
+  const psrt = NP ? Array.from({length:NP}, (_,i) => i) : [];
+
+  for(let i = 0; i < NP; i++){
+    const [x, y, z] = surf[i];
+    phx[i]=x; phy[i]=y; phz[i]=z;
+    pax[i]=x; pay[i]=y; paz[i]=z;
+    psz[i] = .6 + Math.random()*1.6;
+    const band  = y > YBR-BH && y < YBR+1 && Math.sqrt(x*x+z*z) > BI*.87;
+    const ember = !band && Math.random() < .11;
+    if(band){
+      const v = 12 + Math.floor(Math.random()*24);
+      pcol.push(`rgb(${v},${v},${v})`);
+    } else if(ember){
+      const g = 72 + Math.floor(Math.random()*44);
+      pcol.push(`rgb(255,${g},${Math.floor(g*.35)})`);
+    } else {
+      const r = 148 + Math.floor(Math.random()*72);
+      pcol.push(`rgb(${r},${Math.floor(r*.075)},0)`);
+    }
+  }
+
+  function setExplosionTargets(){
+    for(let i = 0; i < NP; i++){
+      const th = Math.random()*Math.PI*2;
+      const ph = Math.acos(2*Math.random() - 1);
+      const d  = 115 + Math.random()*240;
+      pex[i] = Math.sin(ph)*Math.cos(th)*d;
+      pey[i] = Math.sin(ph)*Math.sin(th)*d - 30;
+      pez[i] = Math.cos(ph)*d;
+    }
+  }
+
+  /* ── Orbit particles ───────────────────────────────────────────────── */
+  const oa    = new Float32Array(NO);
+  const orad  = new Float32Array(NO);
+  const oyoff = new Float32Array(NO);
+  const ospd  = new Float32Array(NO);
+  const osz   = new Float32Array(NO);
+  const otr   = Array.from({length:NO}, () => []);
+  const TRL   = 17;
+
+  for(let i = 0; i < NO; i++){
+    oa[i]    = (i/NO) * Math.PI*2;
+    orad[i]  = 162 + Math.random()*60;
+    oyoff[i] = (Math.random()-.5)*54;
+    ospd[i]  = .008 + Math.random()*.008;
+    osz[i]   = 1.2  + Math.random()*.9;
+  }
+
+  /* ── State machine ─────────────────────────────────────────────────── */
+  /* 0=idle  1=exploding  2=drifting  3=reforming  4=settling */
+  let phase  = 0, phaseT = 0;
+  let rotA   = 0, rotSpd = RM ? 0 : .012, rotTgt = .012;
+  let hatAl  = 1, ptAl = 0, orbAl = 0;
+  let orbEver = false;
+  let domHov = false, cooldown = 0;
+
+  function boom(){
+    if(phase !== 0 || RM) return;
+    setExplosionTargets();
+    phase = 1; phaseT = 0; rotTgt = .003;
+  }
+
+  function tick(dt){
+    phaseT += dt;
+    if(!RM) rotSpd += (rotTgt - rotSpd) * .07 * dt;
+    rotA += rotSpd * dt;
+    if(cooldown > 0) cooldown -= dt;
+
+    if(phase === 0){
+      hatAl = 1; ptAl = 0;
+      if(domHov && cooldown <= 0) boom();
+
+    } else if(phase === 1){
+      hatAl = Math.max(0, 1 - phaseT/18);
+      ptAl  = Math.min(1, phaseT/12);
+      for(let i = 0; i < NP; i++){
+        const [hx,,hz] = rotY(phx[i], phy[i], phz[i], rotA);
+        if(phaseT < 4){
+          pax[i] += (hx    - pax[i]) * .35;
+          pay[i] += (phy[i] - pay[i]) * .35;
+          paz[i] += (hz    - paz[i]) * .35;
+        } else {
+          pvx[i] += (pex[i]-pax[i]) * .031;
+          pvy[i] += (pey[i]-pay[i]) * .031;
+          pvz[i] += (pez[i]-paz[i]) * .031;
+          pvx[i] *= .905; pvy[i] *= .905; pvz[i] *= .905;
+          pax[i] += pvx[i]; pay[i] += pvy[i]; paz[i] += pvz[i];
+        }
+      }
+      if(phaseT > 60){ phase = 2; phaseT = 0; }
+
+    } else if(phase === 2){
+      hatAl = 0; ptAl = 1;
+      for(let i = 0; i < NP; i++){
+        const d = Math.sqrt(pax[i]*pax[i] + paz[i]*paz[i]);
+        if(d > .1){
+          const ang = Math.atan2(paz[i], pax[i]) + .016;
+          pvx[i] += (Math.cos(ang)*d - pax[i]) * .10 + (Math.random()-.5)*1.3;
+          pvz[i] += (Math.sin(ang)*d - paz[i]) * .10 + (Math.random()-.5)*1.3;
+        }
+        pvy[i] += -pay[i]*.012 + (Math.random()-.5)*1.3;
+        pvx[i] *= .932; pvy[i] *= .932; pvz[i] *= .932;
+        pax[i] += pvx[i]; pay[i] += pvy[i]; paz[i] += pvz[i];
+      }
+      if(phaseT > 54){ phase = 3; phaseT = 0; }
+
+    } else if(phase === 3){
+      hatAl = 0; ptAl = 1;
+      let near = 0;
+      for(let i = 0; i < NP; i++){
+        const [hx,,hz] = rotY(phx[i], phy[i], phz[i], rotA);
+        pvx[i] += (hx    - pax[i]) * .04;
+        pvy[i] += (phy[i] - pay[i]) * .04;
+        pvz[i] += (hz    - paz[i]) * .04;
+        pvx[i] *= .875; pvy[i] *= .875; pvz[i] *= .875;
+        pax[i] += pvx[i]; pay[i] += pvy[i]; paz[i] += pvz[i];
+        const dx=pax[i]-hx, dy=pay[i]-phy[i], dz=paz[i]-hz;
+        if(dx*dx + dy*dy + dz*dz < 20) near++;
+      }
+      if((near > NP*.92 && phaseT > 22) || phaseT > 74){
+        phase = 4; phaseT = 0; rotTgt = .012; orbEver = true;
+      }
+
+    } else if(phase === 4){
+      hatAl = Math.min(1, phaseT/22);
+      ptAl  = Math.max(0, 1 - phaseT/26);
+      if(phaseT > 148){ phase = 0; phaseT = 0; cooldown = 26; }
+    }
+
+    /* orbit alpha */
+    const otgt = (phase===4 || (phase===0 && orbEver)) ? 1 : 0;
+    orbAl += (otgt - orbAl) * .04 * dt;
+
+    /* update orbit trails */
+    for(let i = 0; i < NO; i++){
+      oa[i] += ospd[i] * dt;
+      const ox = Math.cos(oa[i]) * orad[i];
+      const oz = Math.sin(oa[i]) * orad[i] * .42;
+      const oy = oyoff[i] + Math.sin(oa[i]*1.65)*18;
+      const p  = project(ox, oy, oz);
+      otr[i].unshift({ x: p.px, y: p.py });
+      if(otr[i].length > TRL) otr[i].pop();
+    }
+  }
+
+  /* ── Draw particles ────────────────────────────────────────────────── */
+  function drawParticles(){
+    if(ptAl <= .01) return;
+    /* precompute depths then sort */
+    for(let i = 0; i < NP; i++)
+      pdp[i] = pay[i]*sinT + paz[i]*cosT;
+    psrt.sort((a,b) => pdp[a] - pdp[b]);
+
+    const glowing = phase === 1 || phase === 2;
+    ctx.save();
+    for(const i of psrt){
+      const p = project(pax[i], pay[i], paz[i]);
+      const r = Math.max(.3, psz[i] * p.s * SC * 1.85);
+      ctx.globalAlpha = ptAl * (.5 + p.s*.5);
+      ctx.fillStyle   = pcol[i];
+      if(glowing){
+        ctx.shadowColor = pcol[i];
+        ctx.shadowBlur  = 7;
+      } else {
+        ctx.shadowBlur = 0;
+      }
+      ctx.beginPath();
+      ctx.arc(p.px, p.py, r, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  /* ── Draw orbit particles ──────────────────────────────────────────── */
+  function drawOrbits(){
+    if(orbAl < .01) return;
+    for(let i = 0; i < NO; i++){
+      const tr = otr[i];
+      if(tr.length < 2) continue;
+      ctx.save();
+      /* trail */
+      for(let j = 0; j < tr.length-1; j++){
+        const fade = (1 - j/tr.length) * orbAl;
+        ctx.globalAlpha  = fade * .78;
+        ctx.strokeStyle  = '#ff5533';
+        ctx.shadowColor  = '#ff2000';
+        ctx.shadowBlur   = 8;
+        ctx.lineWidth    = osz[i] * (1 - j/tr.length) * 1.8;
+        ctx.beginPath();
+        ctx.moveTo(tr[j].x, tr[j].y);
+        ctx.lineTo(tr[j+1].x, tr[j+1].y);
+        ctx.stroke();
+      }
+      /* head glow */
+      ctx.globalAlpha = orbAl;
+      ctx.fillStyle   = '#ff8855';
+      ctx.shadowColor = '#ff3300';
+      ctx.shadowBlur  = 15;
+      ctx.beginPath();
+      ctx.arc(tr[0].x, tr[0].y, osz[i]*1.4, 0, Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  /* ── Animation loop ────────────────────────────────────────────────── */
+  let last = 0;
+  function frame(t){
+    requestAnimationFrame(frame);
+    const dt = Math.min((t - last) / 16.67, 3);
+    last = t;
+
+    tick(dt);
+    ctx.clearRect(0, 0, W, H);
+    drawHat(rotA, hatAl);
+    if(!RM){ drawParticles(); drawOrbits(); }
+  }
+
+  /* ── Events ────────────────────────────────────────────────────────── */
+  hero.addEventListener('mouseenter', () => { domHov = true; });
+  hero.addEventListener('mouseleave', () => { domHov = false; });
+  hero.addEventListener('touchstart', e => {
+    e.preventDefault();
+    domHov = true;
+    setTimeout(() => { domHov = false; }, 360);
+  }, { passive: false });
+
+  requestAnimationFrame(frame);
+}());
+</script>
+</body>
+</html>

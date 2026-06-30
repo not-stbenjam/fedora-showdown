@@ -1,0 +1,1210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fedora</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #0a0a0c;
+    --fg: #e8e6e3;
+    --muted: #6b6b70;
+    --accent: #c9a962;
+    --accent-dim: #8b7d4a;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #f5f4f2; --fg: #1a1a1c; --muted: #8b8b90; --accent: #b8954a; --accent-dim: #7a6b3a; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+  html, body { height: 100%; width: 100%; overflow: hidden; background: var(--bg); color: var(--fg); font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  #canvas { display: block; width: 100%; height: 100%; }
+  .caption {
+    position: fixed;
+    bottom: clamp(1.5rem, 4vh, 3rem);
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: clamp(0.85rem, 2vw, 1.1rem);
+    font-weight: 300;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+    opacity: 0.85;
+    pointer-events: none;
+    transition: opacity 0.4s ease;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+  }
+  @media (prefers-color-scheme: light) {
+    .caption { text-shadow: 0 1px 2px rgba(255,255,255,0.5); }
+  }
+  body.reducing .caption { opacity: 0.4; }
+  #error-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(10,10,12,0.95);
+    color: #ff6b6b;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    font-family: monospace;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    z-index: 1000;
+    text-align: center;
+  }
+  #error-overlay.visible { display: flex; }
+  #error-overlay pre { max-height: 60vh; overflow: auto; text-align: left; background: #111; padding: 1rem; border-radius: 4px; margin-top: 1rem; width: 90%; max-width: 800px; }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div class="caption" aria-hidden="true">Red Hat</div>
+<div id="error-overlay"></div>
+<script>
+// ============ CONFIG ============
+const CONFIG = {
+  hat: {
+    crownRadius: 0.65,
+    crownHeight: 0.9,
+    brimRadius: 1.1,
+    brimThickness: 0.12,
+    bandHeight: 0.14,
+    segments: 48,
+  },
+  particles: {
+    count: 8000,
+    dissolveDuration: 1.8,
+    swirlDuration: 2.2,
+    reformDuration: 1.6,
+    orbitCount: 120,
+    orbitRadius: 1.4,
+    orbitSpeed: 0.15,
+  },
+  spin: {
+    baseSpeed: 0.0018,
+    hoverSpeed: 0.0003,
+    transitionDuration: 0.8,
+  },
+  colors: {
+    hat: 0x1a1a1d,
+    band: 0x0d0d0e,
+    highlight: 0x2a2a2e,
+    particle: 0xc9a962,
+    particleDim: 0x8b7d4a,
+    glow: 0xffd47a,
+  },
+  lighting: {
+    ambient: 0x3a3a3f,
+    keyColor: 0xfff8e7,
+    keyIntensity: 1.8,
+    fillColor: 0x8b9dc3,
+    fillIntensity: 0.6,
+    rimColor: 0xc9a962,
+    rimIntensity: 0.4,
+  },
+};
+
+// ============ UTILITIES ============
+const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const smoothstep = (t) => t * t * (3 - 2 * t);
+const rand = (min, max) => Math.random() * (max - min) + min;
+const randInt = (min, max) => Math.floor(rand(min, max + 1));
+
+function showError(msg, details = '') {
+  const overlay = document.getElementById('error-overlay');
+  overlay.innerHTML = `<strong>Error:</strong> ${msg}${details ? '<pre>' + details + '</pre>' : ''}`;
+  overlay.classList.add('visible');
+  console.error(msg, details);
+}
+
+// ============ MATH ============
+class Vec3 {
+  constructor(x = 0, y = 0, z = 0) { this.x = x; this.y = y; this.z = z; }
+  set(x, y, z) { this.x = x; this.y = y; this.z = z; return this; }
+  copy(v) { this.x = v.x; this.y = v.y; this.z = v.z; return this; }
+  add(v) { this.x += v.x; this.y += v.y; this.z += v.z; return this; }
+  sub(v) { this.x -= v.x; this.y -= v.y; this.z -= v.z; return this; }
+  mul(s) { this.x *= s; this.y *= s; this.z *= s; return this; }
+  div(s) { this.x /= s; this.y /= s; this.z /= s; return this; }
+  length() { return Math.sqrt(this.x**2 + this.y**2 + this.z**2); }
+  normalize() { const l = this.length(); if (l > 0) this.div(l); return this; }
+  clone() { return new Vec3(this.x, this.y, this.z); }
+  lerp(v, t) { this.x = lerp(this.x, v.x, t); this.y = lerp(this.y, v.y, t); this.z = lerp(this.z, v.z, t); return this; }
+  applyQuat(q) {
+    const x = this.x, y = this.y, z = this.z;
+    const qx = q.x, qy = q.y, qz = q.z, qw = q.w;
+    const ix = qw * x + qy * z - qz * y;
+    const iy = qw * y + qz * x - qx * z;
+    const iz = qw * z + qx * y - qy * x;
+    const iw = -qx * x - qy * y - qz * z;
+    this.x = ix * qw + iw * -qx + iy * -qz - iz * -qy;
+    this.y = iy * qw + iw * -qy + iz * -qx - ix * -qz;
+    this.z = iz * qw + iw * -qz + ix * -qy - iy * -qx;
+    return this;
+  }
+  rotateY(angle) {
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    const x = this.x * cos + this.z * sin;
+    const z = -this.x * sin + this.z * cos;
+    this.x = x; this.z = z;
+    return this;
+  }
+  cross(v) {
+    return new Vec3(
+      this.y * v.z - this.z * v.y,
+      this.z * v.x - this.x * v.z,
+      this.x * v.y - this.y * v.x
+    );
+  }
+  dot(v) { return this.x * v.x + this.y * v.y + this.z * v.z; }
+  static fromSpherical(radius, phi, theta) {
+    const sinPhi = Math.sin(phi);
+    return new Vec3(
+      radius * sinPhi * Math.sin(theta),
+      radius * Math.cos(phi),
+      radius * sinPhi * Math.cos(theta)
+    );
+  }
+}
+
+class Quat {
+  constructor(x = 0, y = 0, z = 0, w = 1) { this.x = x; this.y = y; this.z = z; this.w = w; }
+  setFromAxisAngle(axis, angle) {
+    const half = angle * 0.5, s = Math.sin(half);
+    this.x = axis.x * s; this.y = axis.y * s; this.z = axis.z * s; this.w = Math.cos(half);
+    return this;
+  }
+  slerp(qb, t) {
+    let dot = this.x * qb.x + this.y * qb.y + this.z * qb.z + this.w * qb.w;
+    if (dot < 0) { dot = -dot; qb = new Quat(-qb.x, -qb.y, -qb.z, -qb.w); }
+    const DOT_THRESHOLD = 0.9995;
+    if (dot > DOT_THRESHOLD) {
+      this.x = lerp(this.x, qb.x, t);
+      this.y = lerp(this.y, qb.y, t);
+      this.z = lerp(this.z, qb.z, t);
+      this.w = lerp(this.w, qb.w, t);
+      return this.normalize();
+    }
+    const theta0 = Math.acos(clamp(dot, -1, 1));
+    const sinTheta0 = Math.sin(theta0);
+    const theta = theta0 * t;
+    const sinTheta = Math.sin(theta);
+    const s0 = Math.cos(theta) - dot * sinTheta / sinTheta0;
+    const s1 = sinTheta / sinTheta0;
+    this.x = this.x * s0 + qb.x * s1;
+    this.y = this.y * s0 + qb.y * s1;
+    this.z = this.z * s0 + qb.z * s1;
+    this.w = this.w * s0 + qb.w * s1;
+    return this.normalize();
+  }
+  normalize() {
+    const l = Math.sqrt(this.x**2 + this.y**2 + this.z**2 + this.w**2);
+    if (l > 0) { this.x /= l; this.y /= l; this.z /= l; this.w /= l; }
+    return this;
+  }
+  clone() { return new Quat(this.x, this.y, this.z, this.w); }
+}
+
+class Mat4 {
+  constructor() { this.m = new Float32Array(16); this.identity(); }
+  identity() { this.m.set([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]); return this; }
+  perspective(fov, aspect, near, far) {
+    const f = 1.0 / Math.tan(fov * 0.5);
+    const nf = 1 / (near - far);
+    this.m.set([
+      f / aspect, 0, 0, 0,
+      0, f, 0, 0,
+      0, 0, (far + near) * nf, -1,
+      0, 0, 2 * far * near * nf, 0
+    ]);
+    return this;
+  }
+  lookAt(eye, target, up) {
+    const z = new Vec3().copy(eye).sub(target).normalize();
+    const x = new Vec3().copy(up).cross(z).normalize();
+    const y = new Vec3().copy(z).cross(x);
+    const m = this.m;
+    m[0] = x.x; m[4] = x.y; m[8] = x.z; m[12] = -x.dot(eye);
+    m[1] = y.x; m[5] = y.y; m[9] = y.z; m[13] = -y.dot(eye);
+    m[2] = z.x; m[6] = z.y; m[10] = z.z; m[14] = -z.dot(eye);
+    m[3] = 0; m[7] = 0; m[11] = 0; m[15] = 1;
+    return this;
+  }
+  multiplyScalar(s) { for (let i = 0; i < 16; i++) this.m[i] *= s; return this; }
+  copy(m) { this.m.set(m.m); return this; }
+  getTranslation() { return new Vec3(this.m[12], this.m[13], this.m[14]); }
+  setTranslation(v) { this.m[12] = v.x; this.m[13] = v.y; this.m[14] = v.z; return this; }
+  makeRotationFromQuat(q) {
+    const x = q.x, y = q.y, z = q.z, w = q.w;
+    const x2 = x + x, y2 = y + y, z2 = z + z;
+    const xx = x * x2, xy = x * y2, xz = x * z2;
+    const yy = y * y2, yz = y * z2, zz = z * z2;
+    const wx = w * x2, wy = w * y2, wz = w * z2;
+    this.m.set([
+      1 - (yy + zz), xy - wz, xz + wy, 0,
+      xy + wz, 1 - (xx + zz), yz - wx, 0,
+      xz - wy, yz + wx, 1 - (xx + yy), 0,
+      0, 0, 0, 1
+    ]);
+    return this;
+  }
+}
+
+// ============ GEOMETRY GENERATION ============
+function generateHatGeometry() {
+  const { crownRadius, crownHeight, brimRadius, brimThickness, bandHeight, segments } = CONFIG.hat;
+  const positions = [];
+  const normals = [];
+  const uvs = [];
+  const indices = [];
+  const vertexMap = new Map();
+
+  function addVertex(pos, normal, uv) {
+    const key = `${pos.x.toFixed(4)},${pos.y.toFixed(4)},${pos.z.toFixed(4)},${normal.x.toFixed(4)},${normal.y.toFixed(4)},${normal.z.toFixed(4)}`;
+    let idx = vertexMap.get(key);
+    if (idx === undefined) {
+      idx = positions.length / 3;
+      vertexMap.set(key, idx);
+      positions.push(pos.x, pos.y, pos.z);
+      normals.push(normal.x, normal.y, normal.z);
+      uvs.push(uv.x, uv.y);
+    }
+    return idx;
+  }
+
+  // Crown (cylinder + top cap)
+  const crownSegs = segments;
+  for (let i = 0; i <= crownSegs; i++) {
+    const theta = (i / crownSegs) * Math.PI * 2;
+    const cos = Math.cos(theta), sin = Math.sin(theta);
+    const nx = cos, nz = sin;
+
+    // Bottom ring (connects to band)
+    positions.push(crownRadius * cos, 0, crownRadius * sin);
+    normals.push(nx, 0, nz);
+    uvs.push(i / crownSegs, 0);
+
+    // Top ring
+    positions.push(crownRadius * cos, crownHeight, crownRadius * sin);
+    normals.push(nx, 0, nz);
+    uvs.push(i / crownSegs, 0.5);
+
+    // Top cap center
+    if (i === 0) {
+      positions.push(0, crownHeight, 0);
+      normals.push(0, 1, 0);
+      uvs.push(0.5, 0.5);
+    }
+  }
+
+  // Crown side faces
+  for (let i = 0; i < crownSegs; i++) {
+    const i0 = i * 2;
+    const i1 = (i + 1) * 2;
+    indices.push(i0, i1, i0 + 1);
+    indices.push(i1, i1 + 1, i0 + 1);
+  }
+  // Crown top cap
+  const capCenter = crownSegs * 2 + 1;
+  for (let i = 0; i < crownSegs; i++) {
+    const i1 = i * 2 + 1;
+    const i2 = ((i + 1) % crownSegs) * 2 + 1;
+    indices.push(capCenter, i2, i1);
+  }
+
+  // Band (thin cylinder at crown base)
+  const bandSegs = segments;
+  const bandY = 0;
+  for (let i = 0; i <= bandSegs; i++) {
+    const theta = (i / bandSegs) * Math.PI * 2;
+    const cos = Math.cos(theta), sin = Math.sin(theta);
+    const r = crownRadius * 1.02;
+    positions.push(r * cos, bandY, r * sin);
+    normals.push(cos, 0, sin);
+    uvs.push(i / bandSegs, 0);
+    positions.push(r * cos, bandY + bandHeight, r * sin);
+    normals.push(cos, 0, sin);
+    uvs.push(i / bandSegs, 1);
+  }
+  const bandBaseIdx = positions.length / 3 - (bandSegs + 1) * 2;
+  for (let i = 0; i < bandSegs; i++) {
+    const i0 = bandBaseIdx + i * 2;
+    const i1 = bandBaseIdx + ((i + 1) % bandSegs) * 2;
+    indices.push(i0, i1, i0 + 1);
+    indices.push(i1, i1 + 1, i0 + 1);
+  }
+
+  // Brim (annulus)
+  const brimSegs = segments;
+  const brimRadial = 16;
+  for (let r = 0; r <= brimRadial; r++) {
+    const rr = crownRadius + (brimRadius - crownRadius) * (r / brimRadial);
+    for (let i = 0; i <= brimSegs; i++) {
+      const theta = (i / brimSegs) * Math.PI * 2;
+      const cos = Math.cos(theta), sin = Math.sin(theta);
+      // Top surface
+      positions.push(rr * cos, brimThickness, rr * sin);
+      normals.push(0, 1, 0);
+      uvs.push(i / brimSegs, r / brimRadial);
+      // Bottom surface
+      positions.push(rr * cos, 0, rr * sin);
+      normals.push(0, -1, 0);
+      uvs.push(i / brimSegs, r / brimRadial);
+    }
+  }
+  const brimBaseIdx = positions.length / 3 - (brimRadial + 1) * (brimSegs + 1) * 2;
+  for (let r = 0; r < brimRadial; r++) {
+    for (let i = 0; i < brimSegs; i++) {
+      const i00 = brimBaseIdx + r * (brimSegs + 1) * 2 + i * 2;
+      const i01 = i00 + 1;
+      const i10 = brimBaseIdx + (r + 1) * (brimSegs + 1) * 2 + i * 2;
+      const i11 = i10 + 1;
+      // Top
+      indices.push(i00, i10, i01);
+      indices.push(i10, i11, i01);
+      // Bottom (flipped winding)
+      indices.push(i01, i10, i00);
+      indices.push(i11, i10, i01);
+    }
+  }
+  // Brim outer edge (side wall)
+  for (let i = 0; i < brimSegs; i++) {
+    const iTop = brimBaseIdx + brimRadial * (brimSegs + 1) * 2 + i * 2;
+    const iBot = iTop + 1;
+    const iTopN = brimBaseIdx + brimRadial * (brimSegs + 1) * 2 + ((i + 1) % brimSegs) * 2;
+    const iBotN = iTopN + 1;
+    const theta = (i / brimSegs) * Math.PI * 2;
+    const nx = Math.cos(theta), nz = Math.sin(theta);
+    // Update normals for edge vertices
+    normals[iTop * 3] = nx; normals[iTop * 3 + 2] = nz;
+    normals[iBot * 3] = nx; normals[iBot * 3 + 2] = nz;
+    normals[iTopN * 3] = nx; normals[iTopN * 3 + 2] = nz;
+    normals[iBotN * 3] = nx; normals[iBotN * 3 + 2] = nz;
+    indices.push(iTop, iTopN, iBot);
+    indices.push(iTopN, iBotN, iBot);
+  }
+
+  // Brim inner edge (hole)
+  for (let i = 0; i < brimSegs; i++) {
+    const iTop = brimBaseIdx + i * 2;
+    const iBot = iTop + 1;
+    const iTopN = brimBaseIdx + ((i + 1) % brimSegs) * 2;
+    const iBotN = iTopN + 1;
+    const theta = (i / brimSegs) * Math.PI * 2;
+    const nx = -Math.cos(theta), nz = -Math.sin(theta);
+    normals[iTop * 3] = nx; normals[iTop * 3 + 2] = nz;
+    normals[iBot * 3] = nx; normals[iBot * 3 + 2] = nz;
+    normals[iTopN * 3] = nx; normals[iTopN * 3 + 2] = nz;
+    normals[iBotN * 3] = nx; normals[iBotN * 3 + 2] = nz;
+    indices.push(iTopN, iTop, iBot);
+    indices.push(iTopN, iBot, iBotN);
+  }
+
+  return {
+    positions: new Float32Array(positions),
+    normals: new Float32Array(normals),
+    uvs: new Float32Array(uvs),
+    indices: new Uint16Array(indices),
+    vertexCount: positions.length / 3,
+  };
+}
+
+function generateParticlePositions(geometry) {
+  const { positions, indices } = geometry;
+  const count = CONFIG.particles.count;
+  const particlePositions = new Float32Array(count * 3);
+  const particleNormals = new Float32Array(count * 3);
+  const particleTarget = new Float32Array(count * 3);
+  const particleUV = new Float32Array(count * 2);
+  const triangleAreas = [];
+  let totalArea = 0;
+
+  // Compute triangle areas for weighted sampling
+  for (let i = 0; i < indices.length; i += 3) {
+    const i0 = indices[i] * 3, i1 = indices[i + 1] * 3, i2 = indices[i + 2] * 3;
+    const ax = positions[i0], ay = positions[i0 + 1], az = positions[i0 + 2];
+    const bx = positions[i1], by = positions[i1 + 1], bz = positions[i1 + 2];
+    const cx = positions[i2], cy = positions[i2 + 1], cz = positions[i2 + 2];
+    const abx = bx - ax, aby = by - ay, abz = bz - az;
+    const acx = cx - ax, acy = cy - ay, acz = cz - az;
+    const cx_ = aby * acz - abz * acy;
+    const cy_ = abz * acx - abx * acz;
+    const cz_ = abx * acy - aby * acx;
+    const area = 0.5 * Math.sqrt(cx_ * cx_ + cy_ * cy_ + cz_ * cz_);
+    triangleAreas.push({ index: i, area });
+    totalArea += area;
+  }
+
+  // Sample particles across surface
+  for (let p = 0; p < count; p++) {
+    let r = Math.random() * totalArea;
+    let triIdx = 0;
+    for (let t = 0; t < triangleAreas.length; t++) {
+      r -= triangleAreas[t].area;
+      if (r <= 0) { triIdx = triangleAreas[t].index; break; }
+    }
+    const i0 = indices[triIdx] * 3, i1 = indices[triIdx + 1] * 3, i2 = indices[triIdx + 2] * 3;
+    const u = Math.random(), v = Math.random();
+    const sqrtU = Math.sqrt(u);
+    const b0 = 1 - sqrtU, b1 = sqrtU * (1 - v), b2 = sqrtU * v;
+    const px = positions[i0] * b0 + positions[i1] * b1 + positions[i2] * b2;
+    const py = positions[i0 + 1] * b0 + positions[i1 + 1] * b1 + positions[i2 + 1] * b2;
+    const pz = positions[i0 + 2] * b0 + positions[i1 + 2] * b1 + positions[i2 + 2] * b2;
+    particlePositions[p * 3] = px;
+    particlePositions[p * 3 + 1] = py;
+    particlePositions[p * 3 + 2] = pz;
+    particleTarget[p * 3] = px;
+    particleTarget[p * 3 + 1] = py;
+    particleTarget[p * 3 + 2] = pz;
+
+    // Normal at this point
+    const ax = positions[i0], ay = positions[i0 + 1], az = positions[i0 + 2];
+    const bx = positions[i1], by = positions[i1 + 1], bz = positions[i1 + 2];
+    const cx = positions[i2], cy = positions[i2 + 1], cz = positions[i2 + 2];
+    const abx = bx - ax, aby = by - ay, abz = bz - az;
+    const acx = cx - ax, acy = cy - ay, acz = cz - az;
+    const nx = aby * acz - abz * acy;
+    const ny = abz * acx - abx * acz;
+    const nz = abx * acy - aby * acx;
+    const nl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+    particleNormals[p * 3] = nx / nl;
+    particleNormals[p * 3 + 1] = ny / nl;
+    particleNormals[p * 3 + 2] = nz / nl;
+
+    particleUV[p * 2] = Math.random();
+    particleUV[p * 2 + 1] = Math.random();
+  }
+
+  return { particlePositions, particleNormals, particleTarget, particleUV };
+}
+
+// ============ SHADERS ============
+const vertexShader = `#version 300 es
+precision highp float;
+
+layout(location = 0) in vec3 aPosition;
+layout(location = 1) in vec3 aNormal;
+layout(location = 2) in vec2 aUV;
+
+uniform mat4 uProjection;
+uniform mat4 uView;
+uniform mat4 uModel;
+uniform mat4 uNormalMatrix;
+
+out vec3 vWorldPos;
+out vec3 vNormal;
+out vec2 vUV;
+
+void main() {
+  vec4 worldPos = uModel * vec4(aPosition, 1.0);
+  vWorldPos = worldPos.xyz;
+  vNormal = normalize(mat3(uNormalMatrix) * aNormal);
+  vUV = aUV;
+  gl_Position = uProjection * uView * worldPos;
+}
+`;
+
+const hatFragmentShader = `#version 300 es
+precision highp float;
+
+in vec3 vWorldPos;
+in vec3 vNormal;
+in vec2 vUV;
+
+uniform vec3 uViewPos;
+uniform vec3 uHatColor;
+uniform vec3 uBandColor;
+uniform vec3 uHighlightColor;
+uniform vec3 uKeyLightDir;
+uniform vec3 uKeyLightColor;
+uniform float uKeyLightIntensity;
+uniform vec3 uFillLightDir;
+uniform vec3 uFillLightColor;
+uniform float uFillLightIntensity;
+uniform vec3 uRimLightDir;
+uniform vec3 uRimLightColor;
+uniform float uRimLightIntensity;
+uniform vec3 uAmbientColor;
+
+out vec4 fragColor;
+
+float remap(float v, float a, float b) {
+  return smoothstep(a, b, v);
+}
+
+void main() {
+  vec3 N = normalize(vNormal);
+  vec3 V = normalize(uViewPos - vWorldPos);
+
+  // Determine if this is band or hat body
+  float isBand = step(0.0, vWorldPos.y) * step(vWorldPos.y, 0.14);
+  vec3 baseColor = mix(uHatColor, uBandColor, isBand);
+
+  // Ambient
+  vec3 color = baseColor * uAmbientColor;
+
+  // Key light
+  float NdotL = max(dot(N, uKeyLightDir), 0.0);
+  color += baseColor * uKeyLightColor * NdotL * uKeyLightIntensity;
+
+  // Fill light
+  float NdotL2 = max(dot(N, uFillLightDir), 0.0);
+  color += baseColor * uFillLightColor * NdotL2 * uFillLightIntensity;
+
+  // Rim light
+  float rim = 1.0 - max(dot(N, V), 0.0);
+  rim = pow(rim, 2.5);
+  color += uRimLightColor * rim * uRimLightIntensity;
+
+  // Specular highlight (subtle)
+  vec3 R = reflect(-uKeyLightDir, N);
+  float spec = pow(max(dot(R, V), 0.0), 32.0);
+  color += uHighlightColor * spec * 0.3 * NdotL;
+
+  // Subtle fresnel darkening at grazing angles
+  float fresnel = 1.0 - max(dot(N, V), 0.0);
+  color *= 1.0 - fresnel * 0.15;
+
+  // Gamma correction
+  color = pow(color, vec3(1.0 / 2.2));
+
+  fragColor = vec4(color, 1.0);
+}
+`;
+
+// Particle shader - baseColor declared BEFORE main()
+const particleVertexShader = `#version 300 es
+precision highp float;
+
+layout(location = 0) in vec3 aPosition;
+layout(location = 1) in vec3 aNormal;
+layout(location = 2) in vec3 aTarget;
+layout(location = 3) in vec2 aUV;
+
+uniform mat4 uProjection;
+uniform mat4 uView;
+uniform mat4 uModel;
+uniform float uTime;
+uniform float uDissolveProgress;
+uniform float uSwirlProgress;
+uniform float uReformProgress;
+uniform vec3 uDissolveCenter;
+
+out vec3 vColor;
+out float vAlpha;
+out float vSize;
+
+vec3 baseColor = vec3(0.1, 0.1, 0.11);
+
+vec3 hash33(vec3 p) {
+  p = vec3(dot(p, vec3(127.1, 311.7, 74.7)),
+           dot(p, vec3(269.5, 183.3, 246.1)),
+           dot(p, vec3(113.5, 271.9, 124.6)));
+  return fract(sin(p) * 43758.5453);
+}
+
+float noise(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(dot(hash33(i + vec3(0,0,0)), f - vec3(0,0,0)),
+                     dot(hash33(i + vec3(1,0,0)), f - vec3(1,0,0)), f.x),
+                 mix(dot(hash33(i + vec3(0,1,0)), f - vec3(0,1,0)),
+                     dot(hash33(i + vec3(1,1,0)), f - vec3(1,1,0)), f.x), f.y),
+             mix(mix(dot(hash33(i + vec3(0,0,1)), f - vec3(0,0,1)),
+                     dot(hash33(i + vec3(1,0,1)), f - vec3(1,0,1)), f.x),
+                 mix(dot(hash33(i + vec3(0,1,1)), f - vec3(0,1,1)),
+                     dot(hash33(i + vec3(1,1,1)), f - vec3(1,1,1)), f.x), f.y), f.z);
+}
+
+vec3 curlNoise(vec3 p) {
+  const float e = 0.01;
+  vec3 n = vec3(
+    noise(p + vec3(e, 0, 0)) - noise(p - vec3(e, 0, 0)),
+    noise(p + vec3(0, e, 0)) - noise(p - vec3(0, e, 0)),
+    noise(p + vec3(0, 0, e)) - noise(p - vec3(0, 0, e))
+  );
+  return n;
+}
+
+void main() {
+  vec3 pos = aPosition;
+  vec3 target = aTarget;
+  vec3 normal = aNormal;
+  float seed = aUV.x * 1000.0 + aUV.y;
+  vec3 hash = hash33(vec3(seed, seed * 1.7, seed * 3.1));
+  float delay = hash.x * 0.15;
+  float speed = 0.8 + hash.y * 1.2;
+  float orbitSeed = hash.z;
+
+  // Dissolve phase: explode outward along normal + noise
+  if (uDissolveProgress > 0.0) {
+    float t = clamp((uDissolveProgress - delay) * speed, 0.0, 1.0);
+    t = smoothstep(0.0, 1.0, t);
+    vec3 explodeDir = normalize(normal + hash33(pos * 0.5 + uTime * 0.1).xyz * 0.5);
+    float dist = mix(0.0, 3.5, t);
+    pos = mix(pos, pos + explodeDir * dist, t);
+    
+    // Add swirl motion during dissolve
+    if (uSwirlProgress > 0.0) {
+      float swirlT = clamp(uSwirlProgress * 2.0, 0.0, 1.0);
+      vec3 swirlAxis = vec3(0.0, 1.0, 0.0);
+      float swirlAngle = swirlT * 6.28 * (0.5 + hash.x * 0.5);
+      float yFactor = (pos.y + 1.5) / 3.0;
+      pos.xz = mat2(cos(swirlAngle * yFactor), -sin(swirlAngle * yFactor),
+                    sin(swirlAngle * yFactor), cos(swirlAngle * yFactor)) * pos.xz;
+      pos.y += sin(swirlT * 3.14) * 0.3 * (1.0 - yFactor);
+    }
+  }
+
+  // Reform phase: return to target
+  if (uReformProgress > 0.0) {
+    float t = clamp(uReformProgress * 1.5, 0.0, 1.0);
+    t = smoothstep(0.0, 1.0, t);
+    pos = mix(pos, target, t);
+  }
+
+  // Orbiting particles after reform
+  if (uReformProgress >= 1.0) {
+    float orbitPhase = uTime * 0.15 * (0.5 + orbitSeed * 0.5) + seed * 0.01;
+    float orbitRadius = 1.4 * (0.7 + orbitSeed * 0.6);
+    float orbitHeight = (orbitSeed - 0.5) * 1.2;
+    vec3 orbitPos = vec3(
+      cos(orbitPhase) * orbitRadius,
+      orbitHeight,
+      sin(orbitPhase) * orbitRadius
+    );
+    // Smoothly transition to orbit
+    float orbitBlend = smoothstep(1.0, 1.3, uReformProgress);
+    pos = mix(pos, orbitPos, orbitBlend);
+  }
+
+  vec4 worldPos = uModel * vec4(pos, 1.0);
+  gl_Position = uProjection * uView * worldPos;
+
+  // Size based on distance and phase
+  float baseSize = 2.5;
+  if (uDissolveProgress > 0.0 && uDissolveProgress < 1.0) {
+    baseSize = mix(2.5, 4.0, uDissolveProgress);
+  }
+  vSize = baseSize * (1.0 / max(gl_Position.w * 0.1, 0.5));
+
+  // Color based on phase
+  vec3 hotColor = vec3(1.0, 0.83, 0.48);
+  vec3 warmColor = vec3(0.79, 0.62, 0.33);
+  vec3 coolColor = vec3(0.55, 0.49, 0.33);
+  
+  if (uDissolveProgress > 0.0 && uDissolveProgress < 1.0) {
+    float heat = 1.0 - smoothstep(0.0, 1.0, uDissolveProgress);
+    vColor = mix(warmColor, hotColor, heat * hash.x);
+    vAlpha = mix(0.9, 0.3, uDissolveProgress);
+  } else if (uSwirlProgress > 0.0) {
+    vColor = mix(warmColor, coolColor, uSwirlProgress);
+    vAlpha = 0.7 * (1.0 - uSwirlProgress * 0.5);
+  } else if (uReformProgress > 0.0 && uReformProgress < 1.0) {
+    vColor = mix(coolColor, warmColor, uReformProgress);
+    vAlpha = 0.5 + uReformProgress * 0.5;
+  } else if (uReformProgress >= 1.0) {
+    float orbitBlend = smoothstep(1.0, 1.3, uReformProgress);
+    vColor = mix(warmColor, hotColor, orbitBlend * 0.5 + hash.x * 0.3);
+    vAlpha = 0.6 + orbitBlend * 0.3;
+  } else {
+    vColor = baseColor;
+    vAlpha = 0.0;
+  }
+}
+`;
+
+const particleFragmentShader = `#version 300 es
+precision highp float;
+
+in vec3 vColor;
+in float vAlpha;
+in float vSize;
+
+out vec4 fragColor;
+
+void main() {
+  vec2 uv = gl_PointCoord - vec2(0.5);
+  float dist = length(uv) * 2.0;
+  
+  // Soft particle with glow
+  float alpha = smoothstep(1.0, 0.0, dist);
+  alpha *= smoothstep(0.0, 0.15, gl_PointCoord.y); // subtle vertical fade
+  
+  // Core glow
+  float core = exp(-dist * dist * 4.0);
+  float halo = exp(-dist * dist * 1.5) * 0.4;
+  
+  vec3 color = vColor * (alpha + core * 0.8) + vColor * halo;
+  float finalAlpha = vAlpha * (alpha + core * 0.5);
+  
+  // Premultiplied alpha for additive blending
+  fragColor = vec4(color * finalAlpha, finalAlpha);
+}
+`;
+
+// ============ WEBGL WRAPPER ============
+class GL {
+  constructor(canvas) {
+    const gl = canvas.getContext('webgl2', { 
+      antialias: true, 
+      alpha: false, 
+      depth: true, 
+      stencil: false, 
+      preserveDrawingBuffer: false, 
+      powerPreference: 'high-performance' 
+    });
+    if (!gl) {
+      throw new Error('WebGL2 not supported. Please use a modern browser.');
+    }
+    this.gl = gl;
+    this.gl.enable(this.gl.DEPTH_TEST);
+    this.gl.enable(this.gl.BLEND);
+    this.gl.blendFuncSeparate(this.gl.SRC_ALPHA, this.gl.ONE_MINUS_SRC_ALPHA, this.gl.ONE, this.gl.ONE_MINUS_SRC_ALPHA);
+    this.gl.clearColor(0.04, 0.04, 0.05, 1.0);
+    this.ext = {
+      floatTex: this.gl.getExtension('EXT_color_buffer_float'),
+      aniso: this.gl.getExtension('EXT_texture_filter_anisotropic'),
+    };
+  }
+  createProgram(vs, fs) {
+    const gl = this.gl;
+    const compile = (src, type) => {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        const err = gl.getShaderInfoLog(s);
+        gl.deleteShader(s);
+        throw new Error(`Shader compile error (${type === gl.VERTEX_SHADER ? 'vertex' : 'fragment'}):\n${err}\n\nSource:\n${src}`);
+      }
+      return s;
+    };
+    const v = compile(vs, gl.VERTEX_SHADER);
+    const f = compile(fs, gl.FRAGMENT_SHADER);
+    const p = gl.createProgram();
+    gl.attachShader(p, v); gl.attachShader(p, f); gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+      const err = gl.getProgramInfoLog(p);
+      gl.deleteProgram(p);
+      throw new Error(`Program link error:\n${err}`);
+    }
+    gl.deleteShader(v); gl.deleteShader(f);
+    return p;
+  }
+  createBuffer(data, usage = this.gl.STATIC_DRAW) {
+    const b = this.gl.createBuffer();
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, b);
+    this.gl.bufferData(this.gl.ARRAY_BUFFER, data, usage);
+    return b;
+  }
+  createIndexBuffer(data) {
+    const b = this.gl.createBuffer();
+    this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, b);
+    this.gl.bufferData(this.gl.ELEMENT_ARRAY_BUFFER, data, this.gl.STATIC_DRAW);
+    return b;
+  }
+  createVAO() { return this.gl.createVertexArray(); }
+  bindVAO(vao) { this.gl.bindVertexArray(vao); }
+  setAttrib(vao, buffer, location, size, type = this.gl.FLOAT, normalized = false, stride = 0, offset = 0) {
+    this.bindVAO(vao);
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer);
+    this.gl.enableVertexAttribArray(location);
+    this.gl.vertexAttribPointer(location, size, type, normalized, stride, offset);
+  }
+  resize(w, h) { this.gl.viewport(0, 0, w, h); }
+  clear() { this.gl.clear(this.gl.COLOR_BUFFER_BIT | this.gl.DEPTH_BUFFER_BIT); }
+  useProgram(p) { this.gl.useProgram(p); }
+  setUniform1f(loc, v) { this.gl.uniform1f(loc, v); }
+  setUniform3f(loc, x, y, z) { this.gl.uniform3f(loc, x, y, z); }
+  setUniform3fv(loc, v) { this.gl.uniform3fv(loc, v); }
+  setUniformMatrix4fv(loc, m) { this.gl.uniformMatrix4fv(loc, false, m); }
+  drawElements(count, type = this.gl.UNSIGNED_SHORT) { this.gl.drawElements(this.gl.TRIANGLES, count, type, 0); }
+  drawArrays(mode, first, count) { this.gl.drawArrays(mode, first, count); }
+  enableBlend(mode = 'add') {
+    if (mode === 'add') { this.gl.blendFunc(this.gl.SRC_ALPHA, this.gl.ONE); }
+    else { this.gl.blendFunc(this.gl.SRC_ALPHA, this.gl.ONE_MINUS_SRC_ALPHA); }
+  }
+  disableBlend() { this.gl.blendFunc(this.gl.SRC_ALPHA, this.gl.ONE_MINUS_SRC_ALPHA); }
+}
+
+// ============ MAIN APP ============
+class FedoraScene {
+  constructor() {
+    this.canvas = document.getElementById('canvas');
+    try {
+      this.gl = new GL(this.canvas);
+    } catch (e) {
+      showError('Failed to initialize WebGL2', e.message);
+      return;
+    }
+    this.width = 0;
+    this.height = 0;
+    this.time = 0;
+    this.lastTime = 0;
+    this.animating = true;
+    this.reducedMotion = false;
+
+    // State
+    this.spinAngle = 0;
+    this.targetSpinSpeed = CONFIG.spin.baseSpeed;
+    this.currentSpinSpeed = CONFIG.spin.baseSpeed;
+    this.hovering = false;
+
+    // Animation phases
+    this.phase = 'idle'; // idle, dissolve, swirl, reform, orbit
+    this.phaseProgress = 0;
+    this.phaseStartTime = 0;
+
+    // Interaction
+    this.pointerDown = false;
+    this.lastInteractionTime = 0;
+
+    this.init();
+  }
+
+  init() {
+    this.checkReducedMotion();
+    this.setupGeometry();
+    this.setupShaders();
+    this.setupBuffers();
+    this.setupEventListeners();
+    this.resize();
+    requestAnimationFrame((t) => this.frame(t));
+  }
+
+  checkReducedMotion() {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    this.reducedMotion = mq.matches;
+    mq.addEventListener('change', (e) => {
+      this.reducedMotion = e.matches;
+      document.body.classList.toggle('reducing', this.reducedMotion);
+    });
+    document.body.classList.toggle('reducing', this.reducedMotion);
+  }
+
+  setupGeometry() {
+    try {
+      this.hatGeom = generateHatGeometry();
+      const particleData = generateParticlePositions(this.hatGeom);
+      this.particlePositions = particleData.particlePositions;
+      this.particleNormals = particleData.particleNormals;
+      this.particleTargets = particleData.particleTarget;
+      this.particleUVs = particleData.particleUV;
+      this.particleCount = CONFIG.particles.count;
+      console.log(`Geometry: ${this.hatGeom.vertexCount} vertices, ${this.hatGeom.indices.length} indices, ${this.particleCount} particles`);
+    } catch (e) {
+      showError('Geometry generation failed', e.stack);
+      throw e;
+    }
+  }
+
+  setupShaders() {
+    try {
+      this.hatProgram = this.gl.createProgram(vertexShader, hatFragmentShader);
+      this.particleProgram = this.gl.createProgram(particleVertexShader, particleFragmentShader);
+      console.log('Shaders compiled successfully');
+    } catch (e) {
+      showError('Shader compilation failed', e.message);
+      throw e;
+    }
+
+    // Hat uniforms
+    this.hatUniforms = {
+      projection: this.gl.gl.getUniformLocation(this.hatProgram, 'uProjection'),
+      view: this.gl.gl.getUniformLocation(this.hatProgram, 'uView'),
+      model: this.gl.gl.getUniformLocation(this.hatProgram, 'uModel'),
+      normalMatrix: this.gl.gl.getUniformLocation(this.hatProgram, 'uNormalMatrix'),
+      viewPos: this.gl.gl.getUniformLocation(this.hatProgram, 'uViewPos'),
+      hatColor: this.gl.gl.getUniformLocation(this.hatProgram, 'uHatColor'),
+      bandColor: this.gl.gl.getUniformLocation(this.hatProgram, 'uBandColor'),
+      highlightColor: this.gl.gl.getUniformLocation(this.hatProgram, 'uHighlightColor'),
+      keyLightDir: this.gl.gl.getUniformLocation(this.hatProgram, 'uKeyLightDir'),
+      keyLightColor: this.gl.gl.getUniformLocation(this.hatProgram, 'uKeyLightColor'),
+      keyLightIntensity: this.gl.gl.getUniformLocation(this.hatProgram, 'uKeyLightIntensity'),
+      fillLightDir: this.gl.gl.getUniformLocation(this.hatProgram, 'uFillLightDir'),
+      fillLightColor: this.gl.gl.getUniformLocation(this.hatProgram, 'uFillLightColor'),
+      fillLightIntensity: this.gl.gl.getUniformLocation(this.hatProgram, 'uFillLightIntensity'),
+      rimLightDir: this.gl.gl.getUniformLocation(this.hatProgram, 'uRimLightDir'),
+      rimLightColor: this.gl.gl.getUniformLocation(this.hatProgram, 'uRimLightColor'),
+      rimLightIntensity: this.gl.gl.getUniformLocation(this.hatProgram, 'uRimLightIntensity'),
+      ambientColor: this.gl.gl.getUniformLocation(this.hatProgram, 'uAmbientColor'),
+    };
+
+    // Particle uniforms
+    this.particleUniforms = {
+      projection: this.gl.gl.getUniformLocation(this.particleProgram, 'uProjection'),
+      view: this.gl.gl.getUniformLocation(this.particleProgram, 'uView'),
+      model: this.gl.gl.getUniformLocation(this.particleProgram, 'uModel'),
+      time: this.gl.gl.getUniformLocation(this.particleProgram, 'uTime'),
+      dissolveProgress: this.gl.gl.getUniformLocation(this.particleProgram, 'uDissolveProgress'),
+      swirlProgress: this.gl.gl.getUniformLocation(this.particleProgram, 'uSwirlProgress'),
+      reformProgress: this.gl.gl.getUniformLocation(this.particleProgram, 'uReformProgress'),
+      dissolveCenter: this.gl.gl.getUniformLocation(this.particleProgram, 'uDissolveCenter'),
+    };
+  }
+
+  setupBuffers() {
+    const gl = this.gl.gl;
+
+    // Hat VAO
+    this.hatVAO = this.gl.createVAO();
+    this.gl.bindVAO(this.hatVAO);
+    this.hatPosBuffer = this.gl.createBuffer(this.hatGeom.positions);
+    this.gl.setAttrib(this.hatVAO, this.hatPosBuffer, 0, 3);
+    this.hatNormalBuffer = this.gl.createBuffer(this.hatGeom.normals);
+    this.gl.setAttrib(this.hatVAO, this.hatNormalBuffer, 1, 3);
+    this.hatUVBuffer = this.gl.createBuffer(this.hatGeom.uvs);
+    this.gl.setAttrib(this.hatVAO, this.hatUVBuffer, 2, 2);
+    this.hatIndexBuffer = this.gl.createIndexBuffer(this.hatGeom.indices);
+    this.hatIndexCount = this.hatGeom.indices.length;
+
+    // Particle VAO
+    this.particleVAO = this.gl.createVAO();
+    this.gl.bindVAO(this.particleVAO);
+    this.particlePosBuffer = this.gl.createBuffer(this.particlePositions);
+    this.gl.setAttrib(this.particleVAO, this.particlePosBuffer, 0, 3);
+    this.particleNormalBuffer = this.gl.createBuffer(this.particleNormals);
+    this.gl.setAttrib(this.particleVAO, this.particleNormalBuffer, 1, 3);
+    this.particleTargetBuffer = this.gl.createBuffer(this.particleTargets);
+    this.gl.setAttrib(this.particleVAO, this.particleTargetBuffer, 2, 3);
+    this.particleUVBuffer = this.gl.createBuffer(this.particleUVs);
+    this.gl.setAttrib(this.particleVAO, this.particleUVBuffer, 3, 2);
+
+    this.gl.bindVAO(null);
+  }
+
+  setupEventListeners() {
+    const interactStart = (e) => {
+      if (this.reducedMotion) return;
+      this.hovering = true;
+      this.pointerDown = true;
+      this.lastInteractionTime = this.time;
+      this.triggerDissolve();
+    };
+    const interactEnd = () => {
+      this.hovering = false;
+      this.pointerDown = false;
+    };
+    const interactMove = (e) => {
+      if (this.reducedMotion) return;
+      const rect = this.canvas.getBoundingClientRect();
+      const x = (e.clientX || e.touches?.[0]?.clientX || 0) - rect.left;
+      const y = (e.clientY || e.touches?.[0]?.clientY || 0) - rect.top;
+      if (x >= 0 && x <= rect.width && y >= 0 && y <= rect.height) {
+        if (!this.hovering) {
+          this.hovering = true;
+          this.targetSpinSpeed = CONFIG.spin.hoverSpeed;
+        }
+      } else if (this.hovering) {
+        this.hovering = false;
+        this.targetSpinSpeed = CONFIG.spin.baseSpeed;
+      }
+    };
+
+    this.canvas.addEventListener('mousedown', interactStart);
+    this.canvas.addEventListener('touchstart', interactStart, { passive: true });
+    window.addEventListener('mouseup', interactEnd);
+    window.addEventListener('touchend', interactEnd);
+    window.addEventListener('mousemove', interactMove);
+    window.addEventListener('touchmove', interactMove, { passive: true });
+    window.addEventListener('resize', () => this.resize());
+  }
+
+  triggerDissolve() {
+    if (this.phase !== 'idle' && this.phase !== 'orbit') return;
+    this.phase = 'dissolve';
+    this.phaseProgress = 0;
+    this.phaseStartTime = this.time;
+    this.targetSpinSpeed = 0;
+  }
+
+  resize() {
+    const dpr = Math.min(window.devicePixelRatio, 2);
+    this.width = this.canvas.clientWidth;
+    this.height = this.canvas.clientHeight;
+    this.canvas.width = this.width * dpr;
+    this.canvas.height = this.height * dpr;
+    this.gl.resize(this.canvas.width, this.canvas.height);
+    this.updateProjection();
+  }
+
+  updateProjection() {
+    const aspect = this.width / this.height;
+    this.projectionMatrix = new Mat4().perspective(0.8, aspect, 0.1, 100);
+    this.viewMatrix = new Mat4().lookAt(
+      new Vec3(0, 0.6, 3.2),
+      new Vec3(0, 0.3, 0),
+      new Vec3(0, 1, 0)
+    );
+    this.viewPos = new Vec3(0, 0.6, 3.2);
+  }
+
+  frame(timestamp) {
+    if (!this.animating) return;
+    const dt = Math.min((timestamp - this.lastTime) / 1000, 1/30);
+    this.lastTime = timestamp;
+    this.time = timestamp / 1000;
+
+    this.update(dt);
+    this.render();
+    requestAnimationFrame((t) => this.frame(t));
+  }
+
+  update(dt) {
+    // Spin speed interpolation
+    this.currentSpinSpeed = lerp(this.currentSpinSpeed, this.targetSpinSpeed, 1 - Math.exp(-dt * 3));
+    if (!this.reducedMotion) {
+      this.spinAngle += this.currentSpinSpeed * dt * 60;
+    }
+
+    // Phase progression
+    if (this.phase !== 'idle' && this.phase !== 'orbit') {
+      const phaseDurations = {
+        dissolve: CONFIG.particles.dissolveDuration,
+        swirl: CONFIG.particles.swirlDuration,
+        reform: CONFIG.particles.reformDuration,
+      };
+      const duration = phaseDurations[this.phase] || 1;
+      this.phaseProgress += dt / duration;
+      if (this.phaseProgress >= 1) {
+        this.phaseProgress = 0;
+        if (this.phase === 'dissolve') this.phase = 'swirl';
+        else if (this.phase === 'swirl') this.phase = 'reform';
+        else if (this.phase === 'reform') this.phase = 'orbit';
+        this.phaseStartTime = this.time;
+      }
+    }
+
+    // After reform, slowly return to idle spin
+    if (this.phase === 'orbit') {
+      const orbitElapsed = this.time - this.phaseStartTime;
+      if (orbitElapsed > 8 && !this.hovering && !this.pointerDown) {
+        this.targetSpinSpeed = CONFIG.spin.baseSpeed;
+      }
+      if (orbitElapsed > 15 && !this.hovering) {
+        this.phase = 'idle';
+        this.targetSpinSpeed = CONFIG.spin.baseSpeed;
+      }
+    }
+  }
+
+  render() {
+    const gl = this.gl.gl;
+    this.gl.clear();
+
+    // Model matrix with spin
+    const modelMatrix = new Mat4();
+    const rot = new Quat().setFromAxisAngle(new Vec3(0, 1, 0), this.spinAngle);
+    modelMatrix.makeRotationFromQuat(rot);
+    modelMatrix.setTranslation(new Vec3(0, -0.1, 0));
+
+    // Normal matrix (upper 3x3 of model, since no scaling/shear)
+    const normalMatrix = new Mat4();
+    const m = modelMatrix.m;
+    normalMatrix.m.set([
+      m[0], m[1], m[2], 0,
+      m[4], m[5], m[6], 0,
+      m[8], m[9], m[10], 0,
+      0, 0, 0, 1
+    ]);
+
+    // ===== RENDER HAT =====
+    if (this.phase === 'idle' || this.phase === 'orbit' || (this.phase === 'reform' && this.phaseProgress > 0.3)) {
+      this.gl.useProgram(this.hatProgram);
+      this.gl.bindVAO(this.hatVAO);
+
+      this.gl.setUniformMatrix4fv(this.hatUniforms.projection, this.projectionMatrix.m);
+      this.gl.setUniformMatrix4fv(this.hatUniforms.view, this.viewMatrix.m);
+      this.gl.setUniformMatrix4fv(this.hatUniforms.model, modelMatrix.m);
+      this.gl.setUniformMatrix4fv(this.hatUniforms.normalMatrix, normalMatrix.m);
+      this.gl.setUniform3fv(this.hatUniforms.viewPos, [this.viewPos.x, this.viewPos.y, this.viewPos.z]);
+
+      // Colors
+      const hatCol = this.hexToRgb(CONFIG.colors.hat);
+      const bandCol = this.hexToRgb(CONFIG.colors.band);
+      const highCol = this.hexToRgb(CONFIG.colors.highlight);
+      this.gl.setUniform3fv(this.hatUniforms.hatColor, hatCol);
+      this.gl.setUniform3fv(this.hatUniforms.bandColor, bandCol);
+      this.gl.setUniform3fv(this.hatUniforms.highlightColor, highCol);
+
+      // Lighting
+      const keyDir = new Vec3(0.6, 1, 0.4).normalize();
+      const fillDir = new Vec3(-0.4, 0.5, -0.3).normalize();
+      const rimDir = new Vec3(0, 0, -1).normalize();
+      const keyCol = this.hexToRgb(CONFIG.lighting.keyColor);
+      const fillCol = this.hexToRgb(CONFIG.lighting.fillColor);
+      const rimCol = this.hexToRgb(CONFIG.lighting.rimColor);
+      const ambCol = this.hexToRgb(CONFIG.lighting.ambient);
+
+      this.gl.setUniform3fv(this.hatUniforms.keyLightDir, [keyDir.x, keyDir.y, keyDir.z]);
+      this.gl.setUniform3fv(this.hatUniforms.keyLightColor, keyCol);
+      this.gl.setUniform1f(this.hatUniforms.keyLightIntensity, CONFIG.lighting.keyIntensity);
+      this.gl.setUniform3fv(this.hatUniforms.fillLightDir, [fillDir.x, fillDir.y, fillDir.z]);
+      this.gl.setUniform3fv(this.hatUniforms.fillLightColor, fillCol);
+      this.gl.setUniform1f(this.hatUniforms.fillLightIntensity, CONFIG.lighting.fillIntensity);
+      this.gl.setUniform3fv(this.hatUniforms.rimLightDir, [rimDir.x, rimDir.y, rimDir.z]);
+      this.gl.setUniform3fv(this.hatUniforms.rimLightColor, rimCol);
+      this.gl.setUniform1f(this.hatUniforms.rimLightIntensity, CONFIG.lighting.rimIntensity);
+      this.gl.setUniform3fv(this.hatUniforms.ambientColor, ambCol);
+
+      this.gl.drawElements(this.hatIndexCount);
+    }
+
+    // ===== RENDER PARTICLES =====
+    if (this.phase !== 'idle') {
+      this.gl.useProgram(this.particleProgram);
+      this.gl.bindVAO(this.particleVAO);
+      this.gl.enableBlend('add');
+      gl.enable(gl.PROGRAM_POINT_SIZE);
+
+      this.gl.setUniformMatrix4fv(this.particleUniforms.projection, this.projectionMatrix.m);
+      this.gl.setUniformMatrix4fv(this.particleUniforms.view, this.viewMatrix.m);
+      this.gl.setUniformMatrix4fv(this.particleUniforms.model, modelMatrix.m);
+      this.gl.setUniform1f(this.particleUniforms.time, this.time);
+
+      let dissolveP = 0, swirlP = 0, reformP = 0;
+      if (this.phase === 'dissolve') dissolveP = this.phaseProgress;
+      else if (this.phase === 'swirl') { dissolveP = 1; swirlP = this.phaseProgress; }
+      else if (this.phase === 'reform') { dissolveP = 1; swirlP = 1; reformP = this.phaseProgress; }
+      else if (this.phase === 'orbit') { dissolveP = 1; swirlP = 1; reformP = 1 + (this.time - this.phaseStartTime) * 0.1; }
+
+      this.gl.setUniform1f(this.particleUniforms.dissolveProgress, dissolveP);
+      this.gl.setUniform1f(this.particleUniforms.swirlProgress, swirlP);
+      this.gl.setUniform1f(this.particleUniforms.reformProgress, reformP);
+      this.gl.setUniform3fv(this.particleUniforms.dissolveCenter, [0, 0.3, 0]);
+
+      this.gl.drawArrays(gl.POINTS, 0, this.particleCount);
+
+      gl.disable(gl.PROGRAM_POINT_SIZE);
+      this.gl.disableBlend();
+    }
+
+    this.gl.bindVAO(null);
+  }
+
+  hexToRgb(hex) {
+    const r = ((hex >> 16) & 255) / 255;
+    const g = ((hex >> 8) & 255) / 255;
+    const b = (hex & 255) / 255;
+    return [r, g, b];
+  }
+}
+
+// ============ START ============
+document.addEventListener('DOMContentLoaded', () => {
+  try {
+    new FedoraScene();
+  } catch (e) {
+    showError('Initialization failed', e.stack);
+  }
+});
+</script>
+</body>
+</html>

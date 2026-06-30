@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Red Hat</title>
+<style>
+  :root{
+    --bg0:#0a0c12;
+    --bg1:#05060a;
+    --ink:#f4eef0;
+    --muted:#8b8f9c;
+    --accent:#ff5a4d;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    background:var(--bg1);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  main.hero{
+    position:fixed;
+    inset:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    /* radial pool of light + deep vignette for depth */
+    background:
+      radial-gradient(120% 90% at 50% 38%, #161a24 0%, var(--bg0) 42%, var(--bg1) 78%, #000 100%);
+  }
+  #stage{
+    position:absolute;
+    inset:0;
+    width:100%;
+    height:100%;
+    display:block;
+    touch-action:manipulation;
+  }
+  .caption{
+    position:absolute;
+    left:50%;
+    bottom:clamp(36px, 12vh, 120px);
+    transform:translateX(-50%);
+    text-align:center;
+    pointer-events:none;
+    user-select:none;
+    z-index:2;
+    padding:0 16px;
+  }
+  .caption .title{
+    font-weight:600;
+    letter-spacing:.42em;
+    text-indent:.42em;
+    font-size:clamp(14px,2.4vw,20px);
+    color:var(--ink);
+    text-transform:uppercase;
+    opacity:.92;
+  }
+  .caption .sub{
+    margin-top:10px;
+    font-size:clamp(10.5px,1.5vw,12.5px);
+    letter-spacing:.22em;
+    text-indent:.22em;
+    text-transform:uppercase;
+    color:var(--muted);
+    opacity:.7;
+    transition:opacity .6s ease;
+  }
+  @media (prefers-reduced-motion: reduce){
+    .caption .sub{ opacity:.55 }
+  }
+</style>
+</head>
+<body>
+  <main class="hero" aria-label="Red Hat fedora hero scene">
+    <canvas id="stage"></canvas>
+    <div class="caption">
+      <div class="title">Red&nbsp;Hat</div>
+      <div class="sub" id="hint">Hover or tap to scatter</div>
+    </div>
+  </main>
+
+<script>
+(function(){
+  "use strict";
+
+  const cvs = document.getElementById('stage');
+  const ctx = cvs.getContext('2d', { alpha:false });
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ---------- view / layout ----------
+  let W=0, H=0, DPR=1, CX=0, CY=0, WORLD=320;
+  const T_TILT = 0.46;                 // constant downward tilt so we read the brim & crown
+  const ct = Math.cos(T_TILT), st = Math.sin(T_TILT);
+  const camZ = 3.4;                    // perspective camera distance
+  // light direction (view space): upper-left, slightly toward viewer
+  const Lx=-0.351, Ly=0.723, Lz=0.603;
+
+  function resize(){
+    DPR = Math.min(2, window.devicePixelRatio || 1);
+    W = window.innerWidth; H = window.innerHeight;
+    cvs.width  = Math.round(W*DPR);
+    cvs.height = Math.round(H*DPR);
+    cvs.style.width = W+'px';
+    cvs.style.height = H+'px';
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    CX = W/2;
+    CY = H*0.455;                      // a touch above center, room for caption
+    WORLD = Math.min(W,H)*0.36;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---------- glow sprites ----------
+  function mkGlow(r,g,b){
+    const s=48, c=document.createElement('canvas');
+    c.width=c.height=s;
+    const g2=c.getContext('2d');
+    const grd=g2.createRadialGradient(s/2,s/2,0, s/2,s/2,s/2);
+    grd.addColorStop(0.00,'rgba('+r+','+g+','+b+',0.95)');
+    grd.addColorStop(0.18,'rgba('+r+','+g+','+b+',0.55)');
+    grd.addColorStop(0.50,'rgba('+r+','+g+','+b+',0.15)');
+    grd.addColorStop(1.00,'rgba('+r+','+g+','+b+',0)');
+    g2.fillStyle=grd; g2.fillRect(0,0,s,s);
+    return c;
+  }
+  const SP = {
+    red  : mkGlow(236, 38, 42),   // hat body
+    dark : mkGlow(150, 18, 24),   // brim / shaded red
+    band : mkGlow( 54,  8, 12),   // hat band (dark)
+    ember: mkGlow(255,138, 52),   // warm scatter glow
+    gold : mkGlow(255,206,128),   // orbiters / sparkle
+    white: mkGlow(255,238,224)    // specular pop
+  };
+
+  // ---------- geometry: build the fedora as a point cloud ----------
+  const P = [];                   // particles
+  let gt = 0;                     // global elapsed time (for noise / orbits)
+
+  function norm3(x,y,z){ const l=Math.hypot(x,y,z)||1; return [x/l,y/l,z/l]; }
+
+  function add(x,y,z, nx,ny,nz, sprite, size, baseA){
+    const n = norm3(nx,ny,nz);
+    P.push({
+      hx:x,hy:y,hz:z, nx:n[0],ny:n[1],nz:n[2],
+      px:x,py:y,pz:z, vx:0,vy:0,vz:0,
+      stx:x,sty:y,stz:z,
+      sprite, size, baseA,
+      seed: Math.random()*Math.PI*2,
+      orbit:false, trail:null,
+      orad:0,oyc:0,oamp:0,owob:0,oph:0,osp:0
+    });
+  }
+
+  function smooth(t){ return t*t*(3-2*t); }
+
+  function build(){
+    const baseY = 0.0;
+    const crownH = 0.60;
+    const rBase = 0.50, rTop = 0.455;
+
+    // --- crown sides ---
+    const cRings = 24;
+    for(let i=0;i<cRings;i++){
+      const h = i/(cRings-1);
+      const y = baseY + h*crownH;
+      const r = rBase + (rTop-rBase)*smooth(h);
+      const count = Math.round(54 + r*40);
+      for(let j=0;j<count;j++){
+        const a = (j/count)*Math.PI*2 + (i%2)*(Math.PI/count);
+        const x = Math.cos(a)*r, z = Math.sin(a)*r;
+        const isBand = h < 0.13;
+        const sprite = isBand ? SP.band : SP.red;
+        // slightly darker toward the very bottom of the crown
+        const baseA = isBand ? 0.6 : 0.42 + h*0.06;
+        add(x,y,z, Math.cos(a), 0.18, Math.sin(a), sprite, 1.05, baseA);
+      }
+    }
+
+    // --- crown top (rounded dome with a front-to-back teardrop dent) ---
+    const tRings = 14, domeH = 0.11, dent = 0.085;
+    for(let i=0;i<tRings;i++){
+      const u = i/(tRings-1);            // 0 center .. 1 rim
+      const r = rTop*u;
+      const count = Math.max(1, Math.round(8 + u*52));
+      for(let j=0;j<count;j++){
+        const a = (j/count)*Math.PI*2 + i*0.6;
+        const x = Math.cos(a)*r, z = Math.sin(a)*r;
+        // dome lift, minus a dent that runs along the x-axis (lowers the centerline)
+        const lift = domeH*(1-u*u);
+        const crease = dent*Math.exp(-(z*z)/(0.42*rTop*rTop))*(1-0.25*u);
+        const y = baseY + crownH + lift - crease;
+        add(x,y,z, x*0.35, 1.0, z*0.35, SP.red, 1.0, 0.46);
+      }
+    }
+
+    // --- brim: wide curved disk with a fedora "snap" (front/back down, sides up) ---
+    const bRad = 16;
+    const rIn = 0.50, rOut = 1.0;
+    for(let i=1;i<=bRad;i++){
+      const t = i/bRad;
+      const r = rIn + (rOut-rIn)*t;
+      const count = Math.round(64 + r*42);
+      for(let j=0;j<count;j++){
+        const a = (j/count)*Math.PI*2 + i*0.4;
+        // cos(2a): a=0 (x/front) dips down, a=90deg (z/side) curls up
+        const wave = -0.17*Math.cos(2*a);
+        const y = baseY - 0.015 + wave*t*t;
+        const x = Math.cos(a)*r, z = Math.sin(a)*r;
+        // normal mostly up, tilted outward at the rim for soft edge shading
+        const nrm = norm3(x*0.35, 1.0, z*0.35);
+        const edge = t;                 // outer edge slightly darker / cooler
+        const sprite = edge>0.62 ? SP.dark : SP.red;
+        add(x,y,z, nrm[0],nrm[1],nrm[2], sprite, 1.0, 0.40 - edge*0.06);
+      }
+    }
+
+    // recenter vertically around the origin so it spins about its middle
+    let miny=Infinity, maxy=-Infinity;
+    for(const p of P){ if(p.hy<miny)miny=p.hy; if(p.hy>maxy)maxy=p.hy; }
+    const off = (miny+maxy)/2;
+    for(const p of P){ p.hy-=off; p.py-=off; p.sty-=off; }
+  }
+  build();
+
+  // ---------- animation state ----------
+  let angle = 0;
+  let spin = 0.34, targetSpin = 0.34;   // radians / sec
+  let emberAmt = 0;                      // 0..1 warm-glow during dissolve
+  let effect = null;                     // {t} while the dissolve is playing
+
+  const PH = { scatter:0.95, swirl:1.15, reform:1.7 };
+  const TOTAL = PH.scatter + PH.swirl + PH.reform;
+
+  function activate(){
+    if(reduced) return;
+    if(effect && effect.t < TOTAL - 0.25) return;   // ignore re-triggers mid-play
+    effect = { t:0 };
+    emberAmt = 0;
+    for(const p of P){
+      p.orbit = false; p.trail = null;
+      // scatter destination: blend of outward-from-center and a random direction
+      const dh = norm3(p.hx, p.hy, p.hz);
+      const ru = norm3(Math.random()*2-1, Math.random()*2-1, Math.random()*2-1);
+      const sd = norm3(dh[0]+ru[0]*0.85, dh[1]+ru[1]*0.85, dh[2]+ru[2]*0.85);
+      const dist = 0.5 + Math.random()*1.15;
+      p.stx = p.hx + sd[0]*dist;
+      p.sty = p.hy + sd[1]*dist*0.8;
+      p.stz = p.hz + sd[2]*dist;
+      // outward impulse so they burst like embers
+      const sp = 1.1 + Math.random()*1.9;
+      p.vx = sd[0]*sp; p.vy = sd[1]*sp*0.8; p.vz = sd[2]*sp;
+    }
+  }
+
+  function finishEffect(){
+    effect = null;
+    targetSpin = 0.34;
+    emberAmt = 0;
+    // let a few embers keep orbiting, trailing faint light
+    const N = Math.min(24, P.length);
+    const used = new Set();
+    for(let k=0;k<N;k++){
+      let idx;
+      do { idx = (Math.random()*P.length)|0; } while(used.has(idx));
+      used.add(idx);
+      const p = P[idx];
+      p.orbit = true;
+      // start the orbit from where the particle currently is → no jump
+      p.orad = Math.max(0.55, Math.hypot(p.px, p.pz)) + Math.random()*0.25;
+      p.oyc  = p.py;
+      p.oamp = 0.08 + Math.random()*0.18;
+      p.owob = 0.6 + Math.random()*0.9;
+      p.oph  = Math.atan2(p.pz, p.px);
+      p.osp  = (Math.random()<0.5?-1:1)*(0.35 + Math.random()*0.4);
+      p.trail = [];
+    }
+  }
+
+  function lerp(a,b,t){ return a+(b-a)*t; }
+
+  function update(dt){
+    gt += dt;
+
+    // ease spin toward its target
+    spin += (targetSpin - spin)*Math.min(1, dt*2.4);
+    angle += spin*dt;
+
+    let phase = -1, swirlAng = 0;
+    if(effect){
+      effect.t += dt;
+      const t = effect.t;
+      if(t < PH.scatter){
+        phase = 0; targetSpin = 0.05;
+        emberAmt = Math.min(1, emberAmt + dt*3.2);
+      } else if(t < PH.scatter+PH.swirl){
+        phase = 1; targetSpin = 0.10;
+        swirlAng = (t-PH.scatter)*1.5;
+        emberAmt = Math.min(1, emberAmt + dt*1.5);
+      } else if(t < TOTAL){
+        phase = 2;
+        const rp = (t - PH.scatter - PH.swirl)/PH.reform;
+        targetSpin = lerp(0.10, 0.34, smooth(rp));
+        emberAmt = Math.max(0, emberAmt - dt*1.4);
+      } else {
+        finishEffect();
+      }
+    } else {
+      emberAmt = Math.max(0, emberAmt - dt*2);
+    }
+
+    const csw = Math.cos(swirlAng), ssw = Math.sin(swirlAng);
+
+    for(const p of P){
+      if(p.orbit){
+        p.oph += p.osp*dt;
+        const r = p.orad;
+        p.px = Math.cos(p.oph)*r;
+        p.pz = Math.sin(p.oph)*r;
+        p.py = p.oyc + p.oamp*Math.sin(gt*p.owob + p.seed);
+        if(p.trail){
+          p.trail.push(p.px, p.py, p.pz);
+          if(p.trail.length > 24) p.trail.splice(0,3); // keep ~8 points
+        }
+        continue;
+      }
+
+      let tx, ty, tz, k, damp, turb;
+      if(phase === 0){                       // burst outward
+        tx=p.stx; ty=p.sty; tz=p.stz; k=3.0; damp=1.2; turb=0.9;
+      } else if(phase === 1){                // swirl the scattered cloud
+        tx = p.stx*csw - p.stz*ssw;
+        tz = p.stx*ssw + p.stz*csw;
+        ty = p.sty + 0.12*Math.sin(gt*0.9 + p.seed);
+        k=2.4; damp=1.1; turb=0.7;
+      } else if(phase === 2){                // flow back & reform perfectly
+        tx=p.hx; ty=p.hy; tz=p.hz;
+        const rp = (effect.t - PH.scatter - PH.swirl)/PH.reform;
+        k = lerp(6, 17, rp); damp = 5; turb = 0.05;
+      } else {                               // idle: gently held at home
+        tx=p.hx; ty=p.hy; tz=p.hz; k=9; damp=8; turb=0;
+      }
+
+      // spring toward target
+      p.vx += (tx-p.px)*k*dt;
+      p.vy += (ty-p.py)*k*dt;
+      p.vz += (tz-p.pz)*k*dt;
+
+      if(turb>0){                            // organic ember drift
+        p.vx += Math.sin(gt*2.7 + p.seed*1.3)*turb*dt;
+        p.vy += Math.cos(gt*2.3 + p.seed*0.7)*turb*dt;
+        p.vz += Math.sin(gt*3.1 + p.seed*1.9)*turb*dt;
+      }
+
+      const d = Math.exp(-damp*dt);
+      p.vx*=d; p.vy*=d; p.vz*=d;
+      p.px += p.vx*dt; p.py += p.vy*dt; p.pz += p.vz*dt;
+    }
+  }
+
+  // ---------- render ----------
+  function drawBackdrop(){
+    // base wash
+    const bg = ctx.createRadialGradient(CX, CY-WORLD*0.1, 0, CX, CY, Math.max(W,H)*0.8);
+    bg.addColorStop(0, '#13161f');
+    bg.addColorStop(0.45,'#0a0c12');
+    bg.addColorStop(1, '#04050a');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0,0,W,H);
+
+    // soft warm halo behind the hat for depth
+    ctx.globalCompositeOperation = 'lighter';
+    const halo = ctx.createRadialGradient(CX, CY, 0, CX, CY, WORLD*1.4);
+    const hi = 0.10 + emberAmt*0.10;
+    halo.addColorStop(0, 'rgba(255,90,70,'+hi+')');
+    halo.addColorStop(0.4,'rgba(180,40,40,'+(hi*0.5)+')');
+    halo.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = halo;
+    ctx.fillRect(0,0,W,H);
+    ctx.globalCompositeOperation = 'source-over';
+
+    // grounded contact shadow → sense of weight
+    const sy = CY + WORLD*0.52;
+    const sw = WORLD*0.95, sh = WORLD*0.16;
+    const sh_g = ctx.createRadialGradient(CX, sy, 0, CX, sy, sw);
+    sh_g.addColorStop(0,'rgba(0,0,0,0.55)');
+    sh_g.addColorStop(0.6,'rgba(0,0,0,0.22)');
+    sh_g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.save();
+    ctx.translate(CX, sy);
+    ctx.scale(1, sh/sw);
+    ctx.fillStyle = sh_g;
+    ctx.beginPath();
+    ctx.arc(0,0,sw,0,Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // transform an object-space point → screen, returning projection data
+  let cosA=1, sinA=0;
+  function project(x,y,z){
+    // Y spin
+    const x1 = x*cosA + z*sinA;
+    const z1 = -x*sinA + z*cosA;
+    const y1 = y;
+    // X tilt
+    const y2 = y1*ct - z1*st;
+    const z2 = y1*st + z1*ct;
+    const scale = camZ/(camZ - z2);
+    return {
+      sx: CX + x1*scale*WORLD,
+      sy: CY - y2*scale*WORLD,
+      z2, scale
+    };
+  }
+
+  function render(){
+    drawBackdrop();
+    cosA = Math.cos(angle); sinA = Math.sin(angle);
+
+    ctx.globalCompositeOperation = 'lighter';
+
+    for(const p of P){
+      // orbiter trails (drawn faint, behind the head of the particle)
+      if(p.orbit && p.trail){
+        const tl = p.trail, n = tl.length/3;
+        for(let i=0;i<n;i++){
+          const pr = project(tl[i*3], tl[i*3+1], tl[i*3+2]);
+          const fade = (i/n);                    // older = dimmer
+          const a = 0.06 * fade;
+          const d = p.size*pr.scale*WORLD*0.013*(0.5+fade*0.5);
+          ctx.globalAlpha = a;
+          ctx.drawImage(SP.gold, pr.sx-d, pr.sy-d, d*2, d*2);
+        }
+      }
+
+      const pr = project(p.px, p.py, p.pz);
+
+      // lighting from the rotated normal
+      const nx1 = p.nx*cosA + p.nz*sinA;
+      const nz1 = -p.nx*sinA + p.nz*cosA;
+      const ny1 = p.ny;
+      const ny2 = ny1*ct - nz1*st;
+      const nz2 = ny1*st + nz1*ct;
+      const nx2 = nx1;
+      const lam = Math.max(0, nx2*Lx + ny2*Ly + nz2*Lz);
+      const bright = 0.32 + 0.85*lam;
+
+      // atmospheric depth: nearer = brighter / bigger
+      let depth = (pr.z2 + 1.0)/2.1;
+      depth = 0.42 + Math.max(0, Math.min(1, depth))*0.66;
+
+      const speed = p.orbit ? 0 : Math.hypot(p.vx,p.vy,p.vz);
+      const sizeBoost = 1 + emberAmt*0.5;
+      const d = p.size*pr.scale*WORLD*0.013*sizeBoost;
+
+      // base glow
+      let a = p.baseA*bright*depth;
+      ctx.globalAlpha = Math.min(0.9, a);
+      const spr = p.orbit ? SP.gold : p.sprite;
+      ctx.drawImage(spr, pr.sx-d, pr.sy-d, d*2, d*2);
+
+      // warm ember overlay while scattered / moving fast
+      const ea = emberAmt*Math.min(1, 0.25 + speed*0.5)*depth;
+      if(ea > 0.02){
+        ctx.globalAlpha = Math.min(0.7, ea*0.7);
+        const de = d*1.25;
+        ctx.drawImage(SP.ember, pr.sx-de, pr.sy-de, de*2, de*2);
+      }
+
+      // specular sparkle on the brightest, nearest facets
+      if(bright > 0.92 && pr.z2 > 0.2){
+        ctx.globalAlpha = (bright-0.92)*3*depth;
+        const dw = d*0.7;
+        ctx.drawImage(SP.white, pr.sx-dw, pr.sy-dw, dw*2, dw*2);
+      }
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  // ---------- loop ----------
+  let last = 0;
+  function frame(ts){
+    if(!last) last = ts;
+    let dt = (ts - last)/1000;
+    last = ts;
+    if(dt > 0.05) dt = 0.05;            // clamp after tab-switches
+    update(dt);
+    render();
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- interaction ----------
+  const hint = document.getElementById('hint');
+  function trigger(){
+    activate();
+    if(hint) hint.style.opacity = '0';
+  }
+  cvs.addEventListener('pointerenter', trigger);
+  cvs.addEventListener('pointerdown', trigger);
+
+  // ---------- reduced motion: single elegant static frame ----------
+  if(reduced){
+    angle = 0.6;                        // a flattering resting angle
+    update(0);                          // settle springs (no-op, already home)
+    render();
+    if(hint) hint.textContent = 'A Red Hat fedora';
+  } else {
+    requestAnimationFrame(frame);
+  }
+})();
+</script>
+</body>
+</html>

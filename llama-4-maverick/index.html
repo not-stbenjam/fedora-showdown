@@ -1,0 +1,176 @@
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spinning Fedora</title>
+    <style>
+      body {
+        margin: 0;
+        background-color: #1a1a1a;
+        overflow: hidden;
+        font-family: Arial, sans-serif;
+      }
+      #scene-container {
+        width: 100vw;
+        height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        flex-direction: column;
+      }
+      #caption {
+        color: #ccc;
+        font-size: 1.2rem;
+        margin-top: 1rem;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #fedora-logo { animation: none !important; }
+        .particle { animation: none !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="scene-container">
+      <canvas id="canvas"></canvas>
+      <div id="caption">Red Hat Fedora</div>
+    </div>
+
+    <script>
+      let scene, camera, renderer, logo, particles = [];
+      const particleCount = 3000;
+
+      function init() {
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        renderer = new THREE.WebGLRenderer({
+          canvas: document.getElementById('canvas'),
+          antialias: true
+        });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setClearColor(0x1a1a1a);
+
+        const ambientLight = new THREE.AmbientLight(0x333333);
+        scene.add(ambientLight);
+
+        const pointLight = new THREE.PointLight(0xffffff, 1, 100);
+        pointLight.position.set(0, 0, 5);
+        scene.add(pointLight);
+
+        const loader = new THREE.GLTFLoader();
+        loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/models/gltf/Fedora.glb', (gltf) => {
+          logo = gltf.scene;
+          logo.scale.set(0.5, 0.5, 0.5);
+          scene.add(logo);
+        });
+
+        camera.position.z = 5;
+
+        window.addEventListener('resize', onWindowResize);
+        document.addEventListener('pointerdown', onPointerDown);
+      }
+
+      function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      }
+
+      function onPointerDown() {
+        if (logo) {
+          createParticles();
+        }
+      }
+
+      function createParticles() {
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(particleCount * 3);
+        const velocities = new Float32Array(particleCount * 3);
+        const colors = new Float32Array(particleCount * 3);
+
+        for (let i = 0; i < particleCount; i++) {
+          const i3 = i * 3;
+          const vertex = logo.position.clone();
+          positions[i3] = vertex.x;
+          positions[i3 + 1] = vertex.y;
+          positions[i3 + 2] = vertex.z;
+
+          velocities[i3] = (Math.random() - 0.5) * 0.1;
+          velocities[i3 + 1] = (Math.random() - 0.5) * 0.1;
+          velocities[i3 + 2] = (Math.random() - 0.5) * 0.1;
+
+          colors[i3] = 1;
+          colors[i3 + 1] = 0;
+          colors[i3 + 2] = 0;
+        }
+
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('velocity', new THREE.BufferAttribute(velocities, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+        const material = new THREE.PointsMaterial({
+          size: 0.05,
+          vertexColors: true,
+          transparent: true,
+          opacity: 0.8
+        });
+
+        const particleSystem = new THREE.Points(geometry, material);
+        scene.add(particleSystem);
+        particles.push(particleSystem);
+
+        logo.visible = false;
+
+        setTimeout(() => {
+          reformLogo(particleSystem);
+        }, 2000);
+      }
+
+      function reformLogo(particleSystem) {
+        const positions = particleSystem.geometry.attributes.position.array;
+        for (let i = 0; i < particleCount; i++) {
+          const i3 = i * 3;
+          positions[i3] = logo.position.x;
+          positions[i3 + 1] = logo.position.y;
+          positions[i3 + 2] = logo.position.z;
+        }
+        particleSystem.geometry.attributes.position.needsUpdate = true;
+
+        logo.visible = true;
+        setTimeout(() => {
+          scene.remove(particleSystem);
+        }, 1000);
+      }
+
+      function animate() {
+        requestAnimationFrame(animate);
+
+        if (logo) {
+          logo.rotation.y += 0.01;
+        }
+
+        particles.forEach((particleSystem) => {
+          const positions = particleSystem.geometry.attributes.position.array;
+          const velocities = particleSystem.geometry.attributes.velocity.array;
+
+          for (let i = 0; i < particleCount; i++) {
+            const i3 = i * 3;
+            positions[i3] += velocities[i3];
+            positions[i3 + 1] += velocities[i3 + 1];
+            positions[i3 + 2] += velocities[i3 + 2];
+
+            velocities[i3] *= 0.99;
+            velocities[i3 + 1] *= 0.99;
+            velocities[i3 + 2] *= 0.99;
+          }
+
+          particleSystem.geometry.attributes.position.needsUpdate = true;
+        });
+
+        renderer.render(scene, camera);
+      }
+
+      init();
+      animate();
+    </script>
+  </body>
+</html>

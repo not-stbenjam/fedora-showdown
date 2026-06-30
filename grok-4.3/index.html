@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Red Hat • Hero</title>
+<style>
+  :root {
+    --bg: #0a0a0c;
+    --accent: #cc0000;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    min-height: 100vh;
+    background: var(--bg);
+    color: #eee;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+  }
+  .hero {
+    width: 100%;
+    max-width: 720px;
+    padding: 2rem;
+    text-align: center;
+    position: relative;
+  }
+  .scene {
+    width: 100%;
+    max-width: 420px;
+    margin: 0 auto 2rem;
+    perspective: 900px;
+    position: relative;
+  }
+  canvas {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1 / 1;
+    display: block;
+    border-radius: 9999px;
+    box-shadow: 
+      0 25px 50px -12px rgb(0 0 0 / 0.4),
+      0 10px 10px -6px rgb(0 0 0 / 0.4),
+      inset 0 0 0 1px rgba(255,255,255,0.06);
+    background: transparent;
+    cursor: pointer;
+    transition: transform 0.2s cubic-bezier(0.23, 1.0, 0.32, 1);
+    will-change: transform;
+  }
+  .caption {
+    font-size: 0.95rem;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    opacity: 0.65;
+    font-weight: 500;
+  }
+  .reduced-notice {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    font-size: 0.75rem;
+    background: rgba(255,255,255,0.05);
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    display: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    canvas { transition: none; }
+  }
+</style>
+</head>
+<body>
+  <div class="hero">
+    <div class="scene">
+      <canvas id="canvas" width="500" height="500"></canvas>
+    </div>
+    <div class="caption">Red Hat</div>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d', { alpha: true });
+  const W = canvas.width;
+  const H = canvas.height;
+  const CX = W / 2;
+  const CY = H / 2 + 10;
+
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reducedMotion) {
+    document.querySelector('.reduced-notice').style.display = 'block';
+  }
+
+  // Hat parameters
+  const HAT = {
+    brimOuter: 168,
+    brimInner: 92,
+    crownHeight: 98,
+    crownWidth: 112,
+    bandY: 78,
+    bandHeight: 22
+  };
+
+  // State
+  let angle = 0;
+  let spinSpeed = reducedMotion ? 0 : 0.012;
+  let targetSpeed = spinSpeed;
+  let mode = 'idle'; // idle | dissolving | swirling | reforming | reformed
+  let particles = [];
+  let time = 0;
+  let lastHover = 0;
+
+  // Generate hat surface points for particles (local coords, z ignored for 2D canvas)
+  function getHatPoints(count) {
+    const pts = [];
+    const { brimOuter, brimInner, crownHeight, crownWidth, bandY } = HAT;
+    const crownBaseY = CY - 35;
+
+    // Brim (outer ring)
+    for (let i = 0; i < count * 0.35; i++) {
+      const t = (i / (count * 0.35)) * Math.PI * 2;
+      const r = brimOuter + (Math.random() - 0.5) * 7;
+      pts.push({
+        x: CX + Math.cos(t) * r,
+        y: CY + 8 + Math.sin(t) * (r * 0.26) + (Math.random() - 0.5) * 3,
+        vx: 0, vy: 0, life: 1, size: 1.6 + Math.random()
+      });
+    }
+    // Brim inner edge
+    for (let i = 0; i < count * 0.12; i++) {
+      const t = (i / (count * 0.12)) * Math.PI * 2;
+      const r = brimInner;
+      pts.push({
+        x: CX + Math.cos(t) * r,
+        y: CY + 8 + Math.sin(t) * (r * 0.26) + (Math.random() - 0.5) * 2,
+        vx: 0, vy: 0, life: 1, size: 1.3 + Math.random()
+      });
+    }
+    // Crown body
+    for (let i = 0; i < count * 0.38; i++) {
+      const t = (i / (count * 0.38)) * Math.PI * 2;
+      const hFrac = Math.pow(Math.random(), 0.8);
+      const y = crownBaseY - hFrac * crownHeight * 0.95;
+      const r = crownWidth * (0.78 + 0.22 * (1 - hFrac)) + (Math.random() - 0.5) * 5;
+      pts.push({
+        x: CX + Math.cos(t) * r,
+        y: y + (Math.random() - 0.5) * 6,
+        vx: 0, vy: 0, life: 1, size: 1.4 + Math.random() * 0.6
+      });
+    }
+    // Crown top dome
+    for (let i = 0; i < count * 0.15; i++) {
+      const t = (i / (count * 0.15)) * Math.PI * 2;
+      const r = crownWidth * 0.55 + Math.random() * 14;
+      const y = crownBaseY - crownHeight - 10 + Math.sin(t) * 8;
+      pts.push({
+        x: CX + Math.cos(t) * r * 0.9,
+        y: y,
+        vx: 0, vy: 0, life: 1, size: 1.5 + Math.random()
+      });
+    }
+    return pts;
+  }
+
+  function createParticles(count = 1850) {
+    const base = getHatPoints(count);
+    const pts = base.map(p => ({
+      ...p,
+      x: p.x + (Math.random() - 0.5) * 2,
+      y: p.y + (Math.random() - 0.5) * 2,
+      vx: (Math.random() - 0.5) * 3.2,
+      vy: (Math.random() - 0.5) * 3.2 - 0.8,
+      size: p.size,
+      life: 1 + Math.random() * 0.6,
+      hue: 0,
+      orbit: false
+    }));
+
+    // A few special orbiting particles that will stay after
+    for (let i = 0; i < 18; i++) {
+      const idx = Math.floor(Math.random() * pts.length);
+      pts[idx].orbit = true;
+      pts[idx].orbitR = 26 + Math.random() * 58;
+      pts[idx].orbitSpeed = 0.018 + Math.random() * 0.024;
+      pts[idx].orbitPhase = Math.random() * Math.PI * 2;
+      pts[idx].trail = [];
+    }
+    return pts;
+  }
+
+  function drawHat(a) {
+    ctx.save();
+    ctx.translate(CX, CY);
+    ctx.rotate(a * 0.15); // subtle global tilt for 3D feel
+    ctx.translate(-CX, -CY);
+
+    const { brimOuter, brimInner, crownHeight, crownWidth, bandY, bandHeight } = HAT;
+    const crownBaseY = CY - 35;
+    const red = '#cc0000';
+    const darkRed = '#9c0000';
+    const band = '#1a1a1a';
+
+    // Soft outer shadow (depth)
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.6)';
+    ctx.shadowBlur = 32;
+    ctx.shadowOffsetY = 24;
+    ctx.shadowOffsetX = Math.sin(a) * 18;
+    ctx.beginPath();
+    ctx.ellipse(CX, CY + 14, brimOuter * 0.96, brimOuter * 0.26, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fill();
+    ctx.restore();
+
+    // === BRIM ===
+    // Main brim (soft red)
+    ctx.beginPath();
+    ctx.ellipse(CX, CY + 8, brimOuter, brimOuter * 0.27, 0, 0, Math.PI * 2);
+    ctx.fillStyle = red;
+    ctx.fill();
+
+    // Inner brim highlight
+    ctx.beginPath();
+    ctx.ellipse(CX - 12, CY + 7, brimOuter * 0.6, brimOuter * 0.16, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    ctx.fill();
+
+    // Brim inner hole
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(CX, CY + 8, brimInner, brimInner * 0.27, 0, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.clearRect(0, 0, W, H);
+    ctx.restore();
+
+    // Brim edge rim
+    ctx.beginPath();
+    ctx.ellipse(CX, CY + 8, brimOuter, brimOuter * 0.27, 0, 0, Math.PI * 2);
+    ctx.strokeStyle = darkRed;
+    ctx.lineWidth = 4;
+    ctx.stroke();
+
+    // === CROWN ===
+    // Crown body gradient
+    const crownGrad = ctx.createLinearGradient(CX - 40, crownBaseY - crownHeight, CX + 60, crownBaseY);
+    crownGrad.addColorStop(0, red);
+    crownGrad.addColorStop(0.5, '#d22');
+    crownGrad.addColorStop(1, darkRed);
+
+    ctx.beginPath();
+    ctx.moveTo(CX - crownWidth * 0.78, crownBaseY);
+    ctx.quadraticCurveTo(CX - crownWidth * 0.9, crownBaseY - crownHeight * 0.55, CX, crownBaseY - crownHeight - 8);
+    ctx.quadraticCurveTo(CX + crownWidth * 0.9, crownBaseY - crownHeight * 0.55, CX + crownWidth * 0.78, crownBaseY);
+    ctx.closePath();
+    ctx.fillStyle = crownGrad;
+    ctx.fill();
+
+    // Soft crown highlight
+    ctx.beginPath();
+    ctx.moveTo(CX - crownWidth * 0.55, crownBaseY - 4);
+    ctx.quadraticCurveTo(CX - 30, crownBaseY - crownHeight * 0.4, CX + 18, crownBaseY - crownHeight - 2);
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = 18;
+    ctx.stroke();
+
+    // === BAND ===
+    ctx.fillStyle = band;
+    ctx.beginPath();
+    ctx.ellipse(CX, crownBaseY - bandY, crownWidth * 0.83, crownWidth * 0.27, 0, 0, Math.PI);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.rect(CX - crownWidth * 0.83, crownBaseY - bandY - bandHeight, crownWidth * 1.66, bandHeight);
+    ctx.fill();
+
+    // Band shine
+    ctx.fillStyle = 'rgba(255,255,255,0.07)';
+    ctx.fillRect(CX - crownWidth * 0.83 + 4, crownBaseY - bandY - bandHeight + 3, crownWidth * 0.6, 7);
+
+    // Fedora ridge line on crown
+    ctx.strokeStyle = darkRed;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(CX - crownWidth * 0.7, crownBaseY - 12);
+    ctx.quadraticCurveTo(CX, crownBaseY - crownHeight * 0.55, CX + crownWidth * 0.7, crownBaseY - 12);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawParticles(ts) {
+    ctx.shadowBlur = 0;
+    ctx.shadowColor = 'transparent';
+
+    let alive = 0;
+    const orbitCenterX = CX;
+    const orbitCenterY = CY - 12;
+
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      if (p.life <= 0.02) continue;
+      alive++;
+
+      if (p.orbit) {
+        // Persistent orbiting embers after reform
+        p.orbitPhase += p.orbitSpeed;
+        const ox = orbitCenterX + Math.cos(p.orbitPhase) * p.orbitR;
+        const oy = orbitCenterY + Math.sin(p.orbitPhase * 1.3) * (p.orbitR * 0.38);
+
+        // trail
+        p.trail.push({ x: p.x, y: p.y });
+        if (p.trail.length > 7) p.trail.shift();
+
+        p.x = ox;
+        p.y = oy;
+
+        // draw trail
+        ctx.strokeStyle = 'rgba(204,0,0,0.18)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        for (let t = 0; t < p.trail.length; t++) {
+          const tp = p.trail[t];
+          if (t === 0) ctx.moveTo(tp.x, tp.y);
+          else ctx.lineTo(tp.x, tp.y);
+        }
+        ctx.stroke();
+
+        // glowing particle
+        ctx.shadowColor = '#ff6644';
+        ctx.shadowBlur = 9;
+        ctx.fillStyle = '#ffaa66';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * 0.9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        continue;
+      }
+
+      // normal particle physics
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vx *= 0.983;
+      p.vy *= 0.983;
+      p.life *= 0.978;
+
+      if (mode === 'reforming') {
+        // flow back to original positions (stored in vx/vy? no, use initial target)
+        if (!p.targetX) {
+          p.targetX = p.x + (Math.random() - 0.5) * 22;
+          p.targetY = p.y - 40 + (Math.random() - 0.5) * 40;
+        }
+        const dx = p.targetX - p.x;
+        const dy = p.targetY - p.y;
+        p.vx += dx * 0.018;
+        p.vy += dy * 0.018;
+      }
+
+      if (mode === 'swirling') {
+        // gentle swirl force
+        const dx = CX - p.x;
+        const dy = (CY - 60) - p.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        p.vx += (dx / dist) * 0.028;
+        p.vy += (dy / dist) * 0.028 - 0.015;
+      }
+
+      // glow
+      ctx.shadowColor = p.orbit ? '#ffaa44' : '#ff4422';
+      ctx.shadowBlur = p.size * 4.5;
+      ctx.fillStyle = p.life > 0.6 ? '#ffddaa' : '#ff6644';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, Math.max(0.8, p.size * p.life), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    if (mode === 'dissolving' && alive < 420) {
+      mode = 'swirling';
+    }
+    if (mode === 'swirling' && time > 92) {
+      mode = 'reforming';
+    }
+    if (mode === 'reforming' && alive < 60) {
+      mode = 'reformed';
+      spinSpeed = reducedMotion ? 0.002 : 0.009;
+    }
+
+    return alive;
+  }
+
+  function update() {
+    time++;
+    ctx.clearRect(0, 0, W, H);
+
+    // Gentle spin easing
+    spinSpeed += (targetSpeed - spinSpeed) * 0.045;
+    angle += spinSpeed;
+
+    const isReduced = reducedMotion;
+
+    if (mode === 'idle') {
+      drawHat(angle);
+    } else {
+      // During effect we slow spin dramatically
+      const slowAngle = angle * 0.6;
+      drawHat(slowAngle);
+
+      const alive = drawParticles();
+
+      if (mode === 'reformed' && alive > 0) {
+        drawHat(slowAngle);
+      }
+    }
+
+    // Subtle vignette for depth
+    const grad = ctx.createRadialGradient(CX, CY, 180, CX, CY, 310);
+    grad.addColorStop(0, 'rgba(0,0,0,0)');
+    grad.addColorStop(1, 'rgba(0,0,0,0.35)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Soft ambient rim light
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(CX, CY - 6, 208, 0, Math.PI * 2);
+    ctx.stroke();
+
+    if (!isReduced && mode === 'idle') {
+      targetSpeed = 0.011;
+    }
+
+    requestAnimationFrame(update);
+  }
+
+  function triggerEffect() {
+    if (mode !== 'idle' && mode !== 'reformed') return;
+
+    particles = createParticles();
+    mode = 'dissolving';
+    targetSpeed = reducedMotion ? 0 : 0.0018;
+    time = 0;
+
+    // After one cycle, allow re-trigger
+    setTimeout(() => {
+      if (mode === 'reformed') {
+        // Keep 12-18 persistent orbiters
+        particles = particles.filter(p => p.orbit);
+        mode = 'idle';
+        targetSpeed = reducedMotion ? 0.001 : 0.012;
+      }
+    }, 5200);
+  }
+
+  // Interaction
+  function onInteract(e) {
+    const now = Date.now();
+    if (now - lastHover < 1200) return;
+    lastHover = now;
+    triggerEffect();
+  }
+
+  canvas.addEventListener('mouseenter', onInteract);
+  canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    onInteract(e);
+  }, { passive: false });
+
+  // Keyboard accessibility
+  canvas.setAttribute('tabindex', '0');
+  canvas.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      onInteract(e);
+    }
+  });
+
+  // Boot
+  if (!reducedMotion) {
+    targetSpeed = 0.012;
+  }
+  update();
+
+  // Auto tease once after load (only if motion ok)
+  if (!reducedMotion) {
+    setTimeout(() => {
+      if (mode === 'idle') {
+        // gentle nudge so user discovers
+        targetSpeed = 0.005;
+        setTimeout(() => { if (mode === 'idle') targetSpeed = 0.012; }, 900);
+      }
+    }, 2400);
+  }
+
+  // Expose for console experimentation (optional)
+  window.RedHatHero = { trigger: triggerEffect };
+})();
+</script>
+</body>
+</html>

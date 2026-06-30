@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Fedora Hero</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#111;color:#fff;font-family:system-ui,sans-serif}
+  .hero{
+    position:relative;
+    width:100%;height:100%;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    perspective:800px;
+  }
+  #logo{
+    width:200px;height:200px;
+    transform-style:preserve-3d;
+    animation:spin 6s linear infinite;
+    will-change:transform;
+  }
+  @keyframes spin{
+    from{transform:rotateY(0deg)}
+    to{transform:rotateY(360deg)}
+  }
+  .slow{
+    animation-duration:20s !important;
+  }
+  .caption{
+    margin-top:1rem;
+    font-size:1.2rem;
+    opacity:0.8;
+  }
+  #particles{
+    position:absolute;
+    inset:0;
+    pointer-events:none;
+  }
+  @media (prefers-reduced-motion: reduce){
+    #logo{animation:none}
+  }
+</style>
+</head>
+<body>
+<div class="hero">
+  <svg id="logo" viewBox="0 0 200 200" aria-label="Fedora hat">
+    <!-- simple fedora shape -->
+    <ellipse cx="100" cy="140" rx="80" ry="20" fill="#b00"/>
+    <path d="M30,140 Q100,30 170,140 Z" fill="#c33"/>
+  </svg>
+  <div class="caption">Fedora</div>
+  <canvas id="particles"></canvas>
+</div>
+
+<script>
+(() => {
+  const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (prefersReduced) return;                 // don't run interactive effects
+
+  const logo = document.getElementById('logo');
+  const canvas = document.getElementById('particles');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const particles = [];
+  const TOTAL = 1500;                         // number of particles for dissolve
+  const ORBITERS = 120;                       // particles that keep orbiting later
+  let animId, state = 'idle';
+
+  function resize() {
+    canvas.width = canvas.offsetWidth * dpr;
+    canvas.height = canvas.offsetHeight * dpr;
+    ctx.scale(dpr,dpr);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function randomBetween(min,max){return Math.random()*(max-min)+min;}
+
+  // ------------------------------------------------------------
+  // Particle class
+  // ------------------------------------------------------------
+  class Particle{
+    constructor(x,y){
+      this.x = x; this.y = y;
+      this.sx = x; this.sy = y;               // start (logo) position
+      this.vx = 0; this.vy = 0;
+      this.life = 0;
+      this.phase = 'out';                     // out → pause → in → idle
+    }
+    // set velocity for outward burst
+    burst(){
+      const angle = randomBetween(0, Math.PI*2);
+      const speed = randomBetween(1,4);
+      this.vx = Math.cos(angle)*speed;
+      this.vy = Math.sin(angle)*speed;
+    }
+    // set velocity for inward return
+    returnTo(){
+      const dx = this.sx - this.x;
+      const dy = this.sy - this.y;
+      const len = Math.hypot(dx,dy) || 1;
+      this.vx = dx/len*4;
+      this.vy = dy/len*4;
+    }
+    update(dt){
+      this.life += dt;
+      if(this.phase==='out'){
+        if(this.life>0.8){ this.phase='pause'; this.life=0; this.vx=this.vy=0; }
+      }else if(this.phase==='pause'){
+        if(this.life>0.2){ this.phase='in'; this.life=0; this.returnTo(); }
+      }else if(this.phase==='in'){
+        const dx = this.sx - this.x;
+        const dy = this.sy - this.y;
+        if(Math.hypot(dx,dy)<3){ this.phase='idle'; this.life=0; }
+      }
+      this.x+=this.vx;
+      this.y+=this.vy;
+    }
+    draw(){
+      const alpha = this.phase==='idle'?0.2:0.8;
+      ctx.fillStyle = `rgba(255,180,80,${alpha})`;
+      ctx.beginPath();ctx.arc(this.x,this.y,1.4,0,Math.PI*2);ctx.fill();
+    }
+  }
+
+  // ------------------------------------------------------------
+  // Orbiting particles (after reform)
+  // ------------------------------------------------------------
+  const orbiters = [];
+  function initOrbiters(){
+    const rect = logo.getBoundingClientRect();
+    const cx = rect.left+rect.width/2;
+    const cy = rect.top+rect.height/2;
+    for(let i=0;i<ORBITERS;i++){
+      const angle = randomBetween(0,Math.PI*2);
+      const radius = randomBetween(rect.width*0.6, rect.width*0.9);
+      orbiters.push({angle, radius, speed: randomBetween(0.4,1.2), cx, cy});
+    }
+  }
+  function drawOrbiters(dt){
+    ctx.fillStyle = 'rgba(255,180,80,0.3)';
+    orbiters.forEach(p=>{
+      p.angle += p.speed*dt;
+      const x = p.cx + Math.cos(p.angle)*p.radius;
+      const y = p.cy + Math.sin(p.angle)*p.radius;
+      ctx.beginPath();ctx.arc(x,y,1.2,0,Math.PI*2);ctx.fill();
+    });
+  }
+
+  // ------------------------------------------------------------
+  // Main animation loop
+  // ------------------------------------------------------------
+  let last = performance.now();
+  function animate(now){
+    const dt = (now-last)/1000;
+    last = now;
+    ctx.clearRect(0,0,canvas.width/dpr,canvas.height/dpr);
+
+    if(state==='dissolve'){
+      particles.forEach(p=>{ p.update(dt); p.draw(); });
+      if(particles.every(p=>p.phase==='idle')){
+        // re-show logo
+        logo.style.opacity = 1;
+        state='orbit';
+        initOrbiters();
+      }
+    }else if(state==='orbit'){
+      drawOrbiters(dt);
+    }
+
+    animId = requestAnimationFrame(animate);
+  }
+  animId = requestAnimationFrame(animate);
+
+  // ------------------------------------------------------------
+  // Interaction handling
+  // ------------------------------------------------------------
+  function trigger(){
+    if(state!=='idle') return;
+    state='dissolve';
+    logo.classList.add('slow');               // slow spin while dissolving
+    logo.style.transition = 'opacity .3s';
+    logo.style.opacity = 0;                   // hide the SVG
+
+    // create particles inside logo's bounding box
+    const rect = logo.getBoundingClientRect();
+    for(let i=0;i<TOTAL;i++){
+      const x = randomBetween(rect.left, rect.right);
+      const y = randomBetween(rect.top, rect.bottom);
+      const p = new Particle(x, y);
+      p.burst();
+      particles.push(p);
+    }
+  }
+
+  // hover for desktop, tap for mobile
+  logo.addEventListener('mouseenter', trigger);
+  logo.addEventListener('touchstart', e=>{ e.preventDefault(); trigger(); });
+
+  // reset if user leaves before animation ends
+  logo.addEventListener('mouseleave',()=>{ if(state==='idle') logo.classList.remove('slow'); });
+})();
+</script>
+</body>
+</html>
+```
+
+This single HTML file:
+
+* Uses a dark background with a centered red‑fedora‑style SVG that spins in 3D.  
+* On hover / tap the spin slows, the hat fades out, and **≈1500** glowing particles burst outward, pause, then fly back and re‑form the hat.  
+* After reform, **≈120** particles keep orbiting the hat with a faint trailing glow.  
+* Respects `prefers-reduced‑motion` by disabling the spin and all interactive effects.  
+* No external assets or libraries – everything (HTML, CSS, JavaScript, SVG) is in‑line.

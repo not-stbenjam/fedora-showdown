@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#07080a">
+<title>Ember Fedora</title>
+<style>
+  :root{
+    --bg-0:#06070a;
+    --bg-1:#14161b;
+    --accent-ember:#ff6a3d;
+    --accent-ember-soft:#ffb347;
+    --text-dim:#9aa0a8;
+    --focus-ring:#ff8f5e;
+  }
+  *,*::before,*::after{box-sizing:border-box;}
+  html,body{height:100%;margin:0;}
+  body{
+    background:var(--bg-0);
+    color:var(--text-dim);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    overflow:hidden;
+  }
+  main{height:100%;}
+  .hero{
+    position:relative;
+    width:100%;
+    height:100vh;
+    height:100dvh;
+    overflow:hidden;
+  }
+  #scene{
+    position:absolute;
+    inset:0;
+    width:100%;
+    height:100%;
+    display:block;
+  }
+  .hat-trigger{
+    position:absolute;
+    inset:0;
+    width:100%;
+    height:100%;
+    background:transparent;
+    border:0;
+    margin:0;
+    padding:0;
+    cursor:pointer;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .hat-trigger:focus-visible{
+    outline:2px solid var(--focus-ring);
+    outline-offset:-6px;
+    border-radius:8px;
+  }
+  .caption{
+    position:absolute;
+    left:50%;
+    bottom:clamp(8%,12vh,16%);
+    transform:translateX(-50%);
+    margin:0;
+    font-size:clamp(0.8rem,1.1vw + 0.55rem,1.05rem);
+    letter-spacing:0.09em;
+    text-transform:uppercase;
+    color:var(--text-dim);
+    text-shadow:0 0 18px rgba(255,106,61,0.22);
+    text-align:center;
+    padding:0 1.5rem;
+    pointer-events:none;
+    user-select:none;
+    white-space:nowrap;
+  }
+  @media (max-width:420px){
+    .caption{white-space:normal;}
+  }
+  @media (prefers-reduced-motion:reduce){
+    .caption{text-shadow:none;}
+  }
+  noscript div{
+    position:fixed;
+    inset:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:var(--bg-0);
+    color:var(--text-dim);
+    font-family:-apple-system,BlinkMacSystemFont,sans-serif;
+    text-align:center;
+    padding:2rem;
+  }
+</style>
+</head>
+<body>
+<main>
+  <section class="hero" id="hero" aria-label="Animated fedora hero">
+    <canvas id="scene"></canvas>
+    <button type="button" id="trigger" class="hat-trigger" aria-label="Dissolve the hat into embers and watch it reform"></button>
+    <p class="caption">Every spark finds its way home.</p>
+  </section>
+</main>
+<noscript><div>A spinning ember fedora needs JavaScript enabled.</div></noscript>
+<script>
+(function(){
+  "use strict";
+
+  var canvas = document.getElementById('scene');
+  var ctx = canvas.getContext('2d');
+  var hero = document.getElementById('hero');
+  var triggerBtn = document.getElementById('trigger');
+
+  var glow = document.createElement('canvas');
+  var gctx = glow.getContext('2d');
+
+  var mql = matchMedia('(prefers-reduced-motion: reduce)');
+  var reducedMotion = mql.matches;
+
+  // ---------- helpers ----------
+  function rand(a,b){ return a + Math.random()*(b-a); }
+  function lerp(a,b,t){ return a + (b-a)*t; }
+  function clampNum(v,a,b){ return v<a?a:(v>b?b:v); }
+  function clamp255(v){ return v<0?0:(v>255?255:v); }
+  function smoothstep(a,b,x){ var t=clampNum((x-a)/(b-a),0,1); return t*t*(3-2*t); }
+  function easeInOutCubic(t){ return t<0.5 ? 4*t*t*t : 1-Math.pow(-2*t+2,3)/2; }
+  function angleDiff(a,b){ var d=Math.abs(a-b)%(Math.PI*2); if(d>Math.PI) d=Math.PI*2-d; return d; }
+  function rotate3(x,y,z,cosY,sinY,cosX,sinX){
+    var x1 = x*cosY + z*sinY;
+    var z1 = -x*sinY + z*cosY;
+    var y2 = y*cosX - z1*sinX;
+    var z2 = y*sinX + z1*cosX;
+    return [x1,y2,z2];
+  }
+
+  var DEG = Math.PI/180;
+  var Lx=-0.4266, Ly=0.7393, Lz=0.5213; // fixed studio light, world space
+
+  // ---------- state ----------
+  var PARTICLE_COUNT = Math.round(clampNum((innerWidth*innerHeight)/950, 1100, 3200));
+  var particles = [];
+  var dust = [];
+  var N = 0;
+
+  var arrOZ, arrSX, arrSY, arrRAD, arrAL, arrCR, arrCG, arrCB, idx;
+
+  var DPR = 1, W = 0, H = 0;
+  var baseScale = 100, cx = 0, cy = 0;
+  var FL = 2.7;
+  var camTilt = 0.52;
+  var baseAngularSpeed = 0.5;
+
+  var angle = 0.6, timeAcc = 0, lastTime = 0, rafId = null;
+  var s = 0, spinFactor = 1;
+  var cycleState = 'idle', cycleT = 0, cycleCompletedOnce = false;
+
+  var DUR_DISSOLVE = 1.05, DUR_SWIRL = 1.55, DUR_REFORM = 1.25;
+  var TOTAL = DUR_DISSOLVE + DUR_SWIRL + DUR_REFORM;
+  var REDUCED_DUR = 0.55;
+
+  var bgGradCache = null, bgGradDirty = true;
+  var blurFilterStr = 'blur(3px)';
+
+  // ---------- particle factory ----------
+  function makeParticle(x,y,z,nx,ny,nz,r,g,b){
+    var rx=rand(-1,1), ry=rand(-1,1), rz=rand(-1,1);
+    var rl = Math.hypot(rx,ry,rz) || 1;
+    rx/=rl; ry/=rl; rz/=rl;
+
+    var sx = nx*0.55 + rx*0.45, sy = ny*0.55 + ry*0.45, sz = nz*0.55 + rz*0.45;
+    var sl = Math.hypot(sx,sy,sz) || 1;
+    sx/=sl; sy/=sl; sz/=sl;
+
+    var upx=0, upy=1, upz=0;
+    if (Math.abs(sy) > 0.9){ upx=1; upy=0; upz=0; }
+    var b1x = sy*upz - sz*upy, b1y = sz*upx - sx*upz, b1z = sx*upy - sy*upx;
+    var b1l = Math.hypot(b1x,b1y,b1z) || 1;
+    b1x/=b1l; b1y/=b1l; b1z/=b1l;
+    var b2x = sy*b1z - sz*b1y, b2y = sz*b1x - sx*b1z, b2z = sx*b1y - sy*b1x;
+
+    return {
+      bx:x, by:y, bz:z, nx:nx, ny:ny, nz:nz, cr:r, cg:g, cb:b,
+      sx:sx, sy:sy, sz:sz, sd:rand(0.65,1.85),
+      b1x:b1x, b1y:b1y, b1z:b1z, b2x:b2x, b2y:b2y, b2z:b2z,
+      swPhase:rand(0,Math.PI*2), swSpeed:rand(0.5,1.3)*(Math.random()<0.5?-1:1), swRad:rand(0.045,0.16),
+      sizeJ:rand(0.75,1.25), emberTint:Math.random(),
+      isEmber: Math.random() < 0.035,
+      emR:rand(0.95,1.65), emSpeed:rand(0.12,0.32)*(Math.random()<0.5?-1:1), emPhase:rand(0,Math.PI*2),
+      emTilt:rand(-0.7,0.7), emYC:rand(-0.25,0.55),
+      relT:0, relB:0, trail:null
+    };
+  }
+
+  function generateParticles(){
+    var nBrimTop = Math.round(PARTICLE_COUNT*0.30);
+    var nBrimUnder = Math.round(PARTICLE_COUNT*0.12);
+    var nCrown = Math.round(PARTICLE_COUNT*0.36);
+    var nDome = Math.round(PARTICLE_COUNT*0.13);
+    var nBand = Math.round(PARTICLE_COUNT*0.09);
+
+    var innerR=0.50, outerR=1.0, curlMax=-0.13;
+
+    var i, theta, tt, r, x, y, z, slope, nx, ny, nz, nl;
+
+    for (i=0;i<nBrimTop;i++){
+      theta = rand(0,Math.PI*2);
+      tt = Math.sqrt(Math.random());
+      r = innerR + (outerR-innerR)*tt;
+      var curl = curlMax*Math.pow(tt,1.4)*Math.cos(2*theta);
+      x = Math.cos(theta)*r; z = Math.sin(theta)*r;
+      y = curl + rand(-0.004,0.004);
+      slope = curlMax*1.4*Math.pow(Math.max(tt,0.001),0.4)*Math.cos(2*theta);
+      nx = Math.cos(theta)*slope*0.7; ny = 1; nz = Math.sin(theta)*slope*0.7;
+      nl = Math.hypot(nx,ny,nz); nx/=nl; ny/=nl; nz/=nl;
+      particles.push(makeParticle(x,y,z,nx,ny,nz,50,52,58));
+    }
+
+    for (i=0;i<nBrimUnder;i++){
+      theta = rand(0,Math.PI*2);
+      tt = Math.sqrt(Math.random());
+      r = innerR + (outerR-innerR)*tt;
+      var curl2 = curlMax*Math.pow(tt,1.4)*Math.cos(2*theta);
+      x = Math.cos(theta)*r; z = Math.sin(theta)*r;
+      y = curl2 - 0.013 + rand(-0.003,0.003);
+      slope = curlMax*1.4*Math.pow(Math.max(tt,0.001),0.4)*Math.cos(2*theta);
+      nx = Math.cos(theta)*slope*0.7; ny = -1; nz = Math.sin(theta)*slope*0.7;
+      nl = Math.hypot(nx,ny,nz); nx/=nl; ny/=nl; nz/=nl;
+      particles.push(makeParticle(x,y,z,nx,ny,nz,14,15,18));
+    }
+
+    for (i=0;i<nCrown;i++){
+      theta = rand(0,Math.PI*2);
+      var v = Math.random();
+      y = 0.04 + v*0.72;
+      var rBase = lerp(0.50,0.46,v);
+      var pinch = 0;
+      var pAngles = [50*DEG, -50*DEG];
+      for (var pIdx=0; pIdx<pAngles.length; pIdx++){
+        var d = angleDiff(theta, pAngles[pIdx]);
+        pinch += Math.exp(-(d*d)/(2*0.10*0.10));
+      }
+      var pinchDepth = 0.06*smoothstep(0.30,0.75,v);
+      r = rBase - pinch*pinchDepth;
+      x = Math.cos(theta)*r; z = Math.sin(theta)*r;
+      nx = Math.cos(theta); ny = 0.16; nz = Math.sin(theta);
+      nl = Math.hypot(nx,ny,nz); nx/=nl; ny/=nl; nz/=nl;
+      var shadeC = 44 + v*14;
+      particles.push(makeParticle(x,y,z,nx,ny,nz,shadeC,shadeC+2,shadeC+6));
+    }
+
+    var domeBaseY=0.76, domeR=0.46, domeH=0.20;
+    for (i=0;i<nDome;i++){
+      theta = rand(0,Math.PI*2);
+      var phi = Math.random()*(Math.PI/2)*0.96;
+      x = domeR*Math.sin(phi)*Math.cos(theta);
+      z = domeR*Math.sin(phi)*Math.sin(theta);
+      y = domeBaseY + domeH*Math.cos(phi);
+      nx = x/domeR; nz = z/domeR; ny = Math.cos(phi)*1.3;
+      nl = Math.hypot(nx,ny,nz); nx/=nl; ny/=nl; nz/=nl;
+      var shadeD = 56 + (1-phi/(Math.PI/2))*10;
+      particles.push(makeParticle(x,y,z,nx,ny,nz,shadeD,shadeD+2,shadeD+7));
+    }
+
+    for (i=0;i<nBand;i++){
+      theta = rand(0,Math.PI*2);
+      y = rand(0.105,0.17);
+      var tband = (y-0.105)/0.065;
+      r = lerp(0.50,0.487,tband)*1.02;
+      x = Math.cos(theta)*r; z = Math.sin(theta)*r;
+      nx = Math.cos(theta); ny = 0; nz = Math.sin(theta);
+      particles.push(makeParticle(x,y,z,nx,ny,nz,9,9,11));
+    }
+
+    N = particles.length;
+    arrOZ = new Float32Array(N); arrSX = new Float32Array(N); arrSY = new Float32Array(N);
+    arrRAD = new Float32Array(N); arrAL = new Float32Array(N);
+    arrCR = new Uint8ClampedArray(N); arrCG = new Uint8ClampedArray(N); arrCB = new Uint8ClampedArray(N);
+    idx = new Array(N);
+    for (i=0;i<N;i++) idx[i]=i;
+  }
+
+  function setupDust(){
+    var count = 36;
+    for (var i=0;i<count;i++){
+      dust.push({
+        x:Math.random(), y:Math.random()*0.85,
+        r:rand(0.5,1.4), base:rand(0.06,0.18),
+        sp:rand(0.15,0.4), ph:rand(0,Math.PI*2)
+      });
+    }
+  }
+
+  // ---------- layout ----------
+  function resize(){
+    var rect = hero.getBoundingClientRect();
+    W = rect.width; H = rect.height;
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(W*DPR);
+    canvas.height = Math.round(H*DPR);
+    canvas.style.width = W+'px';
+    canvas.style.height = H+'px';
+
+    glow.width = Math.max(2, Math.round(canvas.width*0.55));
+    glow.height = Math.max(2, Math.round(canvas.height*0.55));
+
+    var minSide = Math.min(canvas.width, canvas.height);
+    baseScale = clampNum(minSide*0.40, 80*DPR, 230*DPR);
+    cx = canvas.width/2;
+    cy = canvas.height*0.40;
+
+    blurFilterStr = 'blur(' + Math.max(2, 6*DPR*0.5) + 'px)';
+    bgGradDirty = true;
+  }
+
+  // ---------- cycle state machine ----------
+  function triggerCycle(){
+    if (cycleState !== 'idle') return;
+    cycleState = 'dissolve';
+    cycleT = 0;
+    if (!reducedMotion){
+      for (var i=0;i<particles.length;i++){
+        var p = particles[i];
+        if (p.isEmber){ p.relT=0; p.relB=0; p.trail=null; }
+      }
+    }
+    ensureLoop();
+  }
+
+  function updateCycle(dt){
+    if (cycleState === 'idle') return;
+    cycleT += dt;
+
+    if (reducedMotion){
+      var half = REDUCED_DUR/2;
+      if (cycleT < half){
+        s = easeInOutCubic(cycleT/half);
+      } else if (cycleT < REDUCED_DUR){
+        s = 1 - easeInOutCubic((cycleT-half)/half);
+      } else {
+        s = 0; cycleState = 'idle'; cycleT = 0; cycleCompletedOnce = true;
+      }
+      spinFactor = 1;
+      return;
+    }
+
+    if (cycleT < DUR_DISSOLVE){
+      var u1 = easeInOutCubic(cycleT/DUR_DISSOLVE);
+      s = u1;
+      spinFactor = lerp(1,0.3,u1);
+    } else if (cycleT < DUR_DISSOLVE+DUR_SWIRL){
+      s = 1; spinFactor = 0.3;
+    } else if (cycleT < TOTAL){
+      var u2 = easeInOutCubic((cycleT-DUR_DISSOLVE-DUR_SWIRL)/DUR_REFORM);
+      s = 1-u2;
+      spinFactor = lerp(0.3,1,u2);
+    } else {
+      s = 0; spinFactor = 1; cycleState = 'idle'; cycleT = 0; cycleCompletedOnce = true;
+    }
+  }
+
+  function updateEmbers(dt){
+    if (reducedMotion || !cycleCompletedOnce || cycleState !== 'idle') return;
+    for (var i=0;i<particles.length;i++){
+      var p = particles[i];
+      if (!p.isEmber) continue;
+      if (p.relT < 1.05){
+        p.relT += dt;
+        p.relB = smoothstep(0,1,Math.min(1,p.relT));
+      }
+    }
+  }
+
+  // ---------- render ----------
+  function drawBackground(){
+    if (bgGradDirty || !bgGradCache){
+      bgGradCache = ctx.createRadialGradient(cx, canvas.height*0.32, 10, cx, canvas.height*0.4, Math.max(canvas.width,canvas.height)*0.75);
+      bgGradCache.addColorStop(0,'#14161b');
+      bgGradCache.addColorStop(0.55,'#0c0d10');
+      bgGradCache.addColorStop(1,'#05060a');
+      bgGradDirty = false;
+    }
+    ctx.fillStyle = bgGradCache;
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    for (var i=0;i<dust.length;i++){
+      var d = dust[i];
+      var al = reducedMotion ? d.base : d.base*(0.6+0.4*Math.sin(timeAcc*d.sp+d.ph));
+      ctx.fillStyle = 'rgba(255,235,220,' + al.toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.arc(d.x*canvas.width, d.y*canvas.height, d.r*DPR, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  function drawShadow(){
+    var w = baseScale*1.5, h = baseScale*0.38;
+    var gy = cy + baseScale*0.62;
+    var warm = s;
+    var rr = lerp(10,40,warm), gg = lerp(8,20,warm), bb = lerp(10,14,warm);
+    var grad = ctx.createRadialGradient(cx,gy,2,cx,gy,w);
+    grad.addColorStop(0, 'rgba(' + Math.round(rr+18) + ',' + Math.round(gg+10) + ',' + Math.round(bb+6) + ',0.45)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.save();
+    ctx.translate(cx,gy);
+    ctx.scale(1, h/w);
+    ctx.translate(-cx,-gy);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx,gy,w,0,Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function render(){
+    var cosY = Math.cos(angle), sinY = Math.sin(angle);
+    var tiltNow = camTilt + (reducedMotion ? 0 : Math.sin(timeAcc*0.5)*0.045);
+    var cosX = Math.cos(tiltNow), sinX = Math.sin(tiltNow);
+
+    drawBackground();
+    drawShadow();
+
+    gctx.clearRect(0,0,glow.width,glow.height);
+    gctx.globalCompositeOperation = 'lighter';
+    var gRatio = glow.width/canvas.width;
+
+    for (var i=0;i<particles.length;i++){
+      var p = particles[i];
+      var ox, oy, oz;
+
+      if (p.isEmber && !reducedMotion && p.relB > 0.001){
+        var f = rotate3(p.bx,p.by,p.bz,cosY,sinY,cosX,sinX);
+        var ea = timeAcc*p.emSpeed + p.emPhase;
+        var rx0 = Math.cos(ea)*p.emR, rz0 = Math.sin(ea)*p.emR, ry0 = p.emYC;
+        var ct = Math.cos(p.emTilt), st = Math.sin(p.emTilt);
+        var ry1 = ry0*ct - rz0*st, rz1 = ry0*st + rz0*ct;
+        var rcy = ry1*cosX - rz1*sinX, rcz = ry1*sinX + rz1*cosX;
+        ox = lerp(f[0], rx0, p.relB);
+        oy = lerp(f[1], rcy, p.relB);
+        oz = lerp(f[2], rcz, p.relB);
+      } else {
+        var bx = p.bx, by = p.by, bz = p.bz;
+        if (s > 0.0005){
+          var swA = Math.sin(timeAcc*p.swSpeed+p.swPhase)*p.swRad*s;
+          var swB = Math.cos(timeAcc*p.swSpeed*0.8+p.swPhase)*p.swRad*s;
+          bx = p.bx + p.sx*p.sd*s + p.b1x*swA + p.b2x*swB;
+          by = p.by + p.sy*p.sd*s + p.b1y*swA + p.b2y*swB;
+          bz = p.bz + p.sz*p.sd*s + p.b1z*swA + p.b2z*swB;
+        }
+        var f2 = rotate3(bx,by,bz,cosY,sinY,cosX,sinX);
+        ox = f2[0]; oy = f2[1]; oz = f2[2];
+      }
+
+      var nrm = rotate3(p.nx,p.ny,p.nz,cosY,sinY,cosX,sinX);
+      var ndotl = Math.max(0, nrm[0]*Lx + nrm[1]*Ly + nrm[2]*Lz);
+      var k = 0.42 + 0.62*ndotl;
+      var cr = clamp255(p.cr*k), cg = clamp255(p.cg*k), cb = clamp255(p.cb*k);
+
+      var rim = Math.pow(1-Math.min(1,Math.abs(nrm[2])),3.0);
+      var rimAmt = rim*0.32*(1-s);
+      cr = cr + (255-cr)*rimAmt*0.7;
+      cg = cg + (180-cg)*rimAmt*0.55;
+      cb = cb + (110-cb)*rimAmt*0.35;
+
+      if (s > 0.001){
+        var ecr = 255, ecg = lerp(150,70,p.emberTint), ecb = lerp(70,30,p.emberTint);
+        cr = lerp(cr,ecr,s); cg = lerp(cg,ecg,s); cb = lerp(cb,ecb,s);
+      }
+
+      var persp = FL/(FL+oz);
+      var sx2 = cx + ox*persp*baseScale;
+      var sy2 = cy - oy*persp*baseScale;
+      var alpha = lerp(0.85,0.8,s);
+      var rad = (1.15+p.sizeJ*0.55)*DPR*persp*lerp(1,1.5,s);
+
+      arrOZ[i]=oz; arrSX[i]=sx2; arrSY[i]=sy2; arrRAD[i]=rad; arrAL[i]=alpha;
+      arrCR[i]=cr; arrCG[i]=cg; arrCB[i]=cb;
+
+      var glowR = Math.max(0.5, rad*2.1);
+      gctx.fillStyle = 'rgba(' + (cr|0) + ',' + (cg|0) + ',' + (cb|0) + ',' + (alpha*0.55).toFixed(3) + ')';
+      gctx.beginPath();
+      gctx.arc(sx2*gRatio, sy2*gRatio, glowR*gRatio, 0, Math.PI*2);
+      gctx.fill();
+
+      if (p.isEmber && !reducedMotion && p.relB > 0.05){
+        if (!p.trail) p.trail = [];
+        p.trail.push([sx2,sy2]);
+        if (p.trail.length > 6) p.trail.shift();
+      }
+    }
+
+    idx.sort(function(a,b){ return arrOZ[b]-arrOZ[a]; });
+    for (var j=0;j<N;j++){
+      var ii = idx[j];
+      ctx.fillStyle = 'rgba(' + arrCR[ii] + ',' + arrCG[ii] + ',' + arrCB[ii] + ',' + arrAL[ii].toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.arc(arrSX[ii], arrSY[ii], Math.max(0.4,arrRAD[ii]), 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.filter = blurFilterStr;
+    ctx.globalAlpha = 0.6;
+    ctx.drawImage(glow,0,0,glow.width,glow.height,0,0,canvas.width,canvas.height);
+    ctx.restore();
+
+    if (!reducedMotion){
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.lineCap = 'round';
+      for (var t=0;t<particles.length;t++){
+        var pt = particles[t];
+        if (!pt.isEmber || !pt.trail || pt.trail.length < 2) continue;
+        for (var jj=1; jj<pt.trail.length; jj++){
+          var a0 = pt.trail[jj-1], a1 = pt.trail[jj];
+          var al2 = (jj/pt.trail.length)*0.35*pt.relB;
+          ctx.strokeStyle = 'rgba(255,150,90,' + al2.toFixed(3) + ')';
+          ctx.lineWidth = Math.max(0.6, 1.1*DPR*(jj/pt.trail.length));
+          ctx.beginPath();
+          ctx.moveTo(a0[0],a0[1]);
+          ctx.lineTo(a1[0],a1[1]);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    }
+  }
+
+  // ---------- loop control ----------
+  function loop(now){
+    var dt = Math.min((now-lastTime)/1000, 0.05);
+    lastTime = now;
+    timeAcc += dt;
+
+    updateCycle(dt);
+    if (!reducedMotion){ angle += baseAngularSpeed*spinFactor*dt; }
+    updateEmbers(dt);
+    render();
+
+    if (!reducedMotion || cycleState !== 'idle'){
+      rafId = requestAnimationFrame(loop);
+    } else {
+      rafId = null;
+    }
+  }
+
+  function ensureLoop(){
+    if (rafId == null){
+      lastTime = performance.now();
+      rafId = requestAnimationFrame(loop);
+    }
+  }
+  function stopLoop(){
+    if (rafId != null){ cancelAnimationFrame(rafId); rafId = null; }
+  }
+
+  // ---------- wiring ----------
+  window.addEventListener('resize', function(){
+    resize();
+    if (reducedMotion && cycleState === 'idle') render();
+  });
+
+  hero.addEventListener('pointerenter', function(e){
+    if (e.pointerType === 'mouse') triggerCycle();
+  });
+  triggerBtn.addEventListener('click', function(){ triggerCycle(); });
+
+  document.addEventListener('visibilitychange', function(){
+    if (document.hidden){
+      stopLoop();
+    } else if (!reducedMotion || cycleState !== 'idle'){
+      lastTime = performance.now();
+      ensureLoop();
+    } else {
+      render();
+    }
+  });
+
+  if (mql.addEventListener){
+    mql.addEventListener('change', function(e){
+      reducedMotion = e.matches;
+      if (reducedMotion){
+        stopLoop();
+        cycleState = 'idle'; cycleT = 0; s = 0; spinFactor = 1;
+        render();
+      } else {
+        ensureLoop();
+      }
+    });
+  }
+
+  function init(){
+    generateParticles();
+    setupDust();
+    resize();
+    if (reducedMotion){
+      render();
+    } else {
+      ensureLoop();
+    }
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Red Hat Fedora</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #0a0a0c;
+    }
+    
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      background: radial-gradient(ellipse at 50% 40%, #1a1a2e 0%, #0a0a0c 70%);
+    }
+    
+    #canvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
+    
+    .content {
+      position: relative;
+      z-index: 10;
+      text-align: center;
+      pointer-events: none;
+    }
+    
+    .caption {
+      color: #cc2222;
+      font-size: clamp(0.9rem, 2vw, 1.1rem);
+      font-weight: 300;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      opacity: 0.7;
+      margin-top: 2rem;
+      text-shadow: 0 0 20px rgba(204, 34, 34, 0.3);
+    }
+    
+    .hint {
+      color: rgba(255, 255, 255, 0.3);
+      font-size: clamp(0.7rem, 1.5vw, 0.85rem);
+      font-weight: 300;
+      letter-spacing: 0.15em;
+      margin-top: 1rem;
+      transition: opacity 0.5s ease;
+    }
+    
+    .hint.hidden { opacity: 0; }
+    
+    @media (prefers-reduced-motion: reduce) {
+      .hint { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <div class="content">
+    <div class="caption">Red Hat</div>
+    <div class="hint">hover to explore</div>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    
+    // Check for reduced motion preference
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    
+    const canvas = document.getElementById('canvas');
+    const hint = document.querySelector('.hint');
+    
+    // Scene setup
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.z = 5;
+    
+    const renderer = new THREE.WebGLRenderer({ 
+      canvas, 
+      antialias: true, 
+      alpha: true 
+    });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
+    
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+    scene.add(ambientLight);
+    
+    const mainLight = new THREE.DirectionalLight(0xffffff, 1.5);
+    mainLight.position.set(5, 5, 5);
+    mainLight.castShadow = true;
+    mainLight.shadow.mapSize.width = 1024;
+    mainLight.shadow.mapSize.height = 1024;
+    scene.add(mainLight);
+    
+    const rimLight = new THREE.DirectionalLight(0xcc2222, 0.8);
+    rimLight.position.set(-3, 2, -3);
+    scene.add(rimLight);
+    
+    const fillLight = new THREE.PointLight(0x4444ff, 0.3);
+    fillLight.position.set(-3, -2, 3);
+    scene.add(fillLight);
+    
+    // Create fedora geometry
+    function createFedora() {
+      const group = new THREE.Group();
+      
+      // Materials
+      const brimMaterial = new THREE.MeshStandardMaterial({
+        color: 0xcc0000,
+        roughness: 0.4,
+        metalness: 0.1,
+      });
+      
+      const crownMaterial = new THREE.MeshStandardMaterial({
+        color: 0xdd1111,
+        roughness: 0.5,
+        metalness: 0.1,
+      });
+      
+      const bandMaterial = new THREE.MeshStandardMaterial({
+        color: 0x1a1a1a,
+        roughness: 0.3,
+        metalness: 0.6,
+      });
+      
+      // Crown (top part)
+      const crownGeom = new THREE.CylinderGeometry(0.55, 0.6, 0.5, 32, 1, false);
+      const crown = new THREE.Mesh(crownGeom, crownMaterial);
+      crown.position.y = 0.35;
+      crown.castShadow = true;
+      crown.receiveShadow = true;
+      group.add(crown);
+      
+      // Crown top indent
+      const crownTopGeom = new THREE.SphereGeometry(0.55, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+      const crownTop = new THREE.Mesh(crownTopGeom, crownMaterial);
+      crownTop.position.y = 0.6;
+      crownTop.scale.y = 0.15;
+      crownTop.castShadow = true;
+      group.add(crownTop);
+      
+      // Crown pinch (front indent)
+      const pinchGeom = new THREE.SphereGeometry(0.2, 16, 8, 0, Math.PI, 0, Math.PI / 2);
+      const pinch = new THREE.Mesh(pinchGeom, crownMaterial);
+      pinch.position.set(0, 0.35, 0.52);
+      pinch.rotation.x = Math.PI;
+      pinch.scale.set(1, 0.3, 1);
+      group.add(pinch);
+      
+      // Hat band
+      const bandGeom = new THREE.CylinderGeometry(0.62, 0.62, 0.08, 32, 1, true);
+      const band = new THREE.Mesh(bandGeom, bandMaterial);
+      band.position.y = 0.08;
+      group.add(band);
+      
+      // Brim
+      const brimGeom = new THREE.CylinderGeometry(1.1, 1.15, 0.06, 64, 1, false);
+      const brim = new THREE.Mesh(brimGeom, brimMaterial);
+      brim.position.y = -0.15;
+      brim.castShadow = true;
+      brim.receiveShadow = true;
+      group.add(brim);
+      
+      // Brim curve (front)
+      const brimCurveGeom = new THREE.TorusGeometry(1.12, 0.03, 8, 64, Math.PI);
+      const brimCurve = new THREE.Mesh(brimCurveGeom, brimMaterial);
+      brimCurve.position.set(0, -0.12, 0);
+      brimCurve.rotation.x = Math.PI / 2;
+      brimCurve.rotation.z = Math.PI;
+      group.add(brimCurve);
+      
+      return group;
+    }
+    
+    const fedora = createFedora();
+    scene.add(fedora);
+    
+    // Ground plane for shadows
+    const groundGeom = new THREE.PlaneGeometry(20, 20);
+    const groundMat = new THREE.ShadowMaterial({ opacity: 0.3 });
+    const ground = new THREE.Mesh(groundGeom, groundMat);
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -1;
+    ground.receiveShadow = true;
+    scene.add(ground);
+    
+    // Particle system for dissolution
+    const particleCount = 3000;
+    const particles = new THREE.BufferGeometry();
+    const particlePositions = new Float32Array(particleCount * 3);
+    const particleOriginalPositions = new Float32Array(particleCount * 3);
+    const particleVelocities = new Float32Array(particleCount * 3);
+    const particleSizes = new Float32Array(particleCount);
+    
+    // Sample positions from fedora geometry
+    function samplePositions() {
+      let idx = 0;
+      const samplesPerPart = Math.floor(particleCount / 8);
+      
+      // Crown samples
+      for (let i = 0; i < samplesPerPart && idx < particleCount; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const r = 0.55 + Math.random() * 0.05;
+        const y = 0.35 + Math.random() * 0.25;
+        particlePositions[idx * 3] = Math.cos(angle) * r;
+        particlePositions[idx * 3 + 1] = y;
+        particlePositions[idx * 3 + 2] = Math.sin(angle) * r;
+        particleSizes[idx] = 0.02 + Math.random() * 0.02;
+        idx++;
+      }
+      
+      // Brim samples
+      for (let i = 0; i < samplesPerPart && idx < particleCount; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const r = 0.7 + Math.random() * 0.45;
+        const y = -0.15 + (Math.random() - 0.5) * 0.06;
+        particlePositions[idx * 3] = Math.cos(angle) * r;
+        particlePositions[idx * 3 + 1] = y;
+        particlePositions[idx * 3 + 2] = Math.sin(angle) * r;
+        particleSizes[idx] = 0.02 + Math.random() * 0.025;
+        idx++;
+      }
+      
+      // Band samples
+      for (let i = 0; i < samplesPerPart / 2 && idx < particleCount; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const r = 0.63;
+        const y = 0.08 + (Math.random() - 0.5) * 0.08;
+        particlePositions[idx * 3] = Math.cos(angle) * r;
+        particlePositions[idx * 3 + 1] = y;
+        particlePositions[idx * 3 + 2] = Math.sin(angle) * r;
+        particleSizes[idx] = 0.015 + Math.random() * 0.015;
+        idx++;
+      }
+      
+      // Fill remaining with scattered positions
+      for (let i = idx; i < particleCount; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const r = Math.random() * 1.2;
+        const y = (Math.random() - 0.5) * 0.7;
+        particlePositions[i * 3] = Math.cos(angle) * r;
+        particlePositions[i * 3 + 1] = y;
+        particlePositions[i * 3 + 2] = Math.sin(angle) * r;
+        particleSizes[i] = 0.01 + Math.random() * 0.02;
+      }
+      
+      particleOriginalPositions.set(particlePositions);
+    }
+    
+    samplePositions();
+    
+    // Initialize velocities
+    for (let i = 0; i < particleCount; i++) {
+      particleVelocities[i * 3] = (Math.random() - 0.5) * 0.02;
+      particleVelocities[i * 3 + 1] = (Math.random() - 0.5) * 0.02;
+      particleVelocities[i * 3 + 2] = (Math.random() - 0.5) * 0.02;
+    }
+    
+    particles.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+    particles.setAttribute('size', new THREE.BufferAttribute(particleSizes, 1));
+    
+    const particleMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        time: { value: 0 },
+        color: { value: new THREE.Color(0xff3333) },
+        opacity: { value: 0 },
+        dissolved: { value: 0 },
+        reformed: { value: 0 }
+      },
+      vertexShader: `
+        attribute float size;
+        varying float vOpacity;
+        uniform float dissolved;
+        uniform float reformed;
+        uniform float opacity;
+        
+        void main() {
+          vOpacity = opacity * (1.0 - dissolved * 0.7 + reformed * 0.3);
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = size * (300.0 / -mvPosition.z) * (1.0 + dissolved * 0.5);
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 color;
+        uniform float time;
+        varying float vOpacity;
+        
+        void main() {
+          float dist = length(gl_PointCoord - vec2(0.5));
+          if (dist > 0.5) discard;
+          
+          float glow = 1.0 - dist * 2.0;
+          glow = pow(glow, 1.5);
+          
+          vec3 glowColor = color + vec3(0.3, 0.1, 0.0) * glow;
+          float alpha = glow * vOpacity;
+          
+          gl_FragColor = vec4(glowColor, alpha);
+        }
+      `,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    
+    const particleSystem = new THREE.Points(particles, particleMaterial);
+    particleSystem.visible = false;
+    scene.add(particleSystem);
+    
+    // Orbiting particles
+    const orbitCount = 50;
+    const orbitParticles = new THREE.BufferGeometry();
+    const orbitPositions = new Float32Array(orbitCount * 3);
+    const orbitAngles = new Float32Array(orbitCount);
+    const orbitRadii = new Float32Array(orbitCount);
+    const orbitYOffsets = new Float32Array(orbitCount);
+    const orbitSpeeds = new Float32Array(orbitCount);
+    const orbitSizes = new Float32Array(orbitCount);
+    
+    for (let i = 0; i < orbitCount; i++) {
+      orbitAngles[i] = Math.random() * Math.PI * 2;
+      orbitRadii[i] = 1.5 + Math.random() * 1.5;
+      orbitYOffsets[i] = (Math.random() - 0.5) * 1;
+      orbitSpeeds[i] = 0.2 + Math.random() * 0.4;
+      orbitSizes[i] = 0.01 + Math.random() * 0.02;
+    }
+    
+    orbitParticles.setAttribute('position', new THREE.BufferAttribute(orbitPositions, 3));
+    orbitParticles.setAttribute('size', new THREE.BufferAttribute(orbitSizes, 1));
+    
+    const orbitMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        time: { value: 0 },
+        color: { value: new THREE.Color(0xff4444) },
+        opacity: { value: 0 }
+      },
+      vertexShader: `
+        attribute float size;
+        varying float vSize;
+        
+        void main() {
+          vSize = size;
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = size * (400.0 / -mvPosition.z);
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 color;
+        uniform float time;
+        varying float vSize;
+        
+        void main() {
+          float dist = length(gl_PointCoord - vec2(0.5));
+          if (dist > 0.5) discard;
+          
+          float glow = 1.0 - dist * 2.0;
+          glow = pow(glow, 2.0);
+          
+          // Trail effect
+          vec3 trailColor = color + vec3(0.5, 0.2, 0.0) * (1.0 - glow);
+          
+          gl_FragColor = vec4(trailColor, glow * 0.8);
+        }
+      `,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    
+    const orbitSystem = new THREE.Points(orbitParticles, orbitMaterial);
+    orbitSystem.visible = false;
+    scene.add(orbitSystem);
+    
+    // State management
+    let state = 'spinning'; // spinning, dissolving, swirling, reforming, orbiting, reforming_hat
+    let stateTime = 0;
+    let rotationSpeed = prefersReducedMotion ? 0 : 0.01;
+    let dissolveProgress = 0;
+    let orbitOpacity = 0;
+    
+    // Interaction
+    let isHovered = false;
+    
+    canvas.addEventListener('mouseenter', () => {
+      if (prefersReducedMotion) return;
+      isHovered = true;
+      hint.classList.add('hidden');
+    });
+    
+    canvas.addEventListener('mouseleave', () => {
+      if (prefersReducedMotion) return;
+      isHovered = false;
+      if (state === 'spinning') {
+        // Don't interrupt if already in another state
+      }
+    });
+    
+    canvas.addEventListener('click', () => {
+      if (prefersReducedMotion) return;
+      if (state === 'spinning') {
+        state = 'dissolving';
+        stateTime = 0;
+        fedora.visible = true;
+        particleSystem.visible = true;
+        orbitSystem.visible = false;
+      }
+    });
+    
+    // Touch support
+    canvas.addEventListener('touchstart', (e) => {
+      if (prefersReducedMotion) return;
+      e.preventDefault();
+      if (state === 'spinning') {
+        state = 'dissolving';
+        stateTime = 0;
+        fedora.visible = true;
+        particleSystem.visible = true;
+        orbitSystem.visible = false;
+        hint.classList.add('hidden');
+      }
+    }, { passive: false });
+    
+    // Animation loop
+    const clock = new THREE.Clock();
+    
+    function animate() {
+      requestAnimationFrame(animate);
+      
+      const delta = clock.getDelta();
+      const elapsed = clock.getElapsedTime();
+      
+      // Update particle uniforms
+      particleMaterial.uniforms.time.value = elapsed;
+      orbitMaterial.uniforms.time.value = elapsed;
+      
+      // State machine
+      switch (state) {
+        case 'spinning':
+          if (!isHovered) {
+            rotationSpeed = Math.min(rotationSpeed + 0.0001, 0.015);
+          } else {
+            rotationSpeed = Math.max(rotationSpeed - 0.001, 0.002);
+          }
+          fedora.rotation.y += rotationSpeed;
+          fedora.rotation.x = Math.sin(elapsed * 0.5) * 0.1;
+          particleMaterial.uniforms.opacity.value = 0;
+          particleSystem.visible = false;
+          orbitSystem.visible = false;
+          break;
+          
+        case 'dissolving':
+          stateTime += delta;
+          dissolveProgress = Math.min(stateTime / 2, 1);
+          
+          particleMaterial.uniforms.opacity.value = dissolveProgress * 0.9;
+          particleMaterial.uniforms.dissolved.value = dissolveProgress;
+          
+          // Slow rotation
+          fedora.rotation.y += 0.002;
+          
+          // Hide fedora as particles take over
+          fedora.traverse((child) => {
+            if (child.isMesh) {
+              child.material.opacity = 1 - dissolveProgress;
+              child.material.transparent = true;
+            }
+          });
+          
+          // Scatter particles
+          const positions = particles.attributes.position.array;
+          for (let i = 0; i < particleCount; i++) {
+            const idx = i * 3;
+            const angle = elapsed * 0.5 + i * 0.01;
+            const radius = 0.5 + dissolveProgress * 2;
+            
+            particleVelocities[idx] += (Math.random() - 0.5) * 0.02 * dissolveProgress;
+            particleVelocities[idx + 1] += (Math.random() - 0.5) * 0.02 * dissolveProgress + 0.001;
+            particleVelocities[idx + 2] += (Math.random() - 0.5) * 0.02 * dissolveProgress;
+            
+            particleVelocities[idx] *= 0.98;
+            particleVelocities[idx + 1] *= 0.98;
+            particleVelocities[idx + 2] *= 0.98;
+            
+            positions[idx] += particleVelocities[idx];
+            positions[idx + 1] += particleVelocities[idx + 1];
+            positions[idx + 2] += particleVelocities[idx + 2];
+          }
+          particles.attributes.position.needsUpdate = true;
+          
+          if (dissolveProgress >= 1) {
+            fedora.visible = false;
+            state = 'swirling';
+            stateTime = 0;
+          }
+          break;
+          
+        case 'swirling':
+          stateTime += delta;
+          const swirlDuration = 2;
+          
+          particleMaterial.uniforms.opacity.value = 0.9;
+          
+          const positions2 = particles.attributes.position.array;
+          for (let i = 0; i < particleCount; i++) {
+            const idx = i * 3;
+            const originalX = particleOriginalPositions[idx];
+            const originalY = particleOriginalPositions[idx + 1];
+            const originalZ = particleOriginalPositions[idx + 2];
+            
+            const angle = elapsed * 0.8 + i * 0.002;
+            const radius = 2 + Math.sin(stateTime * 2 + i * 0.01) * 0.5;
+            const swirlStrength = Math.sin(stateTime * 1.5) * 0.5 + 0.5;
+            
+            // Swirl motion
+            positions2[idx] += Math.cos(angle) * 0.01 * swirlStrength;
+            positions2[idx + 1] += Math.sin(stateTime * 3 + i * 0.1) * 0.02;
+            positions2[idx + 2] += Math.sin(angle) * 0.01 * swirlStrength;
+            
+            // Gradual return pull
+            const pullStrength = stateTime / swirlDuration * 0.02;
+            positions2[idx] += (originalX - positions2[idx]) * pullStrength;
+            positions2[idx + 1] += (originalY - positions2[idx + 1]) * pullStrength;
+            positions2[idx + 2] += (originalZ - positions2[idx + 2]) * pullStrength;
+          }
+          particles.attributes.position.needsUpdate = true;
+          
+          if (stateTime > swirlDuration) {
+            state = 'reforming';
+            stateTime = 0;
+            particleMaterial.uniforms.dissolved.value = 0;
+          }
+          break;
+          
+        case 'reforming':
+          stateTime += delta;
+          const reformDuration = 1.5;
+          const reformProgress = Math.min(stateTime / reformDuration, 1);
+          
+          particleMaterial.uniforms.reformed.value = reformProgress;
+          
+          const positions3 = particles.attributes.position.array;
+          for (let i = 0; i < particleCount; i++) {
+            const idx = i * 3;
+            const originalX = particleOriginalPositions[idx];
+            const originalY = particleOriginalPositions[idx + 1];
+            const originalZ = particleOriginalPositions[idx + 2];
+            
+            // Eased return
+            const ease = 1 - Math.pow(1 - reformProgress, 3);
+            positions3[idx] += (originalX - positions3[idx]) * ease * 0.1;
+            positions3[idx + 1] += (originalY - positions3[idx + 1]) * ease * 0.1;
+            positions3[idx + 2] += (originalZ - positions3[idx + 2]) * ease * 0.1;
+          }
+          particles.attributes.position.needsUpdate = true;
+          
+          if (reformProgress >= 1) {
+            state = 'orbiting';
+            stateTime = 0;
+            particleSystem.visible = false;
+            orbitSystem.visible = true;
+            orbitOpacity = 0;
+            
+            // Reset fedora materials
+            fedora.traverse((child) => {
+              if (child.isMesh) {
+                child.material.opacity = 1;
+                child.material.transparent = false;
+              }
+            });
+          }
+          break;
+          
+        case 'orbiting':
+          stateTime += delta;
+          rotationSpeed = 0.003;
+          fedora.rotation.y += rotationSpeed;
+          
+          orbitOpacity = Math.min(orbitOpacity + delta * 0.5, 1);
+          orbitMaterial.uniforms.opacity.value = orbitOpacity * 0.7;
+          
+          // Update orbiting particles
+          const orbitPos = orbitParticles.attributes.position.array;
+          for (let i = 0; i < orbitCount; i++) {
+            orbitAngles[i] += orbitSpeeds[i] * delta * (0.5 + Math.sin(elapsed + i) * 0.2);
+            orbitYOffsets[i] = Math.sin(elapsed * orbitSpeeds[i] + i) * 0.3;
+            
+            orbitPos[i * 3] = Math.cos(orbitAngles[i]) * orbitRadii[i];
+            orbitPos[i * 3 + 1] = orbitYOffsets[i];
+            orbitPos[i * 3 + 2] = Math.sin(orbitAngles[i]) * orbitRadii[i];
+          }
+          orbitParticles.attributes.position.needsUpdate = true;
+          
+          // Slowly fade out orbiting particles
+          if (stateTime > 3) {
+            orbitOpacity = Math.max(orbitOpacity - delta * 0.3, 0);
+            orbitMaterial.uniforms.opacity.value = orbitOpacity * 0.7;
+            
+            if (orbitOpacity <= 0) {
+              state = 'spinning';
+              fedora.visible = true;
+              orbitSystem.visible = false;
+              rotationSpeed = 0.01;
+              hint.classList.remove('hidden');
+            }
+          }
+          break;
+      }
+      
+      // Subtle floating animation for fedora
+      if (state === 'spinning') {
+        fedora.position.y = Math.sin(elapsed * 0.8) * 0.05;
+      }
+      
+      renderer.render(scene, camera);
+    }
+    
+    // Handle resize
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+    
+    // Start animation
+    animate();
+  </script>
+</body>
+</html>
