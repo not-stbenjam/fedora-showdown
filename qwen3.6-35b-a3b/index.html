@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fedora</title>
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at 50% 30%, #1a1a2e 0%, #0f0f1a 40%, #050508 100%);
+  overflow: hidden;
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+#scene {
+  position: relative;
+  width: min(80vw, 600px);
+  height: min(80vh, 600px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  outline: none;
+}
+
+#scene::before {
+  content: '';
+  position: absolute;
+  width: 130%;
+  height: 130%;
+  top: -15%;
+  left: -15%;
+  background: radial-gradient(ellipse at center, rgba(227, 76, 38, 0.05) 0%, transparent 55%);
+  pointer-events: none;
+  transition: opacity 1.5s ease;
+}
+
+#scene.dissolved::before {
+  opacity: 0;
+}
+
+#hat-3d {
+  position: absolute;
+  width: 340px;
+  height: 340px;
+  transform-style: preserve-3d;
+  animation: spin 8s linear infinite;
+  transition: opacity 0.15s ease;
+  will-change: transform;
+}
+
+#hat-3d.dimmed {
+  opacity: 0;
+}
+
+#hat-3d canvas {
+  width: 100%;
+  height: 100%;
+  image-rendering: auto;
+}
+
+#particle-container {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+#particle-container.active {
+  opacity: 1;
+}
+
+#particle-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.caption {
+  margin-top: 2.2rem;
+  color: rgba(227, 76, 38, 0.55);
+  font-size: clamp(0.7rem, 1.8vw, 0.95rem);
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+  text-align: center;
+  opacity: 0;
+  animation: fadeIn 2s ease 0.8s forwards;
+}
+
+@keyframes spin {
+  from { transform: rotateY(0deg) rotateX(5deg); }
+  to   { transform: rotateY(360deg) rotateX(5deg); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #hat-3d { animation: none; transform: rotateY(0deg) rotateX(5deg); }
+  .caption { animation: none; opacity: 1; }
+}
+</style>
+</head>
+<body>
+
+<div id="scene" tabindex="0" role="img" aria-label="Spinning Fedora hat — tap or hover to interact">
+  <div id="hat-3d">
+    <canvas id="hat-canvas" width="340" height="340"></canvas>
+  </div>
+  <div id="particle-container">
+    <canvas id="particle-canvas"></canvas>
+  </div>
+</div>
+<p class="caption">Open Source · Open Future</p>
+
+<script>
+(function() {
+  'use strict';
+
+  /* ── DOM refs ── */
+  const scene      = document.getElementById('scene');
+  const hatEl      = document.getElementById('hat-3d');
+  const hatCvs     = document.getElementById('hat-canvas');
+  const hatCtx     = hatCvs.getContext('2d');
+  const pCont      = document.getElementById('particle-container');
+  const pCvs       = document.getElementById('particle-canvas');
+  const pCtx       = pCvs.getContext('2d');
+
+  const H = 340;          // hat canvas logical size
+  const DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+  /* ── State machine ── */
+  let phase   = 'spin';   // spin | burst | swirl | reform | done
+  let particles   = [];
+  let raf         = null;
+  let triggerT    = 0;
+  let reduced     = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  window.matchMedia('(prefers-reduced-motion: reduce)')
+    .addEventListener('change', e => { reduced = e.matches; });
+
+  /* ── Sizing ── */
+  function sizeP() {
+    const r = scene.getBoundingClientRect();
+    pCvs.width  = r.width  * DPR;
+    pCvs.height = r.height * DPR;
+    pCvs.style.width  = r.width  + 'px';
+    pCvs.style.height = r.height + 'px';
+    pCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  sizeP();
+
+  /* ── Draw the fedora ── */
+  function drawFedora(ctx) {
+    ctx.clearRect(0, 0, H, H);
+    ctx.save();
+    ctx.translate(H / 2, H / 2);
+
+    const s = H / 340;
+    const bw = 128 * s, bh = 20 * s;
+    const hw = 96 * s,  hh = 92 * s;
+    const cH = 52 * s;
+    const brimY = hh * 0.68;
+    const bandH = 9 * s;
+
+    /* ─ brim ─ */
+    ctx.beginPath();
+    ctx.ellipse(0, brimY, bw, bh, 0, 0, Math.PI * 2);
+    const bg = ctx.createRadialGradient(0, brimY, 4, 0, brimY, bw);
+    bg.addColorStop(0, '#3c2c2c');
+    bg.addColorStop(0.6, '#2a1c1c');
+    bg.addColorStop(1, '#181010');
+    ctx.fillStyle = bg;
+    ctx.fill();
+
+    /* ─ hat body ─ */
+    ctx.beginPath();
+    ctx.moveTo(-hw, brimY);
+    ctx.bezierCurveTo(-hw * .94, brimY - cH * .35,
+                       -hw * .82, brimY - cH * .65,
+                       -hw * .68, brimY - cH);
+    ctx.bezierCurveTo(-hw * .42, brimY - cH - hh * .32,
+                       -hw * .2, brimY - cH - hh * .34,
+                        0,      brimY - cH - hh * .30);
+    ctx.bezierCurveTo( hw * .2, brimY - cH - hh * .34,
+                        hw * .42, brimY - cH - hh * .32,
+                        hw * .68, brimY - cH);
+    ctx.bezierCurveTo( hw * .82, brimY - cH * .65,
+                        hw * .94, brimY - cH * .35,
+                        hw,      brimY);
+    ctx.closePath();
+
+    const hg = ctx.createLinearGradient(-hw, -hh, hw, 0);
+    hg.addColorStop(0,   '#352828');
+    hg.addColorStop(.3,  '#443434');
+    hg.addColorStop(.5,  '#503c3c');
+    hg.addColorStop(.7,  '#443434');
+    hg.addColorStop(1,   '#352828');
+    ctx.fillStyle = hg;
+    ctx.fill();
+
+    /* ─ red band ─ */
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(-hw, brimY);
+    ctx.bezierCurveTo(-hw * .94, brimY - cH * .35,
+                       -hw * .82, brimY - cH * .65,
+                       -hw * .68, brimY - cH);
+    ctx.bezierCurveTo(-hw * .42, brimY - cH - hh * .32,
+                       -hw * .2, brimY - cH - hh * .34,
+                        0,      brimY - cH - hh * .30);
+    ctx.bezierCurveTo( hw * .2, brimY - cH - hh * .34,
+                        hw * .42, brimY - cH - hh * .32,
+                        hw * .68, brimY - cH);
+    ctx.bezierCurveTo( hw * .82, brimY - cH * .65,
+                        hw * .94, brimY - cH * .35,
+                        hw,      brimY);
+    ctx.closePath();
+    ctx.clip();
+    ctx.fillStyle = '#e34c26';
+    const bY = brimY - bandH * .35;
+    ctx.fillRect(-hw - 12, bY, hw * 2 + 24, bandH);
+    /* thin band lines */
+    ctx.strokeStyle = 'rgba(255,255,255,.07)';
+    ctx.lineWidth = .8;
+    ctx.beginPath();
+    ctx.moveTo(-hw, bY); ctx.lineTo(hw, bY);
+    ctx.moveTo(-hw, bY + bandH); ctx.lineTo(hw, bY + bandH);
+    ctx.stroke();
+    ctx.restore();
+
+    /* ─ subtle shading / highlights ─ */
+    const lg = ctx.createRadialGradient(0, brimY + 6, 4, 0, brimY + 6, bw);
+    lg.addColorStop(0, 'rgba(0,0,0,.18)');
+    lg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = lg;
+    ctx.beginPath();
+    ctx.ellipse(0, brimY + 6, bw, bh, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.ellipse(0, brimY - cH - hh * .29, hw * .48, 5, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,.025)';
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.ellipse(0, brimY, bw * .94, bh * .94, 0, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(227,76,38,.1)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  drawFedora(hatCtx);
+
+  /* ── Sample hat pixels → particle targets ── */
+  function sample() {
+    const tmp = document.createElement('canvas');
+    tmp.width = H; tmp.height = H;
+    const tc = tmp.getContext('2d');
+    drawFedora(tc);
+    const img = tc.getImageData(0, 0, H, H).data;
+    const out = [];
+    const sp = 4;
+    for (let y = 0; y < H; y += sp) {
+      for (let x = 0; x < H; x += sp) {
+        const i = (y * H + x) * 4;
+        if (img[i + 3] > 40) {
+          out.push({ x, y, r: img[i], g: img[i+1], b: img[i+2] });
+        }
+      }
+    }
+    return out;
+  }
+
+  /* ── Particle factory ── */
+  function mkP(samp, cw, ch) {
+    const scx = cw / H, scy = ch / H;
+    const tgX = samp.x * scx, tgY = samp.y * scy;
+    const spread = Math.max(cw, ch) * .7;
+    const a = Math.random() * Math.PI * 2;
+    const d = 100 + Math.random() * spread;
+    const isOrbiter = Math.random() < .05;
+    return {
+      sx: cw/2 + Math.cos(a) * d,
+      sy: ch/2 + Math.sin(a) * d,
+      tgX, tgY,
+      r: samp.r, g: samp.g, b: samp.b,
+      sz: 1 + Math.random() * 2,
+      op: 0,
+      sa: Math.random() * Math.PI * 2,           // swirl angle
+      sr: 40 + Math.random() * 140,              // swirl radius
+      ss: (.002 + Math.random() * .006) * (Math.random() > .5 ? 1 : -1),
+      orb: Math.random() * Math.PI * 2,          // orbit angle
+      or: 50 + Math.random() * 110,              // orbit radius
+      os: (.003 + Math.random() * .01) * (Math.random() > .5 ? 1 : -1),
+      isOrbiter,
+      delay: Math.random() * 600,
+      spark: .55 + Math.random() * .45,
+      bx: Math.cos(a) * (30 + Math.random() * 80), // burst offset
+      by: Math.sin(a) * (30 + Math.random() * 80),
+      trail: []
+    };
+  }
+
+  /* ── Trigger ── */
+  let busy = false;
+  function trigger() {
+    if (phase !== 'spin' && phase !== 'done' || busy) return;
+    busy = true;
+    phase = 'spin';        // reset phase machine
+
+    if (reduced) {
+      hatEl.style.opacity = '.25';
+      setTimeout(() => { hatEl.style.opacity = '1'; busy = false; }, 700);
+      return;
+    }
+
+    hatEl.classList.add('dimmed');
+    scene.classList.add('dissolved');
+    sizeP();
+
+    const s = scene.getBoundingClientRect();
+    const cw = s.width, ch = s.height;
+    const samples = sample();
+    particles = samples.map(s => mkP(s, cw, ch));
+
+    /* hide hat, show particles */
+    hatEl.style.opacity = '0';
+    pCont.classList.add('active');
+
+    triggerT = performance.now();
+    if (!raf) { raf = loop; }
+  }
+
+  /* ── Animation loop ── */
+  function loop(ts) {
+    const t = ts - triggerT;
+    const cnt = particles.length;
+    const cw = pCvs.width / DPR;
+    const ch = pCvs.height / DPR;
+
+    /* ── Phase 1 — burst (0–1.6 s) ── */
+    if (t < 1600) {
+      const e = easeCubic(Math.min(t / 1600, 1));
+      for (let i = 0; i < cnt; i++) {
+        const p = particles[i];
+        if (t < p.delay) continue;
+        const f = (t - p.delay) / 1600;
+        if (f < 0) continue;
+        const fe = easeCubic(Math.min(f, 1));
+        p.x = p.tgX + p.bx * fe;
+        p.y = p.tgY + p.by * fe - 25 * fe;
+        p.op = Math.min(fe * 2.2, 1) * p.spark;
+      }
+    }
+
+    /* ── Phase 2 — swirl (1.2–4.8 s) ── */
+    if (t > 1200 && t < 4800) {
+      const f = Math.min((t - 1200) / 3600, 1);
+      const fe = easeCubic(f);
+      for (let i = 0; i < cnt; i++) {
+        const p = particles[i];
+        if (t < p.delay) continue;
+        p.sa += p.ss;
+        const sx = Math.cos(p.sa) * p.sr * (1 - fe * .4);
+        const sy = Math.sin(p.sa) * p.sr * .55 * (1 - fe * .4);
+        const cx = cw / 2 + (Math.random() - .5) * 30;
+        const cy = ch / 2 + (Math.random() - .5) * 30;
+        p.x = cx + sx;
+        p.y = cy + sy;
+        p.op = p.isOrbiter
+          ? (.25 + Math.sin(ts * .002 + i) * .12) * p.spark
+          : Math.max(0, (1 - fe * 1.2)) * p.spark;
+      }
+    }
+
+    /* ── Phase 3 — reform (4.2–6.8 s) ── */
+    if (t > 4200) {
+      const f = Math.min((t - 4200) / 2600, 1);
+      const fe = easeCubic(f);
+      for (let i = 0; i < cnt; i++) {
+        const p = particles[i];
+        if (t < p.delay) continue;
+        p.x = p.sx + (p.tgX - p.sx) * fe;
+        p.y = p.sy + (p.tgY - p.sy) * fe;
+        p.op = fe * p.spark;
+      }
+      /* fade hat back in at end */
+      if (f > .75) {
+        const hf = (f - .75) / .25;
+        hatEl.style.opacity = easeCubic(hf).toString();
+      }
+    }
+
+    /* ── Phase 4 — done ── */
+    if (t > 6800) {
+      hatEl.style.opacity = '1';
+      hatEl.classList.remove('dimmed');
+      hatEl.style.transition = 'opacity .5s ease';
+      scene.classList.remove('dissolved');
+
+      /* keep orbiters alive */
+      const orbit = particles.filter(p => p.isOrbiter);
+      let alive = true;
+      function loopDone() {
+        if (!alive) return;
+        pCtx.clearRect(0, 0, cw, ch);
+        const now = performance.now();
+        for (const p of orbit) {
+          p.orb += p.os;
+          const ox = Math.cos(p.orb) * p.or;
+          const oy = Math.sin(p.orb) * p.or * .55;
+          const pulse = .2 + Math.sin(now * .002 + p.or) * .1;
+          p.op = pulse * p.spark;
+          p.x = cw/2 + ox;
+          p.y = ch/2 + oy;
+          /* trail */
+          p.trail.push({ x: p.x, y: p.y });
+          if (p.trail.length > 10) p.trail.shift();
+          for (let ti = 0; ti < p.trail.length; ti++) {
+            const tr = p.trail[ti];
+            const ta = (ti / p.trail.length) * .12;
+            pCtx.globalAlpha = ta;
+            pCtx.fillStyle = 'rgba(227,76,38,1)';
+            pCtx.beginPath();
+            pCtx.arc(tr.x, tr.y, p.sz * .5, 0, Math.PI * 2);
+            pCtx.fill();
+          }
+          pCtx.globalAlpha = p.op;
+          const g = pCtx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.sz * 2.5);
+          g.addColorStop(0, `rgba(255,210,190,${p.op})`);
+          g.addColorStop(.5, `rgba(227,76,38,${p.op * .3})`);
+          g.addColorStop(1, 'rgba(227,76,38,0)');
+          pCtx.fillStyle = g;
+          pCtx.beginPath();
+          pCtx.arc(p.x, p.y, p.sz * 2.5, 0, Math.PI * 2);
+          pCtx.fill();
+        }
+        if (alive) raf = requestAnimationFrame(loopDone);
+      }
+      loopDone();
+      phase = 'done';
+      busy = false;
+      /* allow re-trigger after 3s */
+      setTimeout(() => {
+        hatEl.style.transition = '';
+        pCont.classList.remove('active');
+        raf = null;
+      }, 3000);
+      return;
+    }
+
+    renderAll(cnt, cw, ch);
+
+    if (phase !== 'done') raf = requestAnimationFrame(loop);
+  }
+
+  function renderAll(cnt, cw, ch) {
+    pCtx.clearRect(0, 0, cw, ch);
+    for (let i = 0; i < cnt; i++) {
+      const p = particles[i];
+      if (p.op < .005) continue;
+      pCtx.save();
+      pCtx.globalAlpha = Math.min(p.op, 1);
+      const gr = pCtx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.sz * 3);
+      gr.addColorStop(0, `rgba(${p.r},${p.g},${p.b},${p.op})`);
+      gr.addColorStop(.4, `rgba(${p.g},${p.r * .4},${p.b * .3},${p.op * .45})`);
+      gr.addColorStop(1, `rgba(${p.g},${p.r * .4},${p.b * .3},0)`);
+      pCtx.fillStyle = gr;
+      pCtx.beginPath();
+      pCtx.arc(p.x, p.y, p.sz * 3, 0, Math.PI * 2);
+      pCtx.fill();
+      pCtx.restore();
+    }
+  }
+
+  /* ── Helpers ── */
+  function easeCubic(t) { return t * t * (3 - 2 * t); }
+
+  /* ── Events ── */
+  scene.addEventListener('mouseenter', trigger);
+  scene.addEventListener('touchstart', e => { e.preventDefault(); trigger(); }, { passive: false });
+  scene.addEventListener('focus',     trigger);
+
+  let resizeTimer;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { if (phase !== 'spin' && phase !== 'done') sizeP(); }, 150);
+  });
+
+})();
+</script>
+</body>
+</html>
