@@ -788,6 +788,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
   const buttons = [];
   const gridVisible = new Set();
   let voteData = {};
+  let gridCustomized = false;
 
   function init() {
     let lastGroup = null;
@@ -886,6 +887,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
 
   function handleTabClick(idx) {
     if (mode === "grid") {
+      gridCustomized = true;
       if (gridVisible.has(idx)) {
         if (gridVisible.size > 1) gridVisible.delete(idx);
       } else if (gridVisible.size < 4) {
@@ -1121,6 +1123,21 @@ And respect reduced motion. Return only the finished HTML file.</div>
         const d = map[v.dataset.model];
         v.textContent = d ? d.avg_rating + " (" + d.count + ")" : "";
       });
+      if (!gridCustomized) {
+        const top4 = MODELS
+          .map((m, i) => ({ i, d: map[m.id] }))
+          .filter(x => x.d)
+          .sort((a, b) => b.d.avg_rating - a.d.avg_rating || b.d.count - a.d.count)
+          .slice(0, 4)
+          .map(x => x.i);
+        if (top4.length === 4) {
+          gridVisible.clear();
+          top4.forEach(i => gridVisible.add(i));
+          const gridContainer = document.getElementById("viewer");
+          top4.forEach(i => gridContainer.appendChild(frames[i]));
+          if (mode === "grid") { updateTabStyles(); applyVisibility(); }
+        }
+      }
     } catch {}
   }
 
