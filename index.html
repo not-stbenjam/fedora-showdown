@@ -873,6 +873,15 @@ And respect reduced motion. Return only the finished HTML file.</div>
     const hashIdx = hashModel ? MODELS.findIndex(m => m.id === hashModel) : -1;
     selectTab(hashIdx >= 0 ? hashIdx : 0);
     setMode("single");
+    if (hashIdx >= 0) requestAnimationFrame(() => {
+      const target = buttons[hashIdx];
+      const container = document.getElementById("model-list");
+      const ct = container.getBoundingClientRect();
+      const et = target.getBoundingClientRect();
+      if (et.top < ct.top || et.bottom > ct.bottom) {
+        container.scrollTop += et.top - ct.top - 8;
+      }
+    });
   }
 
   function handleTabClick(idx) {
@@ -899,7 +908,14 @@ And respect reduced motion. Return only the finished HTML file.</div>
     const scrollTarget = (idx === 0 || MODELS[idx].group !== MODELS[idx - 1].group)
       ? buttons[idx].previousElementSibling || buttons[idx]
       : buttons[idx];
-    scrollTarget.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    const container = document.getElementById("model-list");
+    const ct = container.getBoundingClientRect();
+    const et = scrollTarget.getBoundingClientRect();
+    if (et.top < ct.top) {
+      container.scrollTop += et.top - ct.top - 8;
+    } else if (et.bottom > ct.bottom) {
+      container.scrollTop += et.bottom - ct.bottom + 8;
+    }
   }
 
   function updateTabStyles() {
