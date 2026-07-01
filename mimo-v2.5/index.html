@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fedora Logo</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(ellipse at 50% 40%, #1a1a2e 0%, #0d0d1a 60%, #05050a 100%);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    overflow: hidden;
+    color: #fff;
+  }
+
+  .scene {
+    position: relative;
+    width: min(340px, 80vw);
+    height: min(340px, 80vw);
+    perspective: 900px;
+    cursor: pointer;
+    z-index: 1;
+  }
+
+  .fedora {
+    position: absolute;
+    inset: 0;
+    transform-style: preserve-3d;
+    animation: spin 6s linear infinite;
+    transition: opacity 0.4s ease;
+    filter: drop-shadow(0 30px 40px rgba(0,0,0,0.7));
+  }
+
+  @keyframes spin {
+    from { transform: rotateY(0deg) rotateX(-8deg); }
+    to { transform: rotateY(360deg) rotateX(-8deg); }
+  }
+
+  .hat-brim {
+    position: absolute;
+    width: 280px;
+    height: 60px;
+    bottom: 100px;
+    left: 50%;
+    transform: translateX(-50%) rotateX(65deg) translateZ(10px);
+    background: linear-gradient(180deg, #b71c1c 0%, #8b0000 50%, #6b0000 100%);
+    border-radius: 50%;
+    box-shadow:
+      0 8px 20px rgba(0,0,0,0.5),
+      inset 0 -5px 15px rgba(0,0,0,0.4),
+      inset 0 5px 10px rgba(255,100,100,0.15);
+  }
+
+  .hat-crown {
+    position: absolute;
+    width: 170px;
+    height: 140px;
+    bottom: 110px;
+    left: 50%;
+    transform: translateX(-50%) translateZ(20px);
+    background: linear-gradient(135deg, #d32f2f 0%, #b71c1c 30%, #8b0000 70%, #5c0000 100%);
+    border-radius: 50% 50% 45% 45% / 60% 60% 40% 40%;
+    box-shadow:
+      inset -20px -10px 30px rgba(0,0,0,0.5),
+      inset 15px 10px 20px rgba(255,150,150,0.1),
+      0 0 40px rgba(183,28,28,0.3);
+  }
+
+  .hat-dent {
+    position: absolute;
+    width: 100px;
+    height: 50px;
+    bottom: 185px;
+    left: 50%;
+    transform: translateX(-50%) translateZ(25px);
+    background: linear-gradient(180deg, #7a1515 0%, #5c0000 100%);
+    border-radius: 0 0 50% 50% / 0 0 100% 100%;
+    box-shadow: inset 0 10px 20px rgba(0,0,0,0.6);
+  }
+
+  .hat-band {
+    position: absolute;
+    width: 174px;
+    height: 18px;
+    bottom: 115px;
+    left: 50%;
+    transform: translateX(-50%) translateZ(22px);
+    background: linear-gradient(90deg, #1a1a1a 0%, #333 50%, #1a1a1a 100%);
+    border-radius: 4px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+  }
+
+  .hat-band::after {
+    content: '';
+    position: absolute;
+    width: 30px;
+    height: 12px;
+    background: linear-gradient(135deg, #ffd700 0%, #b8860b 50%, #8b6914 100%);
+    border-radius: 3px;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 10px rgba(255,215,0,0.4);
+  }
+
+  .caption {
+    margin-top: 20px;
+    font-size: clamp(14px, 3vw, 18px);
+    font-weight: 300;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.7);
+    text-shadow: 0 0 20px rgba(183,28,28,0.5);
+    z-index: 2;
+  }
+
+  canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  .ambient {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .fedora { animation: none; transform: rotateX(-8deg) rotateY(0deg); }
+  }
+</style>
+</head>
+<body>
+
+<div class="ambient" id="ambient"></div>
+
+<div class="scene" id="scene">
+  <div class="fedora" id="fedora">
+    <div class="hat-brim"></div>
+    <div class="hat-crown"></div>
+    <div class="hat-dent"></div>
+    <div class="hat-band"></div>
+  </div>
+  <canvas id="canvas"></canvas>
+</div>
+<div class="caption">Red Hat</div>
+
+<script>
+(() => {
+  const scene = document.getElementById('scene');
+  const fedora = document.getElementById('fedora');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  let W = 0, H = 0;
+  const particles = [];
+  const orbitParticles = [];
+  let state = 'idle';
+  let hovering = false;
+  let dissolveStartTime = 0;
+  let animFrame = 0;
+
+  const DISSOLVE_MS = 1200;
+  const HOLD_MS = 900;
+  const REFORM_MS = 1200;
+
+  /* ── canvas sizing ──────────────────────────────── */
+  function resize() {
+    const r = scene.getBoundingClientRect();
+    W = r.width; H = r.height;
+    const dpr = devicePixelRatio || 1;
+    canvas.width  = W * dpr;
+    canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  addEventListener('resize', resize);
+  resize();
+
+  /* ── easing ─────────────────────────────────────── */
+  const ease = {
+    inOutCubic: t => t < .5 ? 4*t*t*t : 1 - Math.pow(-2*t+2,3)/2,
+    outCubic:   t => 1 - Math.pow(1-t,3),
+    inCubic:    t => t*t*t,
+  };
+
+  /* ── sample hat silhouette for particle home positions ── */
+  function sampleHat(n) {
+    const pts = [], cx = W/2, cy = H/2;
+    for (let i = 0; i < n; i++) {
+      const r = Math.random();
+      let x, y;
+      if (r < .45) {                          // crown
+        const a = Math.random()*Math.PI*2;
+        x = cx + Math.cos(a)*(42 + Math.random()*40);
+        y = cy - 15 + Math.sin(a)*(55 + Math.random()*35);
+      } else if (r < .75) {                   // brim
+        const a = Math.random()*Math.PI*2;
+        x = cx + Math.cos(a)*(100 + Math.random()*40);
+        y = cy + 35 + Math.sin(a)*18;
+      } else {                                 // dent / band
+        const a = Math.random()*Math.PI;
+        x = cx + Math.cos(a)*(20 + Math.random()*35);
+        y = cy - 30 + Math.sin(a)*12;
+      }
+      pts.push({x, y});
+    }
+    return pts;
+  }
+
+  /* ── build particle array ───────────────────────── */
+  function buildParticles() {
+    particles.length = 0;
+    const homes = sampleHat(1100);
+    const cx = W/2, cy = H/2;
+    homes.forEach(h => {
+      const a = Math.random()*Math.PI*2;
+      const d = 100 + Math.random()*300;
+      particles.push({
+        hx: h.x, hy: h.y,                          // home
+        tx: cx + Math.cos(a)*d, ty: cy + Math.sin(a)*d,  // scatter target
+        x: h.x, y: h.y,
+        sz: 1.4 + Math.random()*2.8,
+        hue: Math.random()*22,
+        lit: 45 + Math.random()*30,
+        alpha: .7 + Math.random()*.3,
+        delay: Math.random()*.25,
+        swirl: Math.random()*Math.PI*2,
+        swirlSpd: (Math.random()-.5)*3,
+        swirlR: 20 + Math.random()*60,
+      });
+    });
+  }
+
+  /* ── draw one particle with soft glow ───────────── */
+  function drawP(x, y, sz, hue, lit, alpha) {
+    ctx.beginPath();
+    ctx.arc(x, y, sz, 0, Math.PI*2);
+    ctx.fillStyle = `hsla(${hue},80%,${lit}%,${alpha})`;
+    ctx.fill();
+
+    const g = ctx.createRadialGradient(x, y, 0, x, y, sz*3.5);
+    g.addColorStop(0, `hsla(${hue},90%,${lit}%,${alpha*.3})`);
+    g.addColorStop(1, `hsla(${hue},90%,${lit}%,0)`);
+    ctx.beginPath();
+    ctx.arc(x, y, sz*3.5, 0, Math.PI*2);
+    ctx.fillStyle = g;
+    ctx.fill();
+  }
+
+  /* ── main particle render per frame ─────────────── */
+  function renderParticles(t) {
+    ctx.clearRect(0, 0, W, H);
+    if (state === 'idle') return;
+
+    const elapsed = t - dissolveStartTime;
+
+    /* ── dissolving ── */
+    if (state === 'dissolving') {
+      const p = Math.min(elapsed / DISSOLVE_MS, 1);
+      const ep = ease.inOutCubic(p);
+
+      particles.forEach(pt => {
+        const local = Math.max(0, (ep - pt.delay*.1) / (1 - pt.delay*.1));
+        const e = ease.outCubic(Math.min(local, 1));
+        pt.x = pt.hx + (pt.tx - pt.hx)*e;
+        pt.y = pt.hy + (pt.ty - pt.hy)*e;
+        pt.x += Math.sin(t*.003*pt.swirlSpd + pt.swirl)*pt.swirlR*(1-e);
+        pt.y += Math.cos(t*.003*pt.swirlSpd + pt.swirl)*pt.swirlR*(1-e);
+
+        const a = pt.alpha * (.6 + .4*Math.sin(t*.005 + pt.swirl));
+        const s = pt.sz * (1 + .25*Math.sin(t*.004 + pt.swirl));
+        drawP(pt.x, pt.y, s, pt.hue, pt.lit, a);
+      });
+
+      if (p >= 1) { state = 'holding'; dissolveStartTime = t; }
+      return;
+    }
+
+    /* ── holding (swirling) ── */
+    if (state === 'holding') {
+      particles.forEach(pt => {
+        pt.x = pt.tx + Math.sin(t*.002*pt.swirlSpd + pt.swirl)*pt.swirlR;
+        pt.y = pt.ty + Math.cos(t*.002*pt.swirlSpd + pt.swirl)*pt.swirlR;
+        const a = pt.alpha * (.5 + .5*Math.sin(t*.004 + pt.swirl));
+        drawP(pt.x, pt.y, pt.sz, pt.hue, pt.lit, a);
+      });
+
+      if (!hovering && elapsed >= HOLD_MS) {
+        state = 'reforming';
+        dissolveStartTime = t;
+      }
+      return;
+    }
+
+    /* ── reforming ── */
+    if (state === 'reforming') {
+      const p = Math.min(elapsed / REFORM_MS, 1);
+      const ep = ease.inOutCubic(p);
+
+      particles.forEach(pt => {
+        const e = ease.outCubic(ep);
+        const cx = pt.tx + Math.sin(t*.002*pt.swirlSpd + pt.swirl)*pt.swirlR;
+        const cy = pt.ty + Math.cos(t*.002*pt.swirlSpd + pt.swirl)*pt.swirlR;
+        pt.x = cx + (pt.hx - cx)*e;
+        pt.y = cy + (pt.hy - cy)*e;
+
+        const a = pt.alpha * (.6 + .4*Math.sin(t*.005 + pt.swirl));
+        const shrink = 1 + .3*(1-e)*Math.sin(t*.004 + pt.swirl);
+        drawP(pt.x, pt.y, pt.sz*shrink, pt.hue, pt.lit, a);
+      });
+
+      if (p >= 1) {
+        state = 'reformed';
+        fedora.style.opacity = '1';
+        fedora.style.animationPlayState = 'running';
+        spawnOrbit(t);
+        setTimeout(() => {
+          if (state === 'reformed') {
+            state = 'idle';
+            cancelAnimationFrame(animFrame);
+            orbitParticles.length = 0;
+            ctx.clearRect(0, 0, W, H);
+          }
+        }, 2200);
+      }
+      return;
+    }
+
+    /* ── reformed — orbiting embers ── */
+    if (state === 'reformed') {
+      const cx = W/2, cy = H/2;
+      orbitParticles.forEach(op => {
+        op.angle += op.spd * .02;
+        const x = cx + Math.cos(op.angle) * op.r;
+        const y = cy + op.yOff + Math.sin(op.angle*.7)*30;
+
+        // store trail snapshot (fresh object each frame)
+        op.trail.push({x, y, a: .55});
+        if (op.trail.length > 22) op.trail.shift();
+
+        // draw trail
+        for (let i = 0; i < op.trail.length; i++) {
+          const tr = op.trail[i];
+          tr.a *= .91;
+          if (tr.a > .02) {
+            ctx.beginPath();
+            ctx.arc(tr.x, tr.y, op.sz*tr.a, 0, Math.PI*2);
+            ctx.fillStyle = `hsla(${op.hue},80%,${op.lit}%,${tr.a*.35})`;
+            ctx.fill();
+          }
+        }
+
+        const g = .6 + .4*Math.sin(t*.004 + op.phase);
+        drawP(x, y, op.sz, op.hue, op.lit, g);
+      });
+    }
+  }
+
+  function spawnOrbit(t) {
+    orbitParticles.length = 0;
+    for (let i = 0; i < 14; i++) {
+      orbitParticles.push({
+        angle: Math.random()*Math.PI*2,
+        r: 120 + Math.random()*60,
+        spd: .3 + Math.random()*.5,
+        sz: 1.5 + Math.random()*2,
+        hue: Math.random()*25,
+        lit: 50 + Math.random()*25,
+        yOff: (Math.random()-.5)*80,
+        phase: Math.random()*Math.PI*2,
+        trail: [],
+      });
+    }
+  }
+
+  /* ── animation loop ─────────────────────────────── */
+  function loop(t) {
+    renderParticles(t);
+    if (state !== 'idle') animFrame = requestAnimationFrame(loop);
+  }
+
+  /* ── interaction ────────────────────────────────── */
+  function dissolve() {
+    if (reducedMotion || state === 'dissolving' || state === 'holding') return;
+    buildParticles();
+    state = 'dissolving';
+    dissolveStartTime = performance.now();
+    fedora.style.animationPlayState = 'paused';
+    fedora.style.opacity = '0';
+    cancelAnimationFrame(animFrame);
+    animFrame = requestAnimationFrame(loop);
+  }
+
+  function reform() {
+    if (state === 'dissolving' || state === 'reforming') return;
+    if (state === 'holding') {
+      state = 'reforming';
+      dissolveStartTime = performance.now();
+    }
+  }
+
+  scene.addEventListener('mouseenter',  () => { hovering = true;  dissolve(); });
+  scene.addEventListener('mouseleave',  () => { hovering = false; reform(); });
+  scene.addEventListener('touchstart',  e => { e.preventDefault(); hovering = true;  dissolve(); }, {passive:false});
+  scene.addEventListener('touchend',    () => { hovering = false; reform(); });
+
+  /* ── ambient background motes ───────────────────── */
+  const aCvs = document.createElement('canvas');
+  document.getElementById('ambient').appendChild(aCvs);
+  const ax = aCvs.getContext('2d');
+  const dots = [];
+
+  function resizeAmbient() {
+    const dpr = devicePixelRatio || 1;
+    aCvs.width  = innerWidth*dpr;
+    aCvs.height = innerHeight*dpr;
+    aCvs.style.width  = innerWidth+'px';
+    aCvs.style.height = innerHeight+'px';
+    ax.setTransform(dpr,0,0,dpr,0,0);
+  }
+  addEventListener('resize', resizeAmbient);
+  resizeAmbient();
+
+  for (let i = 0; i < 35; i++) {
+    dots.push({
+      x: Math.random()*innerWidth,
+      y: Math.random()*innerHeight,
+      vx: (Math.random()-.5)*.18,
+      vy: (Math.random()-.5)*.18,
+      sz: .8 + Math.random()*1.2,
+      a: .08 + Math.random()*.15,
+      h: Math.random()*30,
+    });
+  }
+
+  function loopAmbient() {
+    ax.clearRect(0, 0, innerWidth, innerHeight);
+    dots.forEach(d => {
+      d.x += d.vx; d.y += d.vy;
+      if (d.x < 0) d.x = innerWidth;
+      if (d.x > innerWidth) d.x = 0;
+      if (d.y < 0) d.y = innerHeight;
+      if (d.y > innerHeight) d.y = 0;
+      ax.beginPath();
+      ax.arc(d.x, d.y, d.sz, 0, Math.PI*2);
+      ax.fillStyle = `hsla(${d.h},60%,50%,${d.a})`;
+      ax.fill();
+    });
+    requestAnimationFrame(loopAmbient);
+  }
+  if (!reducedMotion) loopAmbient();
+})();
+</script>
+</body>
+</html>

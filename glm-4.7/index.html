@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fedora Hero</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            width: 100%; height: 100%; overflow: hidden;
+            background: #0a0a0f;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        .hero {
+            position: relative;
+            width: 100%; height: 100%;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            background: radial-gradient(ellipse at center bottom, #1a1a2e 0%, #0a0a0f 70%);
+        }
+        canvas { display: block; }
+        .caption {
+            position: absolute;
+            bottom: 15%;
+            color: rgba(255,255,255,0.5);
+            font-size: clamp(0.875rem, 2vw, 1.125rem);
+            font-weight: 300;
+            letter-spacing: 0.3em;
+            text-transform: uppercase;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            canvas { animation: none !important; }
+            .caption { color: rgba(255,255,255,0.7); }
+        }
+    </style>
+</head>
+<body>
+    <div class="hero">
+        <canvas id="canvas"></canvas>
+        <div class="caption">Open Source Intelligence</div>
+    </div>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        let width, height, cx, cy, scale;
+        let mouseX = 0, mouseY = 0;
+        let isHovered = false;
+        let isTouched = false;
+        let time = 0;
+        let hatPoints = [];
+        let particles = [];
+        let orbitParticles = [];
+        let spinAngle = 0;
+        let spinSpeed = 0.008;
+        let targetSpinSpeed = 0.008;
+        let dissolveProgress = 0;
+        let isDissolving = false;
+        let isReforming = false;
+        let reformDelay = 0;
+        let orbitParticlesCreated = false;
+
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+            cx = width / 2;
+            cy = height * 0.42;
+            scale = Math.min(width, height) / 900;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // Fedora shape points (side profile)
+        function createHatPoints() {
+            hatPoints = [];
+            const baseY = 0;
+            const brimWidth = 160;
+            const brimHeight = 15;
+            const crownWidth = 85;
+            const crownHeight = 110;
+            const indentY = baseY - brimHeight - 30;
+            const indentDepth = 12;
+            const bandY = baseY - brimHeight - 5;
+            const bandHeight = 18;
+
+            // Generate 3D points for fedora
+            const segments = 48;
+            for (let i = 0; i < segments; i++) {
+                const angle = (i / segments) * Math.PI * 2;
+                const cos = Math.cos(angle);
+                const sin = Math.sin(angle);
+
+                // Brim - top surface
+                for (let r = 30; r <= brimWidth; r += 8) {
+                    const y = baseY - brimHeight * 0.3;
+                    hatPoints.push({ x: cos * r, y: y, z: sin * r, type: 'brimTop' });
+                }
+
+                // Brim - bottom surface
+                for (let r = 30; r <= brimWidth; r += 10) {
+                    const y = baseY + brimHeight * 0.7;
+                    hatPoints.push({ x: cos * r, y: y, z: sin * r, type: 'brimBottom' });
+                }
+
+                // Brim edge
+                const edgeY = baseY;
+                hatPoints.push({ x: cos * brimWidth, y: edgeY, z: sin * brimWidth, type: 'brimEdge' });
+                hatPoints.push({ x: cos * 30, y: edgeY, z: sin * 30, type: 'brimInner' });
+
+                // Crown bottom band
+                for (let h = 0; h <= bandHeight; h += 5) {
+                    const y = bandY - h;
+                    const w = crownWidth * (1 - h * 0.002);
+                    hatPoints.push({ x: cos * w, y: y, z: sin * w, type: 'band' });
+                }
+
+                // Crown with indent
+                for (let h = bandHeight; h <= crownHeight; h += 6) {
+                    const y = bandY - h;
+                    let w = crownWidth;
+                    
+                    if (h > 30 && h < 80) {
+                        const indentProgress = Math.sin(((h - 30) / 50) * Math.PI);
+                        w -= indentDepth * indentProgress;
+                    }
+                    w -= h * 0.15;
+
+                    hatPoints.push({ x: cos * w, y: y, z: sin * w, type: 'crown' });
+                }
+
+                // Top of crown
+                const topY = bandY - crownHeight;
+                const topW = crownWidth * 0.25;
+                hatPoints.push({ x: cos * topW, y: topY, z: sin * topW, type: 'top' });
+            }
+        }
+        createHatPoints();
+
+        function createParticles() {
+            particles = hatPoints.map((p, i) => ({
+                originX: p.x,
+                originY: p.y,
+                originZ: p.z,
+                x: p.x,
+                y: p.y,
+                z: p.z,
+                vx: 0,
+                vy: 0,
+                vz: 0,
+                type: p.type,
+                size: p.type === 'top' ? 2.5 : (p.type === 'brimEdge' ? 2 : 1.5),
+                color: getColorForType(p.type),
+                alpha: 0.7 + Math.random() * 0.3,
+                phase: Math.random() * Math.PI * 2,
+                driftSpeed: 0.5 + Math.random() * 1.5,
+                swirlPhase: Math.random() * Math.PI * 2
+            }));
+        }
+
+        function getColorForType(type) {
+            const colors = {
+                brimTop: { r: 180, g: 50, b: 50 },
+                brimBottom: { r: 120, g: 30, b: 30 },
+                brimEdge: { r: 200, g: 70, b: 70 },
+                brimInner: { r: 140, g: 40, b: 40 },
+                band: { r: 100, g: 25, b: 25 },
+                crown: { r: 170, g: 45, b: 45 },
+                top: { r: 190, g: 60, b: 60 }
+            };
+            return colors[type] || { r: 160, g: 45, b: 45 };
+        }
+
+        function createOrbitParticles() {
+            orbitParticles = [];
+            const count = 15;
+            for (let i = 0; i < count; i++) {
+                const angle = (i / count) * Math.PI * 2;
+                const radius = 140 + Math.random() * 40;
+                orbitParticles.push({
+                    angle: angle,
+                    radius: radius,
+                    y: -50 + Math.random() * 60,
+                    speed: 0.003 + Math.random() * 0.004,
+                    size: 1.5 + Math.random() * 1,
+                    trail: [],
+                    maxTrail: 8 + Math.floor(Math.random() * 6)
+                });
+            }
+        }
+
+        function rotatePoint(p, angle) {
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            return {
+                x: p.x * cos - p.z * sin,
+                y: p.y,
+                z: p.x * sin + p.z * cos
+            };
+        }
+
+        function project(p) {
+            const perspective = 500;
+            const zDepth = p.z + 200;
+            const factor = perspective / (perspective + zDepth);
+            return {
+                x: cx + p.x * factor * scale,
+                y: cy + p.y * factor * scale,
+                factor: factor,
+                z: zDepth
+            };
+        }
+
+        function updateParticles(dt) {
+            if (isDissolving && dissolveProgress < 1) {
+                dissolveProgress += dt * 1.2;
+                if (dissolveProgress >= 1) {
+                    dissolveProgress = 1;
+                    isDissolving = false;
+                    reformDelay = 2;
+                }
+            }
+
+            if (reformDelay > 0) {
+                reformDelay -= dt;
+                if (reformDelay <= 0) {
+                    isReforming = true;
+                }
+            }
+
+            if (isReforming && dissolveProgress > 0) {
+                dissolveProgress -= dt * 0.8;
+                if (dissolveProgress <= 0) {
+                    dissolveProgress = 0;
+                    isReforming = false;
+                    isHovered = false;
+                    targetSpinSpeed = 0.008;
+                    orbitParticlesCreated = true;
+                    if (!orbitParticles.length) createOrbitParticles();
+                }
+            }
+
+            particles.forEach(p => {
+                if (dissolveProgress > 0) {
+                    // Explosion/drift phase
+                    const drift = dissolveProgress * dissolveProgress;
+                    const swirl = Math.sin(time * 2 + p.swirlPhase) * 20 * drift;
+                    
+                    if (!isReforming) {
+                        p.vx = (Math.random() - 0.5) * p.driftSpeed * drift * 80;
+                        p.vy = (Math.random() - 0.5) * p.driftSpeed * drift * 60 - drift * 30;
+                        p.vz = (Math.random() - 0.5) * p.driftSpeed * drift * 80;
+                        
+                        p.x = p.originX + p.vx + swirl;
+                        p.y = p.originY + p.vy - drift * 50;
+                        p.z = p.originZ + p.vz;
+                    } else {
+                        // Reform phase - flow back
+                        const reformFactor = 1 - dissolveProgress;
+                        const ease = reformFactor * reformFactor * (3 - 2 * reformFactor);
+                        p.x = p.x + (p.originX - p.x) * 0.1;
+                        p.y = p.y + (p.originY - p.y) * 0.1;
+                        p.z = p.z + (p.originZ - p.z) * 0.1;
+                    }
+                } else {
+                    // Normal spinning
+                    const rotated = rotatePoint({ x: p.originX, y: p.originY, z: p.originZ }, spinAngle);
+                    p.x = rotated.x;
+                    p.y = rotated.y;
+                    p.z = rotated.z;
+                }
+
+                // Subtle breathing animation
+                p.phase += dt * 2;
+            });
+
+            // Update orbit particles
+            if (orbitParticlesCreated) {
+                orbitParticles.forEach(op => {
+                    op.angle += op.speed;
+                    
+                    // Add current position to trail
+                    const ox = Math.cos(op.angle) * op.radius;
+                    const oz = Math.sin(op.angle) * op.radius;
+                    const rotated = rotatePoint({ x: ox, y: op.y, z: oz }, spinAngle);
+                    const proj = project(rotated);
+                    
+                    op.trail.unshift({ x: proj.x, y: proj.y, alpha: 0.6 });
+                    if (op.trail.length > op.maxTrail) {
+                        op.trail.pop();
+                    }
+                });
+            }
+        }
+
+        function drawGlow(x, y, radius, color, alpha) {
+            const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+            gradient.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})`);
+            gradient.addColorStop(0.5, `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha * 0.3})`);
+            gradient.addColorStop(1, `rgba(${color.r}, ${color.g}, ${color.b}, 0)`);
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function render() {
+            ctx.fillStyle = '#0a0a0f';
+            ctx.fillRect(0, 0, width, height);
+
+            // Background gradient
+            const bgGrad = ctx.createRadialGradient(cx, height * 0.6, 0, cx, height * 0.6, height * 0.7);
+            bgGrad.addColorStop(0, 'rgba(26, 26, 46, 0.5)');
+            bgGrad.addColorStop(1, 'rgba(10, 10, 15, 0)');
+            ctx.fillStyle = bgGrad;
+            ctx.fillRect(0, 0, width, height);
+
+            // Sort particles by Z for proper depth rendering
+            const sortedParticles = [...particles].sort((a, b) => b.z - a.z);
+
+            // Draw hat particles
+            sortedParticles.forEach(p => {
+                const proj = project({ x: p.x, y: p.y, z: p.z });
+                const depthAlpha = Math.max(0.2, Math.min(1, proj.factor * 1.5));
+                const size = p.size * proj.factor * scale * 0.8;
+                
+                // Adjust color based on depth
+                const lightness = 0.7 + proj.factor * 0.3;
+                const r = Math.min(255, p.color.r * lightness);
+                const g = Math.min(255, p.color.g * lightness);
+                const b = Math.min(255, p.color.b * lightness);
+
+                // Glow effect
+                if (dissolveProgress > 0.1) {
+                    const glowAlpha = dissolveProgress * 0.4 * depthAlpha * p.alpha;
+                    drawGlow(proj.x, proj.y, size * 4, { r, g, b }, glowAlpha);
+                } else {
+                    drawGlow(proj.x, proj.y, size * 2.5, { r, g, b }, 0.15 * depthAlpha);
+                }
+
+                // Particle
+                ctx.beginPath();
+                ctx.arc(proj.x, proj.y, size, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${depthAlpha * p.alpha})`;
+                ctx.fill();
+            });
+
+            // Draw orbit particles with trails
+            if (orbitParticlesCreated) {
+                orbitParticles.forEach(op => {
+                    const ox = Math.cos(op.angle) * op.radius;
+                    const oz = Math.sin(op.angle) * op.radius;
+                    const rotated = rotatePoint({ x: ox, y: op.y, z: oz }, spinAngle);
+                    const proj = project(rotated);
+                    
+                    // Draw trail
+                    op.trail.forEach((t, i) => {
+                        const trailAlpha = (1 - i / op.trail.length) * 0.4;
+                        const trailSize = op.size * (1 - i / op.trail.length) * scale;
+                        ctx.beginPath();
+                        ctx.arc(t.x, t.y, trailSize, 0, Math.PI * 2);
+                        ctx.fillStyle = `rgba(255, 150, 100, ${trailAlpha})`;
+                        ctx.fill();
+                    });
+
+                    // Draw particle
+                    const size = op.size * scale;
+                    drawGlow(proj.x, proj.y, size * 3, { r: 255, g: 180, b: 150 }, 0.3);
+                    ctx.beginPath();
+                    ctx.arc(proj.x, proj.y, size, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(255, 200, 180, 0.9)';
+                    ctx.fill();
+                });
+            }
+
+            // Subtle ambient light effect
+            const ambientGrad = ctx.createRadialGradient(cx, cy - 50, 0, cx, cy, 200 * scale);
+            ambientGrad.addColorStop(0, 'rgba(255, 100, 80, 0.03)');
+            ambientGrad.addColorStop(1, 'rgba(255, 100, 80, 0)');
+            ctx.fillStyle = ambientGrad;
+            ctx.fillRect(0, 0, width, height);
+        }
+
+        let lastTime = 0;
+        function animate(currentTime) {
+            const dt = Math.min((currentTime - lastTime) / 1000, 0.05);
+            lastTime = currentTime;
+
+            if (!prefersReducedMotion) {
+                time += dt;
+                
+                // Smooth spin speed transition
+                spinSpeed += (targetSpinSpeed - spinSpeed) * 0.05;
+                spinAngle += spinSpeed;
+
+                updateParticles(dt);
+            }
+
+            render();
+            requestAnimationFrame(animate);
+        }
+
+        // Event handlers
+        function handleStart() {
+            if (prefersReducedMotion || isDissolving || isReforming) return;
+            isHovered = true;
+            targetSpinSpeed = 0.002;
+            setTimeout(() => {
+                if (isHovered && !isDissolving) {
+                    isDissolving = true;
+                    createParticles();
+                }
+            }, 300);
+        }
+
+        function handleEnd() {
+            if (!isDissolving) {
+                isHovered = false;
+                targetSpinSpeed = 0.008;
+            }
+        }
+
+        canvas.addEventListener('mouseenter', handleStart);
+        canvas.addEventListener('mouseleave', handleEnd);
+        canvas.addEventListener('touchstart', (e) => { e.preventDefault(); handleStart(); });
+        canvas.addEventListener('touchend', handleEnd);
+
+        // Initialize
+        createParticles();
+        requestAnimationFrame(animate);
+    </script>
+</body>
+</html>

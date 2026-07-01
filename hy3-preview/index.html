@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Red Hat Fedora</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; }
+  body {
+    background: radial-gradient(ellipse at 50% 45%, #1a1a2e 0%, #0f0f1a 55%, #050510 100%);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    color: #e0e0e0; min-height: 100vh; position: relative;
+  }
+  /* Subtle vignette */
+  body::after {
+    content: ''; position: fixed; inset: 0; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.4) 100%);
+    z-index: 100;
+  }
+  .scene {
+    position: relative; width: min(50vw, 340px); height: min(50vw, 340px);
+    max-width: 340px; max-height: 340px;
+    min-width: 200px; min-height: 200px;
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1;
+  }
+  #mainCanvas {
+    position: absolute;
+    width: 100%; height: 100%;
+    filter: drop-shadow(0 25px 50px rgba(0,0,0,0.5)) drop-shadow(0 0 80px rgba(200,50,50,0.10));
+    cursor: pointer;
+  }
+  .caption {
+    margin-top: clamp(24px, 5vh, 52px); text-align: center; z-index: 10;
+    position: relative;
+  }
+  .caption h1 {
+    font-size: clamp(1.3rem, 3.5vw, 2.1rem); font-weight: 300;
+    letter-spacing: 0.18em; text-transform: uppercase;
+    background: linear-gradient(160deg, #f0f0f0 20%, #888 80%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text; margin-bottom: 6px;
+  }
+  .caption p {
+    font-size: clamp(0.7rem, 1.8vw, 0.9rem); color: #555;
+    letter-spacing: 0.1em; font-weight: 300;
+  }
+  /* Ambient backlight */
+  .glow {
+    position: absolute; border-radius: 50%; pointer-events: none; z-index: 0;
+  }
+  .glow--main {
+    width: min(55vw, 380px); height: min(55vw, 380px);
+    max-width: 380px; max-height: 380px;
+    background: radial-gradient(circle, rgba(180,40,40,0.07) 0%, transparent 70%);
+    top: 50%; left: 50%; transform: translate(-50%, -55%);
+  }
+  .glow--sub {
+    width: min(30vw, 200px); height: min(30vw, 200px);
+    max-width: 200px; max-height: 200px;
+    background: radial-gradient(circle, rgba(180,40,40,0.04) 0%, transparent 70%);
+    top: 50%; left: 50%; transform: translate(-30%, -50%);
+  }
+  @media (max-width: 420px) {
+    .scene { width: 200px; height: 200px; }
+  }
+</style>
+</head>
+<body>
+<div class="glow glow--main"></div>
+<div class="glow glow--sub"></div>
+<div class="scene" id="scene">
+  <canvas id="mainCanvas"></canvas>
+</div>
+<div class="caption">
+  <h1>Red Hat</h1>
+  <p>explore the possibilities</p>
+</div>
+
+<script>
+(() => {
+  // ── Config ──────────────────────────────────────────────────────
+  const CANVAS_LOGICAL = 340;          // logical px we draw at
+  const HAT_CX = CANVAS_LOGICAL / 2;
+  const HAT_CY = CANVAS_LOGICAL / 2 + 5;
+  const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const BASE_SPIN = prefersReduced ? 0 : 0.006;
+
+  // ── DOM ────────────────────────────────────────────────────────
+  const scene  = document.getElementById('scene');
+  const canvas = document.getElementById('mainCanvas');
+  const ctx    = canvas.getContext('2d');
+
+  // ── Hi-DPI ─────────────────────────────────────────────────────
+  let dpr = window.devicePixelRatio || 1;
+  function sizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+    const rect = scene.getBoundingClientRect();
+    const w = Math.round(rect.width);
+    const h = Math.round(rect.height);
+    canvas.style.width  = w + 'px';
+    canvas.style.height = h + 'px';
+    canvas.width  = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+  }
+  sizeCanvas();
+  window.addEventListener('resize', sizeCanvas);
+
+  // ── Draw fedora onto a given context ──────────────────────────
+  // rotation is in radians; sx,sy are scale; cx,cy is centre of hat in that context
+  function drawFedora(c, cx, cy, rot) {
+    c.save();
+    c.translate(cx, cy);
+    c.rotate(rot);
+    c.scale(1, 1);
+
+    const bw = 108;  // brim half-width
+
+    // ── Shadow ──
+    c.fillStyle = 'rgba(0,0,0,0.18)';
+    c.beginPath();
+    c.ellipse(4, 68, 112, 19, 0, 0, Math.PI * 2);
+    c.fill();
+
+    // ── Brim ──
+    const brimGrad = c.createRadialGradient(0, 54, 8, 0, 54, 130);
+    brimGrad.addColorStop(0, '#4a4a4a');
+    brimGrad.addColorStop(0.4, '#333');
+    brimGrad.addColorStop(1, '#1c1c1c');
+    c.fillStyle = brimGrad;
+    c.beginPath();
+    c.ellipse(0, 52, bw, 22, 0, 0, Math.PI * 2);
+    c.fill();
+    // brim edge highlight (top)
+    c.strokeStyle = 'rgba(255,255,255,0.07)';
+    c.lineWidth = 1;
+    c.beginPath();
+    c.ellipse(0, 52, bw - 3, 19, 0, 0.15, Math.PI - 0.15);
+    c.stroke();
+    // brim underside rim
+    c.strokeStyle = 'rgba(0,0,0,0.4)';
+    c.lineWidth = 1.5;
+    c.beginPath();
+    c.ellipse(0, 52, bw, 22, 0, Math.PI + 0.2, -0.2);
+    c.stroke();
+
+    // ── Crown (body) ──
+    const crownGrad = c.createLinearGradient(-58, -70, 58, 30);
+    crownGrad.addColorStop(0, '#5a5a5a');
+    crownGrad.addColorStop(0.35, '#3e3e3e');
+    crownGrad.addColorStop(0.75, '#2c2c2c');
+    crownGrad.addColorStop(1, '#222');
+
+    // Crown front
+    c.fillStyle = crownGrad;
+    c.beginPath();
+    c.moveTo(-58, 5);
+    c.lineTo(-60, -45);
+    c.quadraticCurveTo(-60, -62, -45, -72);
+    c.lineTo(45, -72);
+    c.quadraticCurveTo(60, -62, 60, -45);
+    c.lineTo(58, 5);
+    c.quadraticCurveTo(0, 12, -58, 5);
+    c.fill();
+
+    // Crown top ellipse highlight
+    const topGrad = c.createLinearGradient(-50, -72, 50, -55);
+    topGrad.addColorStop(0, 'rgba(255,255,255,0.09)');
+    topGrad.addColorStop(0.5, 'rgba(255,255,255,0.02)');
+    topGrad.addColorStop(1, 'rgba(255,255,255,0.06)');
+    c.fillStyle = topGrad;
+    c.beginPath();
+    c.ellipse(0, -72, 50, 14, 0, 0, Math.PI * 2);
+    c.fill();
+
+    // Crown side shadow (left)
+    c.fillStyle = 'rgba(0,0,0,0.15)';
+    c.beginPath();
+    c.ellipse(-30, -30, 12, 40, 0.2, 0, Math.PI * 2);
+    c.fill();
+
+    // ── Red Band (Red Hat signature) ──
+    const bandY = -8;
+    const bandGrad = c.createLinearGradient(-55, bandY - 7, 55, bandY + 7);
+    bandGrad.addColorStop(0, '#b51818');
+    bandGrad.addColorStop(0.25, '#e63030');
+    bandGrad.addColorStop(0.55, '#f04040');
+    bandGrad.addColorStop(0.8, '#c82222');
+    bandGrad.addColorStop(1, '#991010');
+    c.fillStyle = bandGrad;
+    c.beginPath();
+    c.ellipse(0, bandY, 56, 7, 0, 0, Math.PI * 2);
+    c.fill();
+    // band top highlight
+    c.fillStyle = 'rgba(255,255,255,0.13)';
+    c.beginPath();
+    c.ellipse(0, bandY - 3, 54, 2.5, 0, 0.1, Math.PI - 0.1);
+    c.fill();
+    // band bottom shadow
+    c.fillStyle = 'rgba(0,0,0,0.25)';
+    c.beginPath();
+    c.ellipse(0, bandY + 3, 54, 2, 0, Math.PI + 0.1, -0.1);
+    c.fill();
+
+    // ── Crease on crown top ──
+    c.strokeStyle = 'rgba(0,0,0,0.25)';
+    c.lineWidth = 1.2;
+    c.beginPath();
+    c.moveTo(-22, -80);
+    c.quadraticCurveTo(0, -90, 22, -80);
+    c.stroke();
+
+    // ── Subtle edge / rim light on crown ──
+    c.strokeStyle = 'rgba(255,255,255,0.04)';
+    c.lineWidth = 1;
+    c.beginPath();
+    c.moveTo(-58, 5);
+    c.lineTo(-60, -45);
+    c.stroke();
+
+    c.restore();
+  }
+
+  // ── Sample hat pixels → particles ─────────────────────────────
+  function hatchParticles(rotation) {
+    // Draw hat onto an offscreen canvas at logical size
+    const off = document.createElement('canvas');
+    off.width  = CANVAS_LOGICAL * dpr;
+    off.height = CANVAS_LOGICAL * dpr;
+    const oc = off.getContext('2d');
+    oc.scale(dpr, dpr);
+    drawFedora(oc, CANVAS_LOGICAL / 2, CANVAS_LOGICAL / 2 + 5, rotation);
+
+    const imgD = oc.getImageData(0, 0, CANVAS_LOGICAL * dpr, CANVAS_LOGICAL * dpr);
+    const d = imgD.data;
+    const pts = [];
+
+    // Sample every 3rd pixel for performance / density
+    const step = Math.round(2.5 * dpr);
+    for (let py = 0; py < CANVAS_LOGICAL * dpr; py += step) {
+      for (let px = 0; px < CANVAS_LOGICAL * dpr; px += step) {
+        const i = (py * CANVAS_LOGICAL * dpr + px) * 4;
+        if (d[i + 3] > 30) {
+          const lx = px / dpr;
+          const ly = py / dpr;
+          const r = d[i], g = d[i + 1], b = d[i + 2];
+          const isRed = r > 140 && g < 90 && b < 90;
+          pts.push({
+            ox: lx, oy: ly,
+            x: lx, y: ly,
+            vx: 0, vy: 0,
+            r: Math.min(255, r + 30), g, b,
+            size: Math.random() * 1.4 + 0.6,
+            isRed,
+            phase: Math.random() * Math.PI * 2,
+            speed: 0.5 + Math.random() * 1.5,
+          });
+        }
+      }
+    }
+    return pts;
+  }
+
+  // ── State ─────────────────────────────────────────────────────
+  let spin        = 0;
+  let spinSpd     = BASE_SPIN;
+  let spinTarget  = BASE_SPIN;
+  let phase       = 'spin';   // spin | dissolve | swirl | reform | settled
+  let phaseT      = 0;
+  let parts       = [];
+  let orbiters    = [];
+  let hoverActive = false;
+  let lastTS      = 0;
+
+  // ── Interaction ───────────────────────────────────────────────
+  function onEnter() {
+    if (prefersReduced || phase !== 'spin') return;
+    hoverActive = true;
+    phase = 'dissolve';
+    phaseT = 0;
+    parts = hatchParticles(spin);
+    spinTarget = 0;
+  }
+  function onLeave() {
+    if (prefersReduced) return;
+    hoverActive = false;
+    if (phase === 'swirl' || phase === 'dissolve') {
+      // jump to reform
+      phase = 'reform';
+      phaseT = 0;
+      parts.forEach(p => { p.vx = 0; p.vy = 0; });
+    }
+  }
+  scene.addEventListener('mouseenter', onEnter);
+  scene.addEventListener('mouseleave', onLeave);
+  scene.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (prefersReduced) return;
+    if (phase === 'spin') {
+      onEnter();
+    } else if (phase === 'settled') {
+      phase = 'spin';
+      orbiters = [];
+      spinTarget = BASE_SPIN;
+    }
+  });
+  scene.addEventListener('click', () => {
+    if (prefersReduced) return;
+    if (phase === 'spin') {
+      onEnter();
+      setTimeout(() => {
+        if (phase === 'swirl' || phase === 'dissolve') {
+          phase = 'reform'; phaseT = 0;
+          parts.forEach(p => { p.vx = 0; p.vy = 0; });
+        }
+      }, 2200);
+    } else if (phase === 'settled') {
+      phase = 'spin';
+      orbiters = [];
+      spinTarget = BASE_SPIN;
+    }
+  });
+
+  // ── Main loop ──────────────────────────────────────────────────
+  function frame(ts) {
+    const dt = prefersReduced ? 0 : Math.min((ts - (lastTS || ts)) / 1000, 0.05);
+    lastTS = ts;
+
+    // Spin
+    if (!prefersReduced) {
+      spinSpd += (spinTarget - spinSpd) * 0.06;
+      spin += spinSpd;
+    }
+
+    // Clear & setup transform
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, CANVAS_LOGICAL, CANVAS_LOGICAL);
+
+    const cx = CANVAS_LOGICAL / 2;
+    const cy = CANVAS_LOGICAL / 2 + 5;
+
+    // ── SPIN phase ──
+    if (phase === 'spin') {
+      drawFedora(ctx, cx, cy, spin);
+    }
+
+    // ── DISSOLVE phase ──
+    else if (phase === 'dissolve') {
+      phaseT += dt;
+      const p = Math.min(phaseT / 1.0, 1);           // 1 s dissolve
+      const ease = 1 - Math.pow(1 - p, 3);
+
+      // Draw hat fading out
+      if (p < 0.6) {
+        ctx.globalAlpha = 1 - p / 0.6;
+        drawFedora(ctx, cx, cy, spin);
+        ctx.globalAlpha = 1;
+      }
+
+      // Emit particles radially
+      parts.forEach((pt, idx) => {
+        const ep = Math.max(0, Math.min((p - idx / parts.length * 0.4) / 0.6, 1));
+        const ang = Math.atan2(pt.oy - cy, pt.ox - cx) + (Math.random() - 0.5) * 1.5;
+        const dist = (40 + Math.random() * 120) * ep;
+        pt.x = pt.ox + Math.cos(ang) * dist;
+        pt.y = pt.oy + Math.sin(ang) * dist + Math.sin(phaseT * 4 + pt.phase) * 15 * ep;
+
+        const a = 0.4 + (1 - ep) * 0.4;
+        ctx.fillStyle = `rgba(${pt.r},${pt.g},${pt.b},${a})`;
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, pt.size * (1 + ep * 0.3), 0, 6.283);
+        ctx.fill();
+
+        // glow on red
+        if (pt.isRed && ep < 0.9) {
+          ctx.fillStyle = `rgba(255,70,50,${0.25 * (1 - ep)})`;
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, pt.size * 3.5, 0, 6.283);
+          ctx.fill();
+        }
+      });
+
+      if (p >= 1) {
+        phase = 'swirl';
+        phaseT = 0;
+        // give tangential velocity
+        parts.forEach(pt => {
+          const a = Math.atan2(pt.y - cy, pt.x - cx);
+          const d = Math.hypot(pt.x - cx, pt.y - cy);
+          const ts = 1.8 + d * 0.008;
+          pt.vx = Math.cos(a + 1.57) * ts + (Math.random() - 0.5) * 1.2;
+          pt.vy = Math.sin(a + 1.57) * ts + (Math.random() - 0.5) * 1.2;
+        });
+      }
+    }
+
+    // ── SWIRL phase ──
+    else if (phase === 'swirl') {
+      phaseT += dt;
+      const t = Math.min(phaseT / 2.0, 1);
+
+      parts.forEach(pt => {
+        const dx = cx - pt.x;
+        const dy = cy - pt.y;
+        const d  = Math.hypot(dx, dy) || 1;
+        const tx = -dy / d;
+        const ty =  dx / d;
+
+        const inStr  = (0.3 + t * 2.5);
+        const swStr  = (2.0 - t * 1.2);
+
+        pt.vx += (dx / d * inStr + tx * swStr) * dt * 28;
+        pt.vy += (dy / d * inStr + ty * swStr) * dt * 28;
+        pt.vx *= 0.965;
+        pt.vy *= 0.965;
+
+        pt.x += pt.vx;
+        pt.y += pt.vy;
+
+        // draw
+        const a = 0.5 + Math.random() * 0.4;
+        ctx.fillStyle = `rgba(${pt.r},${pt.g},${pt.b},${a})`;
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, pt.size * (1 + (1 - t) * 0.2), 0, 6.283);
+        ctx.fill();
+
+        // trail on red
+        if (pt.isRed) {
+          ctx.strokeStyle = `rgba(255,80,55,${0.18 * (1 - t * 0.5)})`;
+          ctx.lineWidth = 0.6;
+          ctx.beginPath();
+          ctx.moveTo(pt.x, pt.y);
+          ctx.lineTo(pt.x - pt.vx * 2.5, pt.y - pt.vy * 2.5);
+          ctx.stroke();
+        }
+      });
+
+      if (t >= 1) {
+        phase = 'reform';
+        phaseT = 0;
+        // pick orbiters
+        const reds = parts.filter(p => p.isRed);
+        for (let i = 0; i < Math.min(6, reds.length); i++) {
+          orbiters.push({
+            ...reds[i],
+            a: Math.random() * 6.283,
+            s: 0.4 + Math.random() * 0.6,
+            d: 65 + Math.random() * 35,
+            yo: (Math.random() - 0.5) * 18,
+          });
+        }
+      }
+    }
+
+    // ── REFORM phase ──
+    else if (phase === 'reform') {
+      phaseT += dt;
+      const t = Math.min(phaseT / 1.4, 1);
+      const ease = 1 - Math.pow(1 - t, 3);
+
+      // orbiters keep orbiting
+      orbiters.forEach(o => {
+        o.a += o.s * dt;
+        o.x = cx + Math.cos(o.a) * o.d;
+        o.y = cy + o.yo + Math.sin(o.a) * o.d * 0.28;
+
+        ctx.fillStyle = `rgba(${o.r},${o.g},${o.b},0.65)`;
+        ctx.beginPath();
+        ctx.arc(o.x, o.y, o.size * 1.1, 0, 6.283);
+        ctx.fill();
+        // trail arc
+        ctx.strokeStyle = `rgba(${o.r},${o.g},${o.b},0.1)`;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(cx, cy + o.yo, o.d, o.a - 0.6, o.a);
+        ctx.stroke();
+      });
+
+      // reform particles
+      parts.forEach(pt => {
+        pt.x += (pt.ox - pt.x) * 0.1;
+        pt.y += (pt.oy - pt.y) * 0.1;
+        if (Math.abs(pt.x - pt.ox) < 0.4) pt.x = pt.ox;
+        if (Math.abs(pt.y - pt.oy) < 0.4) pt.y = pt.oy;
+
+        const a = 0.5 + ease * 0.5;
+        const sz = pt.size * (0.4 + ease * 0.6);
+        ctx.fillStyle = `rgba(${pt.r},${pt.g},${pt.b},${a})`;
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, sz, 0, 6.283);
+        ctx.fill();
+      });
+
+      if (t >= 1) {
+        phase = 'settled';
+        phaseT = 0;
+        spinTarget = BASE_SPIN;
+      }
+    }
+
+    // ── SETTLED phase (hat + orbiters) ──
+    else if (phase === 'settled') {
+      spin += spinSpd;
+      drawFedora(ctx, cx, cy, spin);
+
+      orbiters.forEach(o => {
+        o.a += o.s * dt;
+        o.x = cx + Math.cos(o.a) * o.d;
+        o.y = cy + o.yo + Math.sin(o.a) * o.d * 0.28;
+
+        // glow
+        const grd = ctx.createRadialGradient(o.x, o.y, 0, o.x, o.y, o.size * 5);
+        grd.addColorStop(0, `rgba(${o.r},${o.g},${o.b},0.45)`);
+        grd.addColorStop(1, `rgba(${o.r},${o.g},${o.b},0)`);
+        ctx.fillStyle = grd;
+        ctx.beginPath();
+        ctx.arc(o.x, o.y, o.size * 5, 0, 6.283);
+        ctx.fill();
+
+        ctx.fillStyle = `rgba(${o.r},${o.g},${o.b},0.85)`;
+        ctx.beginPath();
+        ctx.arc(o.x, o.y, o.size, 0, 6.283);
+        ctx.fill();
+
+        // long faint trail
+        ctx.strokeStyle = `rgba(${o.r},${o.g},${o.b},0.06)`;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        const pa = o.a - o.s * dt * 10;
+        ctx.arc(cx, cy + o.yo, o.d, pa, o.a);
+        ctx.stroke();
+      });
+    }
+
+    requestAnimationFrame(frame);
+  }
+
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

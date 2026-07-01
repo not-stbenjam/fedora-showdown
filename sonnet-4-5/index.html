@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fedora Hero</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            color: #e0e0e0;
+        }
+
+        .container {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+            max-width: 100%;
+        }
+
+        canvas {
+            display: block;
+            cursor: pointer;
+            max-width: 100%;
+            height: auto;
+            filter: drop-shadow(0 20px 40px rgba(220, 53, 69, 0.3));
+            transition: filter 0.3s ease;
+        }
+
+        canvas:hover {
+            filter: drop-shadow(0 30px 60px rgba(220, 53, 69, 0.5));
+        }
+
+        .caption {
+            margin-top: 2rem;
+            font-size: 1rem;
+            font-weight: 300;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            color: #a0a0b0;
+            text-align: center;
+            opacity: 0;
+            animation: fadeInCaption 1s ease 0.5s forwards;
+        }
+
+        @keyframes fadeInCaption {
+            to {
+                opacity: 1;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .caption {
+                font-size: 0.85rem;
+                letter-spacing: 0.1em;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            canvas {
+                animation: none !important;
+            }
+            .caption {
+                animation: none !important;
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <canvas id="heroCanvas"></canvas>
+        <div class="caption">The Future is Open</div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('heroCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Set canvas size
+        const SIZE = Math.min(600, window.innerWidth - 40);
+        canvas.width = SIZE;
+        canvas.height = SIZE;
+        
+        // Check for reduced motion
+        const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        
+        // Animation state
+        let time = 0;
+        let rotationSpeed = prefersReducedMotion ? 0 : 0.005;
+        let isDissolving = false;
+        let dissolveProgress = 0;
+        let particleSystem = [];
+        let orbitingParticles = [];
+        
+        // Fedora shape (simplified Red Hat style)
+        class Fedora {
+            constructor() {
+                this.points = this.createFedoraShape();
+            }
+            
+            createFedoraShape() {
+                const points = [];
+                // Brim
+                for (let i = 0; i <= 60; i++) {
+                    const angle = (i / 60) * Math.PI * 2;
+                    const r = 120;
+                    points.push({
+                        x: Math.cos(angle) * r,
+                        y: -20,
+                        z: Math.sin(angle) * r,
+                        section: 'brim'
+                    });
+                }
+                
+                // Crown bottom
+                for (let i = 0; i <= 40; i++) {
+                    const angle = (i / 40) * Math.PI * 2;
+                    const r = 70;
+                    points.push({
+                        x: Math.cos(angle) * r,
+                        y: -15,
+                        z: Math.sin(angle) * r,
+                        section: 'crown'
+                    });
+                }
+                
+                // Crown middle
+                for (let i = 0; i <= 40; i++) {
+                    const angle = (i / 40) * Math.PI * 2;
+                    const r = 65;
+                    points.push({
+                        x: Math.cos(angle) * r,
+                        y: -40,
+                        z: Math.sin(angle) * r,
+                        section: 'crown'
+                    });
+                }
+                
+                // Crown top
+                for (let i = 0; i <= 40; i++) {
+                    const angle = (i / 40) * Math.PI * 2;
+                    const r = 60;
+                    points.push({
+                        x: Math.cos(angle) * r,
+                        y: -80,
+                        z: Math.sin(angle) * r,
+                        section: 'crown'
+                    });
+                }
+                
+                // Top circle
+                for (let i = 0; i <= 30; i++) {
+                    const angle = (i / 30) * Math.PI * 2;
+                    const r = 50;
+                    points.push({
+                        x: Math.cos(angle) * r,
+                        y: -85,
+                        z: Math.sin(angle) * r,
+                        section: 'top'
+                    });
+                }
+                
+                return points;
+            }
+            
+            project(point, rotation) {
+                // Rotate around Y axis
+                const cosY = Math.cos(rotation);
+                const sinY = Math.sin(rotation);
+                
+                const x = point.x * cosY - point.z * sinY;
+                const z = point.x * sinY + point.z * cosY;
+                const y = point.y;
+                
+                // Perspective projection
+                const fov = 600;
+                const distance = fov / (fov + z);
+                
+                return {
+                    x: x * distance + SIZE / 2,
+                    y: y * distance + SIZE / 2,
+                    z: z,
+                    distance: distance,
+                    original: point
+                };
+            }
+        }
+        
+        class Particle {
+            constructor(x, y, z, originalPoint) {
+                this.x = x;
+                this.y = y;
+                this.z = z;
+                this.originalX = x;
+                this.originalY = y;
+                this.originalZ = z;
+                this.vx = (Math.random() - 0.5) * 3;
+                this.vy = (Math.random() - 0.5) * 3;
+                this.vz = (Math.random() - 0.5) * 3;
+                this.life = 1;
+                this.size = Math.random() * 2 + 1;
+                this.originalPoint = originalPoint;
+                this.angle = Math.random() * Math.PI * 2;
+                this.spiralSpeed = Math.random() * 0.05 + 0.02;
+            }
+            
+            update(phase) {
+                if (phase === 'explode') {
+                    this.x += this.vx;
+                    this.y += this.vy;
+                    this.z += this.vz;
+                    this.vx *= 0.97;
+                    this.vy *= 0.97;
+                    this.vz *= 0.97;
+                } else if (phase === 'swirl') {
+                    this.angle += this.spiralSpeed;
+                    const radius = 150;
+                    this.x += (Math.cos(this.angle) * radius - this.x) * 0.02;
+                    this.y += (Math.sin(this.angle * 0.5) * 100 - this.y) * 0.02;
+                    this.z += (Math.sin(this.angle) * radius - this.z) * 0.02;
+                } else if (phase === 'reform') {
+                    this.x += (this.originalX - this.x) * 0.08;
+                    this.y += (this.originalY - this.y) * 0.08;
+                    this.z += (this.originalZ - this.z) * 0.08;
+                }
+            }
+        }
+        
+        class OrbitingParticle {
+            constructor() {
+                this.angle = Math.random() * Math.PI * 2;
+                this.radius = Math.random() * 100 + 100;
+                this.speed = Math.random() * 0.01 + 0.005;
+                this.yOffset = (Math.random() - 0.5) * 150;
+                this.size = Math.random() * 1.5 + 0.5;
+                this.trail = [];
+                this.maxTrailLength = 15;
+            }
+            
+            update(centerRotation) {
+                this.angle += this.speed;
+                
+                const x = Math.cos(this.angle + centerRotation) * this.radius;
+                const z = Math.sin(this.angle + centerRotation) * this.radius;
+                const y = this.yOffset;
+                
+                // Add current position to trail
+                this.trail.unshift({ x, y, z });
+                if (this.trail.length > this.maxTrailLength) {
+                    this.trail.pop();
+                }
+                
+                return { x, y, z };
+            }
+        }
+        
+        const fedora = new Fedora();
+        
+        // Initialize orbiting particles
+        for (let i = 0; i < 5; i++) {
+            orbitingParticles.push(new OrbitingParticle());
+        }
+        
+        function drawParticle(projected, size, alpha, color = '#dc3545') {
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            
+            // Glow
+            const gradient = ctx.createRadialGradient(
+                projected.x, projected.y, 0,
+                projected.x, projected.y, size * 3
+            );
+            gradient.addColorStop(0, color);
+            gradient.addColorStop(0.5, color + '40');
+            gradient.addColorStop(1, 'transparent');
+            
+            ctx.fillStyle = gradient;
+            ctx.fillRect(projected.x - size * 3, projected.y - size * 3, size * 6, size * 6);
+            
+            // Core
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(projected.x, projected.y, size, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.restore();
+        }
+        
+        function drawFedora(rotation, opacity = 1) {
+            const projected = fedora.points.map(p => fedora.project(p, rotation));
+            projected.sort((a, b) => a.z - b.z);
+            
+            // Draw filled shapes
+            ctx.save();
+            ctx.globalAlpha = opacity;
+            
+            // Draw brim
+            ctx.fillStyle = '#dc3545';
+            ctx.strokeStyle = '#a02030';
+            ctx.lineWidth = 2;
+            
+            const brimPoints = projected.filter(p => p.original.section === 'brim');
+            if (brimPoints.length > 0) {
+                ctx.beginPath();
+                ctx.moveTo(brimPoints[0].x, brimPoints[0].y);
+                for (let i = 1; i < brimPoints.length; i++) {
+                    ctx.lineTo(brimPoints[i].x, brimPoints[i].y);
+                }
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+            }
+            
+            // Draw crown
+            ctx.fillStyle = '#c82333';
+            const crownPoints = projected.filter(p => p.original.section === 'crown');
+            if (crownPoints.length > 0) {
+                ctx.beginPath();
+                ctx.moveTo(crownPoints[0].x, crownPoints[0].y);
+                for (let i = 1; i < crownPoints.length; i++) {
+                    ctx.lineTo(crownPoints[i].x, crownPoints[i].y);
+                }
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+            }
+            
+            // Draw top
+            ctx.fillStyle = '#a02030';
+            const topPoints = projected.filter(p => p.original.section === 'top');
+            if (topPoints.length > 0) {
+                ctx.beginPath();
+                ctx.moveTo(topPoints[0].x, topPoints[0].y);
+                for (let i = 1; i < topPoints.length; i++) {
+                    ctx.lineTo(topPoints[i].x, topPoints[i].y);
+                }
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+            }
+            
+            // Highlight
+            ctx.globalAlpha = opacity * 0.3;
+            ctx.fillStyle = '#ff6b7a';
+            ctx.beginPath();
+            const highlightRadius = 40 * (projected[0]?.distance || 1);
+            ctx.ellipse(SIZE / 2 - 20, SIZE / 2 - 100, highlightRadius, highlightRadius * 0.5, -0.3, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.restore();
+        }
+        
+        function animate() {
+            ctx.clearRect(0, 0, SIZE, SIZE);
+            
+            if (!prefersReducedMotion) {
+                time += rotationSpeed;
+            }
+            
+            if (isDissolving) {
+                dissolveProgress = Math.min(1, dissolveProgress + 0.008);
+                
+                if (dissolveProgress < 0.2) {
+                    // Explode phase
+                    particleSystem.forEach(p => p.update('explode'));
+                } else if (dissolveProgress < 0.6) {
+                    // Swirl phase
+                    particleSystem.forEach(p => p.update('swirl'));
+                } else if (dissolveProgress < 1) {
+                    // Reform phase
+                    particleSystem.forEach(p => p.update('reform'));
+                } else {
+                    // Complete - clear particles and restore hat
+                    isDissolving = false;
+                    dissolveProgress = 0;
+                    particleSystem = [];
+                    rotationSpeed = prefersReducedMotion ? 0 : 0.005;
+                }
+                
+                // Draw particles
+                particleSystem.forEach(particle => {
+                    const projected = fedora.project({
+                        x: particle.x,
+                        y: particle.y,
+                        z: particle.z
+                    }, time);
+                    
+                    let alpha = 1;
+                    if (dissolveProgress > 0.7) {
+                        alpha = Math.max(0, 1 - (dissolveProgress - 0.7) / 0.3);
+                    }
+                    
+                    drawParticle(projected, particle.size, alpha);
+                });
+                
+                // Draw fading/forming hat
+                if (dissolveProgress < 0.15) {
+                    drawFedora(time, 1 - dissolveProgress / 0.15);
+                } else if (dissolveProgress > 0.7) {
+                    drawFedora(time, (dissolveProgress - 0.7) / 0.3);
+                }
+            } else {
+                // Normal hat rendering
+                drawFedora(time);
+            }
+            
+            // Draw orbiting particles
+            if (!isDissolving && !prefersReducedMotion) {
+                orbitingParticles.forEach(particle => {
+                    const pos = particle.update(time);
+                    
+                    // Draw trail
+                    particle.trail.forEach((trailPos, i) => {
+                        const projected = fedora.project(trailPos, 0);
+                        const alpha = (1 - i / particle.trail.length) * 0.4;
+                        drawParticle(projected, particle.size * 0.6, alpha, '#ff6b7a');
+                    });
+                    
+                    // Draw particle
+                    const projected = fedora.project(pos, 0);
+                    drawParticle(projected, particle.size, 0.8, '#ff6b7a');
+                });
+            }
+            
+            requestAnimationFrame(animate);
+        }
+        
+        function startDissolve() {
+            if (isDissolving || prefersReducedMotion) return;
+            
+            isDissolving = true;
+            dissolveProgress = 0;
+            rotationSpeed = 0.001;
+            
+            // Create particles from fedora points
+            particleSystem = fedora.points.map(point => {
+                // Rotate point to current rotation
+                const cosY = Math.cos(time);
+                const sinY = Math.sin(time);
+                const x = point.x * cosY - point.z * sinY;
+                const z = point.x * sinY + point.z * cosY;
+                
+                return new Particle(x, point.y, z, point);
+            });
+        }
+        
+        canvas.addEventListener('mouseenter', startDissolve);
+        canvas.addEventListener('click', startDissolve);
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            const newSize = Math.min(600, window.innerWidth - 40);
+            if (newSize !== SIZE) {
+                location.reload();
+            }
+        });
+        
+        animate();
+    </script>
+</body>
+</html>

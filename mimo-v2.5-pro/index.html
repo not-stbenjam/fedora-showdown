@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Red Hat</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden;background:#080810}
+body{display:flex;align-items:center;justify-content:center;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,sans-serif}
+.hero{display:flex;flex-direction:column;align-items:center;gap:1.5rem}
+canvas{display:block;cursor:pointer}
+.caption{color:rgba(255,255,255,.35);font-size:.78rem;letter-spacing:.22em;
+  text-transform:uppercase;font-weight:300;user-select:none}
+@media(prefers-reduced-motion:reduce){
+  .caption{display:none}
+  canvas{cursor:default}
+}
+</style>
+</head>
+<body>
+<div class="hero">
+  <canvas id="c" role="img" aria-label="Animated Red Hat fedora made of glowing ember particles"></canvas>
+  <p class="caption" aria-hidden="true">Hover to dissolve</p>
+</div>
+<script>
+(function(){
+'use strict';
+
+/* ═══ Configuration ═══════════════════════════════════════ */
+var CFG = {
+  spin:     0.0055,
+  slowMs:   450,
+  dissMs:   1100,
+  swirlMs:  850,
+  reformMs: 1300,
+  nOrbit:   28,
+  trail:    14,
+  sprSz:    64
+};
+
+var RED  = [232,34,42];
+var BAND = [155,22,28];
+
+/* ═══ State ════════════════════════════════════════════════ */
+var canvas,ctx,W,H,cx,cy,sc;
+var particles=[],orbiters=[];
+var angle=0,spinSpd=0,state='idle',stateT=0;
+var hovering=false,rm=false;
+var redSpr,bandSpr,fadeA=0;
+
+/* ═══ Helpers ══════════════════════════════════════════════ */
+var PI2=Math.PI*2, sin=Math.sin, cos=Math.cos,
+    hyp=Math.hypot, max=Math.max, min=Math.min,
+    rnd=Math.random, floor=Math.floor, sqrt=Math.sqrt;
+
+function clamp(v,lo,hi){return v<lo?lo:v>hi?hi:v}
+
+/* ═══ Init ═════════════════════════════════════════════════ */
+function init(){
+  canvas=document.getElementById('c');
+  ctx=canvas.getContext('2d');
+  rm=window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+  mkSprites();
+  resize();
+  window.addEventListener('resize',function(){resize();mkSprites()});
+  canvas.addEventListener('mouseenter',hStart);
+  canvas.addEventListener('mouseleave',hEnd);
+  canvas.addEventListener('touchstart',function(e){e.preventDefault();hStart()},{passive:false});
+  canvas.addEventListener('touchend',hEnd);
+  canvas.addEventListener('touchcancel',hEnd);
+  requestAnimationFrame(loop);
+}
+
+function resize(){
+  var dpr=min(window.devicePixelRatio||1,2);
+  var sz=max(200,min(innerWidth*.85,innerHeight*.72,560));
+  W=H=sz;
+  canvas.width=W*dpr;canvas.height=H*dpr;
+  canvas.style.width=W+'px';canvas.style.height=H+'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  cx=W/2;cy=H/2;sc=W/300;
+  buildHat();
+  state='idle';angle=0;
+  spinSpd=rm?0:CFG.spin;
+  orbiters=[];
+}
+
+/* ═══ Glow Sprites ═════════════════════════════════════════ */
+function mkSprites(){redSpr=mkSpr(RED[0],RED[1],RED[2]);bandSpr=mkSpr(BAND[0],BAND[1],BAND[2])}
+
+function mkSpr(r,g,b){
+  var s=CFG.sprSz,c=document.createElement('canvas');
+  c.width=c.height=s;
+  var x=c.getContext('2d'),
+      gr=x.createRadialGradient(s/2,s/2,0,s/2,s/2,s/2);
+  gr.addColorStop(0,   'rgba('+min(255,r+90)+','+min(255,g+90)+','+min(255,b+90)+',1)');
+  gr.addColorStop(.12, 'rgba('+min(255,r+40)+','+min(255,g+40)+','+min(255,b+40)+',.92)');
+  gr.addColorStop(.4,  'rgba('+r+','+g+','+b+',.5)');
+  gr.addColorStop(.78, 'rgba('+r+','+g+','+b+',.08)');
+  gr.addColorStop(1,   'rgba('+r+','+g+','+b+',0)');
+  x.fillStyle=gr;x.fillRect(0,0,s,s);
+  return c;
+}
+
+/* ═══ Hat Geometry ═════════════════════════════════════════ */
+var PROF=[
+  [-10,118],[-9,122],[-8,120],[-6,110],[-4,95],[-2,75],[0,58],
+  [2,52],[5,50],[10,48],[18,46],[25,44],[30,42],[34,40],[37,36],
+  [40,32],[42,28],[43,27],[44,28],[46,30],[48,26],[50,20],
+  [52,12],[54,4],[55,0]
+];
+
+function rAt(y){
+  for(var i=0;i<PROF.length-1;i++){
+    var y1=PROF[i][0],r1=PROF[i][1],y2=PROF[i+1][0],r2=PROF[i+1][1];
+    if((y>=y1&&y<=y2)||(y>=y2&&y<=y1))
+      return r1+(r2-r1)*((y-y1)/(y2-y1));
+  }
+  return 0;
+}
+
+function addP(x,y,z,band){
+  var hn=(y/sc+12)/67;
+  particles.push({
+    hx:x,hy:y,hz:z, x:x,y:y,z:z,
+    vx:0,vy:0,vz:0,
+    sz:(.9+rnd()*1.3)*sc*.44,
+    br:(.52+hn*.42)*(.84+rnd()*.16),
+    band:!!band, orb:false, trail:[],
+    ph:rnd()*PI2
+  });
+}
+
+function buildHat(){
+  particles=[];
+  var s=sc,y,r,n,a,i,j,t,mr;
+
+  /* surface rings */
+  for(y=-10;y<=55;y+=2){
+    r=rAt(y);if(r<1)continue;
+    n=min(55,max(4,PI2*r*s/5|0));
+    for(j=0;j<n;j++){a=j/n*PI2;addP(cos(a)*r*s,y*s,sin(a)*r*s)}
+  }
+
+  /* brim underside disc */
+  for(i=1;i<=6;i++){
+    r=i/6*118;
+    n=min(45,max(4,PI2*r*s/5.5|0));
+    for(j=0;j<n;j++){a=j/n*PI2;addP(cos(a)*r*s,(-10+rnd()*1.5)*s,sin(a)*r*s)}
+  }
+
+  /* brim top surface fill */
+  for(i=1;i<=5;i++){
+    t=i/5;y=-8+t*8;r=rAt(y)*.9;if(r<5)continue;
+    n=min(40,max(4,PI2*r*s/5.5|0));
+    for(j=0;j<n;j++){a=j/n*PI2;addP(cos(a)*r*s,y*s,sin(a)*r*s)}
+  }
+
+  /* crown interior */
+  for(i=0;i<320;i++){
+    y=2+rnd()*52;mr=rAt(y)*.82;if(mr<2)continue;
+    r=rnd()*mr;a=rnd()*PI2;
+    addP(cos(a)*r*s,y*s,sin(a)*r*s);
+  }
+
+  /* brim interior */
+  for(i=0;i<320;i++){
+    y=-10+rnd()*10;mr=rAt(y)*.88;if(mr<5)continue;
+    r=rnd()*mr;a=rnd()*PI2;
+    addP(cos(a)*r*s,y*s,sin(a)*r*s);
+  }
+
+  /* hat band */
+  for(j=0;j<60;j++){
+    a=j/60*PI2;
+    addP(cos(a)*52*s,(.5+rnd()*2.5)*s,sin(a)*52*s,true);
+  }
+}
+
+/* ═══ Hover ═════════════════════════════════════════════════ */
+function hStart(){hovering=true;if(rm)return;if(state==='idle')go('slowing')}
+function hEnd(){
+  hovering=false;if(rm)return;
+  if(state==='slowing'||state==='dissolving'||state==='swirling')go('reforming');
+  if(state==='orbiting')go('reforming');
+}
+
+/* ═══ State Machine ═════════════════════════════════════════ */
+function go(s){
+  state=s;stateT=performance.now();
+  var i,p,d,sp;
+
+  if(s==='idle'){
+    for(i=0;i<particles.length;i++){
+      p=particles[i];p.x=p.hx;p.y=p.hy;p.z=p.hz;
+      p.vx=p.vy=p.vz=0;p.orb=false;p.trail=[];
+    }
+    orbiters=[];spinSpd=rm?0:CFG.spin;
+  }
+
+  if(s==='dissolving'){
+    for(i=0;i<particles.length;i++){
+      p=particles[i];
+      d=hyp(p.hx,p.hy,p.hz)||1;
+      sp=1.4+rnd()*2.6;
+      p.vx=p.hx/d*sp+(rnd()-.5)*1.6;
+      p.vy=p.hy/d*sp+(rnd()-.5)*1.6;
+      p.vz=p.hz/d*sp+(rnd()-.5)*1.6;
+    }
+  }
+
+  if(s==='orbiting'){
+    for(i=0;i<particles.length;i++){
+      p=particles[i];
+      if(!p.orb){p.x=p.hx;p.y=p.hy;p.z=p.hz;p.vx=p.vy=p.vz=0}
+    }
+    pickOrbit();
+  }
+}
+
+function pickOrbit(){
+  orbiters=[];
+  var pool=[],i,p;
+  for(i=0;i<particles.length;i++){
+    p=particles[i];
+    if(hyp(p.hx,p.hz)>18*sc)pool.push(p);
+  }
+  for(i=0;i<CFG.nOrbit&&pool.length;i++){
+    var idx=floor(rnd()*pool.length);
+    p=pool.splice(idx,1)[0];
+    p.orb=true;
+    p.oA=atan2(p.hz,p.hx);
+    p.oR=hyp(p.hx,p.hz)+(14+rnd()*28)*sc;
+    p.oS=.007+rnd()*.016;
+    p.oY=p.hy+(rnd()-.5)*16*sc;
+    p.trail=[];
+    orbiters.push(p);
+  }
+}
+
+function atan2(y,x){return Math.atan2(y,x)}
+
+/* ═══ Update ════════════════════════════════════════════════ */
+function update(now){
+  var dt=now-stateT,i,p,d,maxD;
+  fadeA=min(1,fadeA+.018);
+  angle+=spinSpd;
+
+  switch(state){
+  case'idle':
+    spinSpd=rm?0:CFG.spin;
+    break;
+
+  case'slowing':
+    spinSpd*=.935;
+    if(dt>CFG.slowMs){spinSpd=0;go('dissolving')}
+    break;
+
+  case'dissolving':
+    for(i=0;i<particles.length;i++){
+      p=particles[i];
+      p.x+=p.vx;p.y+=p.vy;p.z+=p.vz;
+      p.vx*=.981;p.vy*=.981;p.vz*=.981;
+      p.vy-=.014;
+    }
+    if(dt>CFG.dissMs)go('swirling');
+    break;
+
+  case'swirling':
+    for(i=0;i<particles.length;i++){
+      p=particles[i];
+      d=hyp(p.x,p.z)||1;
+      p.vx+=(-p.z/d)*.24;
+      p.vz+=( p.x/d)*.24;
+      p.vx-=p.x*.0014;
+      p.vz-=p.z*.0014;
+      p.vx+=(rnd()-.5)*.24;
+      p.vy+=(rnd()-.5)*.24;
+      p.vz+=(rnd()-.5)*.24;
+      p.x+=p.vx;p.y+=p.vy;p.z+=p.vz;
+      p.vx*=.958;p.vy*=.958;p.vz*=.958;
+    }
+    if(dt>CFG.swirlMs)go('reforming');
+    break;
+
+  case'reforming':
+    for(i=0;i<particles.length;i++){
+      p=particles[i];
+      p.vx+=(p.hx-p.x)*.024;
+      p.vy+=(p.hy-p.y)*.024;
+      p.vz+=(p.hz-p.z)*.024;
+      p.x+=p.vx;p.y+=p.vy;p.z+=p.vz;
+      p.vx*=.89;p.vy*=.89;p.vz*=.89;
+    }
+    maxD=0;
+    for(i=0;i<particles.length;i++){
+      p=particles[i];if(p.orb)continue;
+      maxD=max(maxD,hyp(p.x-p.hx,p.y-p.hy,p.z-p.hz));
+    }
+    if(maxD<2.5||dt>CFG.reformMs){
+      for(i=0;i<particles.length;i++){
+        p=particles[i];
+        if(!p.orb){p.x=p.hx;p.y=p.hy;p.z=p.hz;p.vx=p.vy=p.vz=0}
+      }
+      go(hovering?'orbiting':'idle');
+    }
+    break;
+
+  case'orbiting':
+    spinSpd+=(CFG.spin*.65-spinSpd)*.04;
+    for(i=0;i<orbiters.length;i++){
+      p=orbiters[i];
+      p.oA+=p.oS;
+      p.x=cos(p.oA)*p.oR;
+      p.z=sin(p.oA)*p.oR;
+      p.y=p.oY+sin(now*.0009+p.ph)*9*sc;
+      p.trail.unshift({x:p.x,y:p.y,z:p.z});
+      if(p.trail.length>CFG.trail)p.trail.pop();
+    }
+    break;
+  }
+}
+
+/* ═══ Render ════════════════════════════════════════════════ */
+function render(now){
+  ctx.clearRect(0,0,W,H);
+
+  /* background */
+  var bg=ctx.createRadialGradient(cx,cy,0,cx,cy,W*.72);
+  bg.addColorStop(0,'#11111c');bg.addColorStop(1,'#080810');
+  ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+
+  /* floor shadow */
+  var shA=1;
+  if(state==='dissolving')shA=.35;
+  if(state==='swirling')shA=.15;
+  if(state==='reforming'){
+    var md=0;
+    for(var si=0;si<particles.length;si++){
+      var sp=particles[si];
+      if(!sp.orb)md=max(md,hyp(sp.x-sp.hx,sp.y-sp.hy,sp.z-sp.hz));
+    }
+    shA=max(.15,1-md/(45*sc));
+  }
+  ctx.save();
+  ctx.globalAlpha=shA;
+  ctx.translate(cx,cy+38*sc);
+  ctx.scale(1,.075);
+  var sg=ctx.createRadialGradient(0,0,0,0,0,125*sc);
+  sg.addColorStop(0,'rgba(0,0,0,.28)');sg.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=sg;ctx.beginPath();ctx.arc(0,0,125*sc,0,PI2);ctx.fill();
+  ctx.restore();
+
+  /* ambient glow */
+  var ag=ctx.createRadialGradient(cx,cy-15*sc,0,cx,cy-15*sc,95*sc);
+  ag.addColorStop(0,'rgba(232,34,42,.035)');ag.addColorStop(1,'rgba(232,34,42,0)');
+  ctx.fillStyle=ag;ctx.beginPath();ctx.arc(cx,cy-15*sc,95*sc,0,PI2);ctx.fill();
+
+  /* 3D setup */
+  var cA=cos(angle),sA=sin(angle),
+      tilt=.18,cT=cos(tilt),sT=sin(tilt),
+      fov=500,oy=18*sc;
+
+  ctx.save();
+  ctx.translate(cx,cy+oy);
+  ctx.globalCompositeOperation='lighter';
+
+  /* project & collect */
+  var dl=[],i,p,rx,rz,ry,ry2,rz2,scale,dObj;
+  for(i=0;i<particles.length;i++){
+    p=particles[i];
+    rx=p.x*cA-p.z*sA;
+    rz=p.x*sA+p.z*cA;
+    ry=-p.y;
+    ry2=ry*cT-rz*sT;
+    rz2=ry*sT+rz*cT;
+    scale=fov/(fov+rz2);
+    dl.push({p:p,rx:rx,ry:ry2,rz:rz2,sc:scale});
+  }
+
+  dl.sort(function(a,b){return a.rz-b.rz});
+
+  /* draw particles */
+  for(i=0;i<dl.length;i++){
+    dObj=dl[i];p=dObj.p;
+    if(p.orb&&state==='orbiting')continue;
+
+    var depth=(dObj.rz+155*sc)/(310*sc);
+    var alpha=max(.025,1-depth*.44)*p.br;
+
+    /* breathing in idle */
+    if(state==='idle'&&!rm)alpha*=1+sin(now*.0014)*.038;
+
+    /* ember pulse during dissolve/swirl */
+    if(state==='dissolving'||state==='swirling')
+      alpha*=1.18+sin(now*.0045+p.ph*6.28)*.18;
+
+    /* proximity glow during reform */
+    if(state==='reforming'){
+      var dist=hyp(p.x-p.hx,p.y-p.hy,p.z-p.hz);
+      alpha*=1+(1-min(1,dist/(22*sc)))*.45;
+    }
+
+    alpha=min(.62,alpha);
+    var spr=p.band?bandSpr:redSpr;
+    var ds=p.sz*dObj.sc*5.5;
+    if(ds<.4)continue;
+    ctx.globalAlpha=alpha;
+    ctx.drawImage(spr,dObj.rx*dObj.sc-ds/2,dObj.ry*dObj.sc-ds/2,ds,ds);
+  }
+
+  /* orbiters + trails */
+  if(state==='orbiting'){
+    for(i=0;i<dl.length;i++){
+      dObj=dl[i];p=dObj.p;
+      if(!p.orb)continue;
+      var tr,trx,trz,try_,try2,trz2,tsc,ts,ti;
+
+      /* trail */
+      for(ti=0;ti<p.trail.length;ti++){
+        tr=p.trail[ti];
+        trx=tr.x*cA-tr.z*sA;
+        trz=tr.x*sA+tr.z*cA;
+        try_=-tr.y;
+        try2=try_*cT-trz*sT;
+        trz2=try_*sT+trz*cT;
+        tsc=fov/(fov+trz2);
+        ctx.globalAlpha=(1-ti/p.trail.length)*.18;
+        ts=3.2*tsc;
+        ctx.drawImage(redSpr,trx*tsc-ts/2,try2*tsc-ts/2,ts,ts);
+      }
+
+      /* core */
+      ctx.globalAlpha=.82;
+      var dcore=4.2*dObj.sc;
+      ctx.drawImage(redSpr,dObj.rx*dObj.sc-dcore/2,dObj.ry*dObj.sc-dcore/2,dcore,dcore);
+    }
+  }
+
+  ctx.restore();
+
+  /* vignette */
+  var vg=ctx.createRadialGradient(cx,cy,W*.28,cx,cy,W*.68);
+  vg.addColorStop(0,'rgba(0,0,0,0)');vg.addColorStop(1,'rgba(0,0,0,.38)');
+  ctx.fillStyle=vg;ctx.fillRect(0,0,W,H);
+
+  /* fade-in overlay */
+  if(fadeA<1){
+    ctx.globalAlpha=1-fadeA;
+    ctx.fillStyle='#080810';
+    ctx.fillRect(0,0,W,H);
+    ctx.globalAlpha=1;
+  }
+}
+
+/* ═══ Loop ══════════════════════════════════════════════════ */
+function loop(now){update(now);render(now);requestAnimationFrame(loop)}
+
+/* ═══ Start ═════════════════════════════════════════════════ */
+init();
+
+})();
+</script>
+</body>
+</html>

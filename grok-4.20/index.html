@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Red Hat Fedora</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500&amp;family=Playfair+Display:wght@700&amp;display=swap');
+        
+        :root {
+            --primary: #e31c1c;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: radial-gradient(circle at 50% 30%, #1a0f0a 0%, #0a0a0a 70%);
+            color: #eeeeee;
+            font-family: 'Inter', system-ui, sans-serif;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        
+        .scene {
+            position: relative;
+            width: 420px;
+            height: 420px;
+            perspective: 1400px;
+            filter: drop-shadow(0 60px 80px rgba(227, 28, 28, 0.4));
+        }
+        
+        .hat-container {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotateX(18deg);
+            width: 280px;
+            height: 240px;
+            cursor: pointer;
+            transition: transform 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+        }
+        
+        .hat-container:hover {
+            transform: translate(-50%, -50%) rotateX(18deg) scale(1.05);
+        }
+        
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+        }
+        
+        .logo {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 220px;
+            height: 220px;
+            z-index: 1;
+            display: none;
+        }
+        
+        .caption {
+            position: absolute;
+            bottom: -80px;
+            left: 50%;
+            transform: translateX(-50%);
+            text-align: center;
+            font-size: 15px;
+            letter-spacing: 3px;
+            font-weight: 500;
+            color: #aaaaaa;
+            text-transform: uppercase;
+            white-space: nowrap;
+            z-index: 10;
+            transition: all 0.6s cubic-bezier(0.23, 1, 0.32, 1);
+        }
+        
+        .caption:hover {
+            color: #e31c1c;
+            letter-spacing: 5px;
+        }
+        
+        .glow {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 340px;
+            height: 340px;
+            background: radial-gradient(circle, rgba(227,28,28,0.15) 0%, transparent 70%);
+            transform: translate(-50%, -50%);
+            border-radius: 50%;
+            z-index: 0;
+            animation: pulse-glow 8s ease-in-out infinite;
+        }
+        
+        @keyframes pulse-glow {
+            0%, 100% { opacity: 0.6; transform: translate(-50%, -50%) scale(0.95); }
+            50% { opacity: 0.9; transform: translate(-50%, -50%) scale(1.05); }
+        }
+        
+        .info {
+            position: absolute;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 13px;
+            color: #555;
+            letter-spacing: 1px;
+            z-index: 20;
+        }
+    </style>
+</head>
+<body>
+    <div class="scene" id="scene">
+        <div class="glow"></div>
+        <canvas id="canvas" width="420" height="420"></canvas>
+        <div class="hat-container" id="hatContainer">
+            <!-- Three.js will render here via canvas -->
+        </div>
+        <div class="caption">RED HAT</div>
+        <div class="info">hover or tap • reduced motion respected</div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+    <script>
+        // Respect prefers-reduced-motion
+        const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        
+        let scene, camera, renderer;
+        let hatGroup, brim, crown, band, buckle;
+        let particles = [];
+        let orbitingParticles = [];
+        let isDissolving = false;
+        let dissolveProgress = 0;
+        let targetRotationSpeed = 0.008;
+        let rotationSpeed = 0.008;
+        let mouseX = 0;
+        let mouseY = 0;
+        let targetMouseX = 0;
+        let targetMouseY = 0;
+        let time = 0;
+        
+        const canvas = document.getElementById('canvas');
+        const hatContainer = document.getElementById('hatContainer');
+        
+        function initThree() {
+            const width = 420;
+            const height = 420;
+            
+            scene = new THREE.Scene();
+            scene.fog = new THREE.Fog(0x0a0a0a, 800, 2000);
+            
+            camera = new THREE.PerspectiveCamera(48, width / height, 0.1, 2000);
+            camera.position.set(0, 60, 420);
+            camera.lookAt(0, 80, 0);
+            
+            renderer = new THREE.WebGLRenderer({
+                canvas: canvas,
+                antialias: true,
+                alpha: true
+            });
+            renderer.setSize(width, height);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.outputEncoding = THREE.sRGBEncoding;
+            
+            // Soft ambient lighting
+            const ambient = new THREE.AmbientLight(0xaaaaaa, 0.6);
+            scene.add(ambient);
+            
+            // Key red rim light
+            const rimLight = new THREE.DirectionalLight(0xff3333, 1.8);
+            rimLight.position.set(180, 220, 300);
+            scene.add(rimLight);
+            
+            // Fill light
+            const fillLight = new THREE.DirectionalLight(0x8899ff, 0.7);
+            fillLight.position.set(-220, 140, -180);
+            scene.add(fillLight);
+            
+            // Top soft light
+            const topLight = new THREE.DirectionalLight(0xffffff, 1.1);
+            topLight.position.set(0, 400, 100);
+            scene.add(topLight);
+            
+            createHat();
+            createParticles();
+            
+            // Interaction
+            hatContainer.addEventListener('mousemove', onMouseMove);
+            hatContainer.addEventListener('mouseleave', onMouseLeave);
+            hatContainer.addEventListener('click', triggerDissolve);
+            hatContainer.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                triggerDissolve();
+            });
+            
+            window.addEventListener('resize', onResize);
+            animate();
+        }
+        
+        function createHat() {
+            hatGroup = new THREE.Group();
+            scene.add(hatGroup);
+            
+            const hatMaterial = new THREE.MeshPhongMaterial({
+                color: 0x9c1f1f,
+                shininess: 8,
+                specular: 0x222222,
+                flatShading: false,
+                emissive: 0x220000,
+                emissiveIntensity: 0.2
+            });
+            
+            // Crown (the top cylindrical part)
+            const crownGeo = new THREE.CylinderGeometry(52, 68, 92, 64, 1, true);
+            crown = new THREE.Mesh(crownGeo, hatMaterial);
+            crown.castShadow = true;
+            crown.receiveShadow = true;
+            crown.rotation.x = Math.PI / 2;
+            crown.position.y = 115;
+            hatGroup.add(crown);
+            
+            // Brim
+            const brimGeo = new THREE.CylinderGeometry(118, 52, 22, 64, 1, true);
+            brim = new THREE.Mesh(brimGeo, hatMaterial);
+            brim.castShadow = true;
+            brim.receiveShadow = true;
+            brim.rotation.x = Math.PI / 2;
+            brim.position.y = 48;
+            hatGroup.add(brim);
+            
+            // Inner band (ribbon)
+            const bandMaterial = new THREE.MeshPhongMaterial({
+                color: 0x111111,
+                shininess: 30,
+                specular: 0xaaaaaa
+            });
+            
+            const bandGeo = new THREE.CylinderGeometry(74, 74, 26, 64);
+            band = new THREE.Mesh(bandGeo, bandMaterial);
+            band.castShadow = true;
+            band.position.y = 95;
+            hatGroup.add(band);
+            
+            // Golden buckle
+            const buckleMaterial = new THREE.MeshPhongMaterial({
+                color: 0xffdd88,
+                shininess: 90,
+                specular: 0xffffff,
+                emissive: 0xffaa33,
+                emissiveIntensity: 0.3
+            });
+            
+            const buckleGeo = new THREE.BoxGeometry(52, 18, 8);
+            buckle = new THREE.Mesh(buckleGeo, buckleMaterial);
+            buckle.castShadow = true;
+            buckle.position.set(0, 95, 76);
+            buckle.rotation.y = Math.PI / 2;
+            hatGroup.add(buckle);
+            
+            // Subtle highlight ring on crown
+            const highlightMat = new THREE.MeshPhongMaterial({
+                color: 0x330000,
+                shininess: 10,
+                transparent: true,
+                opacity: 0.25
+            });
+            const highlightGeo = new THREE.CylinderGeometry(53, 69, 12, 64);
+            const highlight = new THREE.Mesh(highlightGeo, highlightMat);
+            highlight.rotation.x = Math.PI / 2;
+            highlight.position.y = 148;
+            hatGroup.add(highlight);
+            
+            // Add a very faint inner shadow cylinder to give depth
+            const innerMat = new THREE.MeshPhongMaterial({
+                color: 0x111111,
+                shininess: 5,
+                transparent: true,
+                opacity: 0.3
+            });
+            const inner = new THREE.Mesh(
+                new THREE.CylinderGeometry(48, 64, 85, 32),
+                innerMat
+            );
+            inner.rotation.x = Math.PI / 2;
+            inner.position.y = 116;
+            hatGroup.add(inner);
+        }
+        
+        function createParticles() {
+            particles = [];
+            orbitingParticles = [];
+            
+            const particleMaterial = new THREE.PointsMaterial({
+                size: 3.5,
+                color: 0xff5522,
+                transparent: true,
+                opacity: 0.9,
+                blending: THREE.AdditiveBlending,
+                depthTest: false
+            });
+            
+            // Create main particle pool
+            for (let i = 0; i < 2200; i++) {
+                const p = {
+                    mesh: null,
+                    baseX: (Math.random() - 0.5) * 220,
+                    baseY: 40 + Math.random() * 160,
+                    baseZ: (Math.random() - 0.5) * 140,
+                    vx: 0,
+                    vy: 0,
+                    vz: 0,
+                    life: 1,
+                    size: 2.5 + Math.random() * 3.5,
+                    active: false
+                };
+                
+                const geometry = new THREE.BufferGeometry();
+                geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(3), 3));
+                
+                p.mesh = new THREE.Points(geometry, particleMaterial.clone());
+                p.mesh.visible = false;
+                scene.add(p.mesh);
+                particles.push(p);
+            }
+            
+            // Create a few permanent orbiting embers
+            const orbitMat = new THREE.PointsMaterial({
+                size: 4.5,
+                color: 0xffaa66,
+                transparent: true,
+                opacity: 0.85,
+                blending: THREE.AdditiveBlending
+            });
+            
+            for (let i = 0; i < 12; i++) {
+                const p = {
+                    mesh: null,
+                    angle: Math.random() * Math.PI * 2,
+                    radius: 110 + Math.random() * 45,
+                    height: 70 + Math.random() * 90,
+                    speed: 0.008 + Math.random() * 0.018,
+                    pulse: Math.random() * 10,
+                    trail: []
+                };
+                
+                const geo = new THREE.BufferGeometry();
+                geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(3), 3));
+                
+                p.mesh = new THREE.Points(geo, orbitMat.clone());
+                scene.add(p.mesh);
+                orbitingParticles.push(p);
+            }
+        }
+        
+        function activateParticles() {
+            const centerX = hatGroup.position.x;
+            const centerY = hatGroup.position.y + 90;
+            const centerZ = hatGroup.position.z;
+            
+            let i = 0;
+            particles.forEach(p => {
+                if (i++ > 1850) return;
+                
+                const spread = 1 + Math.random() * 1.6;
+                
+                p.baseX = centerX + (Math.random() - 0.5) * 220 * spread;
+                p.baseY = centerY + (Math.random() - 0.5) * 170 * spread;
+                p.baseZ = centerZ + (Math.random() - 0.5) * 160 * spread;
+                
+                p.vx = (Math.random() - 0.5) * 9.5;
+                p.vy = 4 + Math.random() * 13;
+                p.vz = (Math.random() - 0.5) * 8;
+                
+                p.life = 0.6 + Math.random() * 0.9;
+                p.mesh.visible = true;
+                p.active = true;
+                p.size = 2 + Math.random() * 4.5;
+                
+                const posAttr = p.mesh.geometry.attributes.position;
+                posAttr.array[0] = p.baseX;
+                posAttr.array[1] = p.baseY;
+                posAttr.array[2] = p.baseZ;
+                posAttr.needsUpdate = true;
+                
+                p.mesh.material.size = p.size;
+                p.mesh.material.opacity = 0.9;
+            });
+            
+            dissolveProgress = 0;
+            isDissolving = true;
+        }
+        
+        function triggerDissolve() {
+            if (isDissolving || reducedMotion) return;
+            activateParticles();
+            
+            // Slow down rotation while dissolving
+            rotationSpeed = 0.0015;
+            
+            setTimeout(() => {
+                if (!isDissolving) rotationSpeed = targetRotationSpeed;
+            }, 3200);
+        }
+        
+        function onMouseMove(e) {
+            const rect = hatContainer.getBoundingClientRect();
+            targetMouseX = (e.clientX - rect.left - rect.width / 2) / (rect.width / 2);
+            targetMouseY = (e.clientY - rect.top - rect.height / 2) / (rect.height / 2);
+        }
+        
+        function onMouseLeave() {
+            targetMouseX = 0;
+            targetMouseY = 0;
+        }
+        
+        function onResize() {
+            const width = Math.min(window.innerWidth * 0.9, 520);
+            const height = width;
+            
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+            renderer.setSize(width, height);
+            
+            document.getElementById('scene').style.width = width + 'px';
+            document.getElementById('scene').style.height = height + 'px';
+        }
+        
+        function updateParticles() {
+            if (!isDissolving) return;
+            
+            dissolveProgress += 0.014;
+            
+            let stillActive = false;
+            
+            particles.forEach(p => {
+                if (!p.active) return;
+                
+                p.vy -= 0.18;
+                p.vx *= 0.975;
+                p.vz *= 0.975;
+                
+                p.baseX += p.vx;
+                p.baseY += p.vy;
+                p.baseZ += p.vz;
+                
+                p.life -= 0.0095;
+                
+                const posAttr = p.mesh.geometry.attributes.position;
+                const x = p.baseX;
+                const y = p.baseY;
+                const z = p.baseZ;
+                
+                posAttr.array[0] = x;
+                posAttr.array[1] = y;
+                posAttr.array[2] = z;
+                posAttr.needsUpdate = true;
+                
+                const alpha = Math.max(0, p.life);
+                p.mesh.material.opacity = alpha * 0.9;
+                p.mesh.material.size = p.size * (0.6 + alpha * 0.9);
+                
+                if (p.life > 0) {
+                    stillActive = true;
+                } else {
+                    p.active = false;
+                    p.mesh.visible = false;
+                }
+            });
+            
+            // Re-form the hat when most particles are gone
+            if (dissolveProgress > 2.8 && stillActive === false) {
+                isDissolving = false;
+                rotationSpeed = targetRotationSpeed;
+                
+                // Reset hat to original position with a nice bounce
+                hatGroup.position.y = -30;
+                hatGroup.scale.set(0.6, 0.6, 0.6);
+                
+                setTimeout(() => {
+                    if (!isDissolving) {
+                        hatGroup.position.y = 0;
+                        hatGroup.scale.set(1, 1, 1);
+                    }
+                }, 10);
+            }
+        }
+        
+        function updateOrbitingParticles() {
+            const now = Date.now() * 0.0012;
+            
+            orbitingParticles.forEach((p, i) => {
+                p.angle += p.speed * (reducedMotion ? 0.2 : 1);
+                p.pulse = Math.sin(now * 3 + i) * 0.5 + 0.5;
+                
+                const x = Math.cos(p.angle) * p.radius * (0.9 + p.pulse * 0.2);
+                const z = Math.sin(p.angle * 1.3) * p.radius * 0.6;
+                const y = p.height + Math.sin(p.angle * 2) * 18;
+                
+                const posAttr = p.mesh.geometry.attributes.position;
+                posAttr.array[0] = x;
+                posAttr.array[1] = y + 35;
+                posAttr.array[2] = z;
+                posAttr.needsUpdate = true;
+                
+                // Glow intensity
+                const intensity = 0.6 + Math.sin(now * 4 + i) * 0.4;
+                p.mesh.material.opacity = intensity;
+                p.mesh.material.size = 3.5 + intensity * 2.5;
+            });
+        }
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            time += 0.016;
+            
+            // Gentle breathing on the hat
+            const breathe = Math.sin(time * 1.4) * 2.5;
+            hatGroup.position.y = breathe * 0.6;
+            
+            // Main rotation
+            if (!reducedMotion) {
+                hatGroup.rotation.y += rotationSpeed;
+            } else {
+                hatGroup.rotation.y = Math.sin(time * 0.6) * 0.15;
+            }
+            
+            // Mouse follow tilt
+            const lerpFactor = 0.1;
+            mouseX = mouseX * (1 - lerpFactor) + targetMouseX * lerpFactor;
+            mouseY = mouseY * (1 - lerpFactor) + targetMouseY * lerpFactor;
+            
+            hatGroup.rotation.x = 0.28 + mouseY * -0.35;
+            hatGroup.rotation.z = mouseX * -0.4;
+            
+            updateParticles();
+            updateOrbitingParticles();
+            
+            if (isDissolving && dissolveProgress < 3.2) {
+                // Gentle upward drift during reformation
+                const reform = Math.max(0, 1 - (dissolveProgress - 1.6) / 1.6);
+                hatGroup.position.y = -25 * reform;
+            }
+            
+            renderer.render(scene, camera);
+        }
+        
+        // Initialize everything
+        window.onload = function() {
+            initThree();
+            
+            // Make the canvas interactive
+            canvas.style.cursor = 'pointer';
+            
+            // Keyboard accessibility: spacebar also triggers dissolve
+            document.addEventListener('keydown', function(e) {
+                if (e.key === ' ' && document.activeElement.tagName !== "INPUT" && document.activeElement.tagName !== "TEXTAREA") {
+                    e.preventDefault();
+                    triggerDissolve();
+                }
+            });
+            
+            // Touch support already added in initThree
+            console.log('%cRed Hat Fedora experience ready. Hover or tap the hat.', 
+                        'color:#e31c1c; font-family:monospace; font-size:13px');
+        };
+    </script>
+</body>
+</html>

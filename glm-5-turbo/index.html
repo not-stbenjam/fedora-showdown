@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fedora</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#07070b}
+canvas{display:block;position:absolute;inset:0;cursor:pointer}
+.cap{
+  position:absolute;bottom:9vh;left:50%;transform:translateX(-50%);
+  color:rgba(185,185,195,.35);
+  font:300 clamp(.65rem,1.3vw,1rem)/1 system-ui,-apple-system,"Segoe UI",sans-serif;
+  letter-spacing:.22em;text-transform:lowercase;
+  pointer-events:none;user-select:none;white-space:nowrap
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<p class="cap">built on open source</p>
+<script>
+(()=>{
+'use strict';
+
+// ──── Canvas ────
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const RM = matchMedia('(prefers-reduced-motion:reduce)').matches;
+
+let W, H, dpr, S;
+function resize() {
+  dpr = devicePixelRatio || 1;
+  W = innerWidth; H = innerHeight;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  S = Math.min(W, H) * .22;
+}
+addEventListener('resize', resize);
+resize();
+
+// ──── Glow Sprites ────
+function mkGlow(sz, r, g, b, edge) {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = sz;
+  const c = cv.getContext('2d');
+  const gr = c.createRadialGradient(sz/2, sz/2, 0, sz/2, sz/2, sz/2);
+  gr.addColorStop(0, 'rgba('+r+','+g+','+b+',1)');
+  gr.addColorStop(edge || .18, 'rgba('+r+','+g+','+b+',.45)');
+  gr.addColorStop(.55, 'rgba('+r+','+g+','+b+',.08)');
+  gr.addColorStop(1, 'rgba('+r+','+g+','+b+',0)');
+  c.fillStyle = gr; c.fillRect(0, 0, sz, sz);
+  return cv;
+}
+const gR = mkGlow(64, 185, 32, 20);
+const gO = mkGlow(64, 255, 120, 28);
+const gY = mkGlow(64, 255, 200, 115);
+const gH = mkGlow(256, 100, 16, 10, .35);
+
+// ──── Fedora Profile ────
+const CB=.46, CBY=.065, CH=.84;
+const BI=.47, BO=1, BY=.055, BAH=.052;
+
+function cR(t) {
+  if (t <= 0) return CB * .91;
+  if (t >= 1) return 0;
+  let r;
+  if (t < .12) { r = CB * (.91 + .09 * (t / .12)); }
+  else { const s = (t - .12) / .88; r = CB * Math.pow(Math.max(0, Math.cos(s * Math.PI * .47)), .5); }
+  if (t > .75) { const p = (t - .75) / .25; r *= 1 - Math.pow(p, 1.4) * .82; }
+  if (t > .84) { const p = (t - .84) / .16; r += .022 * Math.sin(p * Math.PI); }
+  return Math.max(0, r);
+}
+
+// ──── Particles ────
+const N = RM ? 2000 : 5000;
+const P = [];
+
+function addP(x, y, z, tp, cr, cg, cb) {
+  P.push({
+    hx:x, hy:y, hz:z, tp, cr, cg, cb,
+    sz: tp === 'brim' ? 1 + Math.random()*.4 : 1.1 + Math.random()*.5,
+    nx:0, ny:0, nz:0,
+    hash: (Math.random()*100)|0,
+    dx:0, dy:0, dz:0,
+    sa:0, sr:0, ss:0, sy:0, sp:0,
+    es: .8 + Math.random()*1.5
+  });
+}
+
+// Crown – 52 %
+const cnN = Math.floor(N * .52);
+for (let i = 0; i < cnN; i++) {
+  const a = Math.random() * 6.2832;
+  const t = Math.pow(Math.random(), .7);
+  const r = cR(t) * (.90 + Math.random()*.10);
+  const y = CBY + t * CH;
+  addP(r*Math.cos(a), y, r*Math.sin(a), 'crown',
+    155+(Math.random()*35|0), 12+(Math.random()*16|0), 22+(Math.random()*16|0));
+}
+
+// Brim – 38 %
+const brN = Math.floor(N * .38);
+for (let i = 0; i < brN; i++) {
+  const a = Math.random() * 6.2832;
+  const f = Math.pow(Math.random(), .4);
+  const r = BI + f * (BO - BI);
+  const y = BY - f*f*f*.05 + (Math.random()-.5)*.014;
+  addP(r*Math.cos(a), y, r*Math.sin(a), 'brim',
+    140+(Math.random()*30|0), 16+(Math.random()*14|0), 26+(Math.random()*14|0));
+}
+
+// Band – 10 %
+for (let i = P.length; i < N; i++) {
+  const a = Math.random() * 6.2832;
+  const r = BI * (.96 + Math.random()*.04);
+  const y = BY + Math.random() * BAH;
+  addP(r*Math.cos(a), y, r*Math.sin(a), 'band',
+    14+(Math.random()*20|0), 8+(Math.random()*14|0), 8+(Math.random()*14|0));
+}
+
+// Normals & dissolve targets
+P.forEach(p => {
+  const r = Math.sqrt(p.hx*p.hx + p.hz*p.hz) + .001;
+  if (p.tp === 'brim') { p.nx=0; p.ny=1; p.nz=0; }
+  else {
+    const ht = Math.max(0, Math.min(1, (p.hy - CBY) / CH));
+    const dr = cR(ht+.015) - cR(Math.max(0, ht-.015));
+    p.nx = (p.hx/r)*2; p.ny = -dr*50; p.nz = (p.hz/r)*2;
+    const nl = Math.sqrt(p.nx*p.nx+p.ny*p.ny+p.nz*p.nz)+.001;
+    p.nx/=nl; p.ny/=nl; p.nz/=nl;
+  }
+  const b = 1.2 + Math.random()*2.5;
+  p.dx = p.hx + p.nx*b + (Math.random()-.5)*.7;
+  p.dy = p.hy + p.ny*b*.4 + Math.random()*1.4 + .15;
+  p.dz = p.hz + p.nz*b + (Math.random()-.5)*.7;
+  p.sa = Math.random()*6.2832;
+  p.sr = .7 + Math.random()*1.9;
+  p.ss = (.4 + Math.random()*1.6) * (Math.random()<.5?1:-1);
+  p.sy = (Math.random()-.5)*2.3;
+  p.sp = Math.random()*6.2832;
+});
+
+// ──── Ambient Floaters ────
+const AM = Array.from({length:45}, ()=>({
+  x:(Math.random()-.5)*5, y:(Math.random()-.5)*4,
+  a:.025+Math.random()*.1, s:.001+Math.random()*.004,
+  p:Math.random()*6.28, sz:.3+Math.random()*.6
+}));
+
+// ──── Orbiters ────
+let hasOrb = false;
+const OB = Array.from({length:22}, ()=>({
+  r:1.1+Math.random()*.55,
+  spd:(.2+Math.random()*.5)*(Math.random()<.5?1:-1),
+  tilt:(Math.random()-.5)*1.1,
+  ph:Math.random()*6.28,
+  yo:(Math.random()-.5)*.5,
+  sz:1+Math.random()*1,
+  trail:[]
+}));
+
+// ──── State ────
+let phase = 'idle', t0 = 0;
+let spin = 0, spd = RM ? 0 : .35;
+const NSPD = RM ? 0 : .35;
+const TILT = .30, CAM = 4.8, DUR = 4.5, TAU = Math.PI*2;
+
+// Light direction (world-space, normalised)
+const LT = (()=>{
+  const d={x:-.38,y:.72,z:-.55};
+  const n=Math.sqrt(d.x*d.x+d.y*d.y+d.z*d.z);
+  return{x:d.x/n,y:d.y/n,z:d.z/n};
+})();
+
+const eioC = t => t<.5 ? 4*t*t*t : 1-(-2*t+2)**3/2;
+const eoC  = t => 1-(1-t)**3;
+
+// ──── Projection ────
+function pj(px,py,pz) {
+  const cs=Math.cos(spin), sn=Math.sin(spin);
+  let x=px*cs+pz*sn, z=-px*sn+pz*cs, y=py;
+  const ct=Math.cos(TILT), st=Math.sin(TILT);
+  const y2=y*ct-z*st, z2=y*st+z*ct;
+  const s=CAM/(CAM+z2);
+  return{ sx:W/2+x*s*S, sy:H*.44-y2*s*S, z:z2, s };
+}
+function rN(nx,ny,nz) {
+  const cs=Math.cos(spin), sn=Math.sin(spin);
+  let x=nx*cs+nz*sn, z=-nx*sn+nz*cs, y=ny;
+  const ct=Math.cos(TILT), st=Math.sin(TILT);
+  return{x, y:y*ct-z*st, z:y*st+z*ct};
+}
+
+// ──── Dissolve Timeline ────
+function gPos(p, t) {
+  if (t<=.12) return{x:p.hx, y:p.hy, z:p.hz};
+  if (t<.38) {
+    const s=eoC((t-.12)/.26);
+    return{x:p.hx+(p.dx-p.hx)*s, y:p.hy+(p.dy-p.hy)*s, z:p.hz+(p.dz-p.hz)*s};
+  }
+  if (t<.68) {
+    const st=(t-.38)/.3, en=eioC(Math.min(1,st*2.5));
+    const a=p.sa+st*p.ss*6;
+    const r=p.sr*(.82+.18*Math.sin(st*Math.PI+p.sp));
+    const sx=r*Math.cos(a), sy=p.sy+Math.sin(st*TAU+p.sp)*.3, sz=r*Math.sin(a);
+    return{x:p.dx+(sx-p.dx)*en, y:p.dy+(sy-p.dy)*en, z:p.dz+(sz-p.dz)*en};
+  }
+  {
+    const s=eioC((t-.68)/.32);
+    const ea=p.sa+p.ss*6, er=p.sr*.82;
+    const ex=er*Math.cos(ea), ey=p.sy, ez=er*Math.sin(ea);
+    const d=(1-s)*.35, sa2=ea+(1-s)*4;
+    return{x:ex+(p.hx-ex)*s+d*Math.cos(sa2), y:ey+(p.hy-ey)*s, z:ez+(p.hz-ez)*s+d*Math.sin(sa2)};
+  }
+}
+
+function gGlow(t) {
+  if (t<=.12) return 0;
+  if (t<.38) return eoC((t-.12)/.26);
+  if (t<.68) return 1;
+  if (t<1)   return 1-eioC((t-.68)/.32);
+  return 0;
+}
+
+// ──── Render ────
+let prev = 0;
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min((now-prev)/1e3, .05); prev = now;
+
+  // State
+  let prog = 0;
+  if (phase==='active') {
+    prog = Math.min((now-t0)/1e3/DUR, 1);
+    if (prog<.12)      spd = NSPD*(1-(prog/.12)**2*.93);
+    else if (prog>=1)   { phase='idle'; spd=NSPD; if(!hasOrb&&!RM) hasOrb=true; }
+    else                spd = NSPD*.06;
+  } else { spd = NSPD; }
+  if (!RM) spin += spd*dt;
+
+  const glow = gGlow(prog);
+  const sec  = now/1e3;
+  // subtle breathing glow when orbiters are present
+  const baseGlow = .05 + (hasOrb && phase==='idle' ? Math.sin(sec*.8)*.012 : 0);
+  const eg = Math.min(1, glow + baseGlow);
+
+  // ── Background ──
+  const bg = ctx.createRadialGradient(W/2,H*.44,0,W/2,H*.44,Math.max(W,H)*.78);
+  bg.addColorStop(0,'#13111c'); bg.addColorStop(.45,'#0b0a12'); bg.addColorStop(1,'#060608');
+  ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+
+  // Vignette
+  const vig = ctx.createRadialGradient(W/2,H*.44,Math.min(W,H)*.25,W/2,H*.44,Math.max(W,H)*.72);
+  vig.addColorStop(0,'rgba(0,0,0,0)'); vig.addColorStop(1,'rgba(0,0,0,.35)');
+  ctx.fillStyle=vig; ctx.fillRect(0,0,W,H);
+
+  // ── Ambient ──
+  ctx.globalCompositeOperation='lighter';
+  AM.forEach(a=>{
+    ctx.globalAlpha = a.a*(.5+.5*Math.sin(sec*a.s*10+a.p));
+    const ax=W/2+a.x*S*.6, ay=H*.44+(a.y+(RM?0:Math.sin(sec*a.s+a.p)*.12))*S*.6;
+    const as=a.sz*7;
+    ctx.drawImage(gR, ax-as, ay-as, as*2, as*2);
+  });
+  ctx.globalCompositeOperation='source-over'; ctx.globalAlpha=1;
+
+  // ── Halo ──
+  ctx.globalCompositeOperation='lighter';
+  ctx.globalAlpha = .03+eg*.05;
+  const hs=S*2.8;
+  ctx.drawImage(gH, W/2-hs, H*.44-hs, hs*2, hs*2);
+  ctx.globalCompositeOperation='source-over'; ctx.globalAlpha=1;
+
+  // ── Shadow ──
+  ctx.save();
+  ctx.translate(W/2, H*.44+S*.6);
+  ctx.scale(1,.17);
+  const sg=ctx.createRadialGradient(0,0,0,0,0,S*.72);
+  sg.addColorStop(0,'rgba(0,0,0,.22)'); sg.addColorStop(.55,'rgba(0,0,0,.08)');
+  sg.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=sg; ctx.beginPath(); ctx.arc(0,0,S*.72,0,TAU); ctx.fill();
+  ctx.restore();
+
+  // ── Project & Sort ──
+  const pxS = S/160;
+  const vd = {x:0, y:-Math.sin(TILT), z:-Math.cos(TILT)};
+  const buf = [];
+
+  for (let i=0; i<P.length; i++) {
+    const p=P[i];
+    const pos=gPos(p,prog);
+    const pr=pj(pos.x,pos.y,pos.z);
+
+    let lit;
+    if (eg>.7) {
+      lit=.35+.65*Math.max(0,Math.min(1,(pr.z+1.5)/3));
+    } else {
+      const nw=rN(p.nx,p.ny,p.nz);
+      const diff=Math.max(0, nw.x*LT.x+nw.y*LT.y+nw.z*LT.z);
+      const df=.28+.72*Math.max(0,Math.min(1,(pr.z+1.5)/3));
+      lit=df*(.18+.82*diff);
+      const rim=1-Math.abs(nw.x*vd.x+nw.y*vd.y+nw.z*vd.z);
+      lit+=Math.pow(rim,4)*.12;
+      if (eg>0) {
+        const el=.35+.65*Math.max(0,Math.min(1,(pr.z+1.5)/3));
+        lit=lit*(1-eg)+el*eg;
+      }
+    }
+    buf.push({pr, p, lit});
+  }
+  buf.sort((a,b)=>a.pr.z-b.pr.z);
+
+  // ── Solid Dots (surface) ──
+  if (eg<.7) {
+    ctx.globalCompositeOperation='source-over';
+    for (let i=0; i<buf.length; i++) {
+      const{pr,p,lit}=buf[i];
+      const sz=Math.max(.5, p.sz*pr.s*pxS*1.15);
+      const a=Math.max(0,Math.min(1, lit*(1-eg*1.5)));
+      if (a<.02) continue;
+      ctx.globalAlpha=a;
+      ctx.fillStyle='rgb('+Math.min(255,p.cr*lit|0)+','+Math.min(255,p.cg*lit|0)+','+Math.min(255,p.cb*lit|0)+')';
+      ctx.beginPath(); ctx.arc(pr.sx,pr.sy,sz,0,TAU); ctx.fill();
+    }
+  }
+
+  // ── Glow Layer ──
+  ctx.globalCompositeOperation='lighter';
+  for (let i=0; i<buf.length; i++) {
+    const{pr,p,lit}=buf[i];
+    const gsz=p.sz*pr.s*pxS*(2+eg*3.5)*p.es;
+    const ga=lit*(eg*.42+.05);
+    if (ga<.01) continue;
+    ctx.globalAlpha=ga;
+    const g = p.hash%5===0 ? gY : p.hash%5<3 ? gO : gR;
+    ctx.drawImage(g, pr.sx-gsz, pr.sy-gsz, gsz*2, gsz*2);
+  }
+  ctx.globalCompositeOperation='source-over'; ctx.globalAlpha=1;
+
+  // ── Orbiters ──
+  if (hasOrb && !RM) {
+    const oAlpha = phase==='idle' ? 1 : Math.max(0, 1-glow*1.3);
+    if (oAlpha>.01) {
+      ctx.globalCompositeOperation='lighter';
+      OB.forEach(o=>{
+        const a=o.ph+sec*o.spd;
+        const ox=o.r*Math.cos(a), oz=o.r*Math.sin(a);
+        const oy=o.yo+Math.sin(sec*.4+o.ph)*.12;
+        const ct=Math.cos(TILT+o.tilt), st=Math.sin(TILT+o.tilt);
+        const wy=oy*ct-oz*st, wz=oy*st+oz*ct;
+        const s2=CAM/(CAM+wz);
+        const sx=W/2+ox*s2*S, sy=H*.44-wy*s2*S;
+
+        o.trail.push({x:sx,y:sy});
+        if (o.trail.length>16) o.trail.shift();
+
+        for (let j=0;j<o.trail.length;j++){
+          const tp=o.trail[j];
+          ctx.globalAlpha=(j/o.trail.length)*.18*oAlpha;
+          const ts=o.sz*s2*pxS*2.5;
+          ctx.drawImage(gO, tp.x-ts, tp.y-ts, ts*2, ts*2);
+        }
+        ctx.globalAlpha=.45*oAlpha;
+        const os=o.sz*s2*pxS*3.5;
+        ctx.drawImage(gY, sx-os, sy-os, os*2, os*2);
+      });
+      ctx.globalCompositeOperation='source-over'; ctx.globalAlpha=1;
+    }
+  }
+}
+
+// ──── Interaction ────
+function trigger() {
+  if (phase!=='idle'||RM) return;
+  phase='active'; t0=performance.now();
+}
+canvas.addEventListener('mouseenter', trigger);
+canvas.addEventListener('touchstart', e=>{e.preventDefault(); trigger();}, {passive:false});
+
+// ──── Go ────
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

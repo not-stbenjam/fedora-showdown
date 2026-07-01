@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Red Hat - Dissolve Effect</title>
+  <style>
+    :root {
+      --bg-primary: #0a0a0f;
+      --bg-secondary: #12121a;
+      --hat-color: #2d2d3a;
+      --hat-band: #c41e3a;
+      --glow-color: rgba(196, 30, 58, 0.8);
+      --particle-glow: rgba(196, 30, 58, 0.9);
+      --text-color: #888899;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      background: radial-gradient(ellipse at center, var(--bg-secondary) 0%, var(--bg-primary) 70%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      overflow: hidden;
+      perspective: 1000px;
+    }
+
+    .container {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+
+    .scene {
+      position: relative;
+      width: 200px;
+      height: 200px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: transform 0.3s ease;
+    }
+
+    .scene:hover {
+      transform: scale(1.05);
+    }
+
+    .hat-container {
+      position: relative;
+      width: 180px;
+      height: 120px;
+      transform-style: preserve-3d;
+      animation: spin 8s linear infinite;
+    }
+
+    @keyframes spin {
+      from { transform: rotateY(0deg) rotateX(10deg); }
+      to { transform: rotateY(360deg) rotateX(10deg); }
+    }
+
+    .hat-container.dissolving {
+      animation: none;
+      transform: rotateY(var(--rotation) rotateX(10deg);
+    }
+
+    /* Fedora Hat - CSS 3D */
+    .fedora {
+      position: relative;
+      transform-style: preserve-3d;
+    }
+
+    .crown {
+      position: absolute;
+      width: 100px;
+      height: 70px;
+      background: linear-gradient(145deg, #3a3a4a 0%, var(--hat-color) 50%, #1a1a25 100%);
+      border-radius: 50% 50% 40% 40% / 60% 60% 35% 35%;
+      top: 20px;
+      left: 40px;
+      transform: rotateX(-10deg);
+      box-shadow: 
+        inset 0 -5px 20px rgba(0,0,0,0.5),
+        0 10px 30px rgba(0,0,0,0.4);
+    }
+
+    .crown::before {
+      content: '';
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(180deg, rgba(255,255,255,0.1) 0%, transparent 50%);
+      border-radius: inherit;
+    }
+
+    .brim {
+      position: absolute;
+      width: 160px;
+      height: 60px;
+      background: linear-gradient(145deg, #3a3a4a 0%, var(--hat-color) 40%, #1a1a25 100%);
+      border-radius: 50%;
+      bottom: 30px;
+      left: 10px;
+      transform: rotateX(70deg);
+      box-shadow: 
+        inset 0 2px 10px rgba(0,0,0,0.3),
+        0 15px 30px rgba(0,0,0,0.5);
+    }
+
+    .brim::after {
+      content: '';
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(ellipse at 30% 30%, rgba(255,255,255,0.08) 0%, transparent 50%);
+      border-radius: inherit;
+    }
+
+    .band {
+      position: absolute;
+      width: 104px;
+      height: 18px;
+      background: linear-gradient(180deg, #dc2645 0%, var(--hat-band) 50%, #8b1529 100%);
+      border-radius: 8px;
+      top: 58px;
+      left: 38px;
+      transform: rotateX(-5deg);
+      box-shadow: 
+        0 2px 5px rgba(0,0,0,0.4),
+        0 0 20px var(--glow-color);
+    }
+
+    .band::before {
+      content: '';
+      position: absolute;
+      width: 100%;
+      height: 3px;
+      background: rgba(255,255,255,0.3);
+      top: 2px;
+      border-radius: 2px;
+    }
+
+    .shadow {
+      position: absolute;
+      width: 140px;
+      height: 40px;
+      background: radial-gradient(ellipse, rgba(0,0,0,0.6) 0%, transparent 70%);
+      bottom: -30px;
+      left: 20px;
+      transform: rotateX(90deg);
+      animation: shadowPulse 4s ease-in-out infinite;
+    }
+
+    @keyframes shadowPulse {
+      0%, 100% { transform: rotateX(90deg) scale(1); opacity: 0.6; }
+      50% { transform: rotateX(90deg) scale(1.05); opacity: 0.5; }
+    }
+
+    .caption {
+      margin-top: 40px;
+      color: var(--text-color);
+      font-size: 0.9rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      opacity: 0.7;
+      transition: opacity 0.3s ease;
+    }
+
+    .caption:hover {
+      opacity: 1;
+    }
+
+    #particleCanvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 5;
+    }
+
+    /* Reduced motion */
+    @media (prefers-reduced-motion: reduce) {
+      .hat-container {
+        animation: none;
+        transform: rotateY(0deg) rotateX(10deg);
+      }
+      
+      .shadow {
+        animation: none;
+      }
+      
+      .scene:hover {
+        transform: none;
+      }
+      
+      .caption {
+        transition: none;
+      }
+    }
+
+    /* Mobile adjustments */
+    @media (max-width: 480px) {
+      .scene {
+        width: 150px;
+        height: 150px;
+      }
+      
+      .hat-container {
+        width: 130px;
+        height: 90px;
+      }
+      
+      .crown {
+        width: 75px;
+        height: 55px;
+        top: 15px;
+        left: 27px;
+      }
+      
+      .brim {
+        width: 120px;
+        height: 45px;
+        bottom: 20px;
+        left: 5px;
+      }
+      
+      .band {
+        width: 78px;
+        height: 14px;
+        top: 46px;
+        left: 26px;
+      }
+      
+      .shadow {
+        width: 105px;
+        height: 30px;
+        bottom: -25px;
+        left: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="particleCanvas"></canvas>
+  
+  <div class="container">
+    <div class="scene" id="scene">
+      <div class="hat-container" id="hatContainer">
+        <div class="fedora">
+          <div class="crown"></div>
+          <div class="brim"></div>
+          <div class="band"></div>
+        </div>
+        <div class="shadow"></div>
+      </div>
+    </div>
+    <p class="caption">Red Hat</p>
+  </div>
+
+  <script>
+    const scene = document.getElementById('scene');
+    const hatContainer = document.getElementById('hatContainer');
+    const canvas = document.getElementById('particleCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    let width, height;
+    let particles = [];
+    let isDissolving = false;
+    let isReforming = false;
+    let animationId = null;
+    let orbitingParticles = [];
+    let currentRotation = 0;
+    let reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    
+    const PARTICLE_COUNT = 2000;
+    const REFORM_SPEED = 0.02;
+    const DRIFT_SPEED = 2;
+    const SWIRL_SPEED = 0.015;
+    
+    // Hat geometry points (simplified)
+    const hatPoints = [];
+    
+    function generateHatPoints() {
+      hatPoints.length = 0;
+      const centerX = width / 2;
+      const centerY = height / 2;
+      
+      // Crown points
+      for (let i = 0; i < 400; i++) {
+        const angle = (i / 400) * Math.PI * 2;
+        const radius = 45 + Math.sin(i * 0.1) * 10;
+        const heightVar = Math.cos(i * 0.05) * 30;
+        hatPoints.push({
+          x: centerX + Math.cos(angle) * radius,
+          y: centerY - 20 + heightVar,
+          z: Math.sin(angle) * radius * 0.5,
+          color: i % 5 === 0 ? '#c41e3a' : '#2d2d3a',
+          size: Math.random() * 2 + 1
+        });
+      }
+      
+      // Brim points
+      for (let i = 0; i < 800; i++) {
+        const angle = (i / 800) * Math.PI * 2;
+        const radius = 50 + Math.random() * 30;
+        hatPoints.push({
+          x: centerX + Math.cos(angle) * radius,
+          y: centerY + 40,
+          z: Math.sin(angle) * radius * 0.3,
+          color: '#2d2d3a',
+          size: Math.random() * 2 + 1
+        });
+      }
+      
+      // Band points
+      for (let i = 0; i < 300; i++) {
+        const angle = (i / 300) * Math.PI * 2;
+        const radius = 48;
+        hatPoints.push({
+          x: centerX + Math.cos(angle) * radius,
+          y: centerY + 15,
+          z: Math.sin(angle) * radius * 0.5,
+          color: '#c41e3a',
+          size: Math.random() * 2.5 + 1.5
+        });
+      }
+      
+      // Additional hat texture points
+      for (let i = 0; i < 500; i++) {
+        const angle = (i / 500) * Math.PI * 2;
+        const heightVar = Math.cos(i * 0.03) * 25 - 15;
+        const radius = 40 + Math.sin(i * 0.08) * 8;
+        hatPoints.push({
+          x: centerX + Math.cos(angle) * radius,
+          y: centerY + heightVar,
+          z: Math.sin(angle) * radius * 0.4,
+          color: '#3a3a4a',
+          size: Math.random() * 1.5 + 0.5
+        });
+      }
+    }
+    
+    function resize() {
+      width = canvas.width = window.innerWidth;
+      height = canvas.height = window.innerHeight;
+      generateHatPoints();
+    }
+    
+    window.addEventListener('resize', resize);
+    resize();
+    
+    function createParticles() {
+      particles = hatPoints.map((point, i) => ({
+        targetX: point.x,
+        targetY: point.y,
+        targetZ: point.z,
+        x: point.x,
+        y: point.y,
+        z: point.z,
+        vx: 0,
+        vy: 0,
+        vz: 0,
+        color: point.color,
+        size: point.size,
+        phase: Math.random() * Math.PI * 2,
+        speed: Math.random() * 0.5 + 0.5,
+        orbit: false,
+        trail: []
+      }));
+    }
+    
+    createParticles();
+    
+    function startDissolve() {
+      if (isDissolving || isReforming || reducedMotion) return;
+      
+      isDissolving = true;
+      hatContainer.style.animationPlayState = 'paused';
+      currentRotation = parseFloat(getComputedStyle(hatContainer).animationIterationCount) || 0;
+      
+      // Explode particles outward
+      particles.forEach(p => {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = Math.random() * DRIFT_SPEED + 1;
+        p.vx = Math.cos(angle) * speed;
+        p.vy = (Math.random() - 0.5) * speed;
+        p.vz = Math.sin(angle) * speed * 0.5;
+      });
+      
+      animateDissolve();
+    }
+    
+    function animateDissolve() {
+      if (!isDissolving && !isReforming) return;
+      
+      ctx.clearRect(0, 0, width, height);
+      
+      if (isDissolving) {
+        // Drift apart phase
+        particles.forEach(p => {
+          p.x += p.vx * 2;
+          p.y += p.vy * 2;
+          p.z += p.vz * 2;
+          
+          // Add some swirl
+          p.phase += SWIRL_SPEED;
+          p.vx += Math.cos(p.phase) * 0.05;
+          p.vy += Math.sin(p.phase) * 0.05;
+          
+          // Store trail
+          p.trail.push({ x: p.x, y: p.y, alpha: 1 });
+          if (p.trail.length > 10) p.trail.shift();
+        });
+        
+        // Switch to reform after some time
+        if (Math.random() < 0.02 && particles.filter(p => Math.abs(p.x - p.targetX) > 50).length < PARTICLE_COUNT * 0.3) {
+          isDissolving = false;
+          isReforming = true;
+        }
+      }
+      
+      if (isReforming) {
+        // Reform phase
+        let allReformed = true;
+        particles.forEach(p => {
+          const dx = p.targetX - p.x;
+          const dy = p.targetY - p.y;
+          const dz = p.targetZ - p.z;
+          
+          p.x += dx * REFORM_SPEED;
+          p.y += dy * REFORM_SPEED;
+          p.z += dz * REFORM_SPEED;
+          
+          // Add some swirl during reform
+          p.phase += SWIRL_SPEED * 2;
+          p.x += Math.cos(p.phase) * 0.5;
+          p.y += Math.sin(p.phase) * 0.5;
+          
+          if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+            allReformed = false;
+          }
+          
+          // Store trail
+          p.trail.push({ x: p.x, y: p.y, alpha: 0.8 });
+          if (p.trail.length > 8) p.trail.shift();
+        });
+        
+        // Finish reform
+        if (allReformed) {
+          isReforming = false;
+          hatContainer.style.animationPlayState = 'running';
+          hatContainer.style.display = 'block';
+          createOrbitingParticles();
+        }
+      }
+      
+      // Draw particles
+      particles.forEach(p => {
+        // Draw trail
+        p.trail.forEach((t, i) => {
+          const alpha = (i / p.trail.length) * 0.3;
+          ctx.beginPath();
+          ctx.arc(t.x, t.y, p.size * 0.5, 0, Math.PI * 2);
+          ctx.fillStyle = p.color === '#c41e3a' 
+            ? `rgba(196, 30, 58, ${alpha})`
+            : `rgba(60, 60, 80, ${alpha})`;
+          ctx.fill();
+        });
+        
+        // Draw particle
+        const alpha = isReforming ? 0.8 : 1;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fillStyle = p.color === '#c41e3a' 
+          ? `rgba(196, 30, 58, ${alpha})`
+          : `rgba(60, 60, 80, ${alpha})`;
+        ctx.fill();
+        
+        // Glow
+        if (p.color === '#c41e3a') {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size * 2, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(196, 30, 58, ${alpha * 0.3})`;
+          ctx.fill();
+        }
+      });
+      
+      // Draw orbiting particles
+      drawOrbitingParticles();
+      
+      animationId = requestAnimationFrame(animateDissolve);
+    }
+    
+    function createOrbitingParticles() {
+      orbitingParticles = [];
+      const centerX = width / 2;
+      const centerY = height / 2;
+      
+      for (let i = 0; i < 50; i++) {
+        orbitingParticles.push({
+          angle: Math.random() * Math.PI * 2,
+          radius: 100 + Math.random() * 150,
+          speed: 0.005 + Math.random() * 0.01,
+          size: Math.random() * 2 + 1,
+          color: Math.random() > 0.7 ? '#c41e3a' : '#404055',
+          trail: []
+        });
+      }
+      
+      animateOrbiting();
+    }
+    
+    function animateOrbiting() {
+      if (isDissolving || isReforming) return;
+      
+      ctx.clearRect(0, 0, width, height);
+      
+      const centerX = width / 2;
+      const centerY = height / 2;
+      
+      orbitingParticles.forEach(p => {
+        p.angle += p.speed;
+        const x = centerX + Math.cos(p.angle) * p.radius;
+        const y = centerY + Math.sin(p.angle) * p.radius * 0.3;
+        
+        // Store trail
+        p.trail.push({ x, y, alpha: 1 });
+        if (p.trail.length > 15) p.trail.shift();
+        
+        // Draw trail
+        p.trail.forEach((t, i) => {
+          const alpha = (i / p.trail.length) * 0.4;
+          ctx.beginPath();
+          ctx.arc(t.x, t.y, p.size * 0.4, 0, Math.PI * 2);
+          ctx.fillStyle = p.color === '#c41e3a'
+            ? `rgba(196, 30, 58, ${alpha})`
+            : `rgba(60, 60, 80, ${alpha})`;
+          ctx.fill();
+        });
+        
+        // Draw particle
+        ctx.beginPath();
+        ctx.arc(x, y, p.size, 0, Math.PI * 2);
+        ctx.fillStyle = p.color === '#c41e3a'
+          ? 'rgba(196, 30, 58, 0.9)'
+          : 'rgba(60, 60, 80, 0.7)';
+        ctx.fill();
+        
+        // Glow for red particles
+        if (p.color === '#c41e3a') {
+          ctx.beginPath();
+          ctx.arc(x, y, p.size * 2.5, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(196, 30, 58, 0.2)';
+          ctx.fill();
+        }
+      });
+      
+      // Also draw the particles that are in hat form
+      particles.forEach(p => {
+        const alpha = 0.9;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fillStyle = p.color === '#c41e3a'
+          ? `rgba(196, 30, 58, ${alpha})`
+          : `rgba(60, 60, 80, ${alpha})`;
+        ctx.fill();
+        
+        if (p.color === '#c41e3a') {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size * 2, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(196, 30, 58, ${alpha * 0.3})`;
+          ctx.fill();
+        }
+      });
+      
+      animationId = requestAnimationFrame(animateOrbiting);
+    }
+    
+    function drawOrbitingParticles() {
+      const centerX = width / 2;
+      const centerY = height / 2;
+      
+      orbitingParticles.forEach(p => {
+        p.angle += p.speed;
+        const x = centerX + Math.cos(p.angle) * p.radius;
+        const y = centerY + Math.sin(p.angle) * p.radius * 0.3;
+        
+        p.trail.push({ x, y, alpha: 1 });
+        if (p.trail.length > 15) p.trail.shift();
+        
+        p.trail.forEach((t, i) => {
+          const alpha = (i / p.trail.length) * 0.4;
+          ctx.beginPath();
+          ctx.arc(t.x, t.y, p.size * 0.4, 0, Math.PI * 2);
+          ctx.fillStyle = p.color === '#c41e3a'
+            ? `rgba(196, 30, 58, ${alpha})`
+            : `rgba(60, 60, 80, ${alpha})`;
+          ctx.fill();
+        });
+        
+        ctx.beginPath();
+        ctx.arc(x, y, p.size, 0, Math.PI * 2);
+        ctx.fillStyle = p.color === '#c41e3a'
+          ? 'rgba(196, 30, 58, 0.9)'
+          : 'rgba(60, 60, 80, 0.7)';
+        ctx.fill();
+        
+        if (p.color === '#c41e3a') {
+          ctx.beginPath();
+          ctx.arc(x, y, p.size * 2.5, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(196, 30, 58, 0.2)';
+          ctx.fill();
+        }
+      });
+    }
+    
+    // Event listeners
+    scene.addEventListener('mouseenter', startDissolve);
+    scene.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      startDissolve();
+    });
+    
+    // Handle reduced motion changes
+    window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', (e) => {
+      reducedMotion = e.matches;
+      if (reducedMotion) {
+        hatContainer.style.animationPlayState = 'running';
+        cancelAnimationFrame(animationId);
+        ctx.clearRect(0, 0, width, height);
+      }
+    });
+    
+    // Initial render of orbiting particles
+    createOrbitingParticles();
+    animateOrbiting();
+  </script>
+</body>
+</html>

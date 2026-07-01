@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Red Hat Fedora Hero</title>
+<style>
+  html,body{
+    height:100%;
+    margin:0;
+    background:radial-gradient(ellipse at center, #1a1a1a 0%, #000000 80%);
+    overflow:hidden;
+    font-family:sans-serif;
+    color:#eee;
+  }
+  #scene{
+    position:relative;
+    width:100%;
+    height:100%;
+    perspective:800px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    overflow:hidden;
+  }
+  #hat{
+    width:180px;
+    height:220px;
+    display:block;
+    transition:transform 0.5s ease, filter 0.5s ease;
+    will-change:transform,filter;
+    filter:drop-shadow(0 4px 12px rgba(0,0,0,0.6));
+  }
+  /* spin animation */
+  @keyframes spin{
+    from{transform:rotateY(0deg) rotateX(15deg);}
+    to{transform:rotateY(360deg) rotateX(15deg);}
+  }
+  #hat.spinning{
+    animation:spin 12s linear infinite;
+  }
+  #hat.slow-spin{
+    animation-duration:24s; /* slower spin on hover */
+  }
+  #caption{
+    position:absolute;
+    bottom:20px;
+    text-align:center;
+    font-size:1.2rem;
+    letter-spacing:0.05em;
+    opacity:0.8;
+    pointer-events:none;
+  }
+  #particleCanvas{
+    position:absolute;
+    top:0;left:0;width:100%;height:100%;
+    pointer-events:none;
+  }
+  /* reduced motion */
+  @media (prefers-reduced-motion: reduce){
+    #hat.spinning{animation:none;}
+    #hat{transition:none;}
+    #particleCanvas{display:none !important;}
+  }
+</style>
+</head>
+<body>
+<div id="scene">
+  <svg id="hat" viewBox="0 0 200 250" xmlns="http://www.w3.org/2000/svg">
+    <!-- Fedora shape -->
+    <path d="
+      M30,180
+      Q100,20 170,180
+      L175,185
+      Q120,210 80,210
+      L75,185
+      Z
+    " fill="#000"/>
+  </svg>
+  <canvas id="particleCanvas"></canvas>
+  <div id="caption">Red Hat Fedora</div>
+</div>
+
+<script>
+  // Reduced motion check
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reducedMotion) {
+    document.getElementById('hat').style.animation = 'none';
+  }
+
+  // Hat shape sampling
+  const hatSvg = document.getElementById('hat');
+  const pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  pathEl.setAttribute('d', hatSvg.querySelector('path').getAttribute('d'));
+  const pathLength = pathEl.getTotalLength();
+  const sampleCount = 800; // number of particles
+  const points = [];
+  for(let i=0;i<sampleCount;i++){
+    const pt = pathEl.getPointAtLength((i/sampleCount)*pathLength);
+    points.push({x:pt.x, y:pt.y});
+  }
+
+  const scene = document.getElementById('scene');
+  const canvas = document.getElementById('particleCanvas');
+  const ctx = canvas.getContext('2d');
+  function resize(){
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // Particle class
+  class Particle {
+    constructor(index){
+      this.index = index;
+      this.reset();
+    }
+    reset(){
+      const pt = points[this.index];
+      this.targetX = pt.x;
+      this.targetY = pt.y;
+      this.x = this.targetX;
+      this.y = this.targetY;
+      this.vx = 0;
+      this.vy = 0;
+      this.size = 2 + Math.random()*2;
+      this.hue = 45 + Math.random()*30; // warm gold
+      this.alpha = 0.8;
+    }
+    explode(){
+      // push away from center of hat (approx center)
+      const cx = 100, cy = 125;
+      const dx = this.targetX - cx;
+      const dy = this.targetY - cy;
+      const dist = Math.hypot(dx, dy) || 1;
+      const force = 2 + Math.random()*3;
+      this.vx = (dx/dist)*force + (Math.random()-0.5)*0.5;
+      this.vy = (dy/dist)*force + (Math.random()-0.5)*0.5;
+      // tangential swirl
+      const swirl = 0.5;
+      this.vx += -dy/dist * swirl;
+      this.vy += dx/dist * swirl;
+      this.alpha = 0.9;
+    }
+    update(reforming){
+      const dx = this.targetX - this.x;
+      const dy = this.targetY - this.y;
+      const dist = Math.hypot(dx, dy);
+      const springK = reforming ? 0.05 : 0.001;
+      this.ax = dx*springK;
+      this.ay = dy*springK;
+      this.vx = (this.vx + this.ax)*0.92;
+      this.vy = (this.vy + this.ay)*0.92;
+      this.x += this.vx;
+      this.y += this.vy;
+      // size pulse
+      this.size = 2 + Math.random()*2 + (reforming ? 0.5*Math.sin(Date.now()*0.002 + this.index) : 0);
+      // alpha fade
+      if (!reforming){
+        this.alpha = Math.max(0.1, this.alpha - 0.002);
+      }else{
+        this.alpha = Math.min(0.9, this.alpha + 0.003);
+      }
+    }
+    draw(ctx){
+      ctx.save();
+      ctx.fillStyle = `hsla(${this.hue},80%,60%,${this.alpha})`;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.size, 0, Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  // Initialize particles
+  const particles = points.map((_, i) => new Particle(i));
+  let state = 'normal'; // normal, exploding, reforming
+
+  function startExplode(){
+    if (state !== 'normal') return;
+    state = 'exploding';
+    hatSvg.style.visibility = 'hidden';
+    canvas.style.display = 'block';
+    hatSvg.classList.add('slow-spin');
+    particles.forEach(p => p.explode());
+  }
+  function startReform(){
+    if (state !== 'exploding') return;
+    state = 'reforming';
+  }
+  function checkReformDone(){
+    if (state !== 'reforming') return false;
+    const threshold = 2; // px
+    let allClose = true;
+    for (const p of particles){
+      const dx = p.targetX - p.x;
+      const dy = p.targetY - p.y;
+      if (Math.hypot(dx, dy) > threshold){
+        allClose = false;
+        break;
+      }
+    }
+    if (allClose){
+      state = 'normal';
+      hatSvg.style.visibility = 'visible';
+      canvas.style.display = 'none';
+      hatSvg.classList.remove('slow-spin');
+      // reset particles to exact target positions
+      particles.forEach(p => {
+        p.x = p.targetX;
+        p.y = p.targetY;
+        p.vx = 0;
+        p.vy = 0;
+        p.alpha = 0.8;
+      });
+    }
+    return allClose;
+  }
+
+  // Event listeners
+  scene.addEventListener('mouseenter', () => {
+    if (!reducedMotion) startExplode();
+  });
+  scene.addEventListener('mouseleave', () => {
+    if (!reducedMotion) startReform();
+  });
+  scene.addEventListener('touchstart', e => {
+    e.preventDefault();
+    if (!reducedMotion) startExplode();
+  });
+  scene.addEventListener('touchend', e => {
+    e.preventDefault();
+    if (!reducedMotion) startReform();
+  });
+
+  // Animation loop
+  function loop(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    if (state === 'exploding' || state === 'reforming'){
+      particles.forEach(p => {
+        p.update(state === 'reforming');
+        p.draw(ctx);
+      });
+      checkReformDone();
+    }
+    requestAnimationFrame(loop);
+  }
+  loop();
+</script>
+</body>
+</html>

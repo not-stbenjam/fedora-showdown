@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fedora</title>
+    <style>
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --bg-deep: #0a0a0f;
+            --bg-mid: #12121a;
+            --accent-red: #e00;
+            --accent-red-dark: #a00;
+            --accent-red-glow: rgba(238, 0, 0, 0.4);
+            --text-muted: #6a6a7a;
+            --text-light: #9a9aaa;
+        }
+
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: radial-gradient(ellipse at 50% 30%, var(--bg-mid) 0%, var(--bg-deep) 70%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            color: var(--text-light);
+            position: relative;
+        }
+
+        /* Ambient background glow */
+        body::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 60vmin;
+            height: 60vmin;
+            transform: translate(-50%, -60%);
+            background: radial-gradient(circle, rgba(238, 0, 0, 0.08) 0%, transparent 60%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .scene {
+            position: relative;
+            width: 280px;
+            height: 280px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            perspective: 800px;
+            z-index: 1;
+            cursor: pointer;
+        }
+
+        .hat-container {
+            width: 200px;
+            height: 160px;
+            position: relative;
+            transform-style: preserve-3d;
+            animation: spin 8s linear infinite;
+            transition: filter 0.5s ease;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .hat-container {
+                animation: none;
+                transform: rotateX(15deg);
+            }
+            .orbiting-particle {
+                display: none;
+            }
+        }
+
+        .hat-container:hover,
+        .hat-container.active {
+            animation-play-state: paused;
+            filter: brightness(1.1);
+        }
+
+        @keyframes spin {
+            from { transform: rotateX(15deg) rotateY(0deg); }
+            to { transform: rotateX(15deg) rotateY(360deg); }
+        }
+
+        .fedora {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            transform-style: preserve-3d;
+        }
+
+        /* SVG Fedora Hat */
+        .fedora svg {
+            width: 100%;
+            height: 100%;
+            filter: drop-shadow(0 20px 40px rgba(0, 0, 0, 0.6))
+                    drop-shadow(0 0 60px rgba(238, 0, 0, 0.15));
+        }
+
+        .fedora .hat-body {
+            fill: url(#hatGradient);
+        }
+
+        .fedora .hat-band {
+            fill: var(--accent-red);
+            filter: drop-shadow(0 2px 4px rgba(238, 0, 0, 0.5));
+        }
+
+        .fedora .hat-highlight {
+            fill: rgba(255, 255, 255, 0.08);
+        }
+
+        /* Caption */
+        .caption {
+            margin-top: 2.5rem;
+            font-size: 0.9rem;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            z-index: 1;
+            opacity: 0.9;
+            transition: opacity 0.3s ease;
+        }
+
+        /* Canvas for particles */
+        #particle-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        /* Subtle floor shadow */
+        .floor-shadow {
+            position: absolute;
+            bottom: -40px;
+            left: 50%;
+            width: 180px;
+            height: 40px;
+            transform: translateX(-50%) rotateX(90deg);
+            background: radial-gradient(ellipse, rgba(0, 0, 0, 0.5) 0%, transparent 70%);
+            z-index: -1;
+        }
+
+        /* Hint text */
+        .hint {
+            position: absolute;
+            bottom: 2rem;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            opacity: 0.6;
+            letter-spacing: 0.05em;
+        }
+    </style>
+</head>
+<body>
+    <div class="scene" id="scene">
+        <div class="hat-container" id="hat-container">
+            <div class="fedora">
+                <svg viewBox="0 0 200 160" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <linearGradient id="hatGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                            <stop offset="0%" stop-color="#3a3a4a"/>
+                            <stop offset="30%" stop-color="#2a2a3a"/>
+                            <stop offset="70%" stop-color="#1a1a2a"/>
+                            <stop offset="100%" stop-color="#0a0a1a"/>
+                        </linearGradient>
+                        <filter id="glow">
+                            <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+                            <feMerge>
+                                <feMergeNode in="coloredBlur"/>
+                                <feMergeNode in="SourceGraphic"/>
+                            </feMerge>
+                        </filter>
+                    </defs>
+                    
+                    <!-- Brim -->
+                    <ellipse cx="100" cy="130" rx="95" ry="22" class="hat-body"/>
+                    <ellipse cx="100" cy="128" rx="90" ry="18" fill="rgba(0,0,0,0.3)"/>
+                    
+                    <!-- Crown base -->
+                    <path d="M40 130 Q50 70, 100 60 Q150 70, 160 130" class="hat-body"/>
+                    
+                    <!-- Crown highlight -->
+                    <path d="M60 120 Q70 80, 100 72 Q130 80, 140 120" class="hat-highlight"/>
+                    
+                    <!-- Crown top indent -->
+                    <ellipse cx="100" cy="62" rx="35" ry="8" fill="#1a1a2a"/>
+                    <ellipse cx="100" cy="60" rx="28" ry="5" fill="#252535"/>
+                    
+                    <!-- Hat band -->
+                    <path d="M45 115 Q50 100, 100 95 Q150 100, 155 115 Q150 118, 100 120 Q50 118, 45 115" 
+                          class="hat-band" filter="url(#glow)"/>
+                    
+                    <!-- Pinched front -->
+                    <path d="M90 62 Q100 55, 110 62" stroke="#1a1a2a" stroke-width="8" fill="none"/>
+                    
+                    <!-- Subtle edge highlight -->
+                    <path d="M50 90 Q60 50, 100 42 Q140 50, 150 90" 
+                          stroke="rgba(255,255,255,0.05)" stroke-width="1" fill="none"/>
+                </svg>
+            </div>
+            <div class="floor-shadow"></div>
+        </div>
+        <canvas id="particle-canvas"></canvas>
+    </div>
+    
+    <p class="caption">The Hat That Started It All</p>
+    <p class="hint">hover or tap to interact</p>
+
+    <script>
+        (function() {
+            const canvas = document.getElementById('particle-canvas');
+            const ctx = canvas.getContext('2d');
+            const scene = document.getElementById('scene');
+            const hatContainer = document.getElementById('hat-container');
+            
+            let particles = [];
+            let orbitingParticles = [];
+            let isAnimating = false;
+            let isDissolving = false;
+            let isReforming = false;
+            let dissolveProgress = 0;
+            let reformProgress = 0;
+            let prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            
+            // Resize canvas
+            function resizeCanvas() {
+                const rect = scene.getBoundingClientRect();
+                canvas.width = rect.width;
+                canvas.height = rect.height;
+            }
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            
+            // Hat center position (relative to canvas)
+            function getHatCenter() {
+                const rect = scene.getBoundingClientRect();
+                return {
+                    x: rect.width / 2,
+                    y: rect.height / 2 - 20
+                };
+            }
+            
+            // Particle class
+            class Particle {
+                constructor(x, y, originX, originY, delay) {
+                    this.x = x;
+                    this.y = y;
+                    this.originX = originX;
+                    this.originY = originY;
+                    this.targetX = x + (Math.random() - 0.5) * 200;
+                    this.targetY = y + (Math.random() - 0.5) * 200 - 50;
+                    this.delay = delay;
+                    this.size = Math.random() * 2.5 + 1;
+                    this.alpha = Math.random() * 0.5 + 0.5;
+                    this.baseAlpha = this.alpha;
+                    this.speed = Math.random() * 0.8 + 0.4;
+                    this.angle = Math.random() * Math.PI * 2;
+                    this.swirlSpeed = (Math.random() - 0.5) * 0.05;
+                    this.swirlRadius = Math.random() * 30 + 10;
+                    this.hue = Math.random() * 30 - 15; // slight color variation
+                    this.life = 1;
+                }
+                
+                update(progress, phase) {
+                    if (this.delay > 0) {
+                        this.delay -= 0.02;
+                        return;
+                    }
+                    
+                    const center = getHatCenter();
+                    
+                    if (phase === 'dissolve') {
+                        // Dissolve outward with swirl
+                        const swirlX = Math.cos(this.angle) * this.swirlRadius * progress;
+                        const swirlY = Math.sin(this.angle) * this.swirlRadius * progress;
+                        
+                        this.x += (this.targetX - this.x) * 0.03 * this.speed;
+                        this.y += (this.targetY - this.y) * 0.03 * this.speed;
+                        this.x += swirlX * 0.1;
+                        this.y += swirlY * 0.1;
+                        this.angle += this.swirlSpeed;
+                        
+                        this.alpha = this.baseAlpha * Math.min(1, progress * 2);
+                        
+                        // Gentle float upward
+                        this.y -= 0.3 * this.speed;
+                        
+                    } else if (phase === 'swirl') {
+                        // Swirl around
+                        this.angle += this.swirlSpeed * 1.5;
+                        const swirlX = Math.cos(this.angle) * this.swirlRadius;
+                        const swirlY = Math.sin(this.angle) * this.swirlRadius * 0.5;
+                        
+                        const centerX = (this.x + this.originX) / 2 + swirlX;
+                        const centerY = (this.y + this.originY) / 2 + swirlY;
+                        
+                        this.x += (centerX - this.x) * 0.02;
+                        this.y += (centerY - this.y) * 0.02;
+                        
+                        // Slow downward drift
+                        this.y += 0.1;
+                        
+                    } else if (phase === 'reform') {
+                        // Flow back to original position
+                        this.x += (this.originX - this.x) * 0.08;
+                        this.y += (this.originY - this.y) * 0.08;
+                        this.alpha = this.baseAlpha;
+                    }
+                }
+                
+                draw(ctx) {
+                    if (this.delay > 0 || this.alpha <= 0) return;
+                    
+                    const gradient = ctx.createRadialGradient(
+                        this.x, this.y, 0,
+                        this.x, this.y, this.size * 3
+                    );
+                    
+                    const hue = 0 + this.hue; // Red hue
+                    gradient.addColorStop(0, `hsla(${hue}, 80%, 60%, ${this.alpha})`);
+                    gradient.addColorStop(0.4, `hsla(${hue}, 70%, 50%, ${this.alpha * 0.5})`);
+                    gradient.addColorStop(1, `hsla(${hue}, 60%, 40%, 0)`);
+                    
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.size * 3, 0, Math.PI * 2);
+                    ctx.fillStyle = gradient;
+                    ctx.fill();
+                    
+                    // Core bright point
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.size * 0.5, 0, Math.PI * 2);
+                    ctx.fillStyle = `hsla(${hue}, 100%, 80%, ${this.alpha})`;
+                    ctx.fill();
+                }
+            }
+            
+            // Orbiting particle class (persistent after interaction)
+            class OrbitingParticle {
+                constructor(x, y) {
+                    this.centerX = x;
+                    this.centerY = y;
+                    this.angle = Math.random() * Math.PI * 2;
+                    this.radius = Math.random() * 80 + 40;
+                    this.speed = (Math.random() * 0.01 + 0.005) * (Math.random() > 0.5 ? 1 : -1);
+                    this.size = Math.random() * 1.5 + 0.5;
+                    this.alpha = Math.random() * 0.4 + 0.2;
+                    this.verticalOffset = Math.random() * 40 - 20;
+                    this.trail = [];
+                    this.maxTrail = 8;
+                    this.hue = Math.random() * 30 - 15;
+                }
+                
+                update() {
+                    this.angle += this.speed;
+                    this.x = this.centerX + Math.cos(this.angle) * this.radius;
+                    this.y = this.centerY + Math.sin(this.angle) * this.radius * 0.4 + this.verticalOffset;
+                    
+                    // Store trail positions
+                    this.trail.unshift({ x: this.x, y: this.y, alpha: this.alpha });
+                    if (this.trail.length > this.maxTrail) {
+                        this.trail.pop();
+                    }
+                }
+                
+                draw(ctx) {
+                    // Draw trail
+                    this.trail.forEach((pos, i) => {
+                        const trailAlpha = pos.alpha * (1 - i / this.maxTrail) * 0.5;
+                        const trailSize = this.size * (1 - i / this.maxTrail * 0.5);
+                        
+                        const gradient = ctx.createRadialGradient(
+                            pos.x, pos.y, 0,
+                            pos.x, pos.y, trailSize * 3
+                        );
+                        
+                        gradient.addColorStop(0, `hsla(${this.hue}, 80%, 60%, ${trailAlpha})`);
+                        gradient.addColorStop(1, `hsla(${this.hue}, 60%, 40%, 0)`);
+                        
+                        ctx.beginPath();
+                        ctx.arc(pos.x, pos.y, trailSize * 3, 0, Math.PI * 2);
+                        ctx.fillStyle = gradient;
+                        ctx.fill();
+                    });
+                    
+                    // Draw main particle
+                    const gradient = ctx.createRadialGradient(
+                        this.x, this.y, 0,
+                        this.x, this.y, this.size * 4
+                    );
+                    
+                    gradient.addColorStop(0, `hsla(${this.hue}, 100%, 70%, ${this.alpha})`);
+                    gradient.addColorStop(0.5, `hsla(${this.hue}, 80%, 55%, ${this.alpha * 0.5})`);
+                    gradient.addColorStop(1, `hsla(${this.hue}, 60%, 40%, 0)`);
+                    
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.size * 4, 0, Math.PI * 2);
+                    ctx.fillStyle = gradient;
+                    ctx.fill();
+                }
+            }
+            
+            // Generate particles from hat shape
+            function generateParticles() {
+                particles = [];
+                const center = getHatCenter();
+                
+                // Sample points from hat shape
+                // Brim
+                for (let angle = 0; angle < Math.PI * 2; angle += 0.15) {
+                    for (let r = 60; r <= 95; r += 12) {
+                        const x = center.x + Math.cos(angle) * r;
+                        const y = center.y + 70 + Math.sin(angle) * 12;
+                        const delay = Math.random() * 0.3;
+                        particles.push(new Particle(x, y, x, y, delay));
+                    }
+                }
+                
+                // Crown
+                for (let y = center.y; y < center.y + 70; y += 8) {
+                    const widthAtY = 30 + (y - center.y) * 0.8;
+                    for (let x = center.x - widthAtY; x <= center.x + widthAtY; x += 10) {
+                        if (Math.random() > 0.3) {
+                            const delay = Math.random() * 0.5;
+                            particles.push(new Particle(x, y, x, y, delay));
+                        }
+                    }
+                }
+                
+                // Top of crown
+                for (let angle = 0; angle < Math.PI * 2; angle += 0.3) {
+                    for (let r = 0; r <= 35; r += 10) {
+                        const x = center.x + Math.cos(angle) * r;
+                        const y = center.y + Math.sin(angle) * 5;
+                        const delay = Math.random() * 0.2;
+                        particles.push(new Particle(x, y, x, y, delay));
+                    }
+                }
+                
+                // Hat band special particles (more prominent)
+                for (let x = center.x - 55; x <= center.x + 55; x += 6) {
+                    const y = center.y + 55 + (Math.random() - 0.5) * 5;
+                    const p = new Particle(x, y, x, y, Math.random() * 0.1);
+                    p.hue = 0; // Pure red
+                    p.size = Math.random() * 2 + 2;
+                    particles.push(p);
+                }
+            }
+            
+            // Animation states
+            let phase = 'idle';
+            let phaseProgress = 0;
+            
+            function startInteraction() {
+                if (isAnimating || prefersReducedMotion) return;
+                
+                isAnimating = true;
+                isDissolving = true;
+                phase = 'dissolve';
+                phaseProgress = 0;
+                
+                generateParticles();
+                hatContainer.style.opacity = '0';
+            }
+            
+            function endInteraction() {
+                // Let the animation complete before returning
+            }
+            
+            // Event listeners
+            scene.addEventListener('mouseenter', startInteraction);
+            scene.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                startInteraction();
+            }, { passive: false });
+            
+            // Animation loop
+            let lastTime = 0;
+            
+            function animate(currentTime) {
+                const deltaTime = currentTime - lastTime;
+                lastTime = currentTime;
+                
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                if (!prefersReducedMotion) {
+                    if (phase === 'dissolve') {
+                        phaseProgress += 0.015;
+                        
+                        if (phaseProgress >= 1) {
+                            phase = 'swirl';
+                            phaseProgress = 0;
+                        }
+                    } else if (phase === 'swirl') {
+                        phaseProgress += 0.008;
+                        
+                        if (phaseProgress >= 1) {
+                            phase = 'reform';
+                            phaseProgress = 0;
+                        }
+                    } else if (phase === 'reform') {
+                        phaseProgress += 0.02;
+                        
+                        if (phaseProgress >= 1) {
+                            phase = 'idle';
+                            phaseProgress = 0;
+                            isAnimating = false;
+                            hatContainer.style.opacity = '1';
+                            particles = [];
+                            
+                            // Add a few orbiting particles after reformation
+                            const center = getHatCenter();
+                            if (orbitingParticles.length < 5) {
+                                orbitingParticles.push(new OrbitingParticle(center.x, center.y));
+                            }
+                        }
+                    }
+                    
+                    // Update and draw particles
+                    if (phase !== 'idle') {
+                        particles.forEach(p => {
+                            p.update(phaseProgress, phase);
+                            p.draw(ctx);
+                        });
+                    }
+                    
+                    // Always update orbiting particles
+                    orbitingParticles.forEach(p => {
+                        p.update();
+                        p.draw(ctx);
+                    });
+                }
+                
+                requestAnimationFrame(animate);
+            }
+            
+            requestAnimationFrame(animate);
+        })();
+    </script>
+</body>
+</html>

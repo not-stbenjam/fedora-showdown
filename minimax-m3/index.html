@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Red Hat — Open Source Innovation</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; }
+  body {
+    background:
+      radial-gradient(ellipse 90% 75% at 50% 38%, #1c0a0e 0%, #0c0608 55%, #050304 100%);
+    color: #e8e8ec;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    min-height: 100dvh;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .stage {
+    position: relative;
+    width: min(92vw, 84vh, 760px);
+    aspect-ratio: 1 / 1;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+    outline: none;
+  }
+  .caption {
+    position: absolute;
+    bottom: 2.5%;
+    left: 0; right: 0;
+    text-align: center;
+    color: #8a8a92;
+    font-size: 0.78rem;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    pointer-events: none;
+    font-weight: 400;
+  }
+  .caption b {
+    color: #ee0000;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+  }
+  .caption .sep {
+    color: #3a3a40;
+    margin: 0 0.7em;
+    font-weight: 300;
+  }
+  .hint {
+    position: fixed;
+    bottom: max(1.2rem, env(safe-area-inset-bottom, 0px));
+    left: 50%;
+    transform: translateX(-50%);
+    color: #4a4a52;
+    font-size: 0.66rem;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    pointer-events: none;
+    animation: pulse 3.2s ease-in-out infinite;
+    transition: opacity 0.6s ease;
+  }
+  .hint.hide { opacity: 0; }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 0.7; }
+  }
+  @media (max-width: 520px) {
+    .caption { font-size: 0.66rem; letter-spacing: 0.18em; }
+    .caption .sep { margin: 0 0.5em; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hint { animation: none; opacity: 0.5; }
+  }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <canvas id="scene" tabindex="0" role="img" aria-label="Red Hat logo. Hover or tap to see the particle effect."></canvas>
+    <div class="caption">
+      <b>Red Hat</b><span class="sep">·</span>Open Source Innovation
+    </div>
+  </div>
+  <div class="hint" id="hint">hover &nbsp;·&nbsp; tap</div>
+<script>
+(function () {
+  'use strict';
+
+  const canvas = document.getElementById('scene');
+  const ctx = canvas.getContext('2d');
+  const hintEl = document.getElementById('hint');
+  let DPR = 1, W = 0, H = 0;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    const r = canvas.getBoundingClientRect();
+    W = r.width; H = r.height;
+    canvas.width = Math.max(1, Math.floor(W * DPR));
+    canvas.height = Math.max(1, Math.floor(H * DPR));
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ---- Procedural fedora geometry ----------------------------------------
+  // u: angle 0..1, v: 0..0.4 = brim (outer -> inner), 0.4..1.0 = crown (base -> top)
+  function hatPoint(u, v, out) {
+    const a = u * Math.PI * 2;
+    const ca = Math.cos(a), sa = Math.sin(a);
+
+    if (v < 0.4) {
+      // Brim: wide disc, concave on top with a softly upturned edge
+      const bv = v / 0.4;                    // 0 = outer edge, 1 = inner edge
+      const r = 1.5 - bv * 0.85;             // 1.5 -> 0.65
+      const curl = Math.pow(1 - bv, 2.6) * 0.26;   // upturn at the rim
+      const cup = -Math.sin(bv * Math.PI) * 0.05;   // gentle cup
+      out.x = ca * r;
+      out.y = cup + curl;
+      out.z = sa * r;
+    } else {
+      // Crown: tapered cylinder with a top crease running front-to-back
+      const cv = (v - 0.4) / 0.6;            // 0 = base, 1 = top
+      const baseR = 0.63;
+      const topR  = 0.42;
+      // Hatband: slightly proud radius
+      const isBand = cv >= 0.02 && cv <= 0.11;
+      const r = isBand
+        ? (baseR + 0.028) * (1 - cv) + (topR + 0.022) * cv
+        : baseR * (1 - cv) + topR * cv;
+      const y = cv * 0.90;
+      // Crease: pinch the sides, dip the centerline near the top
+      const pinch = Math.max(0, cv - 0.50) * 1.85;
+      const xFactor = 1 - pinch * Math.abs(sa) * 0.60;
+      const x = ca * r * xFactor;
+      const z = sa * r;
+      const dip = -pinch * (1 - Math.abs(sa)) * 0.11;
+      out.x = x;
+      out.y = y + dip;
+      out.z = z;
+    }
+  }
+
+  function hatNormal(u, v, out) {
+    const e = 0.0015;
+    const p1 = {x:0,y:0,z:0}, p2 = {x:0,y:0,z:0}, p3 = {x:0,y:0,z:0};
+    hatPoint(u, v, p1);
+    hatPoint((u + e) % 1, v, p2);
+    hatPoint(u, Math.min(1 - e, v + e), p3);
+    const t1x = p2.x - p1.x, t1y = p2.y - p1.y, t1z = p2.z - p1.z;
+    const t2x = p3.x - p1.x, t2y = p3.y - p1.y, t2z = p3.z - p1.z;
+    let nx = t1y * t2z - t1z * t2y;
+    let ny = t1z * t2x - t1x * t2z;
+    let nz = t1x * t2y - t1y * t2x;
+    const len = Math.sqrt(nx*nx + ny*ny + nz*nz) || 1;
+    nx /= len; ny /= len; nz /= len;
+    if (ny < 0) { nx = -nx; ny = -ny; nz = -nz; }
+    out.x = nx; out.y = ny; out.z = nz;
+  }
+
+  // ---- Particles ----------------------------------------------------------
+  const N = reducedMotion ? 1200 : 3800;
+  const particles = [];
+
+  for (let i = 0; i < N; i++) {
+    // ~55% brim, ~45% crown so the silhouette reads clearly
+    const v = Math.random() < 0.55
+      ? Math.random() * 0.4
+      : 0.4 + Math.random() * 0.6;
+    const u = Math.random();
+    const p = {x:0,y:0,z:0}, n = {x:0,y:0,z:0};
+    hatPoint(u, v, p);
+    hatNormal(u, v, n);
+    const cv = (v - 0.4) / 0.6;
+    const isBand = cv >= 0.02 && cv <= 0.11;
+
+    particles.push({
+      sx: p.x, sy: p.y, sz: p.z,        // source position
+      nx: n.x, ny: n.y, nz: n.z,        // surface normal
+      isBand: isBand,
+      // Dispersion params
+      R: 1.1 + Math.random() * 1.5,
+      dirX: 0, dirY: 0, dirZ: 0,
+      oA: 0, oSpd: 0, oR: 0,
+      delay: Math.random() * 0.18,
+      // Lingering orbiter params
+      isOrbiter: false,
+      obR: 0, obH: 0, obTilt: 0, obSpd: 0, obPhase: 0,
+      trail: [],
+    });
+  }
+
+  // Shuffle so the dissolve/reform looks organic
+  for (let i = particles.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [particles[i], particles[j]] = [particles[j], particles[i]];
+  }
+
+  // Promote a handful of particles into long-lived orbiters
+  const orbiterCount = reducedMotion ? 0 : 8;
+  for (let i = 0; i < orbiterCount; i++) {
+    const p = particles[i];
+    p.isOrbiter = true;
+    p.obR = 1.45 + Math.random() * 0.7;
+    p.obH = (Math.random() - 0.5) * 0.9;
+    p.obTilt = (Math.random() - 0.5) * 0.8;
+    p.obSpd = (0.14 + Math.random() * 0.22) * (Math.random() < 0.5 ? 1 : -1);
+    p.obPhase = Math.random() * Math.PI * 2;
+  }
+
+  function initDispersion(p) {
+    // Direction biased along the surface normal + random scatter + upward lift
+    let dx = p.nx * 0.55 + (Math.random() - 0.5) * 0.9;
+    let dy = p.ny * 0.35 + Math.random() * 0.8 + 0.20;
+    let dz = p.nz * 0.55 + (Math.random() - 0.5) * 0.9;
+    const len = Math.sqrt(dx*dx + dy*dy + dz*dz) || 1;
+    p.dirX = dx / len; p.dirY = dy / len; p.dirZ = dz / len;
+    p.oA = Math.random() * Math.PI * 2;
+    p.oSpd = (0.4 + Math.random() * 1.1) * (Math.random() < 0.5 ? 1 : -1);
+    p.oR = 0.10 + Math.random() * 0.35;
+  }
+
+  // ---- State machine ------------------------------------------------------
+  const ST = { IDLE: 0, DISSOLVE: 1, SWIRL: 2, REFORM: 3, IDLE2: 4 };
+  let state = ST.IDLE;
+  let stateT = 0;
+  let cycleT = 0;
+  let spinAngle = 0;
+  let spinSpeed = reducedMotion ? 0 : 0.55;
+  let targetSpin = reducedMotion ? 0 : 0.55;
+  let activated = false;
+
+  const DUR_DISSOLVE = 1.7;
+  const DUR_SWIRL    = 1.3;
+  const DUR_REFORM   = 1.9;
+
+  function activate() {
+    if (reducedMotion) return;
+    if (state === ST.IDLE || state === ST.IDLE2) {
+      state = ST.DISSOLVE;
+      stateT = 0;
+      for (const p of particles) {
+        initDispersion(p);
+        if (p.isOrbiter) p.trail.length = 0;
+      }
+      targetSpin = 0.10;
+      if (!activated) {
+        activated = true;
+        hintEl.classList.add('hide');
+      }
+    }
+  }
+
+  canvas.addEventListener('mouseenter', activate);
+  canvas.addEventListener('click', activate);
+  canvas.addEventListener('touchstart', (e) => { e.preventDefault(); activate(); }, {passive: false});
+  canvas.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); }
+  });
+
+  // ---- Main loop ----------------------------------------------------------
+  const FOCAL = 6.0;
+  const PERSP_K = 0.32;
+  let lastT = performance.now();
+
+  function frame(now) {
+    let dt = (now - lastT) / 1000;
+    lastT = now;
+    if (dt > 0.05) dt = 0.05;
+    cycleT += dt;
+
+    // Update state
+    if (state === ST.IDLE) {
+      spinSpeed += (targetSpin - spinSpeed) * Math.min(1, dt * 3);
+      spinAngle += spinSpeed * dt;
+    } else if (state === ST.DISSOLVE) {
+      spinSpeed += (targetSpin - spinSpeed) * Math.min(1, dt * 3);
+      spinAngle += spinSpeed * dt;
+      stateT += dt;
+      if (stateT >= DUR_DISSOLVE) { state = ST.SWIRL; stateT = 0; }
+    } else if (state === ST.SWIRL) {
+      spinAngle += spinSpeed * dt;
+      stateT += dt;
+      if (stateT >= DUR_SWIRL) { state = ST.REFORM; stateT = 0; targetSpin = 0.55; }
+    } else if (state === ST.REFORM) {
+      spinSpeed += (targetSpin - spinSpeed) * Math.min(1, dt * 2);
+      spinAngle += spinSpeed * dt;
+      stateT += dt;
+      if (stateT >= DUR_REFORM) { state = ST.IDLE2; stateT = 0; }
+    } else if (state === ST.IDLE2) {
+      spinSpeed += (targetSpin - spinSpeed) * Math.min(1, dt * 3);
+      spinAngle += spinSpeed * dt;
+    }
+
+    // ---- Draw ----
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = 'rgba(8, 4, 6, 1)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Soft background glow
+    const bg = ctx.createRadialGradient(W*0.5, H*0.45, 0, W*0.5, H*0.5, Math.max(W,H) * 0.6);
+    bg.addColorStop(0, 'rgba(90, 6, 10, 0.09)');
+    bg.addColorStop(0.5, 'rgba(30, 2, 4, 0.035)');
+    bg.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    const cx = W * 0.5;
+    const cy = H * 0.5;
+    const projScale = Math.min(W, H) * 0.20;
+    const ca = Math.cos(spinAngle);
+    const sa = Math.sin(spinAngle);
+
+    // Light (fixed in world space; hat rotates)
+    const Lx = 0.45, Ly = 0.6, Lz = 0.55;
+    const lLen = Math.sqrt(Lx*Lx + Ly*Ly + Lz*Lz);
+    const lnx = Lx/lLen, lny = Ly/lLen, lnz = Lz/lLen;
+    const vx = 0, vy = 0, vz = 1;
+
+    const items = new Array(particles.length);
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      let wx, wy, wz, alpha, sz, isEmber;
+
+      if (state === ST.IDLE) {
+        wx = p.sx; wy = p.sy; wz = p.sz;
+        alpha = 1; sz = 1.4; isEmber = false;
+      } else if (state === ST.DISSOLVE) {
+        const rawT = stateT / DUR_DISSOLVE;
+        const t = Math.max(0, Math.min(1, (rawT - p.delay) / Math.max(0.01, 1 - p.delay)));
+        const e = 1 - Math.pow(1 - t, 2.3);
+        wx = p.sx + p.dirX * p.R * e;
+        wy = p.sy + p.dirY * p.R * e;
+        wz = p.sz + p.dirZ * p.R * e;
+        const wt = e * 0.55;
+        const wa = p.oA + wt * p.oSpd * 2.2;
+        wx += Math.cos(wa) * p.oR * wt;
+        wz += Math.sin(wa) * p.oR * wt;
+        alpha = 0.95;
+        sz = 1.4 + e * 1.5;
+        isEmber = true;
+      } else if (state === ST.SWIRL) {
+        const swT = stateT / DUR_SWIRL;
+        const dx = p.dirX * p.R, dy = p.dirY * p.R, dz = p.dirZ * p.R;
+        wx = p.sx + dx;
+        wy = p.sy + dy;
+        wz = p.sz + dz;
+        const ot = swT * 1.4;
+        const oa = p.oA + ot * p.oSpd;
+        const om = 0.4 + 0.6 * Math.sin(swT * Math.PI);
+        wx += Math.cos(oa) * p.oR * om;
+        wz += Math.sin(oa) * p.oR * om;
+        wy += swT * 0.14;
+        alpha = 0.9;
+        sz = 1.8 + Math.sin(swT * Math.PI) * 0.4;
+        isEmber = true;
+      } else if (state === ST.REFORM) {
+        const rawT = stateT / DUR_REFORM;
+        const t = Math.max(0, Math.min(1, (rawT - p.delay) / Math.max(0.01, 1 - p.delay)));
+        const e = t * t * (3 - 2 * t); // smoothstep
+        const dx = p.dirX * p.R, dy = p.dirY * p.R, dz = p.dirZ * p.R;
+        const disX = p.sx + dx, disY = p.sy + dy, disZ = p.sz + dz;
+        const orbitPhase = (1 - e);
+        const oa = p.oA + orbitPhase * p.oSpd * 1.4;
+        const oMul = (1 - e);
+        const ox = Math.cos(oa) * p.oR * oMul;
+        const oz = Math.sin(oa) * p.oR * oMul;
+        wx = disX + (p.sx - disX) * e + ox;
+        wy = disY + (p.sy - disY) * e;
+        wz = disZ + (p.sz - disZ) * e + oz;
+        alpha = 0.9 + 0.1 * e;
+        sz = 2.0 - 0.7 * e;
+        isEmber = e < 0.35;
+      } else { // IDLE2
+        if (p.isOrbiter) {
+          const oa = p.obPhase + cycleT * p.obSpd;
+          wx = Math.cos(oa) * p.obR;
+          wy = p.obH + Math.sin(p.obTilt) * Math.sin(oa) * p.obR * 0.45;
+          wz = Math.cos(p.obTilt) * Math.sin(oa) * p.obR;
+          alpha = 0.9;
+          sz = 1.8;
+          isEmber = true;
+          p.trail.push({x: wx, y: wy, z: wz});
+          if (p.trail.length > 26) p.trail.shift();
+        } else {
+          wx = p.sx; wy = p.sy; wz = p.sz;
+          alpha = 1; sz = 1.4; isEmber = false;
+        }
+      }
+
+      // Y-axis rotation
+      const rx = wx * ca + wz * sa;
+      const ry = wy;
+      const rz = -wx * sa + wz * ca;
+
+      // Weak perspective projection
+      const denom = Math.max(0.4, FOCAL + rz * PERSP_K);
+      const k = FOCAL / denom;
+      const sx = cx + rx * k * projScale;
+      const sy = cy - ry * k * projScale;
+
+      // Lighting (rotate normal with the hat)
+      const rnx = p.nx * ca + p.nz * sa;
+      const rny = p.ny;
+      const rnz = -p.nx * sa + p.nz * ca;
+      const NdotL = Math.max(0, rnx * lnx + rny * lny + rnz * lnz);
+      const rim = 1 - Math.max(0, rnx * vx + rny * vy + rnz * vz);
+      const rimPow = Math.pow(rim, 2.5) * 0.45;
+
+      const size = sz * k;
+
+      items[i] = {
+        x: sx, y: sy, z: rz, size, alpha,
+        NdotL, rimPow,
+        isBand: p.isBand, isEmber, isOrbiter: p.isOrbiter, p, i
+      };
+    }
+
+    // Sort back-to-front for proper depth
+    items.sort((a, b) => a.z - b.z);
+
+    // Draw orbiter trails first (additive)
+    if (state === ST.IDLE2) {
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.lineCap = 'round';
+      for (let k = 0; k < particles.length; k++) {
+        const p = particles[k];
+        if (!p.isOrbiter || p.trail.length < 2) continue;
+        const tr = p.trail;
+        for (let j = 1; j < tr.length; j++) {
+          const a = tr[j-1], b = tr[j];
+          const ax = a.x * ca + a.z * sa, az = -a.x * sa + a.z * ca;
+          const bx = b.x * ca + b.z * sa, bz = -b.x * sa + b.z * ca;
+          const ad = Math.max(0.4, FOCAL + az * PERSP_K);
+          const bd = Math.max(0.4, FOCAL + bz * PERSP_K);
+          const ak = FOCAL / ad, bk = FOCAL / bd;
+          const axs = cx + ax * ak * projScale;
+          const ays = cy - a.y * ak * projScale;
+          const bxs = cx + bx * bk * projScale;
+          const bys = cy - b.y * bk * projScale;
+          const f2 = j / tr.length;
+          ctx.strokeStyle = `rgba(255, 150, 80, ${f2 * 0.32})`;
+          ctx.lineWidth = 1.4 * f2;
+          ctx.beginPath();
+          ctx.moveTo(axs, ays);
+          ctx.lineTo(bxs, bys);
+          ctx.stroke();
+        }
+      }
+      ctx.globalCompositeOperation = 'source-over';
+    }
+
+    // Draw particles (additive for the ember glow)
+    ctx.globalCompositeOperation = 'lighter';
+    for (let k = 0; k < items.length; k++) {
+      const it = items[k];
+      const intensity = 0.28 + it.NdotL * 0.55 + it.rimPow;
+      let r, g, b;
+      if (it.isEmber) {
+        const flicker = 0.82 + 0.18 * Math.sin(cycleT * 5.5 + it.i * 0.27);
+        r = 1.00 * intensity * flicker;
+        g = 0.52 * intensity * flicker;
+        b = 0.16 * intensity * flicker;
+      } else if (it.isBand) {
+        r = 0.55 * intensity;
+        g = 0.02 * intensity;
+        b = 0.04 * intensity;
+      } else {
+        r = 0.95 * intensity;
+        g = 0.04 * intensity;
+        b = 0.06 * intensity;
+      }
+      const a = it.alpha;
+      // Halo
+      ctx.globalAlpha = a * 0.22;
+      ctx.fillStyle = `rgb(${(r*255)|0}, ${(g*255)|0}, ${(b*255)|0})`;
+      ctx.beginPath();
+      ctx.arc(it.x, it.y, it.size * 2.4, 0, Math.PI * 2);
+      ctx.fill();
+      // Core
+      ctx.globalAlpha = a * 0.9;
+      ctx.beginPath();
+      ctx.arc(it.x, it.y, it.size * 0.9, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

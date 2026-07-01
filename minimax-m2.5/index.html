@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Red Hat Fedora</title>
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      height: 100%;
+      overflow: hidden;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(ellipse at 50% 20%, #1a1a2e 0%, #0d0d14 50%, #08080c 100%);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      padding: 2rem;
+    }
+
+    .scene {
+      position: relative;
+      width: min(90vw, 400px);
+      height: min(90vw, 400px);
+      perspective: 1000px;
+    }
+
+    .hat-container {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transform-style: preserve-3d;
+      transition: opacity 0.6s ease;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .caption {
+      margin-top: 2rem;
+      text-align: center;
+      color: #8a8a9a;
+      font-size: clamp(0.875rem, 2vw, 1rem);
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      opacity: 0;
+      animation: fadeIn 1s ease 0.5s forwards;
+    }
+
+    @keyframes fadeIn {
+      to { opacity: 1; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .hat-container, canvas {
+        animation: none !important;
+        transition: none !important;
+      }
+      
+      .caption {
+        animation: none;
+        opacity: 1;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="scene" id="scene">
+    <div class="hat-container" id="hatContainer">
+      <canvas id="canvas"></canvas>
+    </div>
+  </div>
+  <p class="caption">The Fedora</p>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const container = document.getElementById('hatContainer');
+
+    let dpr = window.devicePixelRatio || 1;
+    let width, height;
+    let particles = [];
+    let orbitingParticles = [];
+    let animationPhase = 'spinning'; // spinning, dissolving, swirling, reforming
+    let angle = 0;
+    let dissolveProgress = 0;
+    let swirlAngle = 0;
+    let reformProgress = 0;
+    let lastTime = 0;
+    let isHovered = false;
+    let hasDissolved = false;
+
+    function resize() {
+      dpr = window.devicePixelRatio || 1;
+      const rect = container.getBoundingClientRect();
+      width = rect.width;
+      height = rect.height;
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      canvas.style.width = width + 'px';
+      canvas.style.height = height + 'px';
+      ctx.scale(dpr, dpr);
+    }
+
+    function drawFedora(progress = 1) {
+      ctx.clearRect(0, 0, width, height);
+      
+      const cx = width / 2;
+      const cy = height / 2;
+      const scale = Math.min(width, height) * 0.35;
+      
+      // 3D transformation
+      const tiltY = Math.sin(angle) * 0.15;
+      const tiltX = Math.cos(angle) * 0.08 - 0.1;
+      
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.transform(1, tiltY * 0.3, 0, 1, 0, 0); // slight shear for depth
+      ctx.translate(-cx, -cy);
+      
+      // Soft ambient glow
+      const gradient = ctx.createRadialGradient(cx, cy - scale * 0.3, 0, cx, cy, scale * 2);
+      gradient.addColorStop(0, 'rgba(180, 40, 40, 0.08)');
+      gradient.addColorStop(1, 'transparent');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, width, height);
+      
+      // Shadow underneath
+      ctx.save();
+      ctx.translate(cx, cy + scale * 0.55);
+      ctx.scale(1, 0.2);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, scale * 1.1, scale * 1.1, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+      ctx.filter = 'blur(20px)';
+      ctx.fill();
+      ctx.restore();
+      
+      // Main hat body (crown)
+      const crownBase = cy + scale * 0.05;
+      const crownTop = cy - scale * 0.45;
+      const crownWidth = scale * 0.65;
+      
+      // Crown - back (darker)
+      ctx.fillStyle = '#2a1515';
+      ctx.beginPath();
+      ctx.moveTo(cx - crownWidth * 0.5, crownBase);
+      ctx.lineTo(cx - crownWidth * 0.4, crownTop + scale * 0.15);
+      ctx.lineTo(cx + crownWidth * 0.4, crownTop + scale * 0.15);
+      ctx.lineTo(cx + crownWidth * 0.5, crownBase);
+      ctx.closePath();
+      ctx.fill();
+      
+      // Crown - front
+      const crownGrad = ctx.createLinearGradient(cx - crownWidth, crownTop, cx + crownWidth, crownBase);
+      crownGrad.addColorStop(0, '#5c2020');
+      crownGrad.addColorStop(0.3, '#8a3030');
+      crownGrad.addColorStop(0.7, '#6a2525');
+      crownGrad.addColorStop(1, '#3a1818');
+      ctx.fillStyle = crownGrad;
+      ctx.beginPath();
+      ctx.moveTo(cx - crownWidth * 0.5, crownBase);
+      ctx.lineTo(cx - crownWidth * 0.5, crownTop);
+      ctx.quadraticCurveTo(cx, crownTop - scale * 0.1, cx + crownWidth * 0.5, crownTop);
+      ctx.lineTo(cx + crownWidth * 0.5, crownBase);
+      ctx.closePath();
+      ctx.fill();
+      
+      // Crown top indent
+      ctx.fillStyle = '#3a1818';
+      ctx.beginPath();
+      ctx.ellipse(cx, crownTop - scale * 0.02, scale * 0.2, scale * 0.08, 0, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Crown band
+      const bandY = crownBase - scale * 0.08;
+      ctx.fillStyle = '#1a0a0a';
+      ctx.beginPath();
+      ctx.moveTo(cx - crownWidth * 0.52, bandY - scale * 0.06);
+      ctx.lineTo(cx - crownWidth * 0.52, bandY + scale * 0.06);
+      ctx.quadraticCurveTo(cx, bandY + scale * 0.1, cx + crownWidth * 0.52, bandY + scale * 0.06);
+      ctx.lineTo(cx + crownWidth * 0.52, bandY - scale * 0.06);
+      ctx.quadraticCurveTo(cx, bandY - scale * 0.1, cx - crownWidth * 0.52, bandY - scale * 0.06);
+      ctx.fill();
+      
+      // Brim
+      const brimY = crownBase;
+      const brimWidth = scale * 1.05;
+      const brimDepth = scale * 0.15;
+      
+      // Brim back
+      ctx.fillStyle = '#2a1515';
+      ctx.beginPath();
+      ctx.ellipse(cx, brimY - brimDepth * 0.3, brimWidth * 0.5, brimDepth * 0.8, 0, Math.PI, Math.PI * 2);
+      ctx.fill();
+      
+      // Brim front
+      const brimGrad = ctx.createLinearGradient(cx - brimWidth, brimY, cx + brimWidth, brimY);
+      brimGrad.addColorStop(0, '#4a2020');
+      brimGrad.addColorStop(0.2, '#7a2828');
+      brimGrad.addColorStop(0.5, '#9a3535');
+      brimGrad.addColorStop(0.8, '#7a2828');
+      brimGrad.addColorStop(1, '#4a2020');
+      ctx.fillStyle = brimGrad;
+      ctx.beginPath();
+      ctx.ellipse(cx, brimY, brimWidth, brimDepth, 0, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Brim edge highlight
+      ctx.strokeStyle = 'rgba(180, 80, 80, 0.3)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(cx, brimY, brimWidth - 2, brimDepth - 2, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      
+      ctx.restore();
+    }
+
+    function createParticles() {
+      particles = [];
+      const cx = width / 2;
+      const cy = height / 2;
+      const scale = Math.min(width, height) * 0.35;
+      
+      // Sample points from the fedora shape
+      const samplePoints = [];
+      
+      // Crown points
+      for (let i = 0; i < 300; i++) {
+        const t = Math.random();
+        const x = cx + (Math.random() - 0.5) * scale * 0.65;
+        const y = cy - scale * 0.45 + t * scale * 0.5 + Math.random() * scale * 0.1;
+        if (Math.abs(x - cx) < scale * 0.5 - Math.abs(y - cy) * 0.3) {
+          samplePoints.push({ x, y, z: 0.3 + Math.random() * 0.4 });
+        }
+      }
+      
+      // Brim points
+      for (let i = 0; i < 200; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const r = Math.random() * scale * 1.05;
+        const x = cx + Math.cos(angle) * r;
+        const y = cy + scale * 0.05 + Math.sin(angle) * scale * 0.15;
+        if (r > scale * 0.4) {
+          samplePoints.push({ x, y, z: 0.5 + Math.random() * 0.3 });
+        }
+      }
+      
+      // Band points
+      for (let i = 0; i < 100; i++) {
+        const x = cx + (Math.random() - 0.5) * scale * 1.0;
+        const y = cy + scale * 0.05 - scale * 0.08 + Math.random() * scale * 0.16;
+        samplePoints.push({ x, y, z: 0.6 + Math.random() * 0.2 });
+      }
+      
+      // Add some random glow particles
+      for (let i = 0; i < 400; i++) {
+        samplePoints.push({
+          x: cx + (Math.random() - 0.5) * scale * 1.5,
+          y: cy + (Math.random() - 0.3) * scale * 0.8,
+          z: Math.random()
+        });
+      }
+      
+      samplePoints.forEach((pt, i) => {
+        particles.push({
+          x: pt.x,
+          y: pt.y,
+          z: pt.z,
+          originX: pt.x,
+          originY: pt.y,
+          vx: (Math.random() - 0.5) * 3,
+          vy: (Math.random() - 0.5) * 3 - 1,
+          vz: (Math.random() - 0.5) * 2,
+          size: Math.random() * 2 + 1,
+          alpha: Math.random() * 0.5 + 0.5,
+          hue: Math.random() < 0.3 ? 45 : 0 // Some warm ember particles
+        });
+      });
+      
+      // Create orbiting particles
+      orbitingParticles = [];
+      for (let i = 0; i < 12; i++) {
+        const orbitAngle = (i / 12) * Math.PI * 2;
+        orbitingParticles.push({
+          angle: orbitAngle,
+          radius: scale * 0.8 + Math.random() * scale * 0.3,
+          speed: 0.02 + Math.random() * 0.02,
+          y: cy + (Math.random() - 0.5) * scale * 0.5,
+          size: Math.random() * 1.5 + 0.5,
+          alpha: 0.3 + Math.random() * 0.3,
+          trail: []
+        });
+      }
+    }
+
+    function drawParticles() {
+      const cx = width / 2;
+      const cy = height / 2;
+      
+      particles.forEach(p => {
+        let x, y, alpha;
+        
+        if (animationPhase === 'dissolving') {
+          const ease = easeOutCubic(dissolveProgress);
+          x = p.originX + p.vx * ease * 150;
+          y = p.originY + p.vy * ease * 150 + ease * ease * 50;
+          const drift = Math.sin(p.originX * 0.01 + lastTime * 0.002) * 10 * ease;
+          x += drift;
+          alpha = p.alpha * (1 - ease * 0.5);
+        } else if (animationPhase === 'swirling') {
+          const ease = easeInOutCubic(swirlAngle / (Math.PI * 2));
+          const swirlRadius = 150 * ease;
+          const swirlOffset = Math.sin(p.originX * 0.02 + lastTime * 0.003) * swirlRadius;
+          x = p.originX + swirlOffset * Math.cos(p.originY * 0.01 + lastTime * 0.002);
+          y = p.originY + swirlOffset * Math.sin(p.originY * 0.01 + lastTime * 0.002) * 0.5;
+          alpha = p.alpha * (0.3 + ease * 0.7);
+        } else if (animationPhase === 'reforming') {
+          const ease = easeOutCubic(reformProgress);
+          x = p.originX + (p.originX - p.originX) * (1 - ease);
+          y = p.originY + (p.originY - p.originY) * (1 - ease);
+          alpha = p.alpha * ease;
+        } else {
+          x = p.originX;
+          y = p.originY;
+          alpha = p.alpha * 0.3;
+        }
+        
+        const size = p.size * (animationPhase === 'dissolving' ? 1.5 : 1);
+        
+        // Glow effect
+        const grad = ctx.createRadialGradient(x, y, 0, x, y, size * 3);
+        const hue = p.hue === 45 ? 45 : 0;
+        grad.addColorStop(0, `hsla(${hue}, 80%, 70%, ${alpha})`);
+        grad.addColorStop(0.5, `hsla(${hue}, 60%, 50%, ${alpha * 0.3})`);
+        grad.addColorStop(1, 'transparent');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(x, y, size * 3, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Core particle
+        ctx.fillStyle = `hsla(${hue}, 90%, 80%, ${alpha})`;
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+
+    function drawOrbitingParticles() {
+      if (animationPhase !== 'spinning' && animationPhase !== 'reforming' && animationPhase !== 'postDissolve') return;
+      
+      const cx = width / 2;
+      const cy = height / 2;
+      const showOrbiting = hasDissolved && (animationPhase === 'spinning' || animationPhase === 'postDissolve' || animationPhase === 'reforming');
+      
+      if (!showOrbiting) return;
+      
+      orbitingParticles.forEach(p => {
+        p.angle += p.speed;
+        
+        // Update trail
+        const x = cx + Math.cos(p.angle) * p.radius;
+        const y = cy + p.y - cy + Math.sin(p.angle * 0.5) * 20;
+        
+        p.trail.push({ x, y, alpha: p.alpha });
+        if (p.trail.length > 15) p.trail.shift();
+        
+        // Draw trail
+        p.trail.forEach((t, i) => {
+          const trailAlpha = (i / p.trail.length) * t.alpha * 0.5;
+          const trailSize = (i / p.trail.length) * p.size;
+          ctx.fillStyle = `hsla(30, 80%, 70%, ${trailAlpha})`;
+          ctx.beginPath();
+          ctx.arc(t.x, t.y, trailSize, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        
+        // Draw particle
+        const grad = ctx.createRadialGradient(x, y, 0, x, y, p.size * 4);
+        grad.addColorStop(0, `hsla(30, 80%, 70%, ${p.alpha})`);
+        grad.addColorStop(1, 'transparent');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(x, y, p.size * 4, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.fillStyle = `hsla(30, 90%, 80%, ${p.alpha})`;
+        ctx.beginPath();
+        ctx.arc(x, y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+
+    function easeOutCubic(t) {
+      return 1 - Math.pow(1 - t, 3);
+    }
+
+    function easeInOutCubic(t) {
+      return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    }
+
+    let reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    function animate(time) {
+      const delta = time - lastTime;
+      lastTime = time;
+      
+      ctx.clearRect(0, 0, width, height);
+      
+      if (reducedMotion) {
+        drawFedora(1);
+      } else {
+        if (animationPhase === 'spinning') {
+          const baseSpeed = isHovered ? 0.005 : 0.02;
+          angle += baseSpeed;
+          drawFedora(1);
+          
+          // Show subtle orbiting glow
+          if (hasDissolved) {
+            drawOrbitingParticles();
+          }
+        } 
+        else if (animationPhase === 'dissolving') {
+          angle += 0.003;
+          dissolveProgress += 0.008;
+          
+          if (dissolveProgress >= 1) {
+            animationPhase = 'swirling';
+            dissolveProgress = 1;
+          }
+          
+          drawFedora(1 - dissolveProgress);
+          drawParticles();
+        }
+        else if (animationPhase === 'swirling') {
+          swirlAngle += 0.025;
+          angle += 0.005;
+          
+          if (swirlAngle >= Math.PI * 2) {
+            animationPhase = 'reforming';
+            swirlAngle = 0;
+          }
+          
+          drawParticles();
+        }
+        else if (animationPhase === 'reforming') {
+          angle += 0.015;
+          reformProgress += 0.012;
+          
+          if (reformProgress >= 1) {
+            animationPhase = 'postDissolve';
+            reformProgress = 1;
+            angle = 0;
+          }
+          
+          drawFedora(reformProgress);
+          drawParticles();
+          
+          // Start showing orbiting particles during reform
+          drawOrbitingParticles();
+        }
+        else if (animationPhase === 'postDissolve') {
+          angle += 0.02;
+          drawFedora(1);
+          drawOrbitingParticles();
+        }
+      }
+      
+      requestAnimationFrame(animate);
+    }
+
+    function startDissolve() {
+      if (animationPhase !== 'spinning' && animationPhase !== 'postDissolve') return;
+      if (reducedMotion) return;
+      
+      hasDissolved = true;
+      createParticles();
+      animationPhase = 'dissolving';
+      dissolveProgress = 0;
+      swirlAngle = 0;
+      reformProgress = 0;
+    }
+
+    function endDissolve() {
+      // Don't auto-reform on mouse leave, let it stay dissolved
+      // User can trigger again
+    }
+
+    // Event listeners
+    container.addEventListener('mouseenter', () => {
+      isHovered = true;
+      startDissolve();
+    });
+
+    container.addEventListener('mouseleave', () => {
+      isHovered = false;
+      endDissolve();
+    });
+
+    container.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      startDissolve();
+    }, { passive: false });
+
+    // Resize handler
+    window.addEventListener('resize', resize);
+
+    // Reduced motion listener
+    window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', (e) => {
+      reducedMotion = e.matches;
+    });
+
+    // Initialize
+    resize();
+    createParticles();
+    requestAnimationFrame(animate);
+  </script>
+</body>
+</html>
