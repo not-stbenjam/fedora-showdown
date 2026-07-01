@@ -661,7 +661,7 @@
 <button class="mobile-toggle" id="mobile-toggle" aria-label="Menu">☰</button>
 <div class="sidebar-overlay" id="sidebar-overlay"></div>
 <aside class="sidebar" id="sidebar">
-  <div class="logo">Fedora Showdown</div>
+  <div class="logo" id="logo" style="cursor:pointer">Fedora Showdown</div>
   <div class="bottom-actions">
     <button id="btn-about">💡 About</button>
     <button id="btn-prompt">✨ Prompt</button>
@@ -889,9 +889,15 @@ And respect reduced motion. Return only the finished HTML file.</div>
     }
 
     const hashModel = location.hash.slice(1);
-    const hashIdx = hashModel ? MODELS.findIndex(m => m.id === hashModel) : -1;
-    selectTab(hashIdx >= 0 ? hashIdx : 0);
-    setMode("single");
+    let hashIdx = -1;
+    if (hashModel === "grid") {
+      selectTab(0);
+      setMode("grid");
+    } else {
+      hashIdx = hashModel ? MODELS.findIndex(m => m.id === hashModel) : -1;
+      selectTab(hashIdx >= 0 ? hashIdx : 0);
+      setMode("single");
+    }
     if (hashIdx >= 0) requestAnimationFrame(() => {
       const target = buttons[hashIdx];
       const container = document.getElementById("model-list");
@@ -995,8 +1001,14 @@ And respect reduced motion. Return only the finished HTML file.</div>
   mobileToggle.addEventListener("click", toggleSidebar);
   sidebarOverlay.addEventListener("click", closeSidebar);
 
-  document.getElementById("btn-single").addEventListener("click", () => setMode("single"));
-  document.getElementById("btn-grid").addEventListener("click", () => setMode("grid"));
+  document.getElementById("logo").addEventListener("click", () => {
+    selectTab(0);
+    setMode("single");
+    document.getElementById("model-list").scrollTop = 0;
+    closeSidebar();
+  });
+  document.getElementById("btn-single").addEventListener("click", () => { setMode("single"); history.replaceState(null, "", "#" + MODELS[activeIdx].id); });
+  document.getElementById("btn-grid").addEventListener("click", () => { setMode("grid"); history.replaceState(null, "", "#grid"); });
 
   document.getElementById("nav-prev").addEventListener("click", () => selectTab((activeIdx - 1 + MODELS.length) % MODELS.length));
   document.getElementById("nav-next").addEventListener("click", () => selectTab((activeIdx + 1) % MODELS.length));
