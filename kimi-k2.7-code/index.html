@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Red Hat Fedora — Particle Dissolve</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: radial-gradient(circle at 50% 42%, #1b1b2d 0%, #0d0d18 55%, #040408 100%);
+    color: rgba(255, 248, 240, 0.75);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    touch-action: none;
+  }
+  #scene {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 1;
+    cursor: pointer;
+    background: transparent;
+  }
+  .shadow {
+    position: absolute;
+    top: 54%;
+    left: 50%;
+    width: min(46vw, 380px);
+    height: min(12vw, 90px);
+    transform: translate(-50%, -50%);
+    background: radial-gradient(closest-side, rgba(0, 0, 0, 0.55), transparent);
+    filter: blur(24px);
+    pointer-events: none;
+    z-index: 0;
+  }
+  .caption {
+    position: absolute;
+    left: 50%;
+    bottom: 16%;
+    transform: translateX(-50%);
+    z-index: 2;
+    pointer-events: none;
+    font-size: clamp(0.7rem, 1.1vw, 0.92rem);
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    text-align: center;
+    color: rgba(255, 244, 235, 0.55);
+    text-shadow: 0 1px 10px rgba(0,0,0,0.5);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #scene, .shadow, .caption { animation: none !important; }
+  }
+</style>
+</head>
+<body>
+  <div class="shadow" aria-hidden="true"></div>
+  <canvas id="scene" role="img" aria-label="A red fedora spinning in 3D. Hover or tap to dissolve it into glowing particles that reform."></canvas>
+  <div class="caption">Hover or tap the hat to dissolve & reform</div>
+
+<script>
+(function() {
+  'use strict';
+
+  const canvas = document.getElementById('scene');
+  const ctx = canvas.getContext('2d', { alpha: true });
+
+  let dpr = 1;
+  let cw = 0, ch = 0;
+  let cx = 0, cy = 0;
+  let viewScale = 1;
+  let pointRadius = 1.5;
+
+  let angle = 0;
+  let idleSpeed = 0.00075;
+  let interactAngle = 0;
+
+  const focal = 3.4;
+  const hatPoints = [];
+  let particles = [];
+  let lingeringOrbiters = [];
+
+  let state = 'idle'; // idle, decelerate, dissolve, swirl, reform, orbit
+  let phaseStart = 0;
+  let inTransition = false;
+  let transitionStart = 0;
+
+  let lastTime = 0;
+  let dtSec = 0;
+
+  let reducedMotion = false;
+  const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+  function updateReducedMotion() {
+    reducedMotion = motionQuery.matches;
+    if (reducedMotion) resetToIdle();
+  }
+  motionQuery.addEventListener('change', updateReducedMotion);
+  updateReducedMotion();
+
+  const DURATIONS = {
+    decelerate: 420,
+    dissolve: 520,
+    swirl: 1500,
+    reform: 1500,
+    orbit: 2600,
+    crossfade: 650
+  };
+
+  /* ---------- geometry ---------- */
+  function generateHat() {
+    hatPoints.length = 0;
+    const red = [230, 0, 0];
+    const bandRed = [125, 0, 0];
+    const brimRed = [215, 0, 0];
+
+    // Crown
+    const H = 1.0;
+    const Rb = 0.56;
+    const Rt = 0.41;
+    const drdy = (Rt - Rb) / H;
+    const hSteps = 36;
+    const tSteps = 60;
+    for (let i = 0; i <= hSteps; i++) {
+      const h = i / hSteps;
+      const y = h * H;
+      const r = Rb + (Rt - Rb) * h;
+      for (let j = 0; j < tSteps; j++) {
+        const theta = (j / tSteps) * Math.PI * 2;
+        const cosT = Math.cos(theta);
+        const sinT = Math.sin(theta);
+        let rr = r;
+        let yy = y;
+        if (h > 0.62) {
+          const d = (h - 0.62) / 0.38;
+          const dent = Math.max(0, cosT);
+          rr -= 0.15 * d * dent;
+          yy -= 0.10 * d * dent;
+        }
+        const x = rr * sinT;
+        const z = rr * cosT;
+        const nx = sinT;
+        const ny = -drdy;
+        const nz = cosT;
+        const nlen = Math.hypot(nx, ny, nz) || 1;
+        hatPoints.push({
+          x, y: yy, z,
+          nx: nx / nlen, ny: ny / nlen, nz: nz / nlen,
+          base: red, type: 'crown'
+        });
+      }
+    }
+
+    // Band
+    const bandY = 0.10;
+    const bandH = 0.11;
+    const bandR = Rb + 0.015;
+    const bhSteps = 5;
+    const btSteps = 64;
+    for (let i = 0; i < bhSteps; i++) {
+      const bh = i / bhSteps;
+      const y = bandY + bh * bandH;
+      for (let j = 0; j < btSteps; j++) {
+        const theta = (j / btSteps) * Math.PI * 2;
+        const sinT = Math.sin(theta), cosT = Math.cos(theta);
+        const x = bandR * sinT;
+        const z = bandR * cosT;
+        const nlen = Math.hypot(x, z) || 1;
+        hatPoints.push({
+          x, y, z,
+          nx: x / nlen, ny: 0, nz: z / nlen,
+          base: bandRed, type: 'band'
+        });
+      }
+    }
+
+    // Brim
+    const brimY = -0.02;
+    const brimWidth = 0.74;
+    const brimCurve = 0.16;
+    const rInner = Rb - 0.02;
+    const rSteps = 16;
+    const ttSteps = 66;
+    for (let i = 0; i < rSteps; i++) {
+      const f = i / rSteps;
+      for (let j = 0; j < ttSteps; j++) {
+        const theta = (j / ttSteps) * Math.PI * 2;
+        const cosT = Math.cos(theta);
+        const sinT = Math.sin(theta);
+        const rOuter = rInner + brimWidth * (1 + 0.18 * Math.abs(sinT));
+        const rr = rInner + (rOuter - rInner) * f;
+        const y = brimY - brimCurve * cosT * f;
+        const x = rr * sinT;
+        const z = rr * cosT;
+        const nx = sinT * brimCurve * 0.25;
+        const ny = 1;
+        const nz = -cosT * brimCurve * 0.25;
+        const nlen = Math.hypot(nx, ny, nz) || 1;
+        hatPoints.push({
+          x, y, z,
+          nx: nx / nlen, ny: ny / nlen, nz: nz / nlen,
+          base: brimRed, type: 'brim'
+        });
+      }
+    }
+  }
+
+  function shade(nx, ny, nz, base) {
+    const lx = -0.55, ly = 0.72, lz = -0.4;
+    const llen = Math.hypot(lx, ly, lz) || 1;
+    const lnx = lx / llen, lny = ly / llen, lnz = lz / llen;
+    const diff = Math.max(0, nx * lnx + ny * lny + nz * lnz);
+    const hx = lnx, hy = lny, hz = lnz + 1;
+    const hlen = Math.hypot(hx, hy, hz) || 1;
+    const ndh = (nx * hx + ny * hy + nz * hz) / hlen;
+    const spec = Math.pow(Math.max(0, ndh), 22) * 0.32;
+    const mult = Math.min(1, 0.34 + diff * 0.66 + spec);
+    let r = base[0] * mult + spec * 255;
+    let g = base[1] * mult + spec * 130;
+    let b = base[2] * mult + spec * 80;
+    if (r > 255) r = 255; if (g > 255) g = 255; if (b > 255) b = 255;
+    return `rgb(${r | 0},${g | 0},${b | 0})`;
+  }
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    cw = window.innerWidth;
+    ch = window.innerHeight;
+    canvas.width = Math.floor(cw * dpr);
+    canvas.height = Math.floor(ch * dpr);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(dpr, dpr);
+    cx = cw / 2;
+    cy = ch / 2;
+    const minDim = Math.min(cw, ch);
+    viewScale = minDim * 0.34;
+    pointRadius = Math.max(1.2, minDim * 0.0034);
+  }
+
+  /* ---------- rendering ---------- */
+  function drawHat(a, alpha = 1) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    const cos = Math.cos(a), sin = Math.sin(a);
+
+    function drawGroup(type, cullNZ) {
+      const list = [];
+      for (let i = 0; i < hatPoints.length; i++) {
+        const p = hatPoints[i];
+        if (p.type !== type) continue;
+        const rx = p.x * cos + p.z * sin;
+        const rz = -p.x * sin + p.z * cos;
+        const rnx = p.nx * cos + p.nz * sin;
+        const rnz = -p.nx * sin + p.nz * cos;
+        if (rnz < cullNZ) continue;
+        list.push({ rx, ry: p.y, rz, rnx, rny: p.ny, rnz, base: p.base });
+      }
+      list.sort((a, b) => a.rz - b.rz);
+      for (const q of list) {
+        const persp = focal / (focal + q.rz);
+        const sx = cx + q.rx * viewScale * persp;
+        const sy = cy - q.ry * viewScale * persp;
+        const r = pointRadius * persp;
+        ctx.fillStyle = shade(q.rnx, q.rny, q.rnz, q.base);
+        ctx.beginPath();
+        ctx.arc(sx, sy, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    drawGroup('brim', -0.25);
+    drawGroup('band', -0.2);
+    drawGroup('crown', -0.15);
+    ctx.restore();
+  }
+
+  /* ---------- particles ---------- */
+  function spawnParticles() {
+    particles = [];
+    const a = interactAngle;
+    const cos = Math.cos(a), sin = Math.sin(a);
+
+    for (let i = 0; i < hatPoints.length; i++) {
+      const p = hatPoints[i];
+      const rx = p.x * cos + p.z * sin;
+      const rz = -p.x * sin + p.z * cos;
+      const rnx = p.nx * cos + p.nz * sin;
+      const rnz = -p.nx * sin + p.nz * cos;
+      const persp = focal / (focal + rz);
+      const sx = cx + rx * viewScale * persp;
+      const sy = cy - p.y * viewScale * persp;
+      const size = Math.max(1, pointRadius * persp * 1.25);
+      const color = shade(rnx, p.ny, rnz, p.base);
+      particles.push({
+        x: sx, y: sy,
+        tx: sx, ty: sy,
+        vx: 0, vy: 0,
+        size, color,
+        orbiter: false
+      });
+    }
+
+    // choose orbiters
+    const orbiterCount = Math.max(16, Math.floor(particles.length * 0.012));
+    const idxs = [];
+    for (let i = 0; i < particles.length; i++) idxs.push(i);
+    for (let i = idxs.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [idxs[i], idxs[j]] = [idxs[j], idxs[i]];
+    }
+    for (let i = 0; i < orbiterCount; i++) {
+      particles[idxs[i]].orbiter = true;
+    }
+
+    // initial outward burst
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      const dx = p.x - cx;
+      const dy = p.y - cy;
+      const dist = Math.hypot(dx, dy) + 0.001;
+      const speed = 70 + Math.random() * 110;
+      p.vx = (dx / dist) * speed + (Math.random() - 0.5) * 70;
+      p.vy = (dy / dist) * speed + (Math.random() - 0.5) * 70 - 25;
+    }
+  }
+
+  function drawParticles(alphaMul = 1) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.78 * alphaMul;
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  /* ---------- physics updates ---------- */
+  function updateDissolve() {
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      const dx = p.x - cx;
+      const dy = p.y - cy;
+      const dist = Math.hypot(dx, dy) + 1;
+      const ndx = dx / dist, ndy = dy / dist;
+      p.vx += ndx * 40 * dtSec + (Math.random() - 0.5) * 45 * dtSec;
+      p.vy += ndy * 40 * dtSec + (Math.random() - 0.5) * 45 * dtSec - 18 * dtSec;
+      p.vx *= 0.94;
+      p.vy *= 0.94;
+      p.x += p.vx * dtSec;
+      p.y += p.vy * dtSec;
+    }
+  }
+
+  function updateSwirl(elapsed) {
+    const t = elapsed / 1000;
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      const dx = p.x - cx;
+      const dy = p.y - cy;
+      const dist = Math.hypot(dx, dy) + 1;
+      const ndx = dx / dist, ndy = dy / dist;
+      const swirl = 80 + 35 * Math.sin(t * 2.1 + p.x * 0.015);
+      p.vx += -ndy * swirl * dtSec;
+      p.vy += ndx * swirl * dtSec;
+      p.vx += ndx * (-22) * dtSec;
+      p.vy += ndy * (-22) * dtSec;
+      p.vy -= 28 * dtSec;
+      p.vx += (Math.random() - 0.5) * 32 * dtSec;
+      p.vy += (Math.random() - 0.5) * 32 * dtSec;
+      p.vx *= 0.95;
+      p.vy *= 0.95;
+      p.x += p.vx * dtSec;
+      p.y += p.vy * dtSec;
+    }
+  }
+
+  function updateReform(elapsed) {
+    const prog = Math.min(1, elapsed / DURATIONS.reform);
+    const k = 14 + 28 * prog * prog;
+    const d = 5 + 4 * prog;
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      if (p.orbiter) {
+        const ax = (p.tx - p.x) * k * 0.45 - p.vx * d * 0.5;
+        const ay = (p.ty - p.y) * k * 0.45 - p.vy * d * 0.5;
+        p.vx += ax * dtSec;
+        p.vy += ay * dtSec;
+      } else {
+        const ax = (p.tx - p.x) * k - p.vx * d;
+        const ay = (p.ty - p.y) * k - p.vy * d;
+        p.vx += ax * dtSec;
+        p.vy += ay * dtSec;
+      }
+      p.vx *= 0.96;
+      p.vy *= 0.96;
+      p.x += p.vx * dtSec;
+      p.y += p.vy * dtSec;
+    }
+  }
+
+  function updateOrbit(elapsed) {
+    const t = elapsed / 1000;
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      if (p.orbiter) {
+        if (!p.orbitInit) {
+          const dx = p.x - cx;
+          const dy = p.y - cy;
+          p.orbitAngle = Math.atan2(dy, dx);
+          p.orbitRadius = Math.hypot(dx, dy);
+          p.orbitSpeed = (0.45 + Math.random() * 0.85) * (Math.random() < 0.5 ? 1 : -1);
+          p.orbitTilt = 0.55 + Math.random() * 0.35;
+          p.orbitPhase = Math.random() * Math.PI * 2;
+          p.orbitInit = true;
+        }
+        p.orbitAngle += p.orbitSpeed * dtSec;
+        const r = p.orbitRadius * (1 + 0.07 * Math.sin(t * 3 + p.orbitPhase));
+        const tx = cx + Math.cos(p.orbitAngle) * r;
+        const ty = cy + Math.sin(p.orbitAngle) * r * p.orbitTilt;
+        p.vx += (tx - p.x) * 7 - p.vx * 2.5;
+        p.vy += (ty - p.y) * 7 - p.vy * 2.5;
+        p.x += p.vx * dtSec;
+        p.y += p.vy * dtSec;
+      } else {
+        const ax = (p.tx - p.x) * 55 - p.vx * 12;
+        const ay = (p.ty - p.y) * 55 - p.vy * 12;
+        p.vx += ax * dtSec;
+        p.vy += ay * dtSec;
+        p.x += p.vx * dtSec;
+        p.y += p.vy * dtSec;
+      }
+    }
+  }
+
+  function updateLingering() {
+    for (let i = 0; i < lingeringOrbiters.length; i++) {
+      const o = lingeringOrbiters[i];
+      o.angle += o.speed * dtSec;
+      const r = o.radius * (1 + 0.07 * Math.sin(o.angle * 2 + o.phase));
+      o.x = cx + Math.cos(o.angle) * r;
+      o.y = cy + Math.sin(o.angle) * r * o.tilt;
+    }
+  }
+
+  function drawLingering(now) {
+    if (!lingeringOrbiters.length) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = lingeringOrbiters.length - 1; i >= 0; i--) {
+      const o = lingeringOrbiters[i];
+      const age = (now - o.startTime) / 1000;
+      const fade = Math.max(0, 1 - age / o.lifespan);
+      if (fade <= 0.001) {
+        lingeringOrbiters.splice(i, 1);
+        continue;
+      }
+      ctx.globalAlpha = fade * 0.65;
+      ctx.fillStyle = o.color;
+      ctx.beginPath();
+      ctx.arc(o.x, o.y, o.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function promoteLingering(now) {
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      if (!p.orbiter) continue;
+      lingeringOrbiters.push({
+        x: p.x, y: p.y,
+        angle: p.orbitAngle || Math.atan2(p.y - cy, p.x - cx),
+        radius: p.orbitRadius || Math.hypot(p.x - cx, p.y - cy),
+        speed: p.orbitSpeed || (0.3 + Math.random() * 0.5),
+        tilt: p.orbitTilt || 0.65,
+        phase: Math.random() * Math.PI * 2,
+        size: Math.max(1.1, p.size),
+        color: p.color,
+        startTime: now,
+        lifespan: 5 + Math.random() * 4
+      });
+    }
+  }
+
+  /* ---------- animation control ---------- */
+  function easeOutCubic(x) { return 1 - Math.pow(1 - x, 3); }
+  function easeInOutQuad(x) {
+    return x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
+  }
+
+  function startPhase(name) {
+    state = name;
+    phaseStart = performance.now();
+    if (name === 'dissolve') {
+      interactAngle = angle;
+      spawnParticles();
+    }
+  }
+
+  function resetToIdle() {
+    state = 'idle';
+    particles = [];
+    lingeringOrbiters = [];
+    inTransition = false;
+  }
+
+  function returnToIdle(now) {
+    state = 'idle';
+    angle = interactAngle;
+    inTransition = true;
+    transitionStart = now;
+    promoteLingering(now);
+    // remove orbiters from particles so they are not double-drawn
+    const remaining = [];
+    for (let i = 0; i < particles.length; i++) {
+      if (!particles[i].orbiter) remaining.push(particles[i]);
+    }
+    particles = remaining;
+  }
+
+  function trigger() {
+    if (reducedMotion) return;
+    if (state !== 'idle' || inTransition) return;
+    state = 'decelerate';
+    phaseStart = performance.now();
+    lingeringOrbiters = [];
+  }
+
+  canvas.addEventListener('mouseenter', trigger);
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    trigger();
+  }, { passive: false });
+  canvas.addEventListener('click', trigger);
+
+  function loop(now) {
+    if (!lastTime) lastTime = now;
+    const dt = Math.min(now - lastTime, 50);
+    dtSec = dt / 1000;
+    lastTime = now;
+
+    ctx.clearRect(0, 0, cw, ch);
+
+    if (reducedMotion) {
+      drawHat(0);
+      requestAnimationFrame(loop);
+      return;
+    }
+
+    if (state === 'idle') {
+      if (!inTransition) {
+        angle += idleSpeed * dt;
+        drawHat(angle);
+      } else {
+        const t = Math.min(1, (now - transitionStart) / DURATIONS.crossfade);
+        const e = easeInOutQuad(t);
+        drawHat(angle, e);
+        drawParticles(1 - e);
+        if (t >= 1) {
+          inTransition = false;
+          particles = [];
+        }
+      }
+    } else if (state === 'decelerate') {
+      const elapsed = now - phaseStart;
+      const t = Math.min(1, elapsed / DURATIONS.decelerate);
+      const speed = idleSpeed * (1 - easeOutCubic(t));
+      angle += speed * dt;
+      drawHat(angle);
+      if (t >= 1) startPhase('dissolve');
+    } else if (state === 'dissolve') {
+      updateDissolve();
+      drawParticles();
+      if (now - phaseStart >= DURATIONS.dissolve) startPhase('swirl');
+    } else if (state === 'swirl') {
+      updateSwirl(now - phaseStart);
+      drawParticles();
+      if (now - phaseStart >= DURATIONS.swirl) startPhase('reform');
+    } else if (state === 'reform') {
+      updateReform(now - phaseStart);
+      drawParticles();
+      if (now - phaseStart >= DURATIONS.reform) startPhase('orbit');
+    } else if (state === 'orbit') {
+      updateOrbit(now - phaseStart);
+      drawParticles();
+      if (now - phaseStart >= DURATIONS.orbit) returnToIdle(now);
+    }
+
+    updateLingering();
+    drawLingering(now);
+
+    requestAnimationFrame(loop);
+  }
+
+  generateHat();
+  resize();
+  window.addEventListener('resize', resize);
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
