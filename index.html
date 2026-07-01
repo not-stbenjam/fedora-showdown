@@ -905,16 +905,18 @@ And respect reduced motion. Return only the finished HTML file.</div>
     history.replaceState(null, "", "#" + MODELS[idx].id);
     updateTabStyles();
     applyVisibility();
-    const scrollTarget = (idx === 0 || MODELS[idx].group !== MODELS[idx - 1].group)
-      ? buttons[idx].previousElementSibling || buttons[idx]
-      : buttons[idx];
     const container = document.getElementById("model-list");
     const ct = container.getBoundingClientRect();
-    const et = scrollTarget.getBoundingClientRect();
-    if (et.top < ct.top) {
-      container.scrollTop += et.top - ct.top - 8;
-    } else if (et.bottom > ct.bottom) {
-      container.scrollTop += et.bottom - ct.bottom + 8;
+    const bt = buttons[idx].getBoundingClientRect();
+    const isFirstInGroup = idx === 0 || MODELS[idx].group !== MODELS[idx - 1].group;
+    const header = isFirstInGroup ? buttons[idx].previousElementSibling : null;
+    if (bt.bottom > ct.bottom) {
+      container.scrollTop += bt.bottom - ct.bottom + 8;
+    } else if (header) {
+      const ht = header.getBoundingClientRect();
+      if (ht.top < ct.top) container.scrollTop += ht.top - ct.top - 8;
+    } else if (bt.top < ct.top) {
+      container.scrollTop += bt.top - ct.top - 8;
     }
   }
 
