@@ -663,11 +663,12 @@
 <aside class="sidebar" id="sidebar">
   <div class="logo">Fedora Showdown</div>
   <div class="bottom-actions">
+    <button id="btn-about">💡 About</button>
     <button id="btn-prompt">✨ Prompt</button>
     <button id="btn-leaderboard">🏆 Leaderboard</button>
     <a class="contribute-link" href="https://github.com/not-stbenjam/fedora-showdown" target="_blank" rel="noopener">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-      Contribute yours
+      GitHub
     </a>
   </div>
   <div class="mode-toggle">
@@ -706,6 +707,28 @@ And respect reduced motion. Return only the finished HTML file.</div>
     </div>
     <div class="leaderboard-list" id="leaderboard-list">
       <div class="lb-empty">No votes yet — be the first to rate!</div>
+    </div>
+  </div>
+</div>
+
+<div id="about-backdrop" class="prompt-backdrop">
+  <div class="prompt-modal">
+    <div class="modal-header">
+      <span class="modal-title">About</span>
+      <button id="about-close" aria-label="Close">&times;</button>
+    </div>
+    <div class="prompt-content">
+      <div class="prompt-field" style="font-family: inherit; line-height: 1.8;">
+        <strong>Fedora Showdown</strong> gives every major AI model the same creative prompt and lets you compare the results side by side. The prompt asks each model to build a single-file HTML page with a spinning 3D Red Hat fedora that dissolves into particles on hover.
+        <br><br>
+        <strong>Harness / coding tool used per provider:</strong>
+        <br>
+        <span style="color: var(--muted);">Anthropic models</span> — Claude Code<br>
+        <span style="color: var(--muted);">OpenAI models</span> — Codex (except GPT-5.5 Pro, which is not available in Codex and was done via the ChatGPT web interface)<br>
+        <span style="color: var(--muted);">All other models</span> — Pi + OpenRouter
+        <br><br>
+        All models were run at the default effort level for their respective harness and model. No cherry-picking, no retries, no manual edits. What you see is what each model produced on its first attempt.
+      </div>
     </div>
   </div>
 </div>
@@ -947,6 +970,12 @@ And respect reduced motion. Return only the finished HTML file.</div>
   promptBackdrop.addEventListener("mousedown", (e) => {
     if (e.target === promptBackdrop) togglePrompt();
   });
+
+  const aboutBackdrop = document.getElementById("about-backdrop");
+  function toggleAbout() { aboutBackdrop.classList.toggle("open"); }
+  document.getElementById("btn-about").addEventListener("click", toggleAbout);
+  document.getElementById("about-close").addEventListener("click", toggleAbout);
+  aboutBackdrop.addEventListener("mousedown", (e) => { if (e.target === aboutBackdrop) toggleAbout(); });
 
   const lbBackdrop = document.getElementById("leaderboard-backdrop");
   function toggleLeaderboard() { lbBackdrop.classList.toggle("open"); if (lbBackdrop.classList.contains("open")) renderLeaderboard(); }
