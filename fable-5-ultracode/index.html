@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ember &amp; Felt — a red fedora</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: #050506 radial-gradient(130% 95% at 50% 40%, #16171d 0%, #0b0c10 46%, #050506 100%);
+    color: #c9c7cc;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: clamp(12px, 3vh, 32px);
+  }
+  figure {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: clamp(10px, 2.6vh, 26px);
+    width: 100%;
+  }
+  .stage {
+    position: relative;
+    width: min(94vw, 1400px);
+    height: min(72vh, 100vw);
+    min-height: 220px;
+    border-radius: 18px;
+    cursor: pointer;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .stage:focus { outline: 2px solid rgba(238, 90, 70, 0.55); outline-offset: 6px; }
+  .stage:focus:not(:focus-visible) { outline: none; }
+  .stage:focus-visible { outline: 2px solid rgba(240, 96, 74, 0.9); outline-offset: 6px; }
+  .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  figcaption { text-align: center; }
+  figcaption h1 {
+    font-size: clamp(12px, 1.6vmin, 16px);
+    font-weight: 500;
+    letter-spacing: 0.42em;
+    text-indent: 0.42em;
+    text-transform: uppercase;
+    color: #cbc9ce;
+  }
+  figcaption p {
+    margin-top: 0.7em;
+    font-size: clamp(10px, 1.25vmin, 12.5px);
+    letter-spacing: 0.28em;
+    text-indent: 0.28em;
+    text-transform: uppercase;
+    color: #77747c;
+  }
+  noscript p { margin-top: 1em; color: #8a8890; letter-spacing: 0.1em; }
+</style>
+</head>
+<body>
+<main>
+  <figure>
+    <div class="stage" id="stage" tabindex="0" role="button"
+         aria-label="A red fedora spinning in the dark. Activate to dissolve it into glowing embers.">
+      <canvas id="c" aria-hidden="true"></canvas>
+    </div>
+    <figcaption>
+      <h1>Ember &amp; Felt</h1>
+      <p>a red fedora &mdash; hover or tap to scatter it</p>
+    </figcaption>
+  </figure>
+  <noscript><p>This piece needs JavaScript to spin its hat.</p></noscript>
+</main>
+<script>
+'use strict';
+(function () {
+  var canvas = document.getElementById('c');
+  var stage = document.getElementById('stage');
+  var ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  /* ============================ constants ============================ */
+  var TAU = Math.PI * 2;
+  var N_ANG = 64;                 // angular segments
+  var SUPER_E = 0.92;             // superellipse exponent (slightly boxy)
+  var TILT = 0.26;                // tilt toward viewer ~15deg (applied after spin)
+  var CAM_D = 6.0;                // camera distance, scene units
+  var BASE_SPIN = TAU / 11;       // one revolution per ~11s
+  var POSE_ANGLE = 0.65;          // static three-quarter pose (reduced motion)
+  var Y_SHIFT = 0.28;             // recenter hat vertically around origin
+
+  var DISSOLVE_DUR = 0.95, SWIRL_DUR = 1.45, REFORM_DUR = 1.45, SETTLE_DUR = 0.45;
+  var COOLDOWN = 0.6;
+  var STORM_END = DISSOLVE_DUR + SWIRL_DUR + REFORM_DUR;
+
+  var CT = Math.cos(TILT), ST = Math.sin(TILT);
+  // key light (view space, toward light): upper-front-left
+  var LX = -0.483, LY = 0.696, LZ = 0.531;
+  // cool rim light direction (behind, upper right)
+  var RX = 0.512, RY = 0.256, RZ = -0.820;
+
+  /* ============================ helpers ============================ */
+  function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
+  function sstep(v) { v = clamp01(v); return v * v * (3 - 2 * v); }
+  function easeQuint(t) {
+    t = clamp01(t);
+    return t < 0.5 ? 16 * t * t * t * t * t : 1 - Math.pow(-2 * t + 2, 5) / 2;
+  }
+  function se(v) { return (v < 0 ? -1 : 1) * Math.pow(Math.abs(v), SUPER_E); }
+
+  // deterministic PRNG so every load composes identically
+  var seed = 1234567;
+  function rnd() { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }
+
+  /* ============================ mesh build ============================ */
+  var brimS = [0, 0.16, 0.32, 0.48, 0.62, 0.75, 0.86, 0.94, 1];
+  var crownV = [0, 0.24, 0.42, 0.6, 0.78, 0.92, 1];
+  var capT = [0, 0.3, 0.55, 0.75, 0.9, 1];
+  var RINGS = brimS.length + crownV.length + capT.length; // 22
+  var VCOUNT = RINGS * N_ANG;
+
+  var baseP = new Float32Array(VCOUNT * 3);
+
+  function creaseDepth(x, z, t) {
+    // lengthwise crease along z; two soft lobes from the front
+    var blend = sstep(t / 0.45);
+    var dome = Math.pow(Math.sin(t * Math.PI / 2), 0.8);
+    var g = Math.exp(-(x * x) / (0.19 * 0.19));
+    var front = 1 + 0.22 * (z / 0.36);
+    return 0.115 * g * blend * dome * front;
+  }
+
+  (function buildVerts() {
+    var vi = 0, j, r, k, th, c, s, uc, us, x, y, z, xs, v, t, rr, pin;
+    for (k = 0; k < brimS.length; k++) {        // ---- brim
+      var sb = brimS[k];
+      rr = 0.46 + 0.58 * sb;
+      y = 0.02 - 0.085 * sb + 0.165 * Math.pow(sb, 2.5) - Y_SHIFT;
+      xs = 1 + 0.05 * sb;                       // brim slightly wider along x
+      for (j = 0; j < N_ANG; j++) {
+        th = j / N_ANG * TAU; c = Math.cos(th); s = Math.sin(th);
+        uc = se(c); us = se(s);
+        baseP[vi++] = rr * uc * xs; baseP[vi++] = y; baseP[vi++] = rr * us;
+      }
+    }
+    for (k = 0; k < crownV.length; k++) {       // ---- crown side
+      v = crownV[k];
+      rr = 0.46 - 0.10 * v;
+      y = 0.02 + 0.56 * v - Y_SHIFT;
+      for (j = 0; j < N_ANG; j++) {
+        th = j / N_ANG * TAU; c = Math.cos(th); s = Math.sin(th);
+        uc = se(c); us = se(s);
+        pin = 1 - 0.13 * v * v * Math.max(0, us); // pinch near the top front
+        baseP[vi++] = rr * uc * pin; baseP[vi++] = y; baseP[vi++] = rr * us;
+      }
+    }
+    for (k = 0; k < capT.length; k++) {         // ---- creased top
+      t = capT[k];
+      var rho = Math.pow(Math.cos(t * Math.PI / 2), 0.85);
+      rr = 0.36 * rho;
+      var yb = 0.58 + 0.125 * Math.pow(Math.sin(t * Math.PI / 2), 1.15) - Y_SHIFT;
+      for (j = 0; j < N_ANG; j++) {
+        th = j / N_ANG * TAU; c = Math.cos(th); s = Math.sin(th);
+        uc = se(c); us = se(s);
+        pin = 1 - 0.13 * Math.max(0, us);
+        x = rr * uc * pin; z = rr * us;
+        y = yb - creaseDepth(x, z, t);
+        baseP[vi++] = x; baseP[vi++] = y; baseP[vi++] = z;
+      }
+    }
+  })();
+
+  // faces: quads between consecutive rings of the same surface
+  var bandsBrim = brimS.length - 1, bandsCrown = crownV.length - 1, bandsCap = capT.length - 1;
+  var FCOUNT = (bandsBrim + bandsCrown + bandsCap) * N_ANG;
+  var faceV = new Uint16Array(FCOUNT * 4);
+  var faceMat = new Uint8Array(FCOUNT);   // 0 red, 1 band, 2 brim (two-sided red)
+  var faceAO = new Float32Array(FCOUNT);
+  var faceJit = new Float32Array(FCOUNT);
+  var faceD01 = new Float32Array(FCOUNT);
+  var faceDelay = new Float32Array(FCOUNT);
+  var faceAF = new Float32Array(FCOUNT);  // reform re-appear threshold
+  var faceFlip = new Float32Array(FCOUNT);
+  var faceBN = new Float32Array(FCOUNT * 3); // base (object-space) normal, for particle launch
+  var faceCDF = new Float32Array(FCOUNT);    // area CDF for sampling
+  var totalArea = 0;
+
+  (function buildFaces() {
+    var fi = 0, ring0, band, j, b;
+    function addBand(ringA, mat, ao) {
+      for (j = 0; j < N_ANG; j++) {
+        var j2 = (j + 1) % N_ANG;
+        var a = ringA * N_ANG + j, bidx = ringA * N_ANG + j2;
+        var c = (ringA + 1) * N_ANG + j2, d = (ringA + 1) * N_ANG + j;
+        faceV[fi * 4] = a; faceV[fi * 4 + 1] = bidx; faceV[fi * 4 + 2] = c; faceV[fi * 4 + 3] = d;
+        faceMat[fi] = mat; faceAO[fi] = ao;
+        fi++;
+      }
+    }
+    ring0 = 0;
+    for (b = 0; b < bandsBrim; b++) {
+      var sm = (brimS[b] + brimS[b + 1]) / 2;
+      addBand(ring0 + b, 2, 0.70 + 0.30 * sstep(sm / 0.5));
+    }
+    ring0 = brimS.length;
+    for (b = 0; b < bandsCrown; b++) {
+      var vm = (crownV[b] + crownV[b + 1]) / 2;
+      addBand(ring0 + b, vm < 0.24 ? 1 : 0, 0.84 + 0.16 * Math.min(1, vm * 2));
+    }
+    ring0 = brimS.length + crownV.length;
+    for (b = 0; b < bandsCap; b++) addBand(ring0 + b, 0, 1);
+
+    // per-face derived data
+    var i, k, cx3, cy3, cz3, ax, ay, az, e1x, e1y, e1z, e2x, e2y, e2z, nx, ny, nz, nl;
+    for (i = 0; i < FCOUNT; i++) {
+      var ia = faceV[i * 4] * 3, ib = faceV[i * 4 + 1] * 3, ic = faceV[i * 4 + 2] * 3, id = faceV[i * 4 + 3] * 3;
+      cx3 = (baseP[ia] + baseP[ib] + baseP[ic] + baseP[id]) / 4;
+      cy3 = (baseP[ia + 1] + baseP[ib + 1] + baseP[ic + 1] + baseP[id + 1]) / 4;
+      cz3 = (baseP[ia + 2] + baseP[ib + 2] + baseP[ic + 2] + baseP[id + 2]) / 4;
+      e1x = baseP[ic] - baseP[ia]; e1y = baseP[ic + 1] - baseP[ia + 1]; e1z = baseP[ic + 2] - baseP[ia + 2];
+      e2x = baseP[id] - baseP[ib]; e2y = baseP[id + 1] - baseP[ib + 1]; e2z = baseP[id + 2] - baseP[ib + 2];
+      nx = e1y * e2z - e1z * e2y; ny = e1z * e2x - e1x * e2z; nz = e1x * e2y - e1y * e2x;
+      // orient outward / upward
+      var rfx, rfy, rfz;
+      if (faceMat[i] === 2) { rfx = 0; rfy = 1; rfz = 0; }
+      else if (i < (bandsBrim + bandsCrown) * N_ANG) { rfx = cx3; rfy = 0; rfz = cz3; }
+      else { rfx = cx3 * 0.3; rfy = 1; rfz = cz3 * 0.3; }
+      faceFlip[i] = (nx * rfx + ny * rfy + nz * rfz) < 0 ? -1 : 1;
+      nx *= faceFlip[i]; ny *= faceFlip[i]; nz *= faceFlip[i];
+      nl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+      faceBN[i * 3] = nx / nl; faceBN[i * 3 + 1] = ny / nl; faceBN[i * 3 + 2] = nz / nl;
+
+      // crease AO on the cap
+      if (i >= (bandsBrim + bandsCrown) * N_ANG) {
+        var crease = Math.exp(-(cx3 * cx3) / (0.19 * 0.19)) * clamp01((cy3 + Y_SHIFT - 0.58) / 0.1);
+        faceAO[i] *= 1 - 0.30 * crease;
+      }
+      faceJit[i] = (rnd() - 0.5) * 0.05;
+      faceD01[i] = clamp01((cx3 / 1.1 + 1) / 2);
+      faceDelay[i] = (faceD01[i] * 0.62 + rnd() * 0.18) * DISSOLVE_DUR;
+      faceAF[i] = 0.5 + (1 - faceD01[i]) * 0.28;
+
+      // area (two triangles) for even particle sampling
+      ax = baseP[ib] - baseP[ia]; ay = baseP[ib + 1] - baseP[ia + 1]; az = baseP[ib + 2] - baseP[ia + 2];
+      e1x = baseP[ic] - baseP[ia]; e1y = baseP[ic + 1] - baseP[ia + 1]; e1z = baseP[ic + 2] - baseP[ia + 2];
+      var t1 = 0.5 * Math.sqrt(
+        Math.pow(ay * e1z - az * e1y, 2) + Math.pow(az * e1x - ax * e1z, 2) + Math.pow(ax * e1y - ay * e1x, 2));
+      ax = baseP[id] - baseP[ia]; ay = baseP[id + 1] - baseP[ia + 1]; az = baseP[id + 2] - baseP[ia + 2];
+      var t2 = 0.5 * Math.sqrt(
+        Math.pow(e1y * az - e1z * ay, 2) + Math.pow(e1z * ax - e1x * az, 2) + Math.pow(e1x * ay - e1y * ax, 2));
+      totalArea += t1 + t2;
+      faceCDF[i] = totalArea;
+    }
+  })();
+
+  /* ============================ palettes ============================ */
+  // quantized fill styles: 32 intensity x 8 rim levels per material -> zero
+  // per-frame string allocation.
+  function buildPalette(ar, ag, ab, base, gain, rimR, rimG, rimB) {
+    var out = new Array(32 * 8);
+    for (var i = 0; i < 32; i++) {
+      var inten = i / 31;
+      var lit = base + gain * inten;
+      var hot = Math.pow(Math.max(0, inten - 0.78) / 0.22, 2) * 34;
+      for (var j = 0; j < 8; j++) {
+        var rm = j / 7;
+        var r = Math.min(255, Math.round(ar * lit + hot + rm * rimR));
+        var g = Math.min(255, Math.round(ag * lit + hot + rm * rimG));
+        var b = Math.min(255, Math.round(ab * lit + hot + rm * rimB));
+        out[i * 8 + j] = 'rgb(' + r + ',' + g + ',' + b + ')';
+      }
+    }
+    return out;
+  }
+  var PAL = [
+    buildPalette(236, 30, 24, 0.13, 0.92, 26, 42, 66),  // felt red
+    buildPalette(38, 32, 35, 0.22, 0.85, 20, 32, 50),   // near-black band
+    buildPalette(236, 30, 24, 0.13, 0.92, 26, 42, 66),  // brim top (red)
+    buildPalette(112, 30, 24, 0.10, 0.72, 12, 18, 28)   // brim underside
+  ];
+
+  /* ============================ sprites ============================ */
+  function makeSprite(size, stops) {
+    var cv = document.createElement('canvas');
+    cv.width = size; cv.height = size;
+    var g = cv.getContext('2d');
+    var grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    for (var i = 0; i < stops.length; i++) grad.addColorStop(stops[i][0], stops[i][1]);
+    g.fillStyle = grad;
+    g.fillRect(0, 0, size, size);
+    return cv;
+  }
+  var emberSprites = [
+    makeSprite(64, [[0, 'rgba(255,252,244,1)'], [0.22, 'rgba(255,222,172,0.85)'], [0.55, 'rgba(255,150,60,0.30)'], [1, 'rgba(255,140,50,0)']]),
+    makeSprite(64, [[0, 'rgba(255,238,208,0.98)'], [0.28, 'rgba(255,190,110,0.78)'], [0.6, 'rgba(255,120,40,0.24)'], [1, 'rgba(255,110,35,0)']]),
+    makeSprite(64, [[0, 'rgba(255,206,140,0.95)'], [0.32, 'rgba(255,150,60,0.66)'], [0.66, 'rgba(230,90,25,0.2)'], [1, 'rgba(225,85,25,0)']]),
+    makeSprite(64, [[0, 'rgba(255,172,92,0.9)'], [0.34, 'rgba(240,110,35,0.56)'], [0.68, 'rgba(200,60,15,0.16)'], [1, 'rgba(195,58,15,0)']]),
+    makeSprite(64, [[0, 'rgba(242,122,56,0.85)'], [0.38, 'rgba(205,70,22,0.48)'], [0.72, 'rgba(160,35,10,0.12)'], [1, 'rgba(155,34,10,0)']]),
+    makeSprite(64, [[0, 'rgba(205,76,36,0.8)'], [0.4, 'rgba(160,40,14,0.4)'], [0.75, 'rgba(110,20,8,0.1)'], [1, 'rgba(105,20,8,0)']])
+  ];
+  var dustSprite = makeSprite(48, [[0, 'rgba(200,190,182,0.5)'], [0.5, 'rgba(180,170,164,0.14)'], [1, 'rgba(170,160,155,0)']]);
+  var shadowSprite = makeSprite(256, [[0, 'rgba(0,0,0,0.62)'], [0.55, 'rgba(0,0,0,0.30)'], [1, 'rgba(0,0,0,0)']]);
+  var sheenSprite = makeSprite(256, [[0, 'rgba(152,142,136,0.15)'], [0.6, 'rgba(140,132,128,0.05)'], [1, 'rgba(130,124,120,0)']]);
+  var haloSprite = makeSprite(256, [[0, 'rgba(255,86,58,0.30)'], [0.5, 'rgba(220,60,40,0.10)'], [1, 'rgba(200,50,35,0)']]);
+
+  /* ============================ particles ============================ */
+  var MAXP = 6000;
+  var pHome = new Float32Array(MAXP * 3);
+  var pNorm = new Float32Array(MAXP * 3);
+  var pPos = new Float32Array(MAXP * 3);
+  var pVel = new Float32Array(MAXP * 3);
+  var pCap = new Float32Array(MAXP * 3);
+  var pIgnite = new Float32Array(MAXP);
+  var pSize = new Float32Array(MAXP);
+  var pPh1 = new Float32Array(MAXP);
+  var pPh2 = new Float32Array(MAXP);
+  var pFrq = new Float32Array(MAXP);
+  var pFlk = new Float32Array(MAXP);
+  var pR1 = new Float32Array(MAXP);
+  var pState = new Uint8Array(MAXP); // 0 dormant, 1 live
+  // per-frame scratch (screen x, y, size, depth, alpha, sprite)
+  var sScr = new Float32Array(MAXP * 3);
+  var sZ = new Float32Array(MAXP);
+  var sA = new Float32Array(MAXP);
+  var sSpr = new Uint8Array(MAXP);
+
+  (function seedHomes() {
+    var i, lo, hi, mid, target, fi;
+    for (i = 0; i < MAXP; i++) {
+      target = rnd() * totalArea;
+      lo = 0; hi = FCOUNT - 1;
+      while (lo < hi) { mid = (lo + hi) >> 1; if (faceCDF[mid] < target) lo = mid + 1; else hi = mid; }
+      fi = lo;
+      var ia = faceV[fi * 4] * 3, ib = faceV[fi * 4 + 1] * 3, ic = faceV[fi * 4 + 2] * 3, id = faceV[fi * 4 + 3] * 3;
+      // split quad into (a,b,c) and (a,c,d); pick by rough halves
+      var pb = ib, pc = ic;
+      if (rnd() < 0.5) { pb = ic; pc = id; }
+      var r1 = Math.sqrt(rnd()), r2 = rnd();
+      var w0 = 1 - r1, w1 = r1 * (1 - r2), w2 = r1 * r2;
+      var hx = baseP[ia] * w0 + baseP[pb] * w1 + baseP[pc] * w2;
+      var hy = baseP[ia + 1] * w0 + baseP[pb + 1] * w1 + baseP[pc + 1] * w2;
+      var hz = baseP[ia + 2] * w0 + baseP[pb + 2] * w1 + baseP[pc + 2] * w2;
+      pHome[i * 3] = hx; pHome[i * 3 + 1] = hy; pHome[i * 3 + 2] = hz;
+      pNorm[i * 3] = faceBN[fi * 3]; pNorm[i * 3 + 1] = faceBN[fi * 3 + 1]; pNorm[i * 3 + 2] = faceBN[fi * 3 + 2];
+      var d01 = clamp01((hx / 1.1 + 1) / 2);
+      pIgnite[i] = (d01 * 0.62 + rnd() * 0.18) * DISSOLVE_DUR;
+      pSize[i] = 0.009 + rnd() * 0.016;
+      pPh1[i] = rnd() * TAU; pPh2[i] = rnd() * TAU;
+      pFrq[i] = 2.5 + rnd() * 3.0;
+      pFlk[i] = 6 + rnd() * 9;
+      pR1[i] = rnd();
+    }
+  })();
+
+  /* ---- ambient orbiters (post-first-reform) ---- */
+  var ORB_N = 8, TRAIL = 16;
+  var orb = [];
+  (function () {
+    for (var i = 0; i < ORB_N; i++) {
+      orb.push({
+        rx: 0.72 + rnd() * 0.55, rz: 0.60 + rnd() * 0.5,
+        y0: -0.12 + rnd() * 0.55, w: (0.22 + rnd() * 0.22) * (rnd() < 0.5 ? 1 : -1),
+        ph: rnd() * TAU, bobA: 0.05 + rnd() * 0.05, bobW: 0.5 + rnd() * 0.6, bph: rnd() * TAU,
+        size: 0.016 + rnd() * 0.012, spr: 2 + ((rnd() * 2) | 0)
+      });
+    }
+  })();
+  var orbTrail = new Float32Array(ORB_N * TRAIL * 3);
+  var orbTrailLen = new Uint8Array(ORB_N);
+  var orbHead = new Uint8Array(ORB_N);
+  var orbTick = 0;
+
+  /* ---- dust motes ---- */
+  var DUST_N = 12;
+  var dust = new Float32Array(DUST_N * 5); // x,y (0..1), vx,vy, phase
+  (function () {
+    for (var i = 0; i < DUST_N; i++) {
+      dust[i * 5] = rnd(); dust[i * 5 + 1] = rnd();
+      dust[i * 5 + 2] = (rnd() - 0.5) * 0.012; dust[i * 5 + 3] = -0.004 - rnd() * 0.008;
+      dust[i * 5 + 4] = rnd() * TAU;
+    }
+  })();
+
+  /* ============================ view state ============================ */
+  var cw = 2, ch = 2, cx = 1, cy = 1, scaleF = 100, dpr = 1;
+  var pendingCount = 3000, activeCount = 3000;
+
+  var viewP = new Float32Array(VCOUNT * 3);
+  var projP = new Float32Array(VCOUNT * 2);
+  var faceDepth = new Float32Array(FCOUNT);
+  var faceOrder = new Array(FCOUNT);
+  for (var fo = 0; fo < FCOUNT; fo++) faceOrder[fo] = fo;
+  var depthCmp = function (a, b) { return faceDepth[a] - faceDepth[b]; };
+
+  /* ============================ animation state ============================ */
+  var state = 'idle';       // idle | dissolve | swirl | reform | settle
+  var stateT = 0;
+  var stormT = 0;
+  var tNow = 0;             // pausable clock, seconds
+  var cooldownUntil = 0;
+  var spinAngle = POSE_ANGLE;
+  var spinSpeed = BASE_SPIN;
+  var targetSpeed = BASE_SPIN;
+  var solidity = 1;
+  var hasAmbient = false;
+  var ambT = 0;
+  var pulseT = -1;          // reduced-motion glow pulse
+  var staticDirty = true;
+  var reduced = false;
+  var rafId = 0, running = false, lastT = 0;
+
+  var mql = null;
+  try { mql = window.matchMedia('(prefers-reduced-motion: reduce)'); } catch (e) { mql = null; }
+  reduced = !!(mql && mql.matches);
+  if (reduced) { spinSpeed = 0; targetSpeed = 0; }
+
+  function applyReducedChange() {
+    if (reduced) {
+      state = 'idle'; stateT = 0; stormT = 0;
+      pState.fill(0);
+      solidity = 1; pulseT = -1;
+      spinAngle = POSE_ANGLE; spinSpeed = 0; targetSpeed = 0;
+    } else {
+      targetSpeed = BASE_SPIN;
+    }
+    staticDirty = true;
+  }
+  if (mql) {
+    var onMq = function () { reduced = mql.matches; applyReducedChange(); };
+    if (mql.addEventListener) mql.addEventListener('change', onMq);
+    else if (mql.addListener) mql.addListener(onMq);
+  }
+
+  /* ============================ resize ============================ */
+  function resize() {
+    var rect = stage.getBoundingClientRect();
+    dpr = Math.min(2, window.devicePixelRatio || 1);
+    var w = Math.max(1, Math.round(rect.width));
+    var h = Math.max(1, Math.round(rect.height));
+    canvas.width = Math.max(1, Math.round(w * dpr));
+    canvas.height = Math.max(1, Math.round(h * dpr));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cw = w; ch = h; cx = cw / 2; cy = ch * 0.46;
+    scaleF = Math.min(cw, ch) * 0.40;
+    var raw = 1200 + (cw * ch) / 110;
+    if (dpr > 1.5) raw /= 1.25;
+    pendingCount = Math.max(1600, Math.min(MAXP, Math.round(raw)));
+    if (state === 'idle') activeCount = pendingCount;
+    staticDirty = true;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+  activeCount = pendingCount;
+
+  /* ============================ trigger ============================ */
+  function trigger() {
+    if (reduced) { if (pulseT < 0) { pulseT = 0; staticDirty = true; } return; }
+    if (state !== 'idle' || tNow < cooldownUntil) return;
+    activeCount = pendingCount;
+    pState.fill(0);
+    state = 'dissolve'; stateT = 0; stormT = 0;
+    targetSpeed = BASE_SPIN * 0.15;
+  }
+  stage.addEventListener('pointerenter', function (e) { if (e.pointerType === 'mouse') trigger(); });
+  stage.addEventListener('pointerdown', function () { trigger(); });
+  stage.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); trigger(); }
+  });
+
+  /* ============================ update ============================ */
+  function spawnParticles() {
+    var ca = Math.cos(spinAngle), sa = Math.sin(spinAngle);
+    for (var i = 0; i < activeCount; i++) {
+      if (pState[i] !== 0 || pIgnite[i] > stormT) continue;
+      var hx = pHome[i * 3], hy = pHome[i * 3 + 1], hz = pHome[i * 3 + 2];
+      var x = hx * ca + hz * sa, z = -hx * sa + hz * ca;
+      var nx0 = pNorm[i * 3], ny0 = pNorm[i * 3 + 1], nz0 = pNorm[i * 3 + 2];
+      var nx = nx0 * ca + nz0 * sa, nz = -nx0 * sa + nz0 * ca;
+      pPos[i * 3] = x; pPos[i * 3 + 1] = hy; pPos[i * 3 + 2] = z;
+      var rl = Math.sqrt(x * x + z * z) || 1;
+      var tx = z / rl, tz = -x / rl;
+      var r = pR1[i], r2 = Math.sin(pPh1[i]);
+      var ns = 0.28 + 0.4 * r;
+      var tw = 0.45 + 0.5 * r;
+      pVel[i * 3] = nx * ns + tx * tw + r2 * 0.12;
+      pVel[i * 3 + 1] = ny0 * ns + 0.18 + 0.25 * r;
+      pVel[i * 3 + 2] = nz * ns + tz * tw + Math.cos(pPh2[i]) * 0.12;
+      pState[i] = 1;
+    }
+  }
+
+  function integrateParticles(dt) {
+    var turb = 0.55 * Math.max(0, 1 - Math.max(0, stormT - DISSOLVE_DUR) / (SWIRL_DUR * 1.25));
+    var swA = state === 'swirl' ? 1.25 : 0.45;
+    var damp = Math.max(0, 1 - 1.5 * dt);
+    var t = stormT;
+    for (var i = 0; i < activeCount; i++) {
+      if (pState[i] !== 1) continue;
+      var i3 = i * 3;
+      var px = pPos[i3], py = pPos[i3 + 1], pz = pPos[i3 + 2];
+      var f = pFrq[i], p1 = pPh1[i], p2 = pPh2[i];
+      var ax = Math.sin(t * f + p1) * turb;
+      var ay = Math.sin(t * f * 0.8 + p2) * turb * 0.5 + 0.26;
+      var az = Math.cos(t * f + p2) * turb;
+      var rl = Math.sqrt(px * px + pz * pz);
+      if (rl > 0.0001) {
+        var inv = 1 / rl;
+        ax += (pz * inv) * swA + (px * inv) * (0.95 - rl) * 1.1;
+        az += (-px * inv) * swA + (pz * inv) * (0.95 - rl) * 1.1;
+      }
+      var vx = (pVel[i3] + ax * dt) * damp;
+      var vy = (pVel[i3 + 1] + ay * dt) * damp;
+      var vz = (pVel[i3 + 2] + az * dt) * damp;
+      pVel[i3] = vx; pVel[i3 + 1] = vy; pVel[i3 + 2] = vz;
+      pPos[i3] = px + vx * dt; pPos[i3 + 1] = py + vy * dt; pPos[i3 + 2] = pz + vz * dt;
+    }
+  }
+
+  function reformParticles() {
+    var e = easeQuint(stateT / REFORM_DUR);
+    var ca = Math.cos(spinAngle), sa = Math.sin(spinAngle);
+    for (var i = 0; i < activeCount; i++) {
+      if (pState[i] !== 1) continue;
+      var i3 = i * 3;
+      var hx = pHome[i3], hz = pHome[i3 + 2];
+      var txp = hx * ca + hz * sa, tzp = -hx * sa + hz * ca;
+      pPos[i3] = pCap[i3] + (txp - pCap[i3]) * e;
+      pPos[i3 + 1] = pCap[i3 + 1] + (pHome[i3 + 1] - pCap[i3 + 1]) * e;
+      pPos[i3 + 2] = pCap[i3 + 2] + (tzp - pCap[i3 + 2]) * e;
+    }
+  }
+
+  function update(dt) {
+    tNow += dt;
+    if (reduced) {
+      if (pulseT >= 0) { pulseT += dt; if (pulseT > 1.4) pulseT = -1; staticDirty = true; }
+      return;
+    }
+    spinSpeed += (targetSpeed - spinSpeed) * Math.min(1, dt * 3);
+    spinAngle = (spinAngle + spinSpeed * dt) % TAU;
+    stateT += dt;
+    ambT += dt;
+
+    if (state === 'dissolve') {
+      stormT += dt;
+      spawnParticles();
+      integrateParticles(dt);
+      if (stateT >= DISSOLVE_DUR) { state = 'swirl'; stateT -= DISSOLVE_DUR; }
+    } else if (state === 'swirl') {
+      stormT += dt;
+      spawnParticles(); // safety: any stragglers
+      integrateParticles(dt);
+      if (stateT >= SWIRL_DUR) {
+        state = 'reform'; stateT -= SWIRL_DUR;
+        pCap.set(pPos); // capture free positions for exact homing
+      }
+    } else if (state === 'reform') {
+      stormT += dt;
+      reformParticles();
+      if (stateT >= REFORM_DUR) {
+        state = 'settle'; stateT -= REFORM_DUR;
+        pState.fill(0);
+        hasAmbient = true;
+        targetSpeed = BASE_SPIN;
+      }
+    } else if (state === 'settle') {
+      if (stateT >= SETTLE_DUR) { state = 'idle'; stateT = 0; cooldownUntil = tNow + COOLDOWN; }
+    }
+
+    // orbiters: sample trail every other frame
+    if (hasAmbient) {
+      orbTick ^= 1;
+      for (var i = 0; i < ORB_N; i++) {
+        var o = orb[i];
+        var a = o.ph + ambT * o.w;
+        var ox = Math.cos(a) * o.rx;
+        var oz = Math.sin(a) * o.rz;
+        var oy = o.y0 + Math.sin(ambT * o.bobW + o.bph) * o.bobA;
+        var base = (i * TRAIL + orbHead[i]) * 3;
+        if (orbTick === 0) {
+          orbHead[i] = (orbHead[i] + 1) % TRAIL;
+          base = (i * TRAIL + orbHead[i]) * 3;
+          if (orbTrailLen[i] < TRAIL) orbTrailLen[i]++;
+        }
+        orbTrail[base] = ox; orbTrail[base + 1] = oy; orbTrail[base + 2] = oz;
+      }
+    }
+
+    // dust drift
+    for (var d = 0; d < DUST_N; d++) {
+      dust[d * 5] += dust[d * 5 + 2] * dt;
+      dust[d * 5 + 1] += dust[d * 5 + 3] * dt;
+      if (dust[d * 5] < -0.05) dust[d * 5] += 1.1;
+      if (dust[d * 5] > 1.05) dust[d * 5] -= 1.1;
+      if (dust[d * 5 + 1] < -0.05) dust[d * 5 + 1] += 1.1;
+      if (dust[d * 5 + 1] > 1.05) dust[d * 5 + 1] -= 1.1;
+    }
+
+    // shadow solidity target
+    var target;
+    if (state === 'dissolve') target = clamp01(1 - stormT / 1.0);
+    else if (state === 'swirl') target = 0;
+    else if (state === 'reform') target = sstep((stateT / REFORM_DUR - 0.5) / 0.48);
+    else target = 1;
+    solidity += (target - solidity) * Math.min(1, dt * 6);
+  }
+
+  /* ============================ render ============================ */
+  function transformVerts() {
+    var ca = Math.cos(spinAngle), sa = Math.sin(spinAngle);
+    for (var i = 0; i < VCOUNT; i++) {
+      var i3 = i * 3;
+      var x = baseP[i3], y = baseP[i3 + 1], z = baseP[i3 + 2];
+      var x1 = x * ca + z * sa;
+      var z1 = -x * sa + z * ca;
+      var y2 = y * CT - z1 * ST;
+      var z2 = y * ST + z1 * CT;
+      viewP[i3] = x1; viewP[i3 + 1] = y2; viewP[i3 + 2] = z2;
+      var f = CAM_D / (CAM_D - z2) * scaleF;
+      projP[i * 2] = cx + x1 * f;
+      projP[i * 2 + 1] = cy - y2 * f;
+    }
+  }
+
+  // face alpha per mode: 0 full, 1 dissolving (stormT), 2 hidden, 3 reforming (q)
+  var fadeMode = 0, fadeQ = 0;
+  function faceAlpha(fi) {
+    if (fadeMode === 0) return 1;
+    if (fadeMode === 2) return 0;
+    if (fadeMode === 1) return 1 - sstep((stormT - faceDelay[fi]) / 0.24);
+    return sstep((fadeQ - faceAF[fi]) / 0.18);
+  }
+
+  function drawSolid() {
+    transformVerts();
+    var i, fi;
+    for (i = 0; i < FCOUNT; i++) {
+      var q = i * 4;
+      faceDepth[i] = viewP[faceV[q] * 3 + 2] + viewP[faceV[q + 1] * 3 + 2] +
+                     viewP[faceV[q + 2] * 3 + 2] + viewP[faceV[q + 3] * 3 + 2];
+    }
+    faceOrder.sort(depthCmp); // far -> near (painter)
+
+    for (i = 0; i < FCOUNT; i++) {
+      fi = faceOrder[i];
+      var al = faceAlpha(fi);
+      if (al < 0.01) continue;
+      var q4 = fi * 4;
+      var ia = faceV[q4] * 3, ib = faceV[q4 + 1] * 3, ic = faceV[q4 + 2] * 3, id = faceV[q4 + 3] * 3;
+      var e1x = viewP[ic] - viewP[ia], e1y = viewP[ic + 1] - viewP[ia + 1], e1z = viewP[ic + 2] - viewP[ia + 2];
+      var e2x = viewP[id] - viewP[ib], e2y = viewP[id + 1] - viewP[ib + 1], e2z = viewP[id + 2] - viewP[ib + 2];
+      var fl = faceFlip[fi];
+      var nx = (e1y * e2z - e1z * e2y) * fl;
+      var ny = (e1z * e2x - e1x * e2z) * fl;
+      var nz = (e1x * e2y - e1y * e2x) * fl;
+      var nl = Math.sqrt(nx * nx + ny * ny + nz * nz);
+      if (nl < 1e-9) continue;
+      nx /= nl; ny /= nl; nz /= nl;
+
+      var mat = faceMat[fi];
+      var pal;
+      if (nz <= 0) {
+        if (mat !== 2) continue;        // cull closed-surface backfaces
+        nx = -nx; ny = -ny; nz = -nz;   // brim underside: two-sided
+        pal = PAL[3];
+      } else {
+        pal = PAL[mat];
+      }
+      var diff = nx * LX + ny * LY + nz * LZ; if (diff < 0) diff = 0;
+      var inten = (0.20 + 0.80 * diff + faceJit[fi]) * faceAO[fi];
+      if (pal === PAL[3]) inten *= 0.55; // darker underside
+      var ii = (inten * 31) | 0; if (ii < 0) ii = 0; if (ii > 31) ii = 31;
+      var rdot = nx * RX + ny * RY + nz * RZ; if (rdot < 0) rdot = 0;
+      var rim = rdot * rdot * (1 - (nz > 0 ? nz : 0)) * 1.4;
+      var ri = (rim * 8) | 0; if (ri > 7) ri = 7;
+      var col = pal[ii * 8 + ri];
+
+      var ax = projP[faceV[q4] * 2], ay = projP[faceV[q4] * 2 + 1];
+      var bx = projP[faceV[q4 + 1] * 2], by = projP[faceV[q4 + 1] * 2 + 1];
+      var cx2 = projP[faceV[q4 + 2] * 2], cy2 = projP[faceV[q4 + 2] * 2 + 1];
+      var dx = projP[faceV[q4 + 3] * 2], dy = projP[faceV[q4 + 3] * 2 + 1];
+      ctx.globalAlpha = al;
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.lineTo(cx2, cy2); ctx.lineTo(dx, dy);
+      ctx.closePath();
+      ctx.fill();
+      if (al > 0.9) { ctx.strokeStyle = col; ctx.stroke(); } // hide AA seams
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function computeStormScratch() {
+    var stormActive = (state === 'dissolve' || state === 'swirl' || state === 'reform');
+    if (!stormActive) return 0;
+    var tR = state === 'reform' ? stateT / REFORM_DUR : 0;
+    var endFade = state === 'reform' ? 1 - sstep((tR - 0.86) / 0.14) : 1;
+    var n = 0;
+    for (var i = 0; i < activeCount; i++) {
+      if (pState[i] !== 1) { sA[i] = 0; continue; }
+      var i3 = i * 3;
+      var px = pPos[i3], py = pPos[i3 + 1], pz = pPos[i3 + 2];
+      var y2 = py * CT - pz * ST;
+      var z2 = py * ST + pz * CT;
+      var f = CAM_D / (CAM_D - z2) * scaleF;
+      sScr[i3] = cx + px * f;
+      sScr[i3 + 1] = cy - y2 * f;
+      sScr[i3 + 2] = pSize[i] * f;
+      sZ[i] = z2;
+      var life = clamp01((stormT - pIgnite[i]) / (STORM_END - pIgnite[i]));
+      var si = (life * 6) | 0; if (si > 5) si = 5;
+      sSpr[i] = si;
+      var flick = 0.78 + 0.22 * Math.sin(stormT * pFlk[i] + pPh1[i]);
+      var born = life < 0.08 ? life / 0.08 : 1;
+      sA[i] = 0.45 * flick * born * endFade;
+      n++;
+    }
+    return n;
+  }
+
+  function stampStorm(front) {
+    for (var i = 0; i < activeCount; i++) {
+      var a = sA[i];
+      if (a <= 0.01) continue;
+      var behind = sZ[i] < -0.08;
+      if (front === behind) continue;
+      if (behind) a *= 0.5;
+      var i3 = i * 3;
+      var s = sScr[i3 + 2];
+      ctx.globalAlpha = a;
+      ctx.drawImage(emberSprites[sSpr[i]], sScr[i3] - s, sScr[i3 + 1] - s, s * 2, s * 2);
+    }
+  }
+
+  function stampOrbiters(front) {
+    if (!hasAmbient || reduced) return;
+    for (var i = 0; i < ORB_N; i++) {
+      var o = orb[i], len = orbTrailLen[i];
+      for (var k = 0; k < len; k++) {
+        var idx = (i * TRAIL + ((orbHead[i] - k + TRAIL * 2) % TRAIL)) * 3;
+        var px = orbTrail[idx], py = orbTrail[idx + 1], pz = orbTrail[idx + 2];
+        var y2 = py * CT - pz * ST;
+        var z2 = py * ST + pz * CT;
+        var behind = z2 < -0.08;
+        if (front === behind) continue;
+        var f = CAM_D / (CAM_D - z2) * scaleF;
+        var fade = Math.pow(1 - k / TRAIL, 1.7);
+        var a = (k === 0 ? 0.42 + 0.1 * Math.sin(ambT * 5 + o.bph) : 0.2 * fade);
+        if (behind) a *= 0.5;
+        var s = o.size * f * (k === 0 ? 1 : 0.55 + 0.45 * fade);
+        ctx.globalAlpha = a;
+        ctx.drawImage(emberSprites[o.spr], cx + px * f - s, cy - y2 * f - s, s * 2, s * 2);
+      }
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, cw, ch);
+    var shY = cy + scaleF * 0.68;
+
+    // floor sheen (so the shadow reads on the dark ground)
+    var shw = scaleF * 2.1;
+    ctx.globalAlpha = 0.9;
+    ctx.drawImage(sheenSprite, cx - shw * 1.6, shY - shw * 0.5, shw * 3.2, shw * 1.0);
+
+    // ground shadow reacts to state
+    var sw2 = scaleF * (2.3 + (1 - solidity) * 0.8) * 0.5;
+    var sh2 = sw2 * 0.30;
+    ctx.globalAlpha = 0.34 + 0.40 * solidity;
+    ctx.drawImage(shadowSprite, cx - sw2, shY - sh2, sw2 * 2, sh2 * 2);
+    ctx.globalAlpha = 1;
+
+    // faint red ambience behind the hat
+    if (solidity > 0.02) {
+      ctx.globalCompositeOperation = 'lighter';
+      var hw = scaleF * 1.5;
+      ctx.globalAlpha = 0.35 * solidity;
+      ctx.drawImage(haloSprite, cx - hw, cy - hw * 0.95, hw * 2, hw * 2);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+    }
+
+    // drifting dust motes
+    if (!reduced) {
+      ctx.globalCompositeOperation = 'lighter';
+      for (var d = 0; d < DUST_N; d++) {
+        var da = 0.05 + 0.035 * Math.sin(ambT * 0.7 + dust[d * 5 + 4]);
+        var ds = 4 + 3 * Math.sin(dust[d * 5 + 4]) * Math.sin(dust[d * 5 + 4]);
+        ctx.globalAlpha = da;
+        ctx.drawImage(dustSprite, dust[d * 5] * cw - ds, dust[d * 5 + 1] * ch - ds, ds * 2, ds * 2);
+      }
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+    }
+
+    // fade mode for the solid mesh
+    if (reduced || state === 'idle' || state === 'settle') { fadeMode = 0; }
+    else if (state === 'dissolve' || state === 'swirl') { fadeMode = 1; }
+    else { fadeMode = 3; fadeQ = stateT / REFORM_DUR; }
+    // once every face has fully faded (max delay + fade window), skip the mesh
+    var solidVisible = !(fadeMode === 1 && stormT > 0.8 * DISSOLVE_DUR + 0.26);
+
+    var hasStorm = !reduced && computeStormScratch() > 0;
+
+    if (hasStorm || (hasAmbient && !reduced)) {
+      ctx.globalCompositeOperation = 'lighter';
+      if (hasStorm) stampStorm(false);
+      stampOrbiters(false);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+    }
+
+    if (solidVisible) drawSolid();
+
+    if (hasStorm || (hasAmbient && !reduced)) {
+      ctx.globalCompositeOperation = 'lighter';
+      if (hasStorm) stampStorm(true);
+      stampOrbiters(true);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+    }
+
+    // reduced-motion interaction: gentle glow pulse (opacity only)
+    if (reduced && pulseT >= 0) {
+      var pa = Math.sin(Math.PI * clamp01(pulseT / 1.4)) * 0.20;
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = pa;
+      var pw = scaleF * 1.7;
+      ctx.drawImage(haloSprite, cx - pw, cy - pw, pw * 2, pw * 2);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  /* ============================ main loop ============================ */
+  function frame(nowMs) {
+    if (!running) return;
+    rafId = requestAnimationFrame(frame);
+    var dt = (nowMs - lastT) / 1000;
+    lastT = nowMs;
+    if (dt < 0) dt = 0;
+    if (dt > 0.05) dt = 0.05; // clamp (tab throttle, hitches)
+    update(dt);
+    if (reduced && !staticDirty && pulseT < 0) return; // static scene: skip redraw
+    draw();
+    staticDirty = false;
+  }
+
+  function start() {
+    if (running) return;
+    running = true;
+    lastT = performance.now();
+    rafId = requestAnimationFrame(frame);
+  }
+  function stop() {
+    running = false;
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = 0;
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) stop(); else { staticDirty = true; start(); }
+  });
+
+  start();
+})();
+</script>
+</body>
+</html>

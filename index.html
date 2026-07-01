@@ -654,6 +654,14 @@
     .nav-arrow.prev { left: 8px; }
     .nav-arrow.next { right: 8px; }
   }
+
+.ultracode-badge {
+  color: #c084fc;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  margin-left: 0.3em;
+}
 </style>
 </head>
 <body>
@@ -727,7 +735,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
         <span style="color: var(--muted);">OpenAI models</span> — Codex (except GPT-5.5 Pro, which is not available in Codex and was done via the ChatGPT web interface)<br>
         <span style="color: var(--muted);">All other models</span> — Pi + OpenRouter
         <br><br>
-        All models were run at the default effort level for their respective harness and model. No cherry-picking, no retries, no manual edits. What you see is what each model produced on its first attempt.
+        All models were run at the default effort level for their respective harness and model, unless otherwise noted. No cherry-picking, no retries, no manual edits. What you see is what each model produced on its first attempt. <strong>Fable 5 Ultracode</strong> was run using Claude Code's ultracode multi-agent mode (parallel implementations → judge → best result).
       </div>
     </div>
   </div>
@@ -746,6 +754,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
   const HMAC_SECRET = "1aeec4328a35de292e6945ff9bdcc02c34f1325f32cb003d259838222e1cbf62";
 
   const MODELS = [
+    { id: "fable-5-ultracode", name: "Fable 5 Ultracode", group: "Anthropic" },
     { id: "fable-5",     name: "Fable 5",             group: "Anthropic" },
     { id: "opus-4-8",    name: "Opus 4.8",           group: "Anthropic" },
     { id: "opus-4-7",    name: "Opus 4.7",           group: "Anthropic" },
@@ -824,7 +833,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
       }
 
       const btn = document.createElement("button");
-      btn.innerHTML = '<span class="check"></span>' + m.name;
+      btn.innerHTML = '<span class="check"></span>' + m.name.replace('Ultracode', '<span class="ultracode-badge">Ultracode</span>');
       btn.dataset.idx = i;
       btn.addEventListener("click", () => handleTabClick(i));
       modelList.appendChild(btn);
@@ -842,7 +851,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
       label.className = "label";
 
       const nameSpan = document.createElement("span");
-      nameSpan.textContent = m.name;
+      nameSpan.innerHTML = m.name.replace('Ultracode', '<span class="ultracode-badge">Ultracode</span>');
       label.appendChild(nameSpan);
 
       const starDiv = document.createElement("div");
