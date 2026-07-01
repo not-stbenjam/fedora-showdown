@@ -730,7 +730,11 @@ And respect reduced motion. Return only the finished HTML file.</div>
     { id: "sonnet-5",    name: "Sonnet 5",            group: "Anthropic" },
     { id: "sonnet-4-6",  name: "Sonnet 4.6",          group: "Anthropic" },
     { id: "haiku-4-5",   name: "Haiku 4.5",           group: "Anthropic" },
+    { id: "gpt-5.5-pro", name: "GPT-5.5 Pro",         group: "OpenAI" },
     { id: "gpt-5.5",     name: "GPT-5.5",             group: "OpenAI" },
+    { id: "gpt-5.4",     name: "GPT-5.4",             group: "OpenAI" },
+    { id: "gpt-5.4-mini", name: "GPT-5.4 Mini",       group: "OpenAI" },
+    { id: "gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark", group: "OpenAI" },
     { id: "gpt-oss-120b", name: "GPT-OSS 120B",       group: "OpenAI" },
     { id: "gemini-3.1-pro", name: "Gemini 3.1 Pro",    group: "Google" },
     { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash", group: "Google" },
@@ -869,6 +873,10 @@ And respect reduced motion. Return only the finished HTML file.</div>
     history.replaceState(null, "", "#" + MODELS[idx].id);
     updateTabStyles();
     applyVisibility();
+    const scrollTarget = (idx === 0 || MODELS[idx].group !== MODELS[idx - 1].group)
+      ? buttons[idx].previousElementSibling || buttons[idx]
+      : buttons[idx];
+    scrollTarget.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
 
   function updateTabStyles() {

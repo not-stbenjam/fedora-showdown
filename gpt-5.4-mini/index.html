@@ -1,0 +1,621 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Fedora Study</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #050608;
+      --fg: rgba(255, 241, 236, 0.9);
+      --muted: rgba(255, 241, 236, 0.62);
+      --accent: rgba(244, 92, 72, 0.96);
+    }
+
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 50% 38%, rgba(93, 24, 26, 0.14), transparent 28%),
+        radial-gradient(circle at 50% 46%, rgba(255, 255, 255, 0.03), transparent 15%),
+        linear-gradient(180deg, #050608 0%, #07080b 40%, #040506 100%);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      display: grid;
+      place-items: center;
+    }
+
+    main {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      isolation: isolate;
+      background:
+        radial-gradient(circle at 50% 40%, rgba(183, 48, 34, 0.10), transparent 0 18%, transparent 19%),
+        radial-gradient(circle at 50% 55%, rgba(255, 255, 255, 0.045), transparent 0 10%, transparent 11%);
+    }
+
+    canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: manipulation;
+      cursor: default;
+    }
+
+    .caption {
+      position: absolute;
+      left: 50%;
+      bottom: max(22px, env(safe-area-inset-bottom));
+      transform: translateX(-50%);
+      margin: 0;
+      color: var(--muted);
+      font-size: clamp(12px, 1.4vw, 14px);
+      letter-spacing: 0;
+      line-height: 1.35;
+      text-align: center;
+      user-select: none;
+      pointer-events: none;
+      text-shadow: 0 1px 10px rgba(0, 0, 0, 0.55);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .caption {
+        color: rgba(255, 241, 236, 0.54);
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <canvas id="scene" aria-label="A spinning fedora-style logo dissolving into embers and reforming"></canvas>
+    <p class="caption">Fedora study</p>
+  </main>
+
+  <script>
+    (() => {
+      const canvas = document.getElementById('scene');
+      const ctx = canvas.getContext('2d', { alpha: true, desynchronized: true });
+      const sampleCanvas = document.createElement('canvas');
+      const sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
+
+      const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+      const state = {
+        dpr: 1,
+        w: 0,
+        h: 0,
+        yaw: 0,
+        yawVelocity: 0.33,
+        targetVelocity: 0.33,
+        pointerInside: false,
+        pointerActive: false,
+        effectActive: false,
+        effectStart: 0,
+        lastTime: performance.now(),
+        swarm: [],
+        orbiters: [],
+        orbitSeed: 0,
+        idleGlow: 0
+      };
+
+      const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+      const mix = (a, b, t) => a + (b - a) * t;
+      const smooth = t => t * t * (3 - 2 * t);
+      const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
+      const easeInOutCubic = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      const rand = (a = 1, b = 0) => b + Math.random() * (a - b);
+
+      function resize() {
+        state.dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+        state.w = window.innerWidth;
+        state.h = window.innerHeight;
+        const pxW = Math.round(state.w * state.dpr);
+        const pxH = Math.round(state.h * state.dpr);
+        canvas.width = pxW;
+        canvas.height = pxH;
+        sampleCanvas.width = pxW;
+        sampleCanvas.height = pxH;
+        ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+        sampleCtx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+        if (reducedMotion.matches) {
+          drawFrame(performance.now(), true);
+        }
+      }
+
+      function rotatePoint(p, yaw, pitch, roll) {
+        let x = p.x, y = p.y, z = p.z;
+        const cy = Math.cos(yaw), sy = Math.sin(yaw);
+        const cp = Math.cos(pitch), sp = Math.sin(pitch);
+        const cr = Math.cos(roll), sr = Math.sin(roll);
+
+        let x1 = x * cy + z * sy;
+        let z1 = -x * sy + z * cy;
+        let y1 = y;
+
+        let y2 = y1 * cp - z1 * sp;
+        let z2 = y1 * sp + z1 * cp;
+
+        let x3 = x1 * cr - y2 * sr;
+        let y3 = x1 * sr + y2 * cr;
+        return { x: x3, y: y3, z: z2 };
+      }
+
+      function projectPoint(p, cfg) {
+        const dist = cfg.dist;
+        const s = dist / (dist + p.z);
+        return {
+          x: cfg.cx + p.x * s * cfg.scale,
+          y: cfg.cy + p.y * s * cfg.scale,
+          z: p.z,
+          s
+        };
+      }
+
+      function makeRing(radiusX, radiusZ, y, segments, rot, cfg) {
+        const pts = [];
+        for (let i = 0; i <= segments; i++) {
+          const a = i / segments * Math.PI * 2;
+          const local = {
+            x: Math.cos(a) * radiusX,
+            y,
+            z: Math.sin(a) * radiusZ
+          };
+          pts.push(projectPoint(rotatePoint(local, rot.yaw, rot.pitch, rot.roll), cfg));
+        }
+        return pts;
+      }
+
+      function quadNormal(a, b, c) {
+        const ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z;
+        const vx = c.x - a.x, vy = c.y - a.y, vz = c.z - a.z;
+        return {
+          x: uy * vz - uz * vy,
+          y: uz * vx - ux * vz,
+          z: ux * vy - uy * vx
+        };
+      }
+
+      function fillPoly(ctxx, points) {
+        ctxx.beginPath();
+        ctxx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) ctxx.lineTo(points[i].x, points[i].y);
+        ctxx.closePath();
+        ctxx.fill();
+      }
+
+      function drawQuad(ctxx, a, b, c, d, color) {
+        ctxx.fillStyle = color;
+        ctxx.beginPath();
+        ctxx.moveTo(a.x, a.y);
+        ctxx.lineTo(b.x, b.y);
+        ctxx.lineTo(c.x, c.y);
+        ctxx.lineTo(d.x, d.y);
+        ctxx.closePath();
+        ctxx.fill();
+      }
+
+      function renderHat(ctx2, w, h, yaw, opts = {}) {
+        const cx = w * 0.5;
+        const cy = h * 0.46;
+        const scale = Math.min(w, h) * 0.15;
+        const cfg = {
+          cx,
+          cy,
+          scale,
+          dist: 5.6
+        };
+        const rot = {
+          yaw,
+          pitch: -0.28 + Math.sin(yaw * 0.55) * 0.035,
+          roll: -0.07 + Math.cos(yaw * 0.38) * 0.02
+        };
+
+        const light = { x: -0.42, y: -0.72, z: 0.56 };
+        const lightLen = Math.hypot(light.x, light.y, light.z);
+        light.x /= lightLen; light.y /= lightLen; light.z /= lightLen;
+
+        const brimTop = makeRing(2.25, 1.52, 0.04, 56, rot, cfg);
+        const brimBottom = makeRing(2.30, 1.56, -0.18, 56, rot, cfg);
+        const crownBottom = makeRing(0.90, 0.72, 0.10, 44, rot, cfg);
+        const crownTop = makeRing(0.66, 0.53, 0.90, 44, rot, cfg);
+        const bandTop = makeRing(0.98, 0.78, 0.32, 40, rot, cfg);
+        const bandBottom = makeRing(1.00, 0.80, 0.14, 40, rot, cfg);
+
+        if (opts.shadow !== false) {
+          ctx2.save();
+          const shadowY = cy + scale * 1.18;
+          const shadowW = scale * 2.65;
+          const shadowH = scale * 0.56;
+          const g = ctx2.createRadialGradient(cx, shadowY, shadowW * 0.06, cx, shadowY, shadowW * 0.66);
+          g.addColorStop(0, 'rgba(0,0,0,0.50)');
+          g.addColorStop(0.5, 'rgba(0,0,0,0.24)');
+          g.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx2.fillStyle = g;
+          ctx2.filter = 'blur(18px)';
+          ctx2.beginPath();
+          ctx2.ellipse(cx, shadowY, shadowW * 0.52, shadowH, 0, 0, Math.PI * 2);
+          ctx2.fill();
+          ctx2.restore();
+        }
+
+        ctx2.save();
+        ctx2.globalAlpha = opts.alpha == null ? 1 : opts.alpha;
+
+        const brimSide = [];
+        for (let i = 0; i < brimTop.length - 1; i++) {
+          const a = brimTop[i], b = brimTop[i + 1], c = brimBottom[i + 1], d = brimBottom[i];
+          const n = quadNormal(
+            rotatePoint({ x: Math.cos(i / 56 * Math.PI * 2) * 2.25, y: 0.04, z: Math.sin(i / 56 * Math.PI * 2) * 1.52 }, rot.yaw, rot.pitch, rot.roll),
+            rotatePoint({ x: Math.cos((i + 1) / 56 * Math.PI * 2) * 2.25, y: 0.04, z: Math.sin((i + 1) / 56 * Math.PI * 2) * 1.52 }, rot.yaw, rot.pitch, rot.roll),
+            rotatePoint({ x: Math.cos((i + 1) / 56 * Math.PI * 2) * 2.30, y: -0.18, z: Math.sin((i + 1) / 56 * Math.PI * 2) * 1.56 }, rot.yaw, rot.pitch, rot.roll)
+          );
+          const shade = clamp(n.x * light.x + n.y * light.y + n.z * light.z, -1, 1);
+          const apha = mix(0.52, 1, (shade + 1) * 0.5);
+          drawQuad(ctx2, a, b, c, d, `rgba(${Math.round(160 + 68 * apha)}, ${Math.round(18 + 8 * apha)}, ${Math.round(19 + 10 * apha)}, 0.94)`);
+        }
+
+        for (let i = 0; i < crownBottom.length - 1; i++) {
+          const a = crownBottom[i], b = crownBottom[i + 1], c = crownTop[i + 1], d = crownTop[i];
+          const n = quadNormal(
+            rotatePoint({ x: Math.cos(i / 44 * Math.PI * 2) * 0.90, y: 0.10, z: Math.sin(i / 44 * Math.PI * 2) * 0.72 }, rot.yaw, rot.pitch, rot.roll),
+            rotatePoint({ x: Math.cos((i + 1) / 44 * Math.PI * 2) * 0.90, y: 0.10, z: Math.sin((i + 1) / 44 * Math.PI * 2) * 0.72 }, rot.yaw, rot.pitch, rot.roll),
+            rotatePoint({ x: Math.cos((i + 1) / 44 * Math.PI * 2) * 0.66, y: 0.90, z: Math.sin((i + 1) / 44 * Math.PI * 2) * 0.53 }, rot.yaw, rot.pitch, rot.roll)
+          );
+          const shade = clamp(n.x * light.x + n.y * light.y + n.z * light.z, -1, 1);
+          const red = Math.round(mix(112, 214, (shade + 1) * 0.5));
+          const green = Math.round(mix(16, 54, (shade + 1) * 0.5));
+          const blue = Math.round(mix(18, 44, (shade + 1) * 0.5));
+          drawQuad(ctx2, a, b, c, d, `rgba(${red}, ${green}, ${blue}, 0.98)`);
+        }
+
+        for (let i = 0; i < bandBottom.length - 1; i++) {
+          const a = bandBottom[i], b = bandBottom[i + 1], c = bandTop[i + 1], d = bandTop[i];
+          const n = quadNormal(
+            rotatePoint({ x: Math.cos(i / 40 * Math.PI * 2) * 1.00, y: 0.14, z: Math.sin(i / 40 * Math.PI * 2) * 0.80 }, rot.yaw, rot.pitch, rot.roll),
+            rotatePoint({ x: Math.cos((i + 1) / 40 * Math.PI * 2) * 1.00, y: 0.14, z: Math.sin((i + 1) / 40 * Math.PI * 2) * 0.80 }, rot.yaw, rot.pitch, rot.roll),
+            rotatePoint({ x: Math.cos((i + 1) / 40 * Math.PI * 2) * 0.98, y: 0.32, z: Math.sin((i + 1) / 40 * Math.PI * 2) * 0.78 }, rot.yaw, rot.pitch, rot.roll)
+          );
+          const shade = clamp(n.x * light.x + n.y * light.y + n.z * light.z, -1, 1);
+          const v = mix(0.16, 0.72, (shade + 1) * 0.5);
+          drawQuad(ctx2, a, b, c, d, `rgba(${Math.round(56 * v)}, ${Math.round(8 * v)}, ${Math.round(10 * v)}, 0.96)`);
+        }
+
+        ctx2.fillStyle = 'rgba(208, 32, 29, 0.98)';
+        fillPoly(ctx2, brimTop);
+
+        const brimGlow = ctx2.createLinearGradient(cx - scale * 1.2, cy - scale * 0.7, cx + scale * 1.2, cy + scale * 0.5);
+        brimGlow.addColorStop(0, 'rgba(255,255,255,0.14)');
+        brimGlow.addColorStop(0.35, 'rgba(255,255,255,0.05)');
+        brimGlow.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx2.fillStyle = brimGlow;
+        fillPoly(ctx2, brimTop);
+
+        ctx2.fillStyle = 'rgba(162, 17, 19, 0.90)';
+        fillPoly(ctx2, brimBottom);
+
+        const crownFill = ctx2.createLinearGradient(cx - scale * 0.7, cy - scale * 0.6, cx + scale * 0.8, cy + scale * 0.8);
+        crownFill.addColorStop(0, 'rgba(255, 86, 70, 0.92)');
+        crownFill.addColorStop(0.42, 'rgba(205, 31, 31, 0.95)');
+        crownFill.addColorStop(1, 'rgba(120, 11, 13, 0.98)');
+        ctx2.fillStyle = crownFill;
+        fillPoly(ctx2, crownBottom);
+
+        const crownTopFill = ctx2.createRadialGradient(cx - scale * 0.32, cy - scale * 0.58, scale * 0.12, cx, cy - scale * 0.4, scale * 1.0);
+        crownTopFill.addColorStop(0, 'rgba(255, 96, 88, 0.88)');
+        crownTopFill.addColorStop(0.5, 'rgba(223, 42, 41, 0.88)');
+        crownTopFill.addColorStop(1, 'rgba(125, 12, 12, 0.96)');
+        ctx2.fillStyle = crownTopFill;
+        fillPoly(ctx2, crownTop);
+
+        ctx2.fillStyle = 'rgba(23, 5, 7, 0.92)';
+        const bandShape = bandBottom.slice(0, -1).concat(bandTop.slice().reverse());
+        fillPoly(ctx2, bandShape);
+
+        ctx2.save();
+        ctx2.globalCompositeOperation = 'screen';
+        const highlight = ctx2.createLinearGradient(cx - scale * 0.95, cy - scale * 0.9, cx + scale * 0.65, cy + scale * 0.25);
+        highlight.addColorStop(0, 'rgba(255,255,255,0.44)');
+        highlight.addColorStop(0.3, 'rgba(255,255,255,0.10)');
+        highlight.addColorStop(0.8, 'rgba(255,255,255,0)');
+        ctx2.fillStyle = highlight;
+        ctx2.filter = 'blur(1.2px)';
+        ctx2.beginPath();
+        ctx2.ellipse(cx - scale * 0.17, cy - scale * 0.42, scale * 0.92, scale * 0.50, -0.15, 0, Math.PI * 2);
+        ctx2.fill();
+
+        ctx2.filter = 'none';
+        ctx2.globalAlpha = 0.24;
+        ctx2.fillStyle = 'rgba(255,255,255,0.55)';
+        ctx2.beginPath();
+        ctx2.ellipse(cx - scale * 0.22, cy - scale * 0.54, scale * 0.27, scale * 0.12, -0.26, 0, Math.PI * 2);
+        ctx2.fill();
+        ctx2.restore();
+
+        ctx2.restore();
+      }
+
+      function generateParticles() {
+        const pxW = canvas.width;
+        const pxH = canvas.height;
+        sampleCtx.clearRect(0, 0, state.w, state.h);
+        renderHat(sampleCtx, state.w, state.h, state.yaw, { shadow: false, alpha: 1 });
+        const img = sampleCtx.getImageData(0, 0, pxW, pxH).data;
+        const candidates = [];
+        const step = Math.max(1, Math.round(2 * state.dpr));
+        for (let y = 0; y < pxH; y += step) {
+          for (let x = 0; x < pxW; x += step) {
+            const i = (y * pxW + x) * 4;
+            const a = img[i + 3];
+            if (a < 18) continue;
+            const r = img[i];
+            const g = img[i + 1];
+            const b = img[i + 2];
+            const brightness = (r + g + b) / 3;
+            candidates.push({
+              x: x / state.dpr - state.w * 0.5,
+              y: y / state.dpr - state.h * 0.46,
+              color: [
+                Math.min(255, r + 18),
+                Math.min(255, g + 8),
+                Math.min(255, b + 6)
+              ],
+              alpha: clamp((a / 255) * (0.55 + brightness / 360), 0.16, 1),
+              seed: Math.random() * Math.PI * 2,
+              size: mix(0.8, 1.75, brightness / 255),
+              depth: mix(-2.0, 2.8, Math.random()),
+              twist: rand(0.6, -0.6)
+            });
+          }
+        }
+
+        const target = 2900;
+        const sampled = [];
+        if (candidates.length <= target) {
+          sampled.push(...candidates);
+        } else {
+          const stride = candidates.length / target;
+          for (let i = 0; i < target; i++) {
+            sampled.push(candidates[Math.floor(i * stride + Math.random() * Math.min(6, stride)) % candidates.length]);
+          }
+        }
+
+        state.swarm = sampled.map((p, index) => ({
+          ...p,
+          index,
+          homeX: p.x,
+          homeY: p.y,
+          x: p.x,
+          y: p.y,
+          vx: rand(18, -18),
+          vy: rand(18, -18),
+          trailX: p.x,
+          trailY: p.y
+        }));
+
+        state.orbiters = sampled.slice(0, 38).map((p, index) => ({
+          seed: p.seed + index * 0.29,
+          radius: rand(135, 86),
+          speed: rand(0.52, 0.18),
+          size: rand(1.8, 0.95),
+          alpha: rand(0.22, 0.08),
+          hue: rand(12, -8)
+        }));
+        state.orbitSeed = Math.random() * Math.PI * 2;
+      }
+
+      function startEffect() {
+        if (reducedMotion.matches || state.effectActive) return;
+        state.effectActive = true;
+        state.effectStart = performance.now();
+        state.targetVelocity = 0.045;
+        generateParticles();
+      }
+
+      function finishEffect() {
+        state.effectActive = false;
+        state.targetVelocity = state.pointerInside ? 0.14 : 0.33;
+        state.swarm.length = 0;
+      }
+
+      function background(ctx2, w, h) {
+        ctx2.clearRect(0, 0, w, h);
+        const bg = ctx2.createRadialGradient(w * 0.5, h * 0.43, Math.min(w, h) * 0.05, w * 0.5, h * 0.45, Math.min(w, h) * 0.76);
+        bg.addColorStop(0, '#0a0c10');
+        bg.addColorStop(0.44, '#06070a');
+        bg.addColorStop(1, '#030405');
+        ctx2.fillStyle = bg;
+        ctx2.fillRect(0, 0, w, h);
+
+        ctx2.save();
+        ctx2.globalAlpha = 0.95;
+        const glow = ctx2.createRadialGradient(w * 0.5, h * 0.44, 0, w * 0.5, h * 0.44, Math.min(w, h) * 0.34);
+        glow.addColorStop(0, 'rgba(255, 73, 58, 0.12)');
+        glow.addColorStop(0.35, 'rgba(184, 44, 33, 0.08)');
+        glow.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx2.fillStyle = glow;
+        ctx2.beginPath();
+        ctx2.ellipse(w * 0.5, h * 0.44, Math.min(w, h) * 0.30, Math.min(w, h) * 0.22, 0, 0, Math.PI * 2);
+        ctx2.fill();
+        ctx2.restore();
+
+        ctx2.save();
+        ctx2.globalCompositeOperation = 'screen';
+        ctx2.globalAlpha = 0.10;
+        for (let i = 0; i < 38; i++) {
+          const x = (i * 173.7 % 1) * w;
+          const y = (Math.sin(i * 3.1) * 0.5 + 0.5) * h * 0.95;
+          const s = 0.7 + (i % 5) * 0.3;
+          ctx2.fillStyle = i % 3 === 0 ? 'rgba(255,120,88,0.10)' : 'rgba(255,255,255,0.06)';
+          ctx2.beginPath();
+          ctx2.arc(x, y, s, 0, Math.PI * 2);
+          ctx2.fill();
+        }
+        ctx2.restore();
+      }
+
+      function drawParticle(ctx2, p, x, y, r, g, b, alpha, size, glow) {
+        ctx2.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+        ctx2.beginPath();
+        ctx2.arc(x, y, size, 0, Math.PI * 2);
+        ctx2.fill();
+        if (glow) {
+          ctx2.fillStyle = `rgba(255, 160, 112, ${alpha * 0.10})`;
+          ctx2.beginPath();
+          ctx2.arc(x, y, size * 3.8, 0, Math.PI * 2);
+          ctx2.fill();
+        }
+      }
+
+      function drawFrame(now, staticOnly = false) {
+        const dt = Math.min(32, now - state.lastTime) / 1000;
+        state.lastTime = now;
+        state.idleGlow = mix(state.idleGlow, state.pointerInside ? 1 : 0, 0.05);
+
+        if (!reducedMotion.matches && !staticOnly) {
+          state.yawVelocity = mix(state.yawVelocity, state.targetVelocity, 0.06);
+          state.yaw += state.yawVelocity * dt;
+        }
+
+        const w = state.w;
+        const h = state.h;
+        background(ctx, w, h);
+
+        const pulse = state.effectActive ? clamp((now - state.effectStart) / 3400, 0, 1) : 0;
+        const headCenter = { x: w * 0.5, y: h * 0.46 };
+        const spinYaw = state.yaw;
+        const hatAlpha = state.effectActive ? mix(1, 0, easeOutCubic(clamp(pulse / 0.18, 0, 1))) : 1;
+
+        if (state.effectActive && state.swarm.length) {
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          const centerX = headCenter.x;
+          const centerY = headCenter.y;
+          const swirlPhase = smooth(clamp((pulse - 0.12) / 0.46, 0, 1));
+          const returnPhase = smooth(clamp((pulse - 0.50) / 0.50, 0, 1));
+          for (let i = 0; i < state.swarm.length; i++) {
+            const p = state.swarm[i];
+            const dx = p.homeX;
+            const dy = p.homeY;
+            const dist = Math.max(1, Math.hypot(dx, dy));
+            const nx = dx / dist;
+            const ny = dy / dist;
+            const tx = -ny;
+            const ty = nx;
+            const ring = easeOutCubic(clamp(pulse / 0.2, 0, 1));
+            const bloom = 18 + dist * 0.06 + p.size * 4;
+            const outward = bloom + 175 * ring + 26 * Math.sin(p.seed + pulse * 18 + p.twist * 2);
+            const arc = p.seed + pulse * (2.2 + p.twist * 0.25) + dist * 0.012;
+            const swirlR = 52 + 118 * swirlPhase + p.depth * 2;
+            const swirlX = centerX + nx * swirlR + tx * Math.sin(arc * 2.0) * (26 + 18 * swirlPhase);
+            const swirlY = centerY + ny * swirlR + ty * Math.cos(arc * 1.8) * (26 + 18 * swirlPhase);
+            const driftX = centerX + dx + nx * outward + tx * Math.sin(arc) * (34 * swirlPhase);
+            const driftY = centerY + dy + ny * outward + ty * Math.cos(arc) * (34 * swirlPhase);
+            let x = mix(driftX, swirlX, swirlPhase);
+            let y = mix(driftY, swirlY, swirlPhase);
+            x = mix(x, centerX + dx, returnPhase);
+            y = mix(y, centerY + dy, returnPhase);
+            p.trailX = mix(p.trailX, x, 0.18);
+            p.trailY = mix(p.trailY, y, 0.18);
+            const alpha = p.alpha * mix(0.88, 0.10, returnPhase) * mix(0.15, 1, pulse < 0.08 ? pulse / 0.08 : 1);
+            const size = p.size * mix(1.35, 0.92, returnPhase) * (1 + 0.16 * Math.sin(p.seed + pulse * 7));
+            const [r, g, b] = p.color;
+            drawParticle(ctx, p, p.trailX, p.trailY, r, g, b, alpha * 0.66, size * 1.9, false);
+            drawParticle(ctx, p, x, y, r, g, b, alpha, size, true);
+          }
+          ctx.restore();
+        }
+
+        ctx.save();
+        ctx.globalAlpha = hatAlpha;
+        renderHat(ctx, w, h, spinYaw, { shadow: true, alpha: hatAlpha });
+        ctx.restore();
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const orbBaseX = headCenter.x;
+        const orbBaseY = headCenter.y - Math.min(w, h) * 0.02;
+        const orbPhase = now * 0.00022 + state.orbitSeed;
+        for (let i = 0; i < state.orbiters.length; i++) {
+          const o = state.orbiters[i];
+          const a = orbPhase * o.speed + o.seed;
+          const rx = o.radius * (1.0 + 0.10 * Math.sin(a * 0.9));
+          const ry = o.radius * 0.22;
+          const x = orbBaseX + Math.cos(a) * rx;
+          const y = orbBaseY - 26 + Math.sin(a * 1.25) * ry;
+          const trail = {
+            x: orbBaseX + Math.cos(a - 0.05) * rx,
+            y: orbBaseY - 26 + Math.sin((a - 0.05) * 1.25) * ry
+          };
+          ctx.strokeStyle = `rgba(255, 172, 116, ${o.alpha * 0.55})`;
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.moveTo(trail.x, trail.y);
+          ctx.lineTo(x, y);
+          ctx.stroke();
+          ctx.fillStyle = `rgba(255, 170, 128, ${o.alpha})`;
+          ctx.beginPath();
+          ctx.arc(x, y, o.size, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+
+        if (state.effectActive && pulse >= 1) {
+          finishEffect();
+        }
+
+        if (!reducedMotion.matches) {
+          requestAnimationFrame(drawFrame);
+        }
+      }
+
+      function immediateDraw() {
+        state.lastTime = performance.now();
+        drawFrame(state.lastTime, true);
+      }
+
+      function pointerStateOn() {
+        state.pointerInside = true;
+        state.targetVelocity = state.effectActive ? 0.045 : 0.14;
+        if (!reducedMotion.matches && !state.effectActive) startEffect();
+      }
+
+      function pointerStateOff() {
+        state.pointerInside = false;
+        if (!state.effectActive) state.targetVelocity = 0.33;
+      }
+
+      canvas.addEventListener('pointerenter', pointerStateOn);
+      canvas.addEventListener('pointerleave', pointerStateOff);
+      canvas.addEventListener('pointerdown', e => {
+        e.preventDefault();
+        pointerStateOn();
+      });
+      canvas.addEventListener('pointerup', pointerStateOff);
+      canvas.addEventListener('pointercancel', pointerStateOff);
+
+      window.addEventListener('resize', resize, { passive: true });
+      reducedMotion.addEventListener?.('change', () => {
+        state.effectActive = false;
+        state.targetVelocity = reducedMotion.matches ? 0 : 0.33;
+        state.yawVelocity = state.targetVelocity;
+        resize();
+        if (!reducedMotion.matches) requestAnimationFrame(drawFrame);
+      });
+
+      resize();
+      if (!reducedMotion.matches) {
+        requestAnimationFrame(drawFrame);
+      } else {
+        immediateDraw();
+      }
+    })();
+  </script>
+</body>
+</html>

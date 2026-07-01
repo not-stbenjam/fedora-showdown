@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Fedora Ember Hero</title>
+<style>
+  :root {
+    --bg0: #050608;
+    --bg1: #0b0d12;
+    --bg2: #11151c;
+    --fg: #eef2f7;
+    --muted: rgba(238, 242, 247, 0.66);
+    --accent: #d63b34;
+    --glow: rgba(255, 120, 88, 0.16);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background:
+      radial-gradient(120vmax 80vmax at 50% 18%, rgba(120, 132, 172, 0.10), transparent 48%),
+      radial-gradient(90vmax 56vmax at 50% 55%, rgba(214, 59, 52, 0.08), transparent 34%),
+      linear-gradient(180deg, var(--bg1), var(--bg0) 42%, #030406 100%);
+    color: var(--fg);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .hero {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: grid;
+    place-items: center;
+    isolation: isolate;
+  }
+
+  .hero::before,
+  .hero::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  .hero::before {
+    background:
+      radial-gradient(40vmax 24vmax at 50% 42%, rgba(255, 135, 110, 0.065), transparent 54%),
+      radial-gradient(64vmax 34vmax at 50% 50%, rgba(110, 140, 255, 0.05), transparent 60%);
+    filter: blur(16px);
+  }
+
+  .hero::after {
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.03), transparent 18%, transparent 82%, rgba(0,0,0,0.33)),
+      radial-gradient(circle at 50% 50%, transparent 42%, rgba(0,0,0,0.42) 100%);
+    mix-blend-mode: normal;
+  }
+
+  .stage {
+    position: relative;
+    width: min(100vw, 1100px);
+    height: min(100vh, 840px);
+    display: grid;
+    place-items: center;
+    padding: 8vh 4vw 14vh;
+  }
+
+  canvas {
+    display: block;
+    width: min(92vw, 980px);
+    height: min(72vh, 680px);
+    max-width: 100%;
+    max-height: 100%;
+    touch-action: manipulation;
+    cursor: pointer;
+    filter: drop-shadow(0 28px 70px rgba(0, 0, 0, 0.45));
+  }
+
+  .caption {
+    position: absolute;
+    left: 50%;
+    bottom: max(4.5vh, 24px);
+    transform: translateX(-50%);
+    text-align: center;
+    padding: 0 20px;
+    width: min(92vw, 640px);
+    pointer-events: none;
+  }
+
+  .caption h1 {
+    margin: 0 0 8px;
+    font-size: clamp(14px, 1.2vw, 16px);
+    font-weight: 560;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.9);
+  }
+
+  .caption p {
+    margin: 0;
+    font-size: clamp(12px, 1.2vw, 14px);
+    line-height: 1.5;
+    color: var(--muted);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    canvas { cursor: default; }
+  }
+</style>
+</head>
+<body>
+  <main class="hero">
+    <section class="stage" aria-label="Animated fedora emblem">
+      <canvas id="scene"></canvas>
+      <div class="caption">
+        <h1>Fedora Ember Mark</h1>
+        <p>A quiet glow, a measured orbit, and a form that returns exactly to itself.</p>
+      </div>
+    </section>
+  </main>
+
+<script>
+(() => {
+  const canvas = document.getElementById("scene");
+  const ctx = canvas.getContext("2d", { alpha: true });
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const DPR = Math.min(window.devicePixelRatio || 1, 2);
+  let width = 0;
+  let height = 0;
+  let cx = 0;
+  let cy = 0;
+  let scale = 1;
+
+  const TAU = Math.PI * 2;
+  const particles = [];
+  const orbiters = [];
+  const trails = [];
+  const particleCount = reduceMotion ? 900 : 2600;
+  const orbiterCount = reduceMotion ? 0 : 18;
+
+  let rotationY = -0.35;
+  let rotationX = -0.18;
+  let spin = reduceMotion ? 0 : 0.0095;
+  let spinTarget = reduceMotion ? 0 : 0.0095;
+
+  let dissolve = 0;
+  let dissolveTarget = 0;
+  let cycleStart = 0;
+  let cycleActive = false;
+  let lastTime = performance.now();
+
+  function resize() {
+    const rect = canvas.getBoundingClientRect();
+    width = Math.max(320, Math.round(rect.width * DPR));
+    height = Math.max(240, Math.round(rect.height * DPR));
+    canvas.width = width;
+    canvas.height = height;
+    cx = width * 0.5;
+    cy = height * 0.48;
+    scale = Math.min(width, height) * 0.245;
+  }
+
+  function rand(min, max) {
+    return min + Math.random() * (max - min);
+  }
+
+  function smoothstep(a, b, x) {
+    const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+    return t * t * (3 - 2 * t);
+  }
+
+  function easeInOutCubic(t) {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  }
+
+  function easeOutCubic(t) {
+    return 1 - Math.pow(1 - t, 3);
+  }
+
+  function lerp(a, b, t) {
+    return a + (b - a) * t;
+  }
+
+  function ellipseContains(x, y, rx, ry) {
+    return (x * x) / (rx * rx) + (y * y) / (ry * ry) <= 1;
+  }
+
+  function crownWidth(y) {
+    const y0 = -0.27;
+    const y1 = 0.34;
+    if (y < y0 || y > y1) return 0;
+    const t = (y - y0) / (y1 - y0);
+    const belly = 0.42 + 0.11 * Math.sin(t * Math.PI);
+    const taper = 0.08 * Math.pow(t - 0.52, 2);
+    return belly - taper;
+  }
+
+  function inHatShape(x, y) {
+    const brimOuter = ellipseContains(x, y + 0.02, 0.98, 0.20);
+    const brimInner = ellipseContains(x, y + 0.015, 0.36, 0.08);
+    const brim = brimOuter && !brimInner && y > -0.28 && y < 0.18;
+
+    const w = crownWidth(y);
+    const crown = y > -0.27 && y < 0.34 && Math.abs(x) < w;
+
+    const top = ellipseContains(x, y - 0.30, 0.34, 0.10) && y > 0.20;
+    const pinchL = ellipseContains(x + 0.16, y - 0.16, 0.10, 0.13);
+    const pinchR = ellipseContains(x - 0.16, y - 0.16, 0.10, 0.13);
+    const sideNotch = (pinchL || pinchR) && y > -0.02 && y < 0.26;
+
+    const band = y > -0.05 && y < 0.06 && Math.abs(x) < w + 0.02;
+
+    return brim || crown || top || sideNotch || band;
+  }
+
+  function colorForPoint(x, y) {
+    const band = y > -0.05 && y < 0.06;
+    if (band) {
+      return { r: 247, g: 94, b: 83, a: 0.92 };
+    }
+    const light = 0.58 + (y + 0.4) * 0.28 - Math.abs(x) * 0.08;
+    const tint = Math.max(0.28, Math.min(0.95, light));
+    return {
+      r: Math.round(130 + 88 * tint),
+      g: Math.round(20 + 28 * tint),
+      b: Math.round(24 + 26 * tint),
+      a: 0.85
+    };
+  }
+
+  function generateTargets() {
+    let attempts = 0;
+    while (particles.length < particleCount && attempts < particleCount * 30) {
+      attempts++;
+      const x = rand(-1.04, 1.04);
+      const y = rand(-0.34, 0.43);
+      if (!inHatShape(x, y)) continue;
+
+      const brimZone = Math.abs(y) < 0.15;
+      const thickness = brimZone ? rand(-0.075, 0.075) : rand(-0.12, 0.12);
+      const c = colorForPoint(x, y);
+      const radial = Math.hypot(x * 0.85, y * 1.8) || 1;
+      const dx = x / radial;
+      const dy = y / radial;
+
+      particles.push({
+        x, y, z: thickness,
+        size: rand(0.65, 1.8),
+        glow: rand(0.4, 1.0),
+        color: c,
+        seed: Math.random() * 1000,
+        spreadX: dx * rand(0.55, 1.45) + rand(-0.12, 0.12),
+        spreadY: dy * rand(0.28, 1.10) + rand(-0.18, 0.18),
+        spreadZ: rand(-1.2, 1.4),
+        swirl: rand(0.7, 2.1),
+        lift: rand(-0.15, 0.24),
+        delay: Math.random(),
+        orbitAnchor: Math.random() < 0.05
+      });
+    }
+
+    for (let i = 0; i < orbiterCount; i++) {
+      orbiters.push({
+        angle: rand(0, TAU),
+        radius: rand(0.92, 1.24),
+        y: rand(-0.02, 0.24),
+        speed: rand(0.002, 0.0046) * (Math.random() > 0.5 ? 1 : -1),
+        phase: Math.random() * 100,
+        size: rand(1.2, 2.5),
+        alpha: rand(0.22, 0.42)
+      });
+      trails.push([]);
+    }
+  }
+
+  function project(x, y, z, angleY, angleX) {
+    const cy = Math.cos(angleY);
+    const sy = Math.sin(angleY);
+    const cxr = Math.cos(angleX);
+    const sxr = Math.sin(angleX);
+
+    const x1 = x * cy - z * sy;
+    const z1 = x * sy + z * cy;
+    const y1 = y * cxr - z1 * sxr;
+    const z2 = y * sxr + z1 * cxr;
+
+    const depth = 3.4 + z2 * 1.35;
+    const perspective = 1.7 / depth;
+
+    return {
+      x: cx + x1 * scale * perspective,
+      y: cyBase + y1 * scale * perspective,
+      z: z2,
+      p: perspective
+    };
+  }
+
+  let cyBase = 0;
+
+  function triggerCycle(now) {
+    if (reduceMotion) return;
+    cycleActive = true;
+    cycleStart = now;
+    dissolveTarget = 1;
+    spinTarget = 0.0018;
+  }
+
+  function updateCycle(now) {
+    if (!cycleActive) {
+      dissolve += (dissolveTarget - dissolve) * 0.05;
+      spin += (spinTarget - spin) * 0.045;
+      return;
+    }
+
+    const t = (now - cycleStart) / 1000;
+    const out = smoothstep(0.0, 0.72, t);
+    const hold = smoothstep(0.72, 1.55, t);
+    const back = smoothstep(1.55, 2.95, t);
+
+    if (t < 0.72) {
+      dissolveTarget = easeOutCubic(out);
+      spinTarget = 0.0022;
+    } else if (t < 1.55) {
+      dissolveTarget = 1;
+      spinTarget = 0.00115;
+    } else if (t < 2.95) {
+      dissolveTarget = 1 - easeInOutCubic(back);
+      spinTarget = 0.0035 + (1 - back) * 0.0008;
+    } else {
+      cycleActive = false;
+      dissolveTarget = 0;
+      spinTarget = 0.0095;
+    }
+
+    dissolve += (dissolveTarget - dissolve) * 0.06;
+    spin += (spinTarget - spin) * 0.04;
+  }
+
+  function drawBackground(now) {
+    const pulse = reduceMotion ? 0.5 : 0.5 + Math.sin(now * 0.00065) * 0.08;
+
+    const bg = ctx.createRadialGradient(cx, cyBase - height * 0.12, 0, cx, cyBase - height * 0.08, width * 0.42);
+    bg.addColorStop(0, "rgba(150, 170, 255, " + (0.06 + pulse * 0.03) + ")");
+    bg.addColorStop(0.36, "rgba(214, 59, 52, " + (0.06 + pulse * 0.025) + ")");
+    bg.addColorStop(0.72, "rgba(8, 10, 16, 0.02)");
+    bg.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.save();
+    ctx.translate(cx, cyBase + scale * 0.70);
+    ctx.scale(1, 0.36);
+    const shadow = ctx.createRadialGradient(0, 0, 0, 0, 0, scale * 1.02);
+    shadow.addColorStop(0, "rgba(0,0,0," + (0.26 + dissolve * 0.02) + ")");
+    shadow.addColorStop(0.45, "rgba(0,0,0," + (0.16 + dissolve * 0.02) + ")");
+    shadow.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = shadow;
+    ctx.beginPath();
+    ctx.arc(0, 0, scale * 0.98, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawParticles(now) {
+    const drawList = [];
+    const swirlBase = now * 0.0012;
+
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      const localDissolve = Math.max(0, Math.min(1, (dissolve - p.delay * 0.17) / 0.83));
+      const d = easeInOutCubic(localDissolve);
+
+      let x = p.x;
+      let y = p.y;
+      let z = p.z;
+
+      if (d > 0.0001) {
+        const swirlA = swirlBase * p.swirl + p.seed;
+        const scatter = d;
+        const swirlHold = cycleActive ? smoothstep(0.7, 1.6, (now - cycleStart) / 1000) : 0;
+        const emberCurl = 0.12 + 0.22 * swirlHold;
+
+        x += p.spreadX * scatter + Math.cos(swirlA) * emberCurl * scatter * 0.52;
+        y += p.spreadY * scatter + Math.sin(swirlA * 0.85) * emberCurl * scatter * 0.36 + p.lift * scatter;
+        z += p.spreadZ * scatter + Math.sin(swirlA * 1.35) * emberCurl * scatter * 0.9;
+      }
+
+      const pr = project(x, y, z, rotationY, rotationX);
+      const alpha = p.color.a * (0.46 + pr.p * 1.05) * (1 - d * 0.12);
+      const radius = p.size * pr.p * DPR * (1 + d * 0.55);
+
+      drawList.push({
+        x: pr.x,
+        y: pr.y,
+        z: pr.z,
+        r: radius,
+        alpha,
+        glow: p.glow,
+        color: p.color
+      });
+    }
+
+    drawList.sort((a, b) => a.z - b.z);
+
+    for (let i = 0; i < drawList.length; i++) {
+      const p = drawList[i];
+      const outer = p.r * (2.5 + p.glow * 1.2);
+      const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, outer);
+      grad.addColorStop(0, "rgba(" + p.color.r + "," + p.color.g + "," + p.color.b + "," + Math.min(1, p.alpha * 0.95) + ")");
+      grad.addColorStop(0.25, "rgba(" + Math.min(255, p.color.r + 55) + "," + Math.min(255, p.color.g + 28) + "," + Math.min(255, p.color.b + 18) + "," + (p.alpha * 0.32) + ")");
+      grad.addColorStop(1, "rgba(" + p.color.r + "," + p.color.g + "," + p.color.b + ",0)");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, outer, 0, TAU);
+      ctx.fill();
+
+      ctx.fillStyle = "rgba(" + p.color.r + "," + p.color.g + "," + p.color.b + "," + Math.min(1, p.alpha) + ")";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, Math.max(0.6, p.r), 0, TAU);
+      ctx.fill();
+    }
+  }
+
+  function drawOrbiters(now) {
+    if (!orbiters.length || dissolve > 0.7) return;
+
+    for (let i = 0; i < orbiters.length; i++) {
+      const o = orbiters[i];
+      o.angle += o.speed;
+      const orbitLift = Math.sin(now * 0.0012 + o.phase) * 0.02;
+      const x = Math.cos(o.angle) * o.radius;
+      const z = Math.sin(o.angle) * o.radius * 0.75;
+      const y = o.y + orbitLift;
+
+      const pr = project(x, y, z, rotationY, rotationX);
+      const trail = trails[i];
+      trail.push({ x: pr.x, y: pr.y, a: o.alpha * (1 - dissolve) });
+      if (trail.length > 12) trail.shift();
+
+      for (let j = 1; j < trail.length; j++) {
+        const a = trail[j - 1];
+        const b = trail[j];
+        ctx.strokeStyle = "rgba(255,120,96," + ((j / trail.length) * 0.12 * (1 - dissolve)) + ")";
+        ctx.lineWidth = Math.max(1, DPR * 0.9 * (j / trail.length));
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+      }
+
+      const glowR = o.size * DPR * 4.2;
+      const grad = ctx.createRadialGradient(pr.x, pr.y, 0, pr.x, pr.y, glowR);
+      grad.addColorStop(0, "rgba(255,145,118," + (o.alpha * 0.95 * (1 - dissolve)) + ")");
+      grad.addColorStop(0.45, "rgba(255,120,92," + (o.alpha * 0.28 * (1 - dissolve)) + ")");
+      grad.addColorStop(1, "rgba(255,120,92,0)");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(pr.x, pr.y, glowR, 0, TAU);
+      ctx.fill();
+
+      ctx.fillStyle = "rgba(255,182,160," + (0.82 * (1 - dissolve)) + ")";
+      ctx.beginPath();
+      ctx.arc(pr.x, pr.y, o.size * DPR, 0, TAU);
+      ctx.fill();
+    }
+  }
+
+  function render(now) {
+    const dt = Math.min(32, now - lastTime);
+    lastTime = now;
+
+    updateCycle(now);
+    rotationY += spin * (dt / 16.6667);
+    if (!reduceMotion) {
+      rotationX = -0.17 + Math.sin(now * 0.00042) * 0.025;
+    }
+
+    cyBase = height * 0.49;
+
+    ctx.clearRect(0, 0, width, height);
+    drawBackground(now);
+    drawParticles(now);
+    drawOrbiters(now);
+
+    requestAnimationFrame(render);
+  }
+
+  function init() {
+    resize();
+    generateTargets();
+
+    const stage = canvas.parentElement;
+    if (!reduceMotion) {
+      stage.addEventListener("pointerenter", () => triggerCycle(performance.now()));
+      stage.addEventListener("pointerdown", () => triggerCycle(performance.now()), { passive: true });
+    }
+
+    window.addEventListener("resize", resize);
+    requestAnimationFrame(render);
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>
