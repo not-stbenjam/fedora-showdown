@@ -842,7 +842,9 @@ And respect reduced motion. Return only the finished HTML file.</div>
       if (i < 4) gridVisible.add(i);
     }
 
-    selectTab(0);
+    const hashModel = location.hash.slice(1);
+    const hashIdx = hashModel ? MODELS.findIndex(m => m.id === hashModel) : -1;
+    selectTab(hashIdx >= 0 ? hashIdx : 0);
     setMode("single");
   }
 
@@ -864,6 +866,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
 
   function selectTab(idx) {
     activeIdx = idx;
+    history.replaceState(null, "", "#" + MODELS[idx].id);
     updateTabStyles();
     applyVisibility();
   }
