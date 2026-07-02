@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Red Hat Fedora</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg-deep:#0a0a0f;
+  --bg-mid:#111118;
+  --fg:#e8e8ec;
+  --muted:#6b6b7a;
+  --accent:#e63946;
+  --accent-glow:rgba(230,57,70,0.15);
+}
+html,body{
+  width:100%;height:100%;
+  overflow:hidden;
+  background:var(--bg-deep);
+  font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+  color:var(--fg);
+}
+.scene{
+  position:fixed;inset:0;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  perspective:1200px;
+  background:radial-gradient(ellipse 80% 60% at 50% 70%,#1a1a2e 0%,var(--bg-deep) 60%,#08080c 100%);
+}
+.scene::before{
+  content:'';position:absolute;inset:0;
+  background:radial-gradient(circle at 30% 40%,rgba(230,57,70,0.04) 0%,transparent 50%),
+              radial-gradient(circle at 70% 60%,rgba(200,180,220,0.03) 0%,transparent 40%);
+  pointer-events:none;
+}
+.stage{
+  position:relative;
+  width:280px;height:280px;
+  display:flex;align-items:center;justify-content:center;
+  transform-style:preserve-3d;
+  transition:transform 0.8s cubic-bezier(0.2,0.8,0.2,1);
+}
+.hat-group{
+  position:relative;
+  width:180px;height:200px;
+  transform-style:preserve-3d;
+  transform:translateZ(0);
+}
+.hat-body{
+  position:absolute;
+  left:50%;top:50%;
+  transform-style:preserve-3d;
+}
+.crown{
+  position:absolute;
+  width:80px;height:65px;
+  left:-40px;top:-55px;
+  transform-style:preserve-3d;
+  border-radius:50% 50% 40% 40%;
+  background:linear-gradient(145deg,#2a2a3a 0%,#1a1a25 50%,#0f0f16 100%);
+  box-shadow:
+    0 8px 30px rgba(0,0,0,0.6),
+    inset 0 2px 8px rgba(255,255,255,0.06),
+    inset 0 -2px 6px rgba(0,0,0,0.4);
+}
+.crown::before{
+  content:'';position:absolute;
+  inset:-2px;
+  border-radius:50% 50% 40% 40%;
+  background:linear-gradient(180deg,rgba(230,57,70,0.12) 0%,transparent 30%);
+  pointer-events:none;
+}
+.hat-top-band{
+  position:absolute;
+  width:90px;height:12px;
+  left:-45px;top:-60px;
+  background:linear-gradient(90deg,#c41e3a 0%,#e63946 50%,#c41e3a 100%);
+  border-radius:50%;
+  box-shadow:0 2px 10px rgba(230,57,70,0.4),inset 0 1px 2px rgba(255,255,255,0.3);
+  transform:translateZ(8px);
+}
+.hat-top-band::before{
+  content:'';position:absolute;
+  inset:2px;
+  border-radius:50%;
+  background:linear-gradient(90deg,#d43046 0%,#ff4d5f 50%,#d43046 100%);
+  box-shadow:inset 0 1px 3px rgba(255,255,255,0.2);
+}
+.brim{
+  position:absolute;
+  width:150px;height:32px;
+  left:-75px;top:12px;
+  transform-style:preserve-3d;
+  transform:rotateX(85deg);
+}
+.brim-top{
+  position:absolute;inset:0;
+  border-radius:50%;
+  background:linear-gradient(180deg,#3a3a4a 0%,#22222e 50%,#15151f 100%);
+  box-shadow:
+    0 4px 20px rgba(0,0,0,0.5),
+    inset 0 2px 6px rgba(255,255,255,0.04);
+}
+.brim-underside{
+  position:absolute;inset:0;
+  border-radius:50%;
+  background:#0f0f15;
+  transform:translateZ(-4px);
+  box-shadow:0 -2px 12px rgba(0,0,0,0.4);
+}
+.brim-edge{
+  position:absolute;
+  width:150px;height:8px;
+  left:0;top:0;
+  transform-origin:center;
+  transform:rotateX(-90deg);
+  border-radius:50%;
+  background:linear-gradient(180deg,#2a2a38 0%,#181822 100%);
+}
+.hat-body-main{
+  position:absolute;
+  width:64px;height:85px;
+  left:-32px;top:-18px;
+  background:linear-gradient(180deg,#252532 0%,#181822 100%);
+  border-radius:8px 8px 4px 4px;
+  box-shadow:
+    0 6px 25px rgba(0,0,0,0.5),
+    inset 0 2px 6px rgba(255,255,255,0.04);
+}
+.hat-body-main::after{
+  content:'';position:absolute;
+  bottom:-6px;left:0;right:0;height:8px;
+  background:linear-gradient(180deg,#181822 0%,#0f0f15 100%);
+  border-radius:0 0 4px 4px;
+}
+.hat-band{
+  position:absolute;
+  width:74px;height:14px;
+  left:-37px;top:-4px;
+  background:linear-gradient(90deg,#b22234 0%,#e63946 50%,#b22234 100%);
+  border-radius:50%;
+  box-shadow:0 2px 8px rgba(230,57,70,0.3);
+}
+.hat-band-detail{
+  position:absolute;
+  width:70px;height:8px;
+  left:-35px;top:-2px;
+  background:linear-gradient(90deg,#c41e3a 0%,#ff4d5f 50%,#c41e3a 100%);
+  border-radius:50%;
+  box-shadow:inset 0 1px 3px rgba(255,255,255,0.2);
+}
+.sparkle{
+  position:absolute;
+  width:4px;height:4px;
+  border-radius:50%;
+  background:#fff;
+  opacity:0.6;
+  filter:blur(0.5px);
+  animation:sparkleFloat 3s ease-in-out infinite;
+}
+@keyframes sparkleFloat{
+  0%,100%{opacity:0.3;transform:translateY(0) scale(1)}
+  50%{opacity:0.8;transform:translateY(-10px) scale(1.3)}
+}
+.caption{
+  margin-top:140px;
+  font-size:13px;
+  color:var(--muted);
+  letter-spacing:0.12em;
+  text-transform:uppercase;
+  opacity:0.7;
+  transition:opacity 0.4s;
+  white-space:nowrap;
+  z-index:10;
+}
+.scene:hover .caption,.scene:focus-within .caption{opacity:0.4}
+canvas#particles{
+  position:fixed;inset:0;
+  pointer-events:none;
+  z-index:20;
+}
+@media(prefers-reduced-motion:reduce){
+  .hat-group{animation:none!important;transform:rotateY(0)!important}
+  .sparkle{animation:none!important}
+  .stage{transition:none!important}
+}
+</style>
+</head>
+<body>
+<div class="scene" id="scene" role="img" aria-label="Red Hat Fedora spinning in 3D">
+  <div class="stage" id="stage">
+    <div class="hat-group" id="hatGroup">
+      <div class="hat-body">
+        <div class="hat-top-band"></div>
+        <div class="hat-band"></div>
+        <div class="hat-band-detail"></div>
+        <div class="crown"></div>
+        <div class="hat-body-main"></div>
+        <div class="brim">
+          <div class="brim-edge"></div>
+          <div class="brim-top"></div>
+          <div class="brim-underside"></div>
+        </div>
+        <div class="sparkle" style="left:10px;top:-45px;animation-delay:0s"></div>
+        <div class="sparkle" style="left:25px;top:-50px;animation-delay:1s"></div>
+        <div class="sparkle" style="left:-15px;top:-52px;animation-delay:2s"></div>
+      </div>
+    </div>
+  </div>
+  <div class="caption">Red Hat</div>
+</div>
+<canvas id="particles"></canvas>
+
+<script>
+(function(){
+'use strict';
+const scene=document.getElementById('scene');
+const stage=document.getElementById('stage');
+const hatGroup=document.getElementById('hatGroup');
+const canvas=document.getElementById('particles');
+const ctx=canvas.getContext('2d');
+
+let W=0,H=0;
+let prefersReduced=false;
+let animating=false;
+let phase='idle'; // idle, dissolve, swirl, reform
+let progress=0;
+let startTime=0;
+const DURATION=2500;
+
+const particles=[];
+const ORBIT_COUNT=6;
+const orbiters=[];
+
+function resize(){
+  W=window.innerWidth;
+  H=window.innerHeight;
+  canvas.width=W;
+  canvas.height=H;
+}
+resize();
+window.addEventListener('resize',resize);
+
+const mediaQuery=window.matchMedia('(prefers-reduced-motion:reduce)');
+function checkReduced(){
+  prefersReduced=mediaQuery.matches;
+}
+checkReduced();
+mediaQuery.addEventListener('change',checkReduced);
+
+function createParticles(){
+  particles.length=0;
+  const cx=W/2,cy=H/2-40;
+  const count=Math.min(2800,Math.floor(W*H/4000));
+  
+  for(let i=0;i<count;i++){
+    const angle=Math.random()*Math.PI*2;
+    const dist=Math.random()*60;
+    const x=cx+Math.cos(angle)*dist;
+    const y=cy+Math.sin(angle)*dist-15;
+    
+    const hue=10+Math.random()*20;
+    const sat=60+Math.random()*30;
+    const lum=50+Math.random()*30;
+    
+    particles.push({
+      x,y,
+      ox:x,oy:y,
+      vx:0,vy:0,
+      size:0.5+Math.random()*2.5,
+      hue,
+      sat,
+      lum,
+      alpha:0.3+Math.random()*0.5,
+      phaseOffset:Math.random()*Math.PI*2,
+      speedMult:0.6+Math.random()*0.8
+    });
+  }
+}
+
+function createOrbiters(){
+  orbiters.length=0;
+  const cx=W/2,cy=H/2-40;
+  for(let i=0;i<ORBIT_COUNT;i++){
+    orbiters.push({
+      cx,cy,
+      radius:25+Math.random()*40,
+      angle:(i/ORBIT_COUNT)*Math.PI*2,
+      speed:(0.005+Math.random()*0.01)*Math.random()<0.5?1:-1,
+      size:1+Math.random()*2,
+      hue:10+Math.random()*20,
+      sat:70+Math.random()*20,
+      lum:60+Math.random()*25,
+      alpha:0.2+Math.random()*0.3
+    });
+  }
+}
+
+function triggerAnimation(){
+  if(prefersReduced)return;
+  if(animating)return;
+  animating=true;
+  phase='dissolve';
+  progress=0;
+  startTime=performance.now();
+  createParticles();
+  createOrbiters();
+}
+
+function resetAnimation(){
+  animating=false;
+  phase='idle';
+  progress=0;
+  particles.length=0;
+  orbiters.length=0;
+}
+
+// Mouse/touch interaction
+let interactionActive=false;
+let interactionTimeout=null;
+
+function startInteraction(){
+  if(prefersReduced)return;
+  interactionActive=true;
+  clearTimeout(interactionTimeout);
+  hatGroup.style.transition='transform 1.5s cubic-bezier(0.2,0.8,0.2,1)';
+  hatGroup.style.transform='rotateY(0deg) rotateX(0deg)';
+  
+  stage.style.transition='transform 1.5s cubic-bezier(0.2,0.8,0.2,1)';
+  stage.style.transform='rotateY(0deg)';
+  
+  triggerAnimation();
+}
+
+function endInteraction(){
+  if(prefersReduced)return;
+  interactionActive=false;
+  interactionTimeout=setTimeout(()=>{
+    if(!interactionActive&&phase==='reform'){
+      hatGroup.style.transition='transform 2s cubic-bezier(0.4,0,0.2,1)';
+      stage.style.transition='transform 2s cubic-bezier(0.4,0,0.2,1)';
+    }
+  },1000);
+}
+
+scene.addEventListener('mouseenter',startInteraction);
+scene.addEventListener('mouseleave',endInteraction);
+scene.addEventListener('touchstart',startInteraction,{passive:true});
+scene.addEventListener('touchend',endInteraction,{passive:true});
+
+// Continuous spin when idle
+function spinHat(t){
+  if(prefersReduced||phase!=='idle'||interactionActive)return;
+  const rotY=(t*0.04)%360;
+  const rotX=Math.sin(t*0.001)*5;
+  hatGroup.style.transform=`rotateY(${rotY}deg) rotateX(${rotX}deg)`;
+  stage.style.transform=`rotateY(${-rotY*0.15}deg)`;
+}
+
+// Render particles
+function renderParticles(p){
+  ctx.clearRect(0,0,W,H);
+  
+  // Soft background glow
+  const grad=ctx.createRadialGradient(W/2,H/2-40,0,W/2,H/2-40,200);
+  grad.addColorStop(0,'rgba(230,57,70,0.03)');
+  grad.addColorStop(1,'transparent');
+  ctx.fillStyle=grad;
+  ctx.fillRect(0,0,W,H);
+  
+  // Render orbiters
+  for(const o of orbiters){
+    o.angle+=o.speed*0.02*p;
+    const x=o.cx+Math.cos(o.angle)*o.radius;
+    const y=o.cy+Math.sin(o.angle)*o.radius*0.6;
+    
+    const g=ctx.createRadialGradient(x,y,0,x,y,o.size*2);
+    g.addColorStop(0,`hsla(${o.hue},${o.sat}%,${o.lum}%,${o.alpha})`);
+    g.addColorStop(1,'transparent');
+    ctx.fillStyle=g;
+    ctx.beginPath();
+    ctx.arc(x,y,o.size*2,0,Math.PI*2);
+    ctx.fill();
+  }
+  
+  // Render particles
+  for(const pt of particles){
+    let tx=pt.ox,ty=pt.oy;
+    let targetRadius=0;
+    
+    if(phase==='dissolve'){
+      targetRadius=60+Math.sin(progress*Math.PI+pt.phaseOffset)*40;
+      const outwardAngle=pt.phaseOffset;
+      tx=W/2+Math.cos(outwardAngle)*targetRadius;
+      ty=H/2-40+Math.sin(outwardAngle)*targetRadius-20;
+      tx+=(Math.random()-0.5)*20*p;
+      ty+=(Math.random()-0.5)*20*p;
+    }
+    else if(phase==='swirl'){
+      const swirlAngle=pt.phaseOffset+progress*Math.PI*3;
+      const swirlRadius=80-Math.sin(progress*Math.PI)*40;
+      tx=W/2+Math.cos(swirlAngle)*swirlRadius;
+      ty=H/2-40+Math.sin(swirlAngle)*swirlRadius*0.5-10;
+      tx+=(Math.random()-0.5)*15;
+      ty+=(Math.random()-0.5)*15;
+    }
+    else if(phase==='reform'){
+      targetRadius=90*(1-Math.sin(progress*Math.PI));
+      const reformAngle=pt.phaseOffset;
+      tx=W/2+Math.cos(reformAngle)*(targetRadius*0.3);
+      ty=H/2-40+Math.sin(reformAngle)*(targetRadius*0.15)+Math.sin(progress*Math.PI)*80;
+      
+      // Pull back to original
+      const pull=Math.sin(progress*Math.PI);
+      tx=pt.ox+(tx-pt.ox)*(1-pull);
+      ty=pt.oy+(ty-pt.oy)*(1-pull)+Math.sin(progress*Math.PI)*80*(1-pull);
+    }
+    
+    let alpha=pt.alpha;
+    let size=pt.size;
+    
+    if(phase==='dissolve'){
+      alpha=pt.alpha*Math.min(1,progress*2);
+      size=pt.size*(0.5+progress*0.5);
+    }
+    else if(phase==='swirl'){
+      alpha=pt.alpha;
+    }
+    else if(phase==='reform'){
+      const reformProgress=Math.sin(progress*Math.PI);
+      alpha=pt.alpha*(1-reformProgress);
+      size=pt.size*(1-reformProgress*0.5);
+    }
+    
+    if(alpha<0.01)continue;
+    
+    const g=ctx.createRadialGradient(tx,ty,0,tx,ty,size*2);
+    g.addColorStop(0,`hsla(${pt.hue},${pt.sat}%,${pt.lum}%,${alpha})`);
+    g.addColorStop(1,'transparent');
+    ctx.fillStyle=g;
+    ctx.beginPath();
+    ctx.arc(tx,ty,size*2,0,Math.PI*2);
+    ctx.fill();
+  }
+}
+
+// Animation loop
+function animate(time){
+  if(!prefersReduced){
+    spinHat(time);
+  }
+  
+  if(phase!=='idle'){
+    const elapsed=time-startTime;
+    progress=Math.min(1,elapsed/DURATION);
+    
+    // Easing
+    const ease=s=>s<0.5?4*s*s*s:(s-1)*(2*s-2)*(2*s-2)+1;
+    const ep=ease(progress);
+    
+    if(phase==='dissolve'&&progress>=0.4){
+      phase='swirl';
+      progress=0;
+      startTime=time;
+    }
+    else if(phase==='swirl'&&progress>=0.7){
+      phase='reform';
+      progress=0;
+      startTime=time;
+    }
+    else if(phase==='reform'&&progress>=0.95){
+      resetAnimation();
+      // Restore spin
+      if(!prefersReduced){
+        hatGroup.style.transition='transform 2s cubic-bezier(0.4,0,0.2,1)';
+        stage.style.transition='transform 2s cubic-bezier(0.4,0,0.2,1)';
+      }
+    }
+    
+    renderParticles(ep);
+  }
+  
+  requestAnimationFrame(animate);
+}
+
+requestAnimationFrame(animate);
+
+// Initial spin setup
+if(!prefersReduced){
+  spinHat(0);
+  // Start with a subtle continuous rotation
+  let t=0;
+  function spinLoop(now){
+    if(prefersReduced||phase!=='idle'||interactionActive){
+      requestAnimationFrame(spinLoop);
+      return;
+    }
+    spinHat(now);
+    requestAnimationFrame(spinLoop);
+  }
+  requestAnimationFrame(spinLoop);
+}
+
+})();
+</script>
+</body>
+</html>
