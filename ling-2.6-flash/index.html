@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Fedora Spin</title>
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      height: 100%;
+      background: #0a0a1a;
+      color: #e0e0e0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      overflow: hidden;
+    }
+
+    .scene {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      perspective: 1200px;
+      perspective-origin: 50% 40%;
+      background: radial-gradient(1200px 800px at 50% 60%, #1a1a3a 0%, #0a0a1a 60%, #050510 100%);
+    }
+
+    .hat-wrapper {
+      position: relative;
+      width: 300px;
+      height: 260px;
+      transform-style: preserve-3d;
+      transition: transform 0.8s cubic-bezier(0.2, 0, 0.1, 1);
+      will-change: transform;
+    }
+
+    .scene:hover .hat-wrapper,
+    .scene.touched .hat-wrapper {
+      transform: rotateY(0deg) rotateX(0deg) scale(1.05);
+    }
+
+    .scene.paused .hat-wrapper {
+      animation-play-state: paused;
+    }
+
+    .scene.paused .particles-canvas,
+    .scene.paused .orbiting-particles canvas {
+      animation-play-state: paused;
+    }
+
+    .hat-base {
+      position: absolute;
+      inset: 0;
+      transform-style: preserve-3d;
+      transform: translateZ(0);
+    }
+
+    .hat-crown {
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 160px;
+      height: 160px;
+      transform-style: preserve-3d;
+      transform: translateZ(30px) rotateX(75deg);
+    }
+
+    .hat-band {
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 220px;
+      height: 28px;
+      background: #e60018;
+      border-radius: 14px 14px 10px 10px;
+      transform-origin: bottom center;
+      transform: translateZ(40px) rotateX(90deg);
+      box-shadow:
+        0 2px 8px rgba(0,0,0,0.6),
+        inset 0 1px 0 rgba(255,255,255,0.12);
+    }
+
+    .hat-band::before {
+      content: '';
+      position: absolute;
+      top: 5px;
+      left: 12%;
+      width: 76%;
+      height: 14px;
+      background: linear-gradient(to bottom, #2a0a10, #1a0608);
+      border-radius: 8px;
+      transform: skewY(-6deg);
+      filter: brightness(0.85);
+      box-shadow:
+        inset 0 1px 3px rgba(255,255,255,0.1),
+        0 1px 2px rgba(0,0,0,0.5);
+    }
+
+    .hat-crown-face {
+      position: absolute;
+      inset: 0;
+      border-radius: 50% 50% 48% 48%;
+      background:
+        radial-gradient(ellipse at 35% 30%, rgba(255,255,255,0.18) 0%, transparent 55%),
+        radial-gradient(ellipse at 65% 25%, rgba(255,255,255,0.1) 0%, transparent 45%),
+        radial-gradient(ellipse at 50% 50%, rgba(255,255,255,0.22) 0%, transparent 50%),
+        radial-gradient(ellipse at 20% 70%, rgba(0,0,0,0.5) 0%, transparent 40%),
+        radial-gradient(ellipse at 80% 70%, rgba(0,0,0,0.4) 0%, transparent 45%),
+        linear-gradient(180deg, #b80018 0%, #9a0014 40%, #7a0010 75%, #5a000d 100%);
+      transform: translateZ(2px);
+      box-shadow:
+        inset 0 0 25px rgba(0,0,0,0.6),
+        inset 0 0 6px rgba(255,255,255,0.03),
+        0 4px 16px rgba(0,0,0,0.7),
+        0 1px 0 rgba(255,255,255,0.08);
+    }
+
+    .hat-crown-edge {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      border-radius: 50% 50% 48% 48%;
+      background:
+        radial-gradient(ellipse at 50% 40%, rgba(255,100,20,0.15) 0%, transparent 60%),
+        radial-gradient(ellipse at 30% 80%, rgba(255,200,220,0.08) 0%, transparent 45%),
+        radial-gradient(ellipse at 70% 80%, rgba(255,200,220,0.06) 0%, transparent 45%),
+        radial-gradient(ellipse at 50% 0%, rgba(255,50,20,0.1) 0%, transparent 55%),
+        repeating-conic-gradient(from 0deg, #8b0015 0deg 2.5deg, transparent 2.5deg 5deg) 50% 50% / 16px 16px,
+        linear-gradient(180deg, rgba(255,255,255,0.03) 0%, transparent 40%),
+        linear-gradient(90deg, rgba(255,255,255,0.02) 0%, transparent 40%);
+      mix-blend: overlay;
+      transform: translateZ(8px);
+    }
+
+    .hat-rim {
+      position: absolute;
+      bottom: -8px;
+      left: 50%;
+      transform: translateX(-50%) translateZ(42px) rotateX(90deg);
+      width: 230px;
+      height: 16px;
+      background:
+        radial-gradient(ellipse at 50% 40%, rgba(255,255,255,0.15) 0%, transparent 50%),
+        linear-gradient(180deg, #c0392b 0%, #a5281b 40%, #7a1f15 70%, #4a0f0a 100%);
+      border-radius: 8px 8px 4px 4px;
+      box-shadow:
+        0 3px 10px rgba(0,0,0,0.7),
+        inset 0 1px 2px rgba(255,255,255,0.12);
+      filter: brightness(0.95);
+    }
+
+    .hat-rim-highlight {
+      position: absolute;
+      top: 3px;
+      left: 5%;
+      width: 20%;
+      height: 40%;
+      background: linear-gradient(to right, rgba(255,255,255,0.06) 0%, transparent 100%);
+      border-radius: 50%;
+      transform: rotateY(30deg);
+    }
+
+    .caption {
+      margin-top: 240px;
+      font-size: 14px;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      opacity: 0.55;
+      color: #b0b0c0;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.4);
+      user-select: none;
+      animation: caption-fade 4s ease-in-out infinite;
+    }
+
+    @keyframes caption-fade {
+      0%, 100% { opacity: 0.4; letter-spacing: 3.5px; }
+      50% { opacity: 0.65; letter-spacing: 4.5px; }
+    }
+
+    .particles-canvas,
+    .orbiting-particles canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .orbiting-particles {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 300px;
+      height: 260px;
+      transform: translate(-50%, -50%);
+    }
+  </style>
+</head>
+<body>
+  <div class="scene" id="scene">
+    <div class="hat-wrapper" id="hatWrapper">
+      <svg class="hat-base" viewBox="0 0 220 260" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+          <linearGradient id="bandGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#ff2a4d"/>
+            <stop offset="100%" stop-color="#9a0014"/>
+          </linearGradient>
+          <linearGradient id="crownGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#d60035"/>
+            <stop offset="100%" stop-color="#7a0010"/>
+          </linearGradient>
+          <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="2" result="blur"/>
+            <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+          </filter>
+        </defs>
+        <g filter="url(#softGlow)">
+          <ellipse cx="110" cy="185" rx="100" ry="12" fill="url(#bandGrad)"/>
+          <ellipse cx="110" cy="180" rx="90" ry="100" fill="url(#crownGrad)"/>
+          <ellipse cx="110" cy="40" rx="80" ry="12" fill="url(#crownGrad)"/>
+          <ellipse cx="110" cy="185" rx="100" ry="10" fill="url(#bandGrad)" opacity="0.7"/>
+          <ellipse cx="110" cy="60" rx="60" ry="8" fill="url(#crownGrad)" opacity="0.6"/>
+          <ellipse cx="110" cy="110" rx="75" ry="10" fill="url(#crownGrad)" opacity="0.5"/>
+          <ellipse cx="110" cy="150" rx="85" ry="10" fill="url(#crownGrad)" opacity="0.4"/>
+        </g>
+      </svg>
+      <div class="hat-crown">
+        <div class="hat-crown-face">
+          <div class="hat-crown-edge"></div>
+        </div>
+      </div>
+      <div class="hat-band">
+        <div class="hat-band-highlight"></div>
+      </div>
+      <div class="hat-rim">
+        <div class="hat-rim-highlight"></div>
+      </div>
+    </div>
+
+    <canvas class="particles-canvas" id="particlesCanvas" aria-hidden="true"></canvas>
+    <div class="orbiting-particles">
+      <canvas id="orbitingCanvas" aria-hidden="true"></canvas>
+    </div>
+
+    <div class="caption">Hover or tap to transform</div>
+  </div>
+
+  <script>
+    (function() {
+      const scene = document.getElementById('scene');
+      const wrapper = document.getElementById('hatWrapper');
+      const mainCanvas = document.getElementById('particlesCanvas');
+      const mainCtx = mainCanvas.getContext('2d');
+      const orbitingCanvas = document.getElementById('orbitingCanvas');
+      const orbitingCtx = orbitingCanvas.getContext('2d');
+
+      let dpr = Math.min(window.devicePixelRatio || 1, 2);
+      let W, H, OW, OH;
+      let particles = [];
+      let orbitingParticles = [];
+      let phase = 0;
+      let paused = false;
+      let hovered = false;
+      let touchActive = false;
+      let startTime = null;
+      let transitionProgress = 0;
+      let isTransforming = false;
+      let reassemblePhase = 0;
+
+      function resize() {
+        dpr = Math.min(window.devicePixelRatio || 1, 2);
+        W = window.innerWidth;
+        H = window.innerHeight;
+        mainCanvas.width = W * dpr;
+        mainCanvas.height = H * dpr;
+        mainCanvas.style.width = W + 'px';
+        mainCanvas.style.height = H + 'px';
+        mainCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        OW = W;
+        OH = H;
+        orbitingCanvas.width = OW * dpr;
+        orbitingCanvas.height = OH * dpr;
+        orbitingCanvas.style.width = OW + 'px';
+        orbitingCanvas.style.height = OH + 'px';
+        orbitingCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        centerX = W / 2;
+        centerY = H / 2;
+      }
+
+      let centerX, centerY;
+      resize();
+      window.addEventListener('resize', resize);
+
+      const isReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      function createParticles() {
+        particles = [];
+        const count = Math.floor((W + H) * 0.006);
+        for (let i = 0; i < count; i++) {
+          particles.push({
+            x: centerX + (Math.random() - 0.5) * 200,
+            y: centerY + (Math.random() - 0.5) * 200,
+            size: Math.random() * 3 + 0.5,
+            hue: Math.random() > 0.7 ? 40 : 0,
+            saturation: 90,
+            baseLightness: Math.random() * 20 + 15,
+            lightness: Math.random() * 10 + 8,
+            speed: Math.random() * 0.5 + 0.2,
+            angle: Math.random() * Math.PI * 2,
+            distance: Math.random() * 60 + 20,
+            orbitRadius: Math.random() * 40 + 15,
+            phase: Math.random() * Math.PI * 2,
+            trail: [],
+            trailLength: Math.floor(Math.random() * 6) + 3,
+            alpha: Math.random() * 0.3 + 0.1
+          });
+        }
+      }
+
+      function createOrbitingParticles() {
+        orbitingParticles = [];
+        const count = Math.floor((W + H) * 0.003);
+        for (let i = 0; i < count; i++) {
+          orbitingParticles.push({
+            x: centerX,
+            y: centerY,
+            size: Math.random() * 2.5 + 0.5,
+            hue: 0,
+            saturation: 90,
+            lightness: Math.random() * 15 + 10,
+            speed: Math.random() * 0.02 + 0.005,
+            angle: Math.random() * Math.PI * 2,
+            radius: Math.random() * 100 + 60,
+            alpha: Math.random() * 0.25 + 0.05,
+            trail: []
+          });
+        }
+      }
+
+      function drawHat(ctx, x, y, progress) {
+        const s = progress;
+        ctx.save();
+        ctx.translate(x, y);
+
+        const bandScale = 1 + (1 - s) * 0.15;
+        const bandY = 55 * s;
+        const bandAlpha = s > 0.7 ? 1 - (s - 0.7) / 0.3 : 1;
+
+        // Band
+        ctx.save();
+        ctx.translate(0, bandY);
+        ctx.scale(1, s);
+        ctx.globalAlpha = bandAlpha;
+        ctx.fillStyle = s > 0.5 ? '#d60018' : '#b80018';
+        ctx.beginPath();
+        ctx.moveTo(-120, 0);
+        ctx.quadraticCurveTo(-130, -5 * s, -110, -15 * s);
+        ctx.lineTo(110, -15 * s);
+        ctx.quadraticCurveTo(130, -5 * s, 120, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.globalAlpha = 0.15;
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(-110, 1, 220, 3);
+        ctx.restore();
+
+        // Crown
+        ctx.save();
+        ctx.globalAlpha = s;
+        ctx.fillStyle = s > 0.5 ? '#d60018' : '#b80018';
+        ctx.beginPath();
+        ctx.moveTo(-95, -15 * s);
+        ctx.quadraticCurveTo(-105, -40 * s, -85 * s, -65 * s);
+        ctx.lineTo(85 * s, -65 * s);
+        ctx.quadraticCurveTo(105, -40 * s, 95, -15 * s);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+
+        // Gloss
+        ctx.save();
+        ctx.globalAlpha = 0.1 * s;
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.moveTo(-60, -40 * s);
+        ctx.quadraticCurveTo(-40, -50 * s, -10, -52 * s);
+        ctx.lineTo(10, -52 * s);
+        ctx.quadraticCurveTo(40, -50 * s, 60, -40 * s);
+        ctx.lineTo(50, -15 * s);
+        ctx.quadraticCurveTo(30, -25 * s, 10, -28 * s);
+        ctx.lineTo(-10, -28 * s);
+        ctx.quadraticCurveTo(-30, -25 * s, -50, -15 * s);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+
+        ctx.restore();
+      }
+
+      function drawOrbitingHat(ctx, x, y, progress) {
+        const s = Math.min(progress, 1);
+        if (s < 0.5) return;
+        const alpha = (s - 0.5) / 0.5;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        drawHat(ctx, x, y, (s - 0.5) / 0.5);
+        ctx.restore();
+      }
+
+      function drawMainParticle(ctx, p, frame, dt) {
+        const t = frame * dt;
+        const progress = Math.min(transitionProgress, 1);
+
+        if (progress >= 1) {
+          // Orbiting after reassembly
+          p.trail.unshift({ x: p.x, y: p.y });
+          if (p.trail.length > p.trailLength) p.trail.pop();
+          p.angle += p.speed * 0.5;
+          p.x = centerX + Math.cos(p.angle) * p.orbitRadius;
+          p.y = centerY + Math.sin(p.angle) * p.orbitRadius;
+
+          ctx.save();
+          ctx.globalAlpha = p.alpha * 0.7;
+          ctx.strokeStyle = `hsla(${p.hue}, ${p.saturation}%, ${p.lightness}%, ${p.alpha})`;
+          ctx.lineWidth = p.size;
+          ctx.beginPath();
+          ctx.moveTo(p.trail[0]?.x ?? p.x, p.trail[0]?.y ?? p.y);
+          for (let i = 1; i < p.trail.length; i++) {
+            ctx.lineTo(p.trail[i].x, p.trail[i].y);
+          }
+          ctx.stroke();
+          ctx.fillStyle = `hsla(${p.hue}, ${p.saturation}%, ${p.lightness}%, ${p.alpha})`;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size * 0.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        } else {
+          // Dissolve outward
+          const angle = Math.atan2(p.y - centerY, p.x - centerX);
+          const spread = progress * 200;
+          const tx = centerX + Math.cos(angle) * spread + (Math.random() - 0.5) * spread * 0.3;
+          const ty = centerY + Math.sin(angle) * spread + (Math.random() - 0.5) * spread * 0.3;
+          const trailAngle = angle + Math.PI;
+          p.trail.unshift({ x: tx, y: ty });
+          if (p.trail.length > p.trailLength) p.trail.pop();
+
+          ctx.save();
+          ctx.globalAlpha = p.alpha * (1 - progress);
+          ctx.strokeStyle = `hsla(${p.hue}, ${p.saturation}%, ${p.lightness}%, ${p.alpha * (1 - progress)})`;
+          ctx.lineWidth = p.size;
+          ctx.beginPath();
+          ctx.moveTo(p.trail[0]?.x ?? tx, p.trail[0]?.y ?? ty);
+          for (let i = 1; i < p.trail.length; i++) {
+            ctx.lineTo(p.trail[i].x, p.trail[i].y);
+          }
+          ctx.stroke();
+          ctx.fillStyle = `hsla(${p.hue}, ${p.saturation}%, ${p.lightness}%, ${p.alpha * (1 - progress)})`;
+          ctx.beginPath();
+          ctx.arc(tx, ty, p.size * (1 - progress * 0.5), 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+
+      function updateOrbitingParticle(p, frame, dt) {
+        if (transitionProgress < 1) {
+          p.angle -= p.speed * dt * 60;
+          p.x = centerX + Math.cos(p.angle) * p.radius * (1 - transitionProgress * 0.7);
+          p.y = centerY + Math.sin(p.angle) * p.radius * (1 - transitionProgress * 0.7);
+        } else {
+          p.angle -= p.speed * dt * 60;
+          p.x = centerX + Math.cos(p.angle) * p.radius;
+          p.y = centerY + Math.sin(p.angle) * p.radius;
+        }
+      }
+
+      function drawOrbitingParticle(ctx, p, frame, dt) {
+        if (transitionProgress >= 1) {
+          p.trail.unshift({ x: p.x, y: p.y });
+          if (p.trail.length > 5) p.trail.pop();
+
+          ctx.save();
+          ctx.globalAlpha = p.alpha * 0.5;
+          ctx.strokeStyle = `hsla(0, 0%, 100%, ${p.alpha * 0.3})`;
+          ctx.lineWidth = p.size;
+          ctx.beginPath();
+          ctx.moveTo(p.trail[0]?.x ?? p.x, p.trail[0]?.y ?? p.y);
+          for (let i = 1; i < p.trail.length; i++) {
+            ctx.lineTo(p.trail[i].x, p.trail[i].y);
+          }
+          ctx.stroke();
+          ctx.fillStyle = `hsla(0, 0%, 100%, ${p.alpha})`;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size * 0.6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+
+      function frame(timestamp) {
+        if (!startTime) startTime = timestamp;
+        const dt = (timestamp - startTime) / 1000;
+        startTime = timestamp;
+        const frameCount = dt * 60;
+
+        mainCtx.clearRect(0, 0, W, H);
+        orbitingCtx.clearRect(0, 0, OW, OH);
+
+        const progress = Math.min(transitionProgress, 1);
+        const easedProgress = 1 - Math.pow(1 - progress, 0.5);
+
+        const rotY = easedProgress * 180;
+        const rotX = easedProgress * 25;
+        const scale = 1 + easedProgress * 0.1;
+        const tx = easedProgress * 80;
+        const ty = easedProgress * 40;
+
+        wrapper.style.transform = `rotateY(${rotY}deg) rotateX(${rotX}deg) scale(${scale}) translateX(${tx}px) translateY(${ty}px)`;
+
+        if (progress < 1) {
+          drawHat(mainCtx, centerX, centerY, progress);
+        } else {
+          particles.forEach(p => drawMainParticle(mainCtx, p, frameCount, dt));
+          orbitingParticles.forEach(p => {
+            updateOrbitingParticle(p, frameCount, dt);
+            drawOrbitingParticle(orbitingCtx, p, frameCount, dt);
+          });
+        }
+
+        requestAnimationFrame(frame);
+      }
+
+      function triggerTransition() {
+        if (isTransforming) return;
+        isTransforming = true;
+        paused = true;
+        transitionProgress = 0;
+        startTime = null;
+
+        function animateTransition(ts) {
+          if (!startTime) startTime = ts;
+          const elapsed = (ts - startTime) / 1000;
+          transitionProgress = Math.min(elapsed / 2.5, 1);
+
+          if (transitionProgress < 1) {
+            requestAnimationFrame(animateTransition);
+          } else {
+            transitionProgress = 1;
+            paused = false;
+            isTransforming = false;
+            createOrbitingParticles();
+            startTime = null;
+          }
+          frame(ts);
+        }
+
+        requestAnimationFrame(animateTransition);
+      }
+
+      if (!isReducedMotion) {
+        scene.addEventListener('mouseenter', () => {
+          if (!paused && !isTransforming) triggerTransition();
+        });
+        scene.addEventListener('touchstart', (e) => {
+          e.preventDefault();
+          if (!paused && !isTransforming) {
+            touchActive = true;
+            triggerTransition();
+          }
+        }, { passive: false });
+      }
+
+      createParticles();
+      createOrbitingParticles();
+      requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>
