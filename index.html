@@ -592,6 +592,40 @@
     min-height: 0;
   }
 
+  .perf-warning {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    z-index: 5;
+  }
+  .perf-warning .perf-card {
+    max-width: 480px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 40px;
+    text-align: center;
+  }
+  .perf-warning .perf-icon { font-size: 48px; margin-bottom: 20px; }
+  .perf-warning h2 { font-size: 20px; font-weight: 700; margin-bottom: 12px; }
+  .perf-warning p { color: var(--muted); font-size: 14px; line-height: 1.7; margin-bottom: 24px; }
+  .perf-warning .perf-btn {
+    display: inline-block;
+    padding: 10px 28px;
+    background: var(--accent-dim);
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .perf-warning .perf-btn:hover { background: rgba(255, 90, 77, 0.24); }
+
   /* --- Mobile hamburger --- */
   .mobile-toggle {
     display: none;
@@ -797,9 +831,10 @@ And respect reduced motion. Return only the finished HTML file.</div>
     { id: "gpt-5.5",     name: "GPT-5.5",             group: "OpenAI", openrouterId: "openai/gpt-5.5", dateAdded: "1970-01-01" },
     { id: "gpt-5.4",     name: "GPT-5.4",             group: "OpenAI", openrouterId: "openai/gpt-5.4", dateAdded: "1970-01-01" },
     { id: "gpt-5.4-mini", name: "GPT-5.4 Mini",       group: "OpenAI", openrouterId: "openai/gpt-5.4-mini", dateAdded: "1970-01-01" },
-    { id: "codex-5.2", name: "Codex 5.2", group: "OpenAI", dateAdded: "2026-07-02" },
-    { id: "codex-5.1", name: "Codex 5.1", group: "OpenAI", dateAdded: "2026-07-02" },
+    { id: "codex-5.3", name: "Codex 5.3", group: "OpenAI", dateAdded: "1970-01-01" },
     { id: "gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark", group: "OpenAI", dateAdded: "1970-01-01" },
+    { id: "codex-5.2", name: "Codex 5.2", group: "OpenAI", dateAdded: "1970-01-01", perfWarning: true },
+    { id: "codex-5.1", name: "Codex 5.1", group: "OpenAI", dateAdded: "1970-01-01" },
     { id: "gpt-oss-120b", name: "GPT-OSS 120B",       group: "OpenAI", openrouterId: "openai/gpt-oss-120b", dateAdded: "1970-01-01" },
     { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash", group: "Google", openrouterId: "google/gemini-3.5-flash", dateAdded: "1970-01-01" },
     { id: "gemini-3.1-pro", name: "Gemini 3.1 Pro",    group: "Google", dateAdded: "1970-01-01" },
@@ -956,6 +991,21 @@ And respect reduced motion. Return only the finished HTML file.</div>
       hint.textContent = "Try hovering over the fedora";
       frame.appendChild(hint);
 
+      if (m.perfWarning) {
+        const warn = document.createElement("div");
+        warn.className = "perf-warning";
+        warn.innerHTML = '<div class="perf-card"><div class="perf-icon">&#9888;&#65039;</div>'
+          + '<h2>Performance Warning</h2>'
+          + '<p>This model\'s fedora is extremely resource-intensive and will likely freeze or crash your browser tab.</p>'
+          + '<button class="perf-btn">Load it anyway</button></div>';
+        warn.querySelector(".perf-btn").addEventListener("click", () => {
+          warn.remove();
+          const iframe = frame.querySelector("iframe");
+          if (!iframe.src) iframe.src = iframe.dataset.src;
+        });
+        frame.appendChild(warn);
+      }
+
       const iframe = document.createElement("iframe");
       iframe.dataset.src = url;
       iframe.loading = "lazy";
@@ -1050,7 +1100,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
       f.classList.toggle("visible", mode === "single" && show);
       f.classList.toggle("grid-visible", mode === "grid" && show);
       const iframe = f.querySelector("iframe");
-      if (show && !iframe.src) {
+      if (show && !iframe.src && !f.querySelector(".perf-warning")) {
         iframe.src = iframe.dataset.src;
       } else if (!show && iframe.src) {
         iframe.src = "";
