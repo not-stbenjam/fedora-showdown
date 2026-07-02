@@ -662,13 +662,31 @@
   letter-spacing: 0.04em;
   margin-left: 0.3em;
 }
-.new-badge {
-  color: #4ade80;
-  font-size: 0.6rem;
-  font-weight: 700;
+.sidebar .model-list button .btn-label {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.sidebar .model-list button .btn-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sidebar .model-list button .btn-provider {
+  font-size: 10px;
+  color: var(--muted);
+  opacity: 0.8;
   letter-spacing: 0.04em;
-  margin-left: 0.3em;
-  text-transform: uppercase;
+}
+.sidebar .model-list button .new-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #4ade80;
+  margin-left: 6px;
+  vertical-align: middle;
 }
 </style>
 </head>
@@ -785,7 +803,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
     { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro",    group: "Google", openrouterId: "google/gemini-2.5-pro", dateAdded: "1970-01-01" },
     { id: "gemma-4-31b", name: "Gemma 4 31B",         group: "Google", openrouterId: "google/gemma-4-31b-it", dateAdded: "1970-01-01" },
     { id: "gemma-4-26b", name: "Gemma 4 26B",         group: "Google", openrouterId: "google/gemma-4-26b-a4b-it", dateAdded: "1970-01-01" },
-    { id: "qwen3.7-plus", name: "Qwen3.7 Plus", group: "Alibaba", openrouterId: "qwen/qwen3.7-plus", dateAdded: "2026-07-02" },
+    { id: "qwen3.7-plus", name: "Qwen3.7 Plus", group: "Alibaba", openrouterId: "qwen/qwen3.7-plus", dateAdded: "1970-01-01" },
     { id: "qwen3-235b",  name: "Qwen3.7 Max",         group: "Alibaba", openrouterId: "qwen/qwen3-235b-a22b", dateAdded: "1970-01-01" },
     { id: "qwen3.6-35b-a3b", name: "Qwen3.6 35B A3B",  group: "Alibaba", openrouterId: "qwen/qwen3.6-35b-a3b", dateAdded: "1970-01-01" },
     { id: "qwen3.5-397b", name: "Qwen3.5 397B",        group: "Alibaba", openrouterId: "qwen/qwen3.5-397b-a17b", dateAdded: "1970-01-01" },
@@ -813,8 +831,8 @@ And respect reduced motion. Return only the finished HTML file.</div>
     { id: "grok-4.20",   name: "Grok 4.20",           group: "xAI", openrouterId: "x-ai/grok-4.20", dateAdded: "1970-01-01" },
     { id: "grok-4",      name: "Grok 4",              group: "xAI", dateAdded: "1970-01-01" },
     { id: "fugu-ultra",   name: "Fugu Ultra",           group: "Sakana", openrouterId: "sakana/fugu-ultra", dateAdded: "1970-01-01" },
-    { id: "glm-5.2-ultracode", name: "GLM-5.2 Ultracode", group: "Z.ai", dateAdded: "1970-01-01" },
-    { id: "glm-5.2",     name: "GLM-5.2",             group: "Z.ai", openrouterId: "z-ai/glm-5.2", dateAdded: "1970-01-01" },
+    { id: "glm-5.2-ultracode", name: "GLM-5.2 Ultracode", group: "Z.ai", dateAdded: "2026-07-01" },
+    { id: "glm-5.2",     name: "GLM-5.2",             group: "Z.ai", openrouterId: "z-ai/glm-5.2", dateAdded: "2026-07-01" },
     { id: "glm-5.1",     name: "GLM-5.1",             group: "Z.ai", openrouterId: "z-ai/glm-5.1", dateAdded: "1970-01-01" },
     { id: "glm-5-turbo", name: "GLM-5 Turbo",         group: "Z.ai", openrouterId: "z-ai/glm-5-turbo", dateAdded: "1970-01-01" },
     { id: "glm-5",       name: "GLM-5",               group: "Z.ai", openrouterId: "z-ai/glm-5", dateAdded: "1970-01-01" },
@@ -823,34 +841,61 @@ And respect reduced motion. Return only the finished HTML file.</div>
 
   const viewer = document.getElementById("viewer");
   const modelList = document.getElementById("model-list");
-  let activeIdx = 0;
+  let activeIdx = 0;   // model index of the selected model (drives hash + iframes)
+  let activePos = 0;   // sidebar position of the selected button (drives prev/next)
   let mode = "single";
   const frames = [];
-  const buttons = [];
+  // Sidebar buttons in visual order. New models appear twice — once under
+  // "New" and once under their provider group — so nav (prev/next, arrows)
+  // walks button positions, while hashes and frames always use the model id.
+  const navOrder = [];    // position -> model index
+  const navButtons = [];  // position -> button element
+  const headerAt = [];    // position -> group header element, if first under one
+  const sections = [];    // { header, positions } per sidebar group, for search filtering
   const gridVisible = new Set();
   let voteData = {};
   let gridCustomized = false;
 
   function init() {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const newModelIndices = new Set();
-    for (let i = 0; i < MODELS.length; i++) {
-      if (MODELS[i].dateAdded > thirtyDaysAgo) newModelIndices.add(i);
-    }
+    const isNew = MODELS.map(m => m.dateAdded > thirtyDaysAgo);
 
-    if (newModelIndices.size > 0) {
+    function addHeader(label) {
       const header = document.createElement("div");
       header.className = "group-header";
-      header.textContent = "New";
+      header.textContent = label;
       modelList.appendChild(header);
-      for (const i of newModelIndices) {
-        const m = MODELS[i];
-        const btn = document.createElement("button");
-        btn.innerHTML = '<span class="check"></span>' + m.name.replace('Ultracode', '<span class="ultracode-badge">Ultracode</span>') + '<span class="new-badge">NEW</span>';
-        btn.dataset.idx = i;
-        btn.addEventListener("click", () => handleTabClick(i));
-        modelList.appendChild(btn);
-      }
+      sections.push({ header, positions: [] });
+      headerAt[navOrder.length] = header;
+    }
+
+    function addButton(i, inNewSection) {
+      const m = MODELS[i];
+      const pos = navOrder.length;
+      navOrder.push(i);
+      const nameHtml = m.name.replace('Ultracode', '<span class="ultracode-badge">Ultracode</span>')
+        + (!inNewSection && isNew[i] ? '<span class="new-dot" title="Recently added"></span>' : '');
+      const btn = document.createElement("button");
+      btn.innerHTML = '<span class="check"></span><span class="btn-label"><span class="btn-name">' + nameHtml + '</span>'
+        + (inNewSection ? '<span class="btn-provider">' + m.group + '</span>' : '')
+        + '</span>';
+      btn.dataset.idx = i;
+      btn.addEventListener("click", () => handleTabClick(pos));
+      const avgBadge = document.createElement("span");
+      avgBadge.className = "avg-badge";
+      avgBadge.dataset.model = m.id;
+      btn.appendChild(avgBadge);
+      modelList.appendChild(btn);
+      navButtons[pos] = btn;
+      sections[sections.length - 1].positions.push(pos);
+    }
+
+    // New models get their own section at the top and still appear in their
+    // provider group below. Hash links use the model id either way, so they
+    // keep working after a model ages out of "New".
+    if (isNew.some(Boolean)) {
+      addHeader("New");
+      for (let i = 0; i < MODELS.length; i++) if (isNew[i]) addButton(i, true);
     }
 
     let lastGroup = null;
@@ -859,24 +904,10 @@ And respect reduced motion. Return only the finished HTML file.</div>
       const url = m.id + "/index.html";
 
       if (m.group !== lastGroup) {
-        const header = document.createElement("div");
-        header.className = "group-header";
-        header.textContent = m.group;
-        modelList.appendChild(header);
+        addHeader(m.group);
         lastGroup = m.group;
       }
-
-      const btn = document.createElement("button");
-      btn.innerHTML = '<span class="check"></span>' + m.name.replace('Ultracode', '<span class="ultracode-badge">Ultracode</span>') + (newModelIndices.has(i) ? '<span class="new-badge">NEW</span>' : '');
-      btn.dataset.idx = i;
-      btn.addEventListener("click", () => handleTabClick(i));
-      modelList.appendChild(btn);
-      buttons.push(btn);
-
-      const avgBadge = document.createElement("span");
-      avgBadge.className = "avg-badge";
-      avgBadge.dataset.model = m.id;
-      btn.appendChild(avgBadge);
+      addButton(i, false);
 
       const frame = document.createElement("div");
       frame.className = "frame";
@@ -927,23 +958,24 @@ And respect reduced motion. Return only the finished HTML file.</div>
       frame.appendChild(iframe);
 
       viewer.appendChild(frame);
-      frames.push(frame);
-
-      if (i < 4) gridVisible.add(i);
+      frames[i] = frame;
     }
 
+    for (const i of navOrder) if (gridVisible.size < 4) gridVisible.add(i);
+
     const hashModel = location.hash.slice(1);
-    let hashIdx = -1;
+    let hashPos = -1;
     if (hashModel === "grid") {
       selectTab(0);
       setMode("grid");
     } else {
-      hashIdx = hashModel ? MODELS.findIndex(m => m.id === hashModel) : -1;
-      selectTab(hashIdx >= 0 ? hashIdx : 0);
+      const hashIdx = hashModel ? MODELS.findIndex(m => m.id === hashModel) : -1;
+      if (hashIdx >= 0) hashPos = navOrder.indexOf(hashIdx);
+      selectTab(hashPos >= 0 ? hashPos : 0);
       setMode("single");
     }
-    if (hashIdx >= 0) requestAnimationFrame(() => {
-      const target = buttons[hashIdx];
+    if (hashPos >= 0) requestAnimationFrame(() => {
+      const target = navButtons[hashPos];
       const container = document.getElementById("model-list");
       const ct = container.getBoundingClientRect();
       const et = target.getBoundingClientRect();
@@ -953,7 +985,8 @@ And respect reduced motion. Return only the finished HTML file.</div>
     });
   }
 
-  function handleTabClick(idx) {
+  function handleTabClick(pos) {
+    const idx = navOrder[pos];
     if (mode === "grid") {
       gridCustomized = true;
       if (gridVisible.has(idx)) {
@@ -965,21 +998,22 @@ And respect reduced motion. Return only the finished HTML file.</div>
       applyVisibility();
       updateHint();
     } else {
-      selectTab(idx);
+      selectTab(pos);
       closeSidebar();
     }
   }
 
-  function selectTab(idx) {
-    activeIdx = idx;
-    history.replaceState(null, "", "#" + MODELS[idx].id);
+  function selectTab(pos) {
+    activePos = pos;
+    activeIdx = navOrder[pos];
+    history.replaceState(null, "", "#" + MODELS[activeIdx].id);
     updateTabStyles();
     applyVisibility();
+    const btn = navButtons[pos];
     const container = document.getElementById("model-list");
     const ct = container.getBoundingClientRect();
-    const bt = buttons[idx].getBoundingClientRect();
-    const isFirstInGroup = idx === 0 || MODELS[idx].group !== MODELS[idx - 1].group;
-    const header = isFirstInGroup ? buttons[idx].previousElementSibling : null;
+    const bt = btn.getBoundingClientRect();
+    const header = headerAt[pos];
     if (bt.bottom > ct.bottom) {
       container.scrollTop += bt.bottom - ct.bottom + 8;
     } else if (header) {
@@ -991,17 +1025,17 @@ And respect reduced motion. Return only the finished HTML file.</div>
   }
 
   function updateTabStyles() {
-    if (mode === "grid") {
-      buttons.forEach((b, i) => {
+    const allBtns = modelList.querySelectorAll("button[data-idx]");
+    allBtns.forEach(b => {
+      const i = parseInt(b.dataset.idx);
+      if (mode === "grid") {
         b.classList.toggle("active", gridVisible.has(i));
         b.querySelector(".check").textContent = gridVisible.has(i) ? "✓" : "";
-      });
-    } else {
-      buttons.forEach((b, i) => {
+      } else {
         b.classList.toggle("active", i === activeIdx);
         b.querySelector(".check").textContent = "";
-      });
-    }
+      }
+    });
   }
 
   function applyVisibility() {
@@ -1054,8 +1088,12 @@ And respect reduced motion. Return only the finished HTML file.</div>
   document.getElementById("btn-single").addEventListener("click", () => { setMode("single"); history.replaceState(null, "", "#" + MODELS[activeIdx].id); });
   document.getElementById("btn-grid").addEventListener("click", () => { setMode("grid"); history.replaceState(null, "", "#grid"); });
 
-  document.getElementById("nav-prev").addEventListener("click", () => selectTab((activeIdx - 1 + MODELS.length) % MODELS.length));
-  document.getElementById("nav-next").addEventListener("click", () => selectTab((activeIdx + 1) % MODELS.length));
+  function stepModel(delta) {
+    selectTab((activePos + delta + navOrder.length) % navOrder.length);
+  }
+
+  document.getElementById("nav-prev").addEventListener("click", () => stepModel(-1));
+  document.getElementById("nav-next").addEventListener("click", () => stepModel(1));
 
   const promptBackdrop = document.getElementById("prompt-backdrop");
   function togglePrompt() { promptBackdrop.classList.toggle("open"); }
@@ -1089,18 +1127,14 @@ And respect reduced motion. Return only the finished HTML file.</div>
 
   document.getElementById("model-search").addEventListener("input", (e) => {
     const q = e.target.value.toLowerCase();
-    const headers = modelList.querySelectorAll(".group-header");
-    buttons.forEach((btn, i) => {
-      const m = MODELS[i];
+    navButtons.forEach((btn, pos) => {
+      const m = MODELS[navOrder[pos]];
       const match = !q || m.name.toLowerCase().includes(q) || m.group.toLowerCase().includes(q);
       btn.style.display = match ? "" : "none";
     });
-    headers.forEach(h => {
-      const group = h.textContent.toLowerCase();
-      const hasVisible = Array.from(buttons).some((btn, i) =>
-        btn.style.display !== "none" && MODELS[i].group.toLowerCase() === group
-      );
-      h.style.display = hasVisible ? "" : "none";
+    sections.forEach(s => {
+      const hasVisible = s.positions.some(p => navButtons[p].style.display !== "none");
+      s.header.style.display = hasVisible ? "" : "none";
     });
   });
 
@@ -1112,10 +1146,10 @@ And respect reduced motion. Return only the finished HTML file.</div>
   document.addEventListener("keydown", (e) => {
     if (e.key === "ArrowRight" || e.key === "ArrowDown") {
       e.preventDefault();
-      selectTab((activeIdx + 1) % MODELS.length);
+      stepModel(1);
     } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
       e.preventDefault();
-      selectTab((activeIdx - 1 + MODELS.length) % MODELS.length);
+      stepModel(-1);
     } else if (e.key === "1") setMode("single");
     else if (e.key === "2") setMode("grid");
   });
@@ -1241,7 +1275,8 @@ And respect reduced motion. Return only the finished HTML file.</div>
       name.innerHTML = m.name + ' <span class="lb-group">' + m.group + "</span>";
       name.addEventListener("click", () => {
         const idx = MODELS.findIndex(x => x.id === m.id);
-        if (idx >= 0) { selectTab(idx); toggleLeaderboard(); }
+        const pos = navOrder.indexOf(idx);
+        if (pos >= 0) { selectTab(pos); toggleLeaderboard(); }
       });
 
       const stars = document.createElement("div");
