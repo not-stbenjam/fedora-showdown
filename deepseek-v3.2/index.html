@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fedora Logo — Elegant Particle Animation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #0a0a0e;
+            color: #ccc;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            position: relative;
+        }
+        .container {
+            text-align: center;
+            z-index: 2;
+            position: relative;
+        }
+        .scene {
+            width: 300px;
+            height: 300px;
+            perspective: 1000px;
+            margin: 0 auto 2rem;
+            position: relative;
+            cursor: pointer;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .scene {
+                perspective: 500px;
+            }
+        }
+        .hat-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            transform-style: preserve-3d;
+            transition: transform 0.3s ease-out;
+        }
+        .hat {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform-style: preserve-3d;
+            transform: translate3d(-50%, -50%, 0);
+            animation: spin 20s infinite linear;
+            animation-play-state: running;
+            opacity: 1;
+            transition: opacity 0.5s ease-out, animation-play-state 0.5s ease-out;
+        }
+        .hat-hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        .crown {
+            width: 120px;
+            height: 100px;
+            background: linear-gradient(to bottom, #b30000 0%, #8b0000 100%);
+            position: absolute;
+            border-radius: 50% 50% 40% 40%;
+            transform: translate3d(0, -50px, 0) rotateX(70deg);
+            box-shadow: 
+                inset 0 -10px 20px rgba(0,0,0,0.5),
+                0 5px 30px rgba(179, 0, 0, 0.7);
+        }
+        .brim {
+            width: 180px;
+            height: 25px;
+            background: linear-gradient(to bottom, #8b0000 0%, #660000 100%);
+            position: absolute;
+            border-radius: 50%;
+            transform: translate3d(0, 25px, 0);
+            box-shadow: 
+                0 10px 20px rgba(0,0,0,0.5),
+                inset 0 5px 10px rgba(255,255,255,0.05);
+        }
+        .caption {
+            margin-top: 2rem;
+            font-size: 1.1rem;
+            opacity: 0.8;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            font-weight: 300;
+        }
+        .particle-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.5s ease-out;
+        }
+        .particles-visible {
+            opacity: 1;
+        }
+        .glow {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 200px;
+            height: 200px;
+            transform: translate(-50%, -50%);
+            background: radial-gradient(circle, rgba(179, 0, 0, 0.2) 0%, transparent 70%);
+            filter: blur(20px);
+            z-index: -1;
+            opacity: 0.5;
+        }
+        .instructions {
+            margin-top: 1rem;
+            font-size: 0.9rem;
+            opacity: 0.6;
+            font-style: italic;
+        }
+        @media (max-width: 600px) {
+            .scene {
+                width: 250px;
+                height: 250px;
+            }
+            .crown {
+                width: 100px;
+                height: 80px;
+            }
+            .brim {
+                width: 160px;
+                height: 20px;
+            }
+        }
+        @keyframes spin {
+            from { transform: translate3d(-50%, -50%, 0) rotateY(0deg); }
+            to { transform: translate3d(-50%, -50%, 0) rotateY(360deg); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .hat-container {
+                animation: none !important;
+            }
+            .hat {
+                animation: none !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="scene" id="scene">
+            <canvas class="particle-canvas" id="canvas"></canvas>
+            <div class="glow"></div>
+            <div class="hat-container" id="hatContainer">
+                <div class="hat" id="hat">
+                    <div class="crown"></div>
+                    <div class="brim"></div>
+                </div>
+            </div>
+        </div>
+        <h1 class="caption">Fedora Logo</h1>
+        <p class="instructions">Hover or tap to see the particle effect</p>
+    </div>
+
+    <script>
+        (function() {
+            'use strict';
+
+            const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            const scene = document.getElementById('scene');
+            const hat = document.getElementById('hat');
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+
+            // Canvas setup
+            function resizeCanvas() {
+                const rect = scene.getBoundingClientRect();
+                canvas.width = rect.width;
+                canvas.height = rect.height;
+            }
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+
+            // Animation control
+            const hatAnimation = hat.style;
+            let animationSpeed = reducedMotion ? 0 : 1;
+            if (reducedMotion) {
+                hat.style.animation = 'none';
+                document.querySelector('.caption').textContent = 'Fedora Logo (Reduced Motion)';
+            }
+
+            // Particle system
+            const particles = [];
+            const PARTICLE_COUNT = 800;
+            let exploding = false;
+            let reassembling = false;
+            let orbitPhase = false;
+
+            class Particle {
+                constructor(x, y, z) {
+                    this.ox = x; // original position
+                    this.oy = y;
+                    this.oz = z;
+                    this.x = x;
+                    this.y = y;
+                    this.z = z;
+                    this.vx = 0;
+                    this.vy = 0;
+                    this.vz = 0;
+                    this.size = Math.random() * 2 + 0.5;
+                    this.hue = 179 + Math.random() * 50;
+                    this.saturation = 70 + Math.random() * 30;
+                    this.lightness = 40 + Math.random() * 20;
+                    this.alpha = 0;
+                    this.orbitRadius = Math.random() * 60 + 20;
+                    this.orbitAngle = Math.random() * Math.PI * 2;
+                    this.orbitSpeed = (Math.random() - 0.5) * 0.02;
+                }
+                explode() {
+                    const angle = Math.random() * Math.PI * 2;
+                    const force = 3 + Math.random() * 7;
+                    this.vx = Math.cos(angle) * force;
+                    this.vy = (Math.random() - 0.5) * force;
+                    this.vz = Math.sin(angle) * force;
+                }
+                update() {
+                    if (exploding) {
+                        this.x += this.vx;
+                        this.y += this.vy;
+                        this.z += this.vz;
+                        this.vx *= 0.98;
+                        this.vy *= 0.98;
+                        this.vz *= 0.98;
+                        this.alpha = Math.min(1, this.alpha + 0.05);
+                    } else if (reassembling) {
+                        const dx = this.ox - this.x;
+                        const dy = this.oy - this.y;
+                        const dz = this.oz - this.z;
+                        this.vx = dx * 0.07;
+                        this.vy = dy * 0.07;
+                        this.vz = dz * 0.07;
+                        this.x += this.vx;
+                        this.y += this.vy;
+                        this.z += this.vz;
+                        if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(dz) < 1) {
+                            this.x = this.ox;
+                            this.y = this.oy;
+                            this.z = this.oz;
+                        }
+                        if (orbitPhase) {
+                            this.alpha *= 0.98;
+                        }
+                    }
+                    if (orbitPhase && !exploding && !reassembling) {
+                        this.orbitAngle += this.orbitSpeed;
+                        this.x = this.ox + Math.cos(this.orbitAngle) * this.orbitRadius;
+                        this.z = this.oz + Math.sin(this.orbitAngle) * this.orbitRadius;
+                    }
+                }
+                draw() {
+                    if (this.alpha <= 0) return;
+                    const centerX = canvas.width / 2;
+                    const centerY = canvas.height / 2;
+                    const scale = 300 / (300 + this.z);
+                    const screenX = centerX + (this.x - centerX) * scale;
+                    const screenY = centerY + (this.y - centerY) * scale;
+                    ctx.beginPath();
+                    ctx.arc(screenX, screenY, this.size * scale, 0, Math.PI * 2);
+                    ctx.fillStyle = `hsla(${this.hue}, ${this.saturation}%, ${this.lightness}%, ${this.alpha})`;
+                    ctx.fill();
+                }
+            }
+
+            // Initialize particles at hat shape
+            function createParticles() {
+                particles.length = 0;
+                const cx = canvas.width / 2;
+                const cy = canvas.height / 2;
+                // Crown (cone)
+                for (let i = 0; i < PARTICLE_COUNT * 0.7; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const radius = Math.random() * 60;
+                    const height = Math.random() * 100 - 100;
+                    const x = cx + Math.cos(angle) * radius;
+                    const y = cy + height;
+                    const z = Math.sin(angle) * radius;
+                    particles.push(new Particle(x, y, z));
+                }
+                // Brim (disk)
+                for (let i = 0; i < PARTICLE_COUNT * 0.3; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const radius = Math.random() * 90 + 60;
+                    const x = cx + Math.cos(angle) * radius;
+                    const y = cy + 25;
+                    const z = Math.sin(angle) * radius;
+                    particles.push(new Particle(x, y, z));
+                }
+            }
+            createParticles();
+
+            // Animation loop
+            function animate() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                particles.forEach(p => {
+                    p.update();
+                    p.draw();
+                });
+                requestAnimationFrame(animate);
+            }
+            animate();
+
+            // Hover interactions
+            let hoverTimeout = null;
+            scene.addEventListener('mouseenter', handleHover);
+            scene.addEventListener('touchstart', handleHover);
+            scene.addEventListener('mouseleave', handleLeave);
+            scene.addEventListener('touchend', handleLeave);
+
+            function handleHover(e) {
+                e.preventDefault();
+                if (reducedMotion) return;
+                if (hoverTimeout) clearTimeout(hoverTimeout);
+                // Slow down spin
+                hat.style.animationPlayState = 'paused';
+                hat.style.animationDuration = '40s';
+                // Hide hat, show particles
+                hat.classList.add('hat-hidden');
+                canvas.classList.add('particles-visible');
+                // Trigger explosion
+                exploding = true;
+                reassembling = false;
+                orbitPhase = false;
+                particles.forEach(p => {
+                    p.explode();
+                    p.alpha = 0; // start invisible and fade in
+                });
+            }
+
+            function handleLeave(e) {
+                e.preventDefault();
+                if (reducedMotion) return;
+                // Start reassembly
+                exploding = false;
+                reassembling = true;
+                hat.style.animationPlayState = 'running';
+                hat.style.animationDuration = '20s';
+                hoverTimeout = setTimeout(() => {
+                    reassembling = false;
+                    orbitPhase = true;
+                    // After reassembly, keep some orbiting particles
+                    // Hide particles after a moment
+                    setTimeout(() => {
+                        canvas.classList.remove('particles-visible');
+                        hat.classList.remove('hat-hidden');
+                        orbitPhase = false;
+                    }, 2000);
+                }, 800);
+            }
+        })();
+    </script>
+</body>
+</html>
