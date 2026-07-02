@@ -662,6 +662,14 @@
   letter-spacing: 0.04em;
   margin-left: 0.3em;
 }
+.new-badge {
+  color: #4ade80;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin-left: 0.3em;
+  text-transform: uppercase;
+}
 </style>
 </head>
 <body>
@@ -753,63 +761,64 @@ And respect reduced motion. Return only the finished HTML file.</div>
   const API_URL = "https://fedora-showdown-api.stephen-dda.workers.dev";
   const HMAC_SECRET = "1aeec4328a35de292e6945ff9bdcc02c34f1325f32cb003d259838222e1cbf62";
 
+  // dateAdded: existing entries use 1970-01-01 as a placeholder (pre-dates tracking)
   const MODELS = [
-    { id: "fable-5-ultracode", name: "Fable 5 Ultracode", group: "Anthropic" },
-    { id: "fable-5",     name: "Fable 5",             group: "Anthropic", openrouterId: "anthropic/claude-fable-5" },
-    { id: "opus-4-8",    name: "Opus 4.8",           group: "Anthropic", openrouterId: "anthropic/claude-opus-4.8" },
-    { id: "opus-4-7",    name: "Opus 4.7",           group: "Anthropic", openrouterId: "anthropic/claude-opus-4.7" },
-    { id: "opus-4-6",    name: "Opus 4.6",           group: "Anthropic", openrouterId: "anthropic/claude-opus-4.6" },
-    { id: "opus-4-5",    name: "Opus 4.5",           group: "Anthropic", openrouterId: "anthropic/claude-opus-4.5" },
-    { id: "opus-4-1",    name: "Opus 4.1",           group: "Anthropic", openrouterId: "anthropic/claude-opus-4.1" },
-    { id: "sonnet-5",    name: "Sonnet 5",            group: "Anthropic", openrouterId: "anthropic/claude-sonnet-5" },
-    { id: "sonnet-4-6",  name: "Sonnet 4.6",          group: "Anthropic", openrouterId: "anthropic/claude-sonnet-4.6" },
-    { id: "sonnet-4-5",  name: "Sonnet 4.5",          group: "Anthropic", openrouterId: "anthropic/claude-sonnet-4.5" },
-    { id: "haiku-4-5",   name: "Haiku 4.5",           group: "Anthropic", openrouterId: "anthropic/claude-haiku-4.5" },
-    { id: "gpt-5.5-pro", name: "GPT-5.5 Pro",         group: "OpenAI", openrouterId: "openai/gpt-5.5-pro" },
-    { id: "gpt-5.5",     name: "GPT-5.5",             group: "OpenAI", openrouterId: "openai/gpt-5.5" },
-    { id: "gpt-5.4",     name: "GPT-5.4",             group: "OpenAI", openrouterId: "openai/gpt-5.4" },
-    { id: "gpt-5.4-mini", name: "GPT-5.4 Mini",       group: "OpenAI", openrouterId: "openai/gpt-5.4-mini" },
-    { id: "gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark", group: "OpenAI" },
-    { id: "gpt-oss-120b", name: "GPT-OSS 120B",       group: "OpenAI", openrouterId: "openai/gpt-oss-120b" },
-    { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", group: "Google", openrouterId: "google/gemini-2.5-pro" },
-    { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash", group: "Google", openrouterId: "google/gemini-3.5-flash" },
-    { id: "gemini-3.1-pro", name: "Gemini 3.1 Pro",    group: "Google" },
-    { id: "gemma-4-31b", name: "Gemma 4 31B",         group: "Google", openrouterId: "google/gemma-4-31b-it" },
-    { id: "gemma-4-26b", name: "Gemma 4 26B",         group: "Google", openrouterId: "google/gemma-4-26b-a4b-it" },
-    { id: "qwen3.7-plus", name: "Qwen3.7 Plus", group: "Alibaba", openrouterId: "qwen/qwen3.7-plus" },
-    { id: "qwen3-235b",  name: "Qwen3.7 Max",         group: "Alibaba", openrouterId: "qwen/qwen3-235b-a22b" },
-    { id: "qwen3.6-35b-a3b", name: "Qwen3.6 35B A3B",  group: "Alibaba", openrouterId: "qwen/qwen3.6-35b-a3b" },
-    { id: "qwen3.5-397b", name: "Qwen3.5 397B",        group: "Alibaba", openrouterId: "qwen/qwen3.5-397b-a17b" },
-    { id: "qwen3.5-27b", name: "Qwen3.5 27B",          group: "Alibaba", openrouterId: "qwen/qwen3.5-27b" },
-    { id: "deepseek-v3.2", name: "DeepSeek V3.2", group: "DeepSeek", openrouterId: "deepseek/deepseek-v3.2" },
-    { id: "deepseek-v4-pro",   name: "DeepSeek V4 Pro",   group: "DeepSeek", openrouterId: "deepseek/deepseek-v4-pro" },
-    { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", group: "DeepSeek", openrouterId: "deepseek/deepseek-v4-flash" },
-    { id: "granite-4.1-8b", name: "Granite 4.1 8B",    group: "IBM", openrouterId: "ibm-granite/granite-4.1-8b" },
-    { id: "llama-4-maverick", name: "Llama 4 Maverick",  group: "Meta", openrouterId: "meta-llama/llama-4-maverick" },
-    { id: "minimax-m3",  name: "MiniMax M3",          group: "MiniMax", openrouterId: "minimax/minimax-m3" },
-    { id: "minimax-m2.7", name: "MiniMax M2.7",        group: "MiniMax", openrouterId: "minimax/minimax-m2.7" },
-    { id: "minimax-m2.5", name: "MiniMax M2.5",        group: "MiniMax", openrouterId: "minimax/minimax-m2.5" },
-    { id: "devstral-2512", name: "Devstral 2512",        group: "Mistral", openrouterId: "mistralai/devstral-2512" },
-    { id: "mistral-medium-3.5", name: "Mistral Medium 3.5", group: "Mistral", openrouterId: "mistralai/mistral-medium-3-5" },
-    { id: "nemotron-3-ultra", name: "Nemotron 3 Ultra", group: "NVIDIA", openrouterId: "nvidia/nemotron-3-ultra-550b-a55b" },
-    { id: "nemotron-3-super", name: "Nemotron 3 Super", group: "NVIDIA", openrouterId: "nvidia/nemotron-3-super-120b-a12b" },
-    { id: "step-3.7-flash", name: "Step 3.7 Flash",     group: "StepFun", openrouterId: "stepfun/step-3.7-flash" },
-    { id: "hy3-preview",  name: "HY3 Preview",          group: "Tencent", openrouterId: "tencent/hy3-preview" },
-    { id: "kimi-k2.7-code", name: "Kimi K2.7 Code",  group: "Moonshot", openrouterId: "moonshotai/kimi-k2.7-code" },
-    { id: "kimi-k2.6",   name: "Kimi K2.6",           group: "Moonshot", openrouterId: "moonshotai/kimi-k2.6" },
-    { id: "kimi-k2.5",   name: "Kimi K2.5",           group: "Moonshot", openrouterId: "moonshotai/kimi-k2.5" },
-    { id: "mimo-v2.5-pro", name: "MiMo V2.5 Pro",     group: "Xiaomi", openrouterId: "xiaomi/mimo-v2.5-pro" },
-    { id: "mimo-v2.5",   name: "MiMo V2.5",           group: "Xiaomi", openrouterId: "xiaomi/mimo-v2.5" },
-    { id: "grok-4.3",    name: "Grok 4.3",            group: "xAI", openrouterId: "x-ai/grok-4.3" },
-    { id: "grok-4.20",   name: "Grok 4.20",           group: "xAI", openrouterId: "x-ai/grok-4.20" },
-    { id: "grok-4",      name: "Grok 4",              group: "xAI" },
-    { id: "fugu-ultra",   name: "Fugu Ultra",           group: "Sakana", openrouterId: "sakana/fugu-ultra" },
-    { id: "glm-5.2-ultracode", name: "GLM-5.2 Ultracode", group: "Z.ai" },
-    { id: "glm-5.2",     name: "GLM-5.2",             group: "Z.ai", openrouterId: "z-ai/glm-5.2" },
-    { id: "glm-5.1",     name: "GLM-5.1",             group: "Z.ai", openrouterId: "z-ai/glm-5.1" },
-    { id: "glm-5-turbo", name: "GLM-5 Turbo",         group: "Z.ai", openrouterId: "z-ai/glm-5-turbo" },
-    { id: "glm-5",       name: "GLM-5",               group: "Z.ai", openrouterId: "z-ai/glm-5" },
-    { id: "glm-4.7",     name: "GLM-4.7",             group: "Z.ai", openrouterId: "z-ai/glm-4.7" },
+    { id: "fable-5-ultracode", name: "Fable 5 Ultracode", group: "Anthropic", dateAdded: "2026-07-01" },
+    { id: "fable-5",     name: "Fable 5",             group: "Anthropic", openrouterId: "anthropic/claude-fable-5", dateAdded: "2026-07-01" },
+    { id: "opus-4-8",    name: "Opus 4.8",           group: "Anthropic", openrouterId: "anthropic/claude-opus-4.8", dateAdded: "1970-01-01" },
+    { id: "opus-4-7",    name: "Opus 4.7",           group: "Anthropic", openrouterId: "anthropic/claude-opus-4.7", dateAdded: "1970-01-01" },
+    { id: "opus-4-6",    name: "Opus 4.6",           group: "Anthropic", openrouterId: "anthropic/claude-opus-4.6", dateAdded: "1970-01-01" },
+    { id: "opus-4-5",    name: "Opus 4.5",           group: "Anthropic", openrouterId: "anthropic/claude-opus-4.5", dateAdded: "1970-01-01" },
+    { id: "opus-4-1",    name: "Opus 4.1",           group: "Anthropic", openrouterId: "anthropic/claude-opus-4.1", dateAdded: "1970-01-01" },
+    { id: "sonnet-5",    name: "Sonnet 5",            group: "Anthropic", openrouterId: "anthropic/claude-sonnet-5", dateAdded: "2026-07-01" },
+    { id: "sonnet-4-6",  name: "Sonnet 4.6",          group: "Anthropic", openrouterId: "anthropic/claude-sonnet-4.6", dateAdded: "1970-01-01" },
+    { id: "sonnet-4-5",  name: "Sonnet 4.5",          group: "Anthropic", openrouterId: "anthropic/claude-sonnet-4.5", dateAdded: "1970-01-01" },
+    { id: "haiku-4-5",   name: "Haiku 4.5",           group: "Anthropic", openrouterId: "anthropic/claude-haiku-4.5", dateAdded: "1970-01-01" },
+    { id: "gpt-5.5-pro", name: "GPT-5.5 Pro",         group: "OpenAI", openrouterId: "openai/gpt-5.5-pro", dateAdded: "1970-01-01" },
+    { id: "gpt-5.5",     name: "GPT-5.5",             group: "OpenAI", openrouterId: "openai/gpt-5.5", dateAdded: "1970-01-01" },
+    { id: "gpt-5.4",     name: "GPT-5.4",             group: "OpenAI", openrouterId: "openai/gpt-5.4", dateAdded: "1970-01-01" },
+    { id: "gpt-5.4-mini", name: "GPT-5.4 Mini",       group: "OpenAI", openrouterId: "openai/gpt-5.4-mini", dateAdded: "1970-01-01" },
+    { id: "gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark", group: "OpenAI", dateAdded: "1970-01-01" },
+    { id: "gpt-oss-120b", name: "GPT-OSS 120B",       group: "OpenAI", openrouterId: "openai/gpt-oss-120b", dateAdded: "1970-01-01" },
+    { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash", group: "Google", openrouterId: "google/gemini-3.5-flash", dateAdded: "1970-01-01" },
+    { id: "gemini-3.1-pro", name: "Gemini 3.1 Pro",    group: "Google", dateAdded: "1970-01-01" },
+    { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro",    group: "Google", openrouterId: "google/gemini-2.5-pro", dateAdded: "1970-01-01" },
+    { id: "gemma-4-31b", name: "Gemma 4 31B",         group: "Google", openrouterId: "google/gemma-4-31b-it", dateAdded: "1970-01-01" },
+    { id: "gemma-4-26b", name: "Gemma 4 26B",         group: "Google", openrouterId: "google/gemma-4-26b-a4b-it", dateAdded: "1970-01-01" },
+    { id: "qwen3.7-plus", name: "Qwen3.7 Plus", group: "Alibaba", openrouterId: "qwen/qwen3.7-plus", dateAdded: "2026-07-02" },
+    { id: "qwen3-235b",  name: "Qwen3.7 Max",         group: "Alibaba", openrouterId: "qwen/qwen3-235b-a22b", dateAdded: "1970-01-01" },
+    { id: "qwen3.6-35b-a3b", name: "Qwen3.6 35B A3B",  group: "Alibaba", openrouterId: "qwen/qwen3.6-35b-a3b", dateAdded: "1970-01-01" },
+    { id: "qwen3.5-397b", name: "Qwen3.5 397B",        group: "Alibaba", openrouterId: "qwen/qwen3.5-397b-a17b", dateAdded: "1970-01-01" },
+    { id: "qwen3.5-27b", name: "Qwen3.5 27B",          group: "Alibaba", openrouterId: "qwen/qwen3.5-27b", dateAdded: "1970-01-01" },
+    { id: "deepseek-v4-pro",   name: "DeepSeek V4 Pro",   group: "DeepSeek", openrouterId: "deepseek/deepseek-v4-pro", dateAdded: "1970-01-01" },
+    { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", group: "DeepSeek", openrouterId: "deepseek/deepseek-v4-flash", dateAdded: "1970-01-01" },
+    { id: "deepseek-v3.2", name: "DeepSeek V3.2",      group: "DeepSeek", openrouterId: "deepseek/deepseek-v3.2", dateAdded: "1970-01-01" },
+    { id: "granite-4.1-8b", name: "Granite 4.1 8B",    group: "IBM", openrouterId: "ibm-granite/granite-4.1-8b", dateAdded: "1970-01-01" },
+    { id: "llama-4-maverick", name: "Llama 4 Maverick",  group: "Meta", openrouterId: "meta-llama/llama-4-maverick", dateAdded: "1970-01-01" },
+    { id: "minimax-m3",  name: "MiniMax M3",          group: "MiniMax", openrouterId: "minimax/minimax-m3", dateAdded: "1970-01-01" },
+    { id: "minimax-m2.7", name: "MiniMax M2.7",        group: "MiniMax", openrouterId: "minimax/minimax-m2.7", dateAdded: "1970-01-01" },
+    { id: "minimax-m2.5", name: "MiniMax M2.5",        group: "MiniMax", openrouterId: "minimax/minimax-m2.5", dateAdded: "1970-01-01" },
+    { id: "devstral-2512", name: "Devstral 2512",        group: "Mistral", openrouterId: "mistralai/devstral-2512", dateAdded: "1970-01-01" },
+    { id: "mistral-medium-3.5", name: "Mistral Medium 3.5", group: "Mistral", openrouterId: "mistralai/mistral-medium-3-5", dateAdded: "1970-01-01" },
+    { id: "nemotron-3-ultra", name: "Nemotron 3 Ultra", group: "NVIDIA", openrouterId: "nvidia/nemotron-3-ultra-550b-a55b", dateAdded: "1970-01-01" },
+    { id: "nemotron-3-super", name: "Nemotron 3 Super", group: "NVIDIA", openrouterId: "nvidia/nemotron-3-super-120b-a12b", dateAdded: "1970-01-01" },
+    { id: "step-3.7-flash", name: "Step 3.7 Flash",     group: "StepFun", openrouterId: "stepfun/step-3.7-flash", dateAdded: "1970-01-01" },
+    { id: "hy3-preview",  name: "HY3 Preview",          group: "Tencent", openrouterId: "tencent/hy3-preview", dateAdded: "1970-01-01" },
+    { id: "kimi-k2.7-code", name: "Kimi K2.7 Code",  group: "Moonshot", openrouterId: "moonshotai/kimi-k2.7-code", dateAdded: "1970-01-01" },
+    { id: "kimi-k2.6",   name: "Kimi K2.6",           group: "Moonshot", openrouterId: "moonshotai/kimi-k2.6", dateAdded: "1970-01-01" },
+    { id: "kimi-k2.5",   name: "Kimi K2.5",           group: "Moonshot", openrouterId: "moonshotai/kimi-k2.5", dateAdded: "1970-01-01" },
+    { id: "mimo-v2.5-pro", name: "MiMo V2.5 Pro",     group: "Xiaomi", openrouterId: "xiaomi/mimo-v2.5-pro", dateAdded: "1970-01-01" },
+    { id: "mimo-v2.5",   name: "MiMo V2.5",           group: "Xiaomi", openrouterId: "xiaomi/mimo-v2.5", dateAdded: "1970-01-01" },
+    { id: "grok-4.3",    name: "Grok 4.3",            group: "xAI", openrouterId: "x-ai/grok-4.3", dateAdded: "1970-01-01" },
+    { id: "grok-4.20",   name: "Grok 4.20",           group: "xAI", openrouterId: "x-ai/grok-4.20", dateAdded: "1970-01-01" },
+    { id: "grok-4",      name: "Grok 4",              group: "xAI", dateAdded: "1970-01-01" },
+    { id: "fugu-ultra",   name: "Fugu Ultra",           group: "Sakana", openrouterId: "sakana/fugu-ultra", dateAdded: "1970-01-01" },
+    { id: "glm-5.2-ultracode", name: "GLM-5.2 Ultracode", group: "Z.ai", dateAdded: "1970-01-01" },
+    { id: "glm-5.2",     name: "GLM-5.2",             group: "Z.ai", openrouterId: "z-ai/glm-5.2", dateAdded: "1970-01-01" },
+    { id: "glm-5.1",     name: "GLM-5.1",             group: "Z.ai", openrouterId: "z-ai/glm-5.1", dateAdded: "1970-01-01" },
+    { id: "glm-5-turbo", name: "GLM-5 Turbo",         group: "Z.ai", openrouterId: "z-ai/glm-5-turbo", dateAdded: "1970-01-01" },
+    { id: "glm-5",       name: "GLM-5",               group: "Z.ai", openrouterId: "z-ai/glm-5", dateAdded: "1970-01-01" },
+    { id: "glm-4.7",     name: "GLM-4.7",             group: "Z.ai", openrouterId: "z-ai/glm-4.7", dateAdded: "1970-01-01" },
   ];
 
   const viewer = document.getElementById("viewer");
@@ -823,6 +832,27 @@ And respect reduced motion. Return only the finished HTML file.</div>
   let gridCustomized = false;
 
   function init() {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const newModelIndices = new Set();
+    for (let i = 0; i < MODELS.length; i++) {
+      if (MODELS[i].dateAdded > thirtyDaysAgo) newModelIndices.add(i);
+    }
+
+    if (newModelIndices.size > 0) {
+      const header = document.createElement("div");
+      header.className = "group-header";
+      header.textContent = "New";
+      modelList.appendChild(header);
+      for (const i of newModelIndices) {
+        const m = MODELS[i];
+        const btn = document.createElement("button");
+        btn.innerHTML = '<span class="check"></span>' + m.name.replace('Ultracode', '<span class="ultracode-badge">Ultracode</span>') + '<span class="new-badge">NEW</span>';
+        btn.dataset.idx = i;
+        btn.addEventListener("click", () => handleTabClick(i));
+        modelList.appendChild(btn);
+      }
+    }
+
     let lastGroup = null;
     for (let i = 0; i < MODELS.length; i++) {
       const m = MODELS[i];
@@ -837,7 +867,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
       }
 
       const btn = document.createElement("button");
-      btn.innerHTML = '<span class="check"></span>' + m.name.replace('Ultracode', '<span class="ultracode-badge">Ultracode</span>');
+      btn.innerHTML = '<span class="check"></span>' + m.name.replace('Ultracode', '<span class="ultracode-badge">Ultracode</span>') + (newModelIndices.has(i) ? '<span class="new-badge">NEW</span>' : '');
       btn.dataset.idx = i;
       btn.addEventListener("click", () => handleTabClick(i));
       modelList.appendChild(btn);

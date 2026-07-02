@@ -243,9 +243,10 @@ def update_models_array(slug, display_name, group, openrouter_id):
     if array_start is None or array_end is None:
         raise RuntimeError("Could not find MODELS array in index.html")
 
+    today = time.strftime("%Y-%m-%d")
     new_entry = (
         f'    {{ id: "{slug}", name: "{display_name}", '
-        f'group: "{group}", openrouterId: "{openrouter_id}" }},\n'
+        f'group: "{group}", openrouterId: "{openrouter_id}", dateAdded: "{today}" }},\n'
     )
 
     first_group_line = None
