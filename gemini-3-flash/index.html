@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Fedora - Legend Particles</title>
+    <style>
+        :root {
+            --bg-color: #0b0b0b;
+            --text-color: #e0e0e0;
+            --accent-red: #cc0000;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: var(--bg-color);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #canvas-container {
+            position: relative;
+            width: 100vw;
+            height: 80vh;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        .caption {
+            color: var(--text-color);
+            opacity: 0.6;
+            font-size: 0.9rem;
+            letter-spacing: 0.2rem;
+            text-transform: uppercase;
+            margin-top: -20px;
+            pointer-events: none;
+            transition: opacity 0.5s ease;
+        }
+
+        #canvas-container:hover ~ .caption {
+            opacity: 0.9;
+        }
+
+        /* Reduced Motion */
+        @media (prefers-reduced-motion: reduce) {
+            .caption {
+                transition: none;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="canvas-container">
+        <canvas id="hatCanvas"></canvas>
+    </div>
+    <div class="caption">The Open Spirit</div>
+
+    <script>
+        const canvas = document.getElementById('hatCanvas');
+        const ctx = canvas.getContext('2d');
+        const container = document.getElementById('canvas-container');
+
+        let width, height;
+        let particles = [];
+        const particleCount = 2800; 
+        let rotationY = 0;
+        let rotationX = 0.2;
+        let targetRotationY = 0;
+        let isTransitioning = false;
+        let transitionProgress = 0;
+        let state = 'SPINNING'; // SPINNING, DISSOLVING, SWIRLING, REFORMING
+        let stateTimer = 0;
+
+        const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        class Particle {
+            constructor(targetX, targetY, targetZ, color) {
+                this.baseX = targetX;
+                this.baseY = targetY;
+                this.baseZ = targetZ;
+                
+                this.x = (Math.random() - 0.5) * 1000;
+                this.y = (Math.random() - 0.5) * 1000;
+                this.z = (Math.random() - 0.5) * 1000;
+                
+                this.vx = 0;
+                this.vy = 0;
+                this.vz = 0;
+                
+                this.color = color;
+                this.size = Math.random() * 1.5 + 0.5;
+                this.noiseOffset = Math.random() * 100;
+                
+                // For the "persistent orbiters"
+                this.isOrbiter = Math.random() > 0.98;
+                this.orbitAngle = Math.random() * Math.PI * 2;
+                this.orbitSpeed = 0.02 + Math.random() * 0.03;
+                this.orbitRadius = 100 + Math.random() * 50;
+            }
+
+            update() {
+                if (state === 'SPINNING') {
+                    this.seek(this.getRotatedPos());
+                    const friction = 0.85;
+                    this.vx *= friction;
+                    this.vy *= friction;
+                    this.vz *= friction;
+                } 
+                else if (state === 'DISSOLVING') {
+                    this.vx += (Math.random() - 0.5) * 0.5;
+                    this.vy += (Math.random() - 0.5) * 0.5 - 0.1; // Float up
+                    this.vz += (Math.random() - 0.5) * 0.5;
+                    this.vx *= 0.95;
+                    this.vy *= 0.95;
+                    this.vz *= 0.95;
+                }
+                else if (state === 'SWIRLING') {
+                    const angle = Math.atan2(this.z, this.x) + 0.1;
+                    const dist = Math.sqrt(this.x * this.x + this.z * this.z);
+                    const targetX = Math.cos(angle) * dist;
+                    const targetZ = Math.sin(angle) * dist;
+                    this.vx += (targetX - this.x) * 0.05;
+                    this.vz += (targetZ - this.z) * 0.05;
+                    this.vy += (Math.sin(Date.now() * 0.001 + this.noiseOffset) * 0.5);
+                    this.vx *= 0.9;
+                    this.vy *= 0.9;
+                    this.vz *= 0.9;
+                }
+                else if (state === 'REFORMING') {
+                    this.seek(this.getRotatedPos(), 0.15);
+                    this.vx *= 0.8;
+                    this.vy *= 0.8;
+                    this.vz *= 0.8;
+                }
+
+                this.x += this.vx;
+                this.y += this.vy;
+                this.z += this.vz;
+
+                // Orbiters behavior
+                if (this.isOrbiter && state === 'SPINNING') {
+                    this.orbitAngle += this.orbitSpeed;
+                    this.x += Math.cos(this.orbitAngle) * 2;
+                    this.z += Math.sin(this.orbitAngle) * 2;
+                    this.vy += Math.sin(this.orbitAngle * 0.5) * 0.5;
+                }
+            }
+
+            getRotatedPos() {
+                // Rotate base positions
+                let x = this.baseX;
+                let y = this.baseY;
+                let z = this.baseZ;
+
+                // Y Axis Rotation
+                let cosY = Math.cos(rotationY);
+                let sinY = Math.sin(rotationY);
+                let x1 = x * cosY - z * sinY;
+                let z1 = x * sinY + z * cosY;
+
+                // X Axis Rotation (Tilt)
+                let cosX = Math.cos(rotationX);
+                let sinX = Math.sin(rotationX);
+                let y2 = y * cosX - z1 * sinX;
+                let z2 = y * sinX + z1 * cosX;
+
+                return { x: x1, y: y2, z: z2 };
+            }
+
+            seek(target, force = 0.1) {
+                this.vx += (target.x - this.x) * force;
+                this.vy += (target.y - this.y) * force;
+                this.vz += (target.z - this.z) * force;
+            }
+
+            draw() {
+                const perspective = 600 / (600 + this.z);
+                const drawX = this.x * perspective + width / 2;
+                const drawY = this.y * perspective + height / 2;
+                
+                if (drawX < 0 || drawX > width || drawY < 0 || drawY > height) return;
+
+                const size = Math.max(0.1, this.size * perspective);
+                const alpha = Math.max(0.1, Math.min(1, perspective - 0.2));
+
+                ctx.fillStyle = this.color;
+                ctx.globalAlpha = alpha;
+                ctx.beginPath();
+                ctx.arc(drawX, drawY, size, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Subtle glow for orbiters or during transitions
+                if (this.isOrbiter || state !== 'SPINNING') {
+                    ctx.shadowBlur = 5;
+                    ctx.shadowColor = this.color;
+                } else {
+                    ctx.shadowBlur = 0;
+                }
+            }
+        }
+
+        function init() {
+            resize();
+            createHatPoints();
+            animate();
+        }
+
+        function createHatPoints() {
+            particles = [];
+            const red = '#e91e63'; // Slightly brighter Red Hat red for glow
+            const dark = '#1a1a1a';
+
+            // Generate Fedora Shape
+            for (let i = 0; i < particleCount; i++) {
+                let x, y, z, col;
+                const r = Math.random();
+
+                if (r < 0.45) {
+                    // Brim (Elliptical disk)
+                    const angle = Math.random() * Math.PI * 2;
+                    const radius = Math.sqrt(Math.random()) * 110;
+                    x = Math.cos(angle) * radius;
+                    z = Math.sin(angle) * (radius * 0.8);
+                    y = 20 + Math.pow(radius / 110, 2) * 5; // Slight curl
+                    col = red;
+                } else if (r < 0.8) {
+                    // Crown (Tapered, pinched cylinder)
+                    const angle = Math.random() * Math.PI * 2;
+                    const h = Math.random() * 60;
+                    const taper = 1 - (h / 70) * 0.3;
+                    const pinch = 1 + Math.cos(angle * 2) * 0.15 * (h / 60);
+                    const radius = 55 * taper * pinch;
+                    
+                    x = Math.cos(angle) * radius;
+                    z = Math.sin(angle) * radius * 0.9;
+                    y = 20 - h;
+                    
+                    // Top cap
+                    if (h > 58) {
+                        const capR = Math.sqrt(Math.random()) * radius;
+                        x = Math.cos(angle) * capR;
+                        z = Math.sin(angle) * capR * 0.9;
+                    }
+                    col = red;
+                } else {
+                    // Band (The black ribbon)
+                    const angle = Math.random() * Math.PI * 2;
+                    const h = Math.random() * 12;
+                    const radius = 56;
+                    x = Math.cos(angle) * radius;
+                    z = Math.sin(angle) * radius * 0.9;
+                    y = 18 - h;
+                    col = dark;
+                }
+
+                particles.push(new Particle(x, y + 10, z, col));
+            }
+        }
+
+        function resize() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width;
+            canvas.height = height;
+        }
+
+        function animate() {
+            ctx.clearRect(0, 0, width, height);
+
+            // Floor Shadow
+            const shadowAlpha = state === 'SPINNING' ? 0.15 : 0.15 * (1 - transitionProgress);
+            ctx.globalAlpha = shadowAlpha;
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            ctx.ellipse(width / 2, height / 2 + 60, 100, 40, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1.0;
+
+            // Sort particles by Z for basic depth testing
+            if (!prefersReducedMotion) {
+                particles.sort((a, b) => b.z - a.z);
+            }
+
+            if (state === 'SPINNING' || state === 'REFORMING') {
+                const speed = state === 'REFORMING' ? 0.005 : 0.015;
+                if (!prefersReducedMotion) rotationY += speed;
+            }
+
+            particles.forEach(p => {
+                p.update();
+                p.draw();
+            });
+
+            updateState();
+            requestAnimationFrame(animate);
+        }
+
+        function updateState() {
+            if (state === 'DISSOLVING') {
+                transitionProgress += 0.02;
+                if (transitionProgress >= 1) {
+                    state = 'SWIRLING';
+                    transitionProgress = 0;
+                    stateTimer = 0;
+                }
+            } else if (state === 'SWIRLING') {
+                stateTimer++;
+                if (stateTimer > 120) {
+                    state = 'REFORMING';
+                }
+            } else if (state === 'REFORMING') {
+                transitionProgress += 0.02;
+                if (transitionProgress >= 1) {
+                    state = 'SPINNING';
+                    transitionProgress = 0;
+                }
+            }
+        }
+
+        function triggerDissolve() {
+            if (state === 'SPINNING') {
+                state = 'DISSOLVING';
+                transitionProgress = 0;
+            }
+        }
+
+        container.addEventListener('mouseenter', triggerDissolve);
+        container.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            triggerDissolve();
+        });
+        window.addEventListener('resize', resize);
+
+        init();
+    </script>
+</body>
+</html>
