@@ -43,7 +43,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install Pi coding agent
-        run: npm install -g @mariozechner/pi-coding-agent
+        run: npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 
       - name: Install Python dependencies
         run: pip install requests
@@ -61,3 +61,11 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run == true }}
           MAX_MODELS: ${{ inputs.max_models || '5' }}
         run: python3 .github/scripts/discover_models.py
+
+      - name: Upload Pi working directories
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-workdirs
+          path: artifacts/
+          if-no-files-found: ignore
