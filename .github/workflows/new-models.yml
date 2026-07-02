@@ -10,7 +10,7 @@ on:
         required: false
         type: string
       dry_run:
-        description: 'Discover and log but do not create PRs'
+        description: 'Dry run'
         required: false
         type: boolean
         default: false
@@ -58,6 +58,6 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MODEL_FILTER: ${{ inputs.model_id || '' }}
-          DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+          DRY_RUN: ${{ inputs.dry_run == true }}
           MAX_MODELS: ${{ inputs.max_models || '5' }}
         run: python3 .github/scripts/discover_models.py
