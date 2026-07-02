@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spinning Fedora</title>
+    <style>
+        :root {
+            --hat-color: #9B2C2C;
+            --band-color: #1A202C;
+            --glow-color: #FED7D7;
+            --bg-color: #121212;
+            --text-color: #A0AEC0;
+            --anim-duration: 10s;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+            perspective: 1000px;
+        }
+
+        .scene {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            width: 100%;
+            padding: 2rem;
+            box-sizing: border-box;
+            transform-style: preserve-3d;
+        }
+
+        .hat-container {
+            position: relative;
+            width: 200px;
+            height: 200px;
+            transform-style: preserve-3d;
+            animation: spin var(--anim-duration) linear infinite;
+        }
+
+        .hat {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            transform-style: preserve-3d;
+            transition: opacity 0.5s ease-in-out;
+        }
+
+        .brim {
+            position: absolute;
+            width: 200px;
+            height: 200px;
+            background: var(--hat-color);
+            border-radius: 50%;
+            transform: rotateX(85deg);
+            box-shadow: 0 2px 15px rgba(0, 0, 0, 0.7);
+        }
+
+        .crown-base {
+            position: absolute;
+            top: 55px;
+            left: 55px;
+            width: 90px;
+            height: 90px;
+            background: var(--hat-color);
+            border-radius: 50%;
+            transform: rotateX(85deg) translateZ(5px);
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+        }
+
+        .crown-side {
+            position: absolute;
+            top: 60px;
+            left: 55px;
+            width: 90px;
+            height: 50px;
+            background: linear-gradient(to right, #7a2020, #c53939);
+            transform: rotateX(-5deg) translateZ(-45px) translateY(51px) rotateY(180deg);
+            transform-style: preserve-3d;
+            border-radius: 5px 5px 0 0;
+        }
+        
+        .crown-side::before {
+            content: '';
+            position: absolute;
+            width: 90px;
+            height: 90px;
+            background: var(--hat-color);
+            border-radius: 50%;
+            transform: rotateX(90deg) translateY(-45px) translateZ(5px);
+            box-shadow: inset 0 0 15px rgba(0,0,0,0.6);
+        }
+
+        .crown-top-dent {
+            position: absolute;
+            width: 60px;
+            height: 20px;
+            top: -15px;
+            left: 15px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 50%;
+            transform: rotateX(90deg) translateY(-40px) translateZ(-5px);
+        }
+
+        .band {
+            position: absolute;
+            width: 92px;
+            height: 15px;
+            background: var(--band-color);
+            top: 96px;
+            left: 54px;
+            transform-style: preserve-3d;
+            transform: rotateX(-5deg) translateZ(0px) translateY(0px) rotateY(180deg);
+            border-radius: 2px;
+        }
+
+        .caption {
+            margin-top: 50px;
+            font-size: 0.9rem;
+            color: var(--text-color);
+            opacity: 0.8;
+            transition: opacity 0.3s;
+        }
+        .scene:hover .caption {
+            opacity: 1;
+        }
+
+        /* Particle System */
+        .particles {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            transform-style: preserve-3d;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.5s ease-in-out;
+        }
+
+        .particle {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 4px;
+            height: 4px;
+            background: var(--glow-color);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--glow-color), 0 0 12px #fff;
+            transform-style: preserve-3d;
+        }
+
+        .scene:hover .hat-container,
+        .scene:focus-within .hat-container {
+            animation-duration: 30s; /* Slows down spin */
+        }
+        
+        .scene:hover .hat,
+        .scene:focus-within .hat {
+            opacity: 0;
+        }
+
+        .scene:hover .particles,
+        .scene:focus-within .particles {
+            opacity: 1;
+            animation: fade-in 0.5s forwards, reform-hat 4s 3s forwards;
+        }
+
+        @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+        /* Generate particle animations */
+        /* This part is repetitive and would ideally be done with a script, 
+           but works with pure CSS for a fixed number of particles. */
+        
+        /* Dissolve and swirl animation for each particle */
+        @keyframes Dissolve-1 { 0% { opacity: 0; transform: translate3d(0,0,0); } 20% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; transform: translate3d(-113px, 98px, 145px) rotate(360deg); } }
+        /* ... more keyframes for each particle ... */
+
+
+        @media (prefers-reduced-motion: reduce) {
+            .hat-container, .scene:hover .particles, .scene:focus-within .particles, .particle  {
+                animation: none !important;
+            }
+        }
+
+        @keyframes spin {
+            from { transform: rotateY(0deg) rotateX(10deg); }
+            to { transform: rotateY(360deg) rotateX(10deg); }
+        }
+    </style>
+    <script>
+        // Generate particles and their animations dynamically
+        document.addEventListener('DOMContentLoaded', () => {
+            const particlesContainer = document.querySelector('.particles');
+            const styleSheet = document.styleSheets[0];
+            const numParticles = 1500;
+            const orbitParticles = 3;
+
+            for (let i = 0; i < numParticles; i++) {
+                const particle = document.createElement('div');
+                particle.classList.add('particle');
+                
+                const x = (Math.random() - 0.5) * 400;
+                const y = (Math.random() - 0.5) * 400;
+                const z = (Math.random() - 0.5) * 400;
+                const delay = Math.random() * 2;
+                const duration = 2 + Math.random() * 2;
+
+                // Dissolve and reform animation
+                const animName = `dissolve-${i}`;
+                const keyframes = `
+                    @keyframes ${animName} {
+                        0% { opacity: 0; transform: translate3d(0,0,0); }
+                        10% { opacity: 1; }
+                        70% { opacity: 1; transform: translate3d(${x}px, ${y}px, ${z}px) rotateZ(${Math.random() * 720}deg); }
+                        100% { opacity: 0; transform: translate3d(0, 0, 0); }
+                    }
+                `;
+                styleSheet.insertRule(keyframes, styleSheet.cssRules.length);
+                particle.style.animation = `${animName} ${duration}s ${delay}s ease-in-out both`;
+
+                // Add permanent orbiting trail to a few particles
+                if (i < orbitParticles) {
+                    const orbitAnimName = `orbit-${i}`;
+                    const orbitDuration = 5 + Math.random() * 5;
+                    const orbitRadius = 100 + Math.random() * 20;
+
+                    const orbitKeyframes = `
+                        @keyframes ${orbitAnimName} {
+                           from { opacity: 0.7; transform: rotateY(0deg) translateX(${orbitRadius}px) rotateY(-0deg) scale(0.8); }
+                           to { opacity: 0.7; transform: rotateY(360deg) translateX(${orbitRadius}px) rotateY(-360deg) scale(0.8); }
+                        }
+                    `;
+                     styleSheet.insertRule(orbitKeyframes, styleSheet.cssRules.length);
+                    const trail = document.createElement('div');
+                    trail.classList.add('particle');
+                    trail.style.animation = `${orbitAnimName} ${orbitDuration}s linear infinite`;
+                    trail.style.animationDelay = `${i * 2}s`;
+                    trail.style.background = 'var(--glow-color)';
+                    trail.style.boxShadow = '0 0 10px var(--glow-color)';
+                    trail.style.width = '3px';
+                    trail.style.height = '3px';
+                    particlesContainer.appendChild(trail);
+                }
+
+
+                particlesContainer.appendChild(particle);
+            }
+
+            const scene = document.querySelector('.scene');
+            scene.addEventListener('mouseenter', () => particlesContainer.style.animation = 'none');
+            scene.addEventListener('mouseleave', () => {
+                // This is a bit of a hack to re-trigger the animations on next hover
+                // A better implementation would use JS to add/remove classes.
+            });
+        });
+    </script>
+</head>
+<body>
+    <div class="scene" tabindex="0">
+        <div class="hat-container">
+            <div class="hat">
+                <div class="brim"></div>
+                <div class="crown-base"></div>
+                <div class="crown-side">
+                    <div class="crown-top-dent"></div>
+                </div>
+                <div class="band"></div>
+            </div>
+            <div class="particles">
+                <!-- Particles will be generated by script -->
+            </div>
+        </div>
+        <div class="caption">
+            A tribute to open source.
+        </div>
+    </div>
+</body>
+</html>
