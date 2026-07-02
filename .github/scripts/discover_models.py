@@ -23,7 +23,7 @@ DRY_RUN = os.environ.get("DRY_RUN", "false").lower() == "true"
 MODEL_FILTER = os.environ.get("MODEL_FILTER", "").strip()
 PI_TIMEOUT = 600
 MIN_HTML_SIZE = 1024
-LOOKBACK_SECONDS = 7 * 24 * 3600
+LOOKBACK_SECONDS = 30 * 24 * 3600
 
 SKIP_PROVIDERS = {
     "anthracite-org", "cognitivecomputations", "gryphe", "mancer",
