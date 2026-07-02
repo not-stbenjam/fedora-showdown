@@ -164,6 +164,21 @@ def has_open_pr(slug):
     return False
 
 
+def _extract_html_from_stdout(stdout):
+    """Extract HTML from stdout, stripping markdown code fences if present."""
+    fence_match = re.search(r"```html?\s*\n(.*?)```", stdout, re.DOTALL)
+    if fence_match:
+        html = fence_match.group(1).strip()
+        if re.search(r"<!DOCTYPE|<html", html, re.IGNORECASE):
+            return html
+    if re.search(r"<!DOCTYPE|<html", stdout, re.IGNORECASE):
+        start = re.search(r"<!DOCTYPE|<html", stdout, re.IGNORECASE).start()
+        end = stdout.rfind("</html>")
+        if end > start:
+            return stdout[start:end + len("</html>")].strip()
+    return None
+
+
 def run_pi(model_id, slug, work_dir):
     prompt = PROMPT_FILE.read_text().strip()
 
@@ -181,8 +196,11 @@ def run_pi(model_id, slug, work_dir):
     try:
         result = subprocess.run(
             cmd, cwd=work_dir, timeout=PI_TIMEOUT,
+            capture_output=True, text=True,
         )
         logging.info(f"Pi exit code: {result.returncode}")
+        if result.stdout:
+            logging.info(f"Pi stdout length: {len(result.stdout)} chars")
     except subprocess.TimeoutExpired:
         logging.error(f"Pi timed out after {PI_TIMEOUT}s for {model_id}")
         return False
@@ -196,6 +214,15 @@ def run_pi(model_id, slug, work_dir):
         if candidates:
             output_file = candidates[0]
             logging.info(f"Found {output_file.name} instead of index.html")
+        elif result.stdout:
+            html = _extract_html_from_stdout(result.stdout)
+            if html:
+                output_file = work_dir / "index.html"
+                output_file.write_text(html)
+                logging.info(f"Recovered HTML from stdout ({len(html)} chars)")
+            else:
+                logging.error(f"No HTML file produced for {model_id}")
+                return False
         else:
             logging.error(f"No HTML file produced for {model_id}")
             return False
