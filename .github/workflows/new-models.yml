@@ -1,0 +1,63 @@
+name: Discover New Models
+
+on:
+  schedule:
+    - cron: '23 7 * * *'
+  workflow_dispatch:
+    inputs:
+      model_id:
+        description: 'Only process this specific OpenRouter model ID (e.g. qwen/qwen3.7-plus)'
+        required: false
+        type: string
+      dry_run:
+        description: 'Discover and log but do not create PRs'
+        required: false
+        type: boolean
+        default: false
+      max_models:
+        description: 'Max models to process in this run'
+        required: false
+        type: number
+        default: 5
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Pi coding agent
+        run: npm install -g @mariozechner/pi-coding-agent
+
+      - name: Install Python dependencies
+        run: pip install requests
+
+      - name: Configure Git identity
+        run: |
+          git config user.name "fedora-showdown[bot]"
+          git config user.email "fedora-showdown[bot]@users.noreply.github.com"
+
+      - name: Discover and generate
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODEL_FILTER: ${{ inputs.model_id || '' }}
+          DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+          MAX_MODELS: ${{ inputs.max_models || '5' }}
+        run: python3 .github/scripts/discover_models.py
