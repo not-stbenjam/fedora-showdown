@@ -30,7 +30,7 @@ ARTIFACTS_DIR = REPO_ROOT / "artifacts"
 SKIP_PROVIDERS = {
     "anthracite-org", "cognitivecomputations", "gryphe", "mancer",
     "nousresearch", "sao10k", "thedrummer", "undi95",
-    "openrouter", "switchpoint",
+    "anthropic", "openai", "openrouter", "switchpoint",
 }
 
 SKIP_NAME_PATTERNS = [
