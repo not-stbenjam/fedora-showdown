@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Red Hat Hero</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg1: #0b0f14;
+    --bg2: #131a23;
+    --glow: rgba(255,84,84,0.25);
+    --text: #e8ecf3;
+    --muted: #9ba7b8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: radial-gradient(circle at 30% 30%, var(--bg2), var(--bg1) 50%, #05080d 90%);
+    font-family: "Inter", system-ui, -apple-system, sans-serif;
+    display: grid;
+    place-items: center;
+    color: var(--text);
+  }
+  .hero {
+    position: relative;
+    width: min(1200px, 100vw);
+    height: min(700px, 75vh);
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    padding: 24px;
+  }
+  canvas {
+    width: 100%;
+    height: 100%;
+    filter: drop-shadow(0 15px 45px rgba(0,0,0,0.35));
+  }
+  .caption {
+    position: absolute;
+    inset: auto 0 28px 0;
+    text-align: center;
+    font-size: clamp(14px, 1.2vw, 16px);
+    letter-spacing: 0.01em;
+    color: var(--muted);
+    text-shadow: 0 2px 8px rgba(0,0,0,0.6);
+    user-select: none;
+    pointer-events: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hero { animation: none; }
+    canvas { filter: drop-shadow(0 10px 25px rgba(0,0,0,0.35)); }
+  }
+</style>
+</head>
+<body>
+  <div class="hero" id="hero">
+    <canvas id="c"></canvas>
+    <div class="caption">Open, secure, and beautifully engineered.</div>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const hero = document.getElementById('hero');
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  let w, h, cx, cy, scale;
+  let angle = 0, spinSpeed = 0.35, targetSpin = 0.35;
+  let dissolve = false, particles = [], embers = [];
+  const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function resize() {
+    const rect = hero.getBoundingClientRect();
+    w = rect.width; h = rect.height;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    ctx.scale(dpr, dpr);
+    cx = w / 2;
+    cy = h / 2;
+    scale = Math.min(w, h) * 0.4;
+  }
+
+  function drawHatPath(ctx, a = 0) {
+    const squish = 0.35 + Math.cos(a) * 0.15;
+    const zLift = 0.06 * Math.sin(a);
+    const brimR = scale * (0.8 + 0.1 * Math.cos(a));
+    const brimH = brimR * (0.28 * squish);
+    const crownW = brimR * 0.65 * (0.8 + 0.2 * Math.cos(a + Math.PI/2));
+    const crownH = brimR * 0.45;
+    const crownY = -brimH * 0.3 - crownH * (0.2 + zLift);
+
+    // Shadow
+    ctx.save();
+    ctx.translate(cx, cy + brimH * 0.2);
+    ctx.scale(1, 0.45);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, brimR * 0.95, brimH * 1.1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Brim
+    const gradBrim = ctx.createLinearGradient(-brimR, -brimH, brimR, brimH);
+    gradBrim.addColorStop(0, '#b81414');
+    gradBrim.addColorStop(0.5, '#e91c1c');
+    gradBrim.addColorStop(1, '#c41212');
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(1, squish);
+    ctx.rotate(0.02 * Math.sin(a * 1.5));
+    ctx.fillStyle = gradBrim;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, brimR, brimH, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Brim rim highlight
+    ctx.lineWidth = Math.max(1.5, scale * 0.01);
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.stroke();
+
+    ctx.restore();
+
+    // Crown
+    ctx.save();
+    ctx.translate(cx, cy + crownY);
+    ctx.rotate(0.08 * Math.sin(a));
+    const gradCrown = ctx.createLinearGradient(-crownW, -crownH, crownW, crownH);
+    gradCrown.addColorStop(0, '#ff2424');
+    gradCrown.addColorStop(0.35, '#f21a1a');
+    gradCrown.addColorStop(1, '#b50f0f');
+    ctx.fillStyle = gradCrown;
+    ctx.beginPath();
+    ctx.moveTo(-crownW * 0.9, crownH * 0.6);
+    ctx.quadraticCurveTo(-crownW, -crownH * 0.3, -crownW * 0.4, -crownH);
+    ctx.lineTo(crownW * 0.5, -crownH * 0.85);
+    ctx.quadraticCurveTo(crownW * 0.95, -crownH * 0.2, crownW * 0.7, crownH * 0.65);
+    ctx.closePath();
+    ctx.fill();
+
+    // Ribbon
+    const ribbonH = crownH * 0.18;
+    const gradRibbon = ctx.createLinearGradient(-crownW, 0, crownW, ribbonH);
+    gradRibbon.addColorStop(0, '#0d0d10');
+    gradRibbon.addColorStop(0.5, '#202026');
+    gradRibbon.addColorStop(1, '#0c0c10');
+    ctx.fillStyle = gradRibbon;
+    ctx.beginPath();
+    ctx.moveTo(-crownW * 0.85, -ribbonH * 0.5);
+    ctx.lineTo(crownW * 0.9, -ribbonH * 0.8);
+    ctx.lineTo(crownW * 0.8, ribbonH * 0.8);
+    ctx.lineTo(-crownW * 0.9, ribbonH * 0.6);
+    ctx.closePath();
+    ctx.fill();
+
+    // Crown highlight
+    ctx.globalCompositeOperation = 'screen';
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.beginPath();
+    ctx.ellipse(-crownW * 0.1, -crownH * 0.25, crownW * 0.35, crownH * 0.35, 0.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.restore();
+  }
+
+  const maskCanvas = document.createElement('canvas');
+  const maskCtx = maskCanvas.getContext('2d');
+  function updateMask() {
+    maskCanvas.width = w;
+    maskCanvas.height = h;
+    maskCtx.clearRect(0,0,w,h);
+    maskCtx.save();
+    drawHatPath(maskCtx, angle);
+    maskCtx.restore();
+  }
+
+  function spawnParticles(count) {
+    particles.length = 0;
+    const maxAttempts = count * 5;
+    let made = 0, tries = 0;
+    while (made < count && tries < maxAttempts) {
+      const x = Math.random() * w;
+      const y = Math.random() * h;
+      if (maskCtx.isPointInPath(x, y)) {
+        const t = Math.random();
+        const hue = 0;
+        particles.push({
+          x, y,
+          vx: (Math.random()-0.5)*1.2,
+          vy: (Math.random()-0.5)*1.2,
+          life: 0,
+          maxLife: 2.6 + Math.random()*0.8,
+          size: 1.2 + Math.random()*1.8,
+          color: `hsla(${hue + Math.random()*8}, 85%, ${50+Math.random()*20}%, 0.9)`,
+          drift: (Math.random()*0.6+0.2) * (Math.random() < 0.5 ? -1 : 1)
+        });
+        made++;
+      }
+      tries++;
+    }
+  }
+
+  function spawnEmbers() {
+    embers.length = 0;
+    const count = 30;
+    for (let i = 0; i < count; i++) {
+      const r = scale * (0.15 + Math.random()*0.25);
+      const theta = Math.random() * Math.PI * 2;
+      embers.push({
+        baseR: r,
+        r,
+        theta,
+        speed: 0.3 + Math.random()*0.6,
+        size: 1.2 + Math.random()*1.4,
+        glow: 0.4 + Math.random()*0.2
+      });
+    }
+  }
+
+  let phase = 'form'; // form -> disperse -> reform
+  let phaseTimer = 0;
+
+  function triggerDissolve() {
+    if (prefersReduced) return;
+    if (phase !== 'form') return;
+    updateMask();
+    spawnParticles(1800);
+    phase = 'disperse';
+    phaseTimer = 0;
+    targetSpin = 0.06;
+  }
+
+  function update(dt) {
+    spinSpeed += (targetSpin - spinSpeed) * 0.08;
+    angle += spinSpeed * dt * 0.6;
+
+    if (prefersReduced) return;
+
+    if (phase === 'disperse') {
+      phaseTimer += dt;
+      const swirl = 0.8;
+      particles.forEach(p => {
+        const dx = p.x - cx, dy = p.y - cy;
+        const d = Math.max(20, Math.hypot(dx, dy));
+        p.vx += (-dy / d) * 0.02 * swirl + p.drift * 0.005;
+        p.vy += ( dx / d) * 0.02 * swirl;
+        p.x += p.vx * 60 * dt;
+        p.y += p.vy * 60 * dt;
+        p.life += dt;
+      });
+      if (phaseTimer > 2.2) {
+        phase = 'reform';
+        phaseTimer = 0;
+      }
+    } else if (phase === 'reform') {
+      phaseTimer += dt;
+      const t = Math.min(1, phaseTimer / 1.4);
+      particles.forEach(p => {
+        const tx = cx + (p.x - cx) * (1 - t) * 0.3 + (Math.random()-0.5)*2;
+        const ty = cy + (p.y - cy) * (1 - t) * 0.3;
+        p.x += (tx - p.x) * 0.12;
+        p.y += (ty - p.y) * 0.12;
+        p.size *= 0.98;
+      });
+      if (t >= 1) {
+        phase = 'form';
+        targetSpin = 0.35;
+        spawnEmbers();
+      }
+    }
+  }
+
+  function render() {
+    ctx.clearRect(0,0,w,h);
+
+    // Ambient glow
+    ctx.save();
+    const glow = ctx.createRadialGradient(cx, cy, scale*0.1, cx, cy, scale*1.1);
+    glow.addColorStop(0, 'rgba(255,60,60,0.12)');
+    glow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0,0,w,h);
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    const perspective = 0.78 + 0.18 * Math.cos(angle);
+    ctx.scale(perspective, 1);
+    ctx.translate(-cx, -cy);
+    drawHatPath(ctx, angle);
+    ctx.restore();
+
+    if (!prefersReduced) {
+      // Particles
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      particles.forEach(p => {
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+        ctx.fill();
+      });
+      ctx.restore();
+
+      // Embers orbiting
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      embers.forEach(e => {
+        e.theta += e.speed * 0.008;
+        const x = cx + Math.cos(e.theta) * e.r;
+        const y = cy + Math.sin(e.theta) * (e.r * 0.35);
+        ctx.fillStyle = `rgba(255,140,100,${0.5*e.glow})`;
+        ctx.beginPath();
+        ctx.arc(x, y, e.size, 0, Math.PI*2);
+        ctx.fill();
+        // trail
+        ctx.strokeStyle = `rgba(255,120,80,${0.25*e.glow})`;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x - Math.cos(e.theta)*6, y - Math.sin(e.theta)*2);
+        ctx.stroke();
+      });
+      ctx.restore();
+    }
+  }
+
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min(0.033, (now - last) / 1000);
+    last = now;
+    update(dt);
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  hero.addEventListener('pointerenter', triggerDissolve);
+  hero.addEventListener('pointerdown', triggerDissolve);
+  hero.addEventListener('touchstart', e => { e.preventDefault(); triggerDissolve(); }, {passive:false});
+
+  window.addEventListener('resize', () => {
+    resize();
+    updateMask();
+  });
+
+  resize();
+  updateMask();
+  spawnEmbers();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
