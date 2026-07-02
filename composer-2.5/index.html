@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Red Hat Fedora</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: #0a0a0f;
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    color: #c8c4bc;
+  }
+  .hero {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background:
+      radial-gradient(ellipse 80% 60% at 50% 45%, rgba(180, 30, 40, 0.08) 0%, transparent 70%),
+      radial-gradient(ellipse 120% 80% at 50% 100%, rgba(20, 10, 15, 0.9) 0%, transparent 50%),
+      linear-gradient(180deg, #0d0d14 0%, #080810 40%, #050508 100%);
+  }
+  .hero::before {
+    content: "";
+    position: absolute; inset: 0;
+    background: radial-gradient(circle at 50% 40%, transparent 30%, rgba(0,0,0,0.55) 100%);
+    pointer-events: none;
+  }
+  .hero::after {
+    content: "";
+    position: absolute;
+    bottom: 0; left: 0; right: 0; height: 40%;
+    background: linear-gradient(to top, rgba(0,0,0,0.6), transparent);
+    pointer-events: none;
+  }
+  .stage {
+    position: relative;
+    width: min(90vw, 520px);
+    height: min(70vh, 480px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+  .caption {
+    position: relative;
+    z-index: 2;
+    margin-top: clamp(12px, 3vh, 28px);
+    text-align: center;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+    font-size: clamp(0.65rem, 1.8vw, 0.78rem);
+    font-weight: 300;
+    color: rgba(200, 190, 180, 0.55);
+    text-shadow: 0 1px 12px rgba(0,0,0,0.8);
+    pointer-events: none;
+    user-select: none;
+  }
+  .hint {
+    display: block;
+    margin-top: 0.6em;
+    font-size: 0.75em;
+    letter-spacing: 0.2em;
+    color: rgba(200, 190, 180, 0.28);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hint { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="hero">
+  <div class="stage" id="stage" aria-label="Spinning Red Hat fedora — hover to interact">
+    <canvas id="c"></canvas>
+  </div>
+  <p class="caption">
+    Red Hat
+    <span class="hint">hover to dissolve</span>
+  </p>
+</div>
+<script>
+(function () {
+  "use strict";
+
+  const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const canvas = document.getElementById("c");
+  const stage = document.getElementById("stage");
+  const ctx = canvas.getContext("2d");
+
+  let W = 0, H = 0, CX = 0, CY = 0, DPR = 1;
+  let angle = 0;
+  let spinSpeed = REDUCED ? 0 : 0.012;
+  let targetSpin = spinSpeed;
+  let time = 0;
+  let lastT = 0;
+
+  const STATE = { IDLE: 0, SLOW: 1, DISSOLVE: 2, SWIRL: 3, REFORM: 4, ORBIT: 5 };
+  let state = STATE.IDLE;
+  let stateT = 0;
+  let triggered = false;
+  let dissolve = 0;
+  let orbiters = [];
+
+  const COL = {
+    body: [196, 28, 42],
+    dark: [120, 12, 22],
+    band: [240, 235, 225],
+    glow: [255, 80, 70],
+    ember: [255, 140, 60]
+  };
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    const rect = stage.getBoundingClientRect();
+    W = rect.width; H = rect.height;
+    canvas.width = W * DPR; canvas.height = H * DPR;
+    canvas.style.width = W + "px"; canvas.style.height = H + "px";
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    CX = W / 2; CY = H / 2;
+    scale = Math.min(W, H) * 0.38;
+  }
+
+  function rotY(x, y, z, a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    return [x * c + z * s, y, -x * s + z * c];
+  }
+
+  function rotX(x, y, z, a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    return [x, y * c - z * s, y * s + z * c];
+  }
+
+  function project(x, y, z) {
+    const tilt = 0.22;
+    let [rx, ry, rz] = rotX(x, y, z, tilt);
+    const f = 520 / (520 + rz);
+    return { x: CX + rx * f, y: CY + ry * f - H * 0.04, z: rz, s: f };
+  }
+
+  function sampleHat(n) {
+    const pts = [];
+    const add = (x, y, z, w) => {
+      for (let i = 0; i < w; i++) {
+        const j = (Math.random() - 0.5) * 0.6;
+        pts.push([x + j, y + j * 0.3, z + j]);
+      }
+    };
+
+    for (let i = 0; i < n * 0.42; i++) {
+      const t = Math.random();
+      const th = Math.random() * Math.PI * 2;
+      const rTop = 0.28 + Math.random() * 0.04;
+      const rBot = 0.38 + Math.random() * 0.04;
+      const y = -0.05 + t * 0.55;
+      const r = rBot + (rTop - rBot) * t;
+      const pinch = 1 - 0.18 * Math.pow(Math.abs(Math.sin(th)), 3);
+      add(Math.cos(th) * r * pinch, y, Math.sin(th) * r * pinch, 1);
+    }
+
+    for (let i = 0; i < n * 0.12; i++) {
+      const th = Math.random() * Math.PI * 2;
+      const r = 0.26 + Math.random() * 0.06;
+      add(Math.cos(th) * r * 0.85, 0.48 + Math.random() * 0.06, Math.sin(th) * r * 0.85, 1);
+    }
+
+    for (let i = 0; i < n * 0.08; i++) {
+      const th = Math.random() * Math.PI * 2;
+      const r = 0.34 + Math.random() * 0.04;
+      add(Math.cos(th) * r, 0.02 + Math.random() * 0.04, Math.sin(th) * r, 1);
+    }
+
+    for (let i = 0; i < n * 0.38; i++) {
+      const th = Math.random() * Math.PI * 2;
+      const r = 0.42 + Math.pow(Math.random(), 0.6) * 0.38;
+      const y = -0.12 + Math.random() * 0.04;
+      add(Math.cos(th) * r, y, Math.sin(th) * r * 0.55, 1);
+    }
+
+    return pts.slice(0, n);
+  }
+
+  const COUNT = REDUCED ? 600 : 2800;
+  const raw = sampleHat(COUNT);
+  let scale = 140;
+
+  const particles = raw.map(([x, y, z]) => ({
+    hx: x, hy: y, hz: z,
+    x: 0, y: 0, z: 0,
+    vx: 0, vy: 0, vz: 0,
+    px: 0, py: 0,
+    size: 0.8 + Math.random() * 1.4,
+    bright: 0.5 + Math.random() * 0.5,
+    band: y > 0 && y < 0.08 && Math.hypot(x, z) < 0.4,
+    orbit: false,
+    trail: []
+  }));
+
+  function hatColor(p, lit) {
+    if (p.band) return COL.band;
+    const d = lit * p.bright;
+    return [
+      COL.body[0] * d + COL.dark[0] * (1 - d),
+      COL.body[1] * d + COL.dark[1] * (1 - d),
+      COL.body[2] * d + COL.dark[2] * (1 - d)
+    ];
+  }
+
+  function worldPos(p, a) {
+    const [wx, wy, wz] = rotY(p.hx * scale, p.hy * scale, p.hz * scale, a);
+    return { wx, wy, wz };
+  }
+
+  function trigger() {
+    if (REDUCED || triggered) return;
+    triggered = true;
+    state = STATE.SLOW;
+    stateT = 0;
+    targetSpin = 0.002;
+  }
+
+  function resetTrigger() {
+    if (REDUCED) return;
+    triggered = false;
+    state = STATE.IDLE;
+    stateT = 0;
+    dissolve = 0;
+    targetSpin = 0.012;
+    orbiters.forEach(o => { o.orbit = false; o.trail = []; });
+    orbiters = [];
+    particles.forEach(p => {
+      p.orbit = false;
+      p.trail = [];
+      p.vx = p.vy = p.vz = 0;
+    });
+  }
+
+  stage.addEventListener("pointerenter", (e) => { if (e.pointerType === "mouse") trigger(); });
+  stage.addEventListener("pointerdown", (e) => { e.preventDefault(); trigger(); });
+  stage.addEventListener("pointerleave", (e) => {
+    if (e.pointerType === "mouse" && state === STATE.IDLE) resetTrigger();
+  });
+
+  function updateState(dt) {
+    stateT += dt;
+    spinSpeed += (targetSpin - spinSpeed) * Math.min(1, dt * 3);
+
+    if (state === STATE.SLOW && stateT > 0.6) {
+      state = STATE.DISSOLVE;
+      stateT = 0;
+      particles.forEach(p => {
+        const w = worldPos(p, angle);
+        const dir = Math.random() * Math.PI * 2;
+        const mag = 80 + Math.random() * 160;
+        p.vx = Math.cos(dir) * mag;
+        p.vy = (Math.random() - 0.5) * mag * 0.6 - 40;
+        p.vz = Math.sin(dir) * mag;
+        p.x = w.wx; p.y = w.wy; p.z = w.wz;
+      });
+    }
+
+    if (state === STATE.DISSOLVE) {
+      dissolve = Math.min(1, stateT / 0.9);
+      if (stateT > 1.0) { state = STATE.SWIRL; stateT = 0; }
+    }
+
+    if (state === STATE.SWIRL && stateT > 1.6) {
+      state = STATE.REFORM;
+      stateT = 0;
+    }
+
+    if (state === STATE.REFORM) {
+      dissolve = Math.max(0, 1 - stateT / 1.4);
+      if (stateT > 1.6) {
+        state = STATE.ORBIT;
+        stateT = 0;
+        targetSpin = 0.012;
+        const picks = particles.sort(() => Math.random() - 0.5).slice(0, 7);
+        picks.forEach((p, i) => {
+          p.orbit = true;
+          p.orbitR = 0.55 + i * 0.07;
+          p.orbitSp = 0.4 + Math.random() * 0.5;
+          p.orbitPh = Math.random() * Math.PI * 2;
+          orbiters.push(p);
+        });
+      }
+    }
+  }
+
+  function updateParticles(dt) {
+    const swirling = state === STATE.SWIRL || state === STATE.DISSOLVE;
+    const reforming = state === STATE.REFORM;
+    const idle = state === STATE.IDLE || state === STATE.SLOW || state === STATE.ORBIT;
+
+    particles.forEach(p => {
+      const w = worldPos(p, angle);
+
+      if (idle && !p.orbit) {
+        p.x = w.wx; p.y = w.wy; p.z = w.wz;
+      } else if (swirling) {
+        p.vx *= 0.985;
+        p.vy *= 0.985;
+        p.vz *= 0.985;
+        if (state === STATE.SWIRL) {
+          const dx = -p.x, dy = -p.y * 0.3, dz = -p.z;
+          const dist = Math.hypot(dx, dz) + 1;
+          p.vx += (-dz / dist) * 55 * dt + dx * 8 * dt;
+          p.vy += dy * 12 * dt;
+          p.vz += (dx / dist) * 55 * dt + dz * 8 * dt;
+        }
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.z += p.vz * dt;
+      } else if (reforming) {
+        const tx = w.wx, ty = w.wy, tz = w.wz;
+        p.x += (tx - p.x) * Math.min(1, dt * 3.5);
+        p.y += (ty - p.y) * Math.min(1, dt * 3.5);
+        p.z += (tz - p.z) * Math.min(1, dt * 3.5);
+      }
+
+      if (p.orbit && state === STATE.ORBIT) {
+        p.orbitPh += p.orbitSp * dt;
+        const ox = Math.cos(p.orbitPh) * p.orbitR * scale;
+        const oz = Math.sin(p.orbitPh) * p.orbitR * scale;
+        const oy = Math.sin(p.orbitPh * 2.1) * scale * 0.08 + scale * 0.05;
+        const [rx, ry, rz] = rotY(ox, oy, oz, angle);
+        p.x = rx; p.y = ry; p.z = rz;
+      }
+    });
+  }
+
+  function drawShadow() {
+    ctx.save();
+    ctx.globalAlpha = 0.35;
+    ctx.filter = "blur(18px)";
+    ctx.beginPath();
+    ctx.ellipse(CX, CY + scale * 0.38, scale * 0.72, scale * 0.14, 0, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(0,0,0,0.9)";
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawGlow() {
+    const g = ctx.createRadialGradient(CX, CY - scale * 0.05, 0, CX, CY, scale * 1.1);
+    g.addColorStop(0, "rgba(200, 30, 40, 0.12)");
+    g.addColorStop(0.5, "rgba(120, 15, 25, 0.05)");
+    g.addColorStop(1, "transparent");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  function drawParticle(p, a) {
+    let sx, sy, ss, lit;
+
+    if (p.orbit && state === STATE.ORBIT) {
+      const pr = project(p.x, p.y, p.z);
+      sx = pr.x; sy = pr.y; ss = pr.s; lit = 0.85;
+    } else if (state === STATE.IDLE || state === STATE.SLOW || (state === STATE.ORBIT && !p.orbit)) {
+      const [rx, ry, rz] = rotY(p.hx * scale, p.hy * scale, p.hz * scale, a);
+      const pr = project(rx, ry, rz);
+      sx = pr.x; sy = pr.y; ss = pr.s;
+      lit = 0.45 + ss * 0.55;
+    } else {
+      const pr = project(p.x, p.y, p.z);
+      sx = pr.x; sy = pr.y; ss = pr.s;
+      lit = 0.6 + Math.sin(time * 3 + p.hx * 10) * 0.15;
+    }
+
+    const emberMix = (state >= STATE.DISSOLVE && state <= STATE.REFORM) ? dissolve * 0.7 : 0;
+    const orbGlow = p.orbit ? 0.6 : 0;
+    const [r, g, b] = hatColor(p, lit);
+    const er = r + (COL.ember[0] - r) * emberMix + (COL.glow[0] - r) * orbGlow;
+    const eg = g + (COL.ember[1] - g) * emberMix + (COL.glow[1] - g) * orbGlow;
+    const eb = b + (COL.ember[2] - b) * emberMix + (COL.glow[2] - b) * orbGlow;
+
+    const sz = p.size * ss * (p.orbit ? 1.6 : 1);
+
+    if (p.orbit) {
+      p.trail.push({ x: sx, y: sy });
+      if (p.trail.length > 14) p.trail.shift();
+      for (let i = 0; i < p.trail.length; i++) {
+        const t = i / p.trail.length;
+        ctx.beginPath();
+        ctx.arc(p.trail[i].x, p.trail[i].y, sz * t * 0.5, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${COL.glow[0]},${COL.glow[1]},${COL.glow[2]},${t * 0.08})`;
+        ctx.fill();
+      }
+    }
+
+    ctx.beginPath();
+    ctx.arc(sx, sy, sz, 0, Math.PI * 2);
+    const alpha = p.orbit ? 0.95 : (0.55 + ss * 0.45);
+    ctx.fillStyle = `rgba(${er|0},${eg|0},${eb|0},${alpha})`;
+
+    if (emberMix > 0.2 || p.orbit) {
+      ctx.shadowColor = `rgba(${COL.glow[0]},${COL.glow[1]},${COL.glow[2]},${0.25 + emberMix * 0.35})`;
+      ctx.shadowBlur = sz * (2 + emberMix * 3);
+    }
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  function render(a) {
+    ctx.clearRect(0, 0, W, H);
+    drawGlow();
+    drawShadow();
+
+    const sorted = particles.slice().sort((p, q) => {
+      const pa = p.orbit ? p.z : rotY(p.hx * scale, p.hy * scale, p.hz * scale, a)[2];
+      const qa = q.orbit ? q.z : rotY(q.hx * scale, q.hy * scale, q.hz * scale, a)[2];
+      return pa - qa;
+    });
+
+    sorted.forEach(p => drawParticle(p, a));
+  }
+
+  function loop(t) {
+    if (!lastT) lastT = t;
+    const dt = Math.min(0.033, (t - lastT) / 1000);
+    lastT = t;
+    time += dt;
+
+    if (!REDUCED) {
+      angle += spinSpeed;
+      updateState(dt);
+      updateParticles(dt);
+    } else {
+      angle = 0.4;
+    }
+
+    render(angle);
+    requestAnimationFrame(loop);
+  }
+
+  resize();
+  window.addEventListener("resize", resize);
+
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
