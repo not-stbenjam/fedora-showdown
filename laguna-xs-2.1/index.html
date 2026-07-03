@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hero Fedora</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  overflow: hidden;
+}
+#scene {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  background: linear-gradient(135deg, #0a0a0e 0%, #121218 40%, #1a1a2a 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+#hero-container {
+  position: relative;
+  perspective: 1200px;
+  cursor: grab;
+}
+#hero-container:active { cursor: grabbing; }
+.fedora {
+  width: 200px;
+  height: 120px;
+  position: relative;
+  transform-style: preserve-3d;
+  animation: spin 20s linear infinite, fedora-glow 6s ease-in-out infinite;
+  filter: drop-shadow(0 0 20px rgba(255, 77, 77, 0.2));
+}
+.fedora::before,
+.fedora::after {
+  content: '';
+  position: absolute;
+  background: radial-gradient(circle at 30% 50%, #ff4d4d, #cc0000);
+  border-radius: 50% 50% 0 0;
+  transform: rotateX(45deg);
+  box-shadow: 0 10px 30px rgba(204, 0, 0, 0.6);
+}
+.fedora::before {
+  width: 140px;
+  height: 80px;
+  left: 30px;
+  top: 0;
+  transform-origin: center;
+  animation: tilt 8s ease-in-out infinite;
+}
+.fedora::after {
+  width: 100px;
+  height: 60px;
+  left: 50px;
+  top: -40px;
+  border-radius: 50% 50% 0 0;
+  transform: rotateX(60deg) rotateY(20deg);
+  box-shadow: 0 8px 25px rgba(204, 0, 0, 0.5);
+  animation: tilt-reverse 6s ease-in-out infinite;
+}
+.fedora .brim {
+  position: absolute;
+  width: 100%;
+  height: 40px;
+  background: radial-gradient(circle at center, #ff6b6b, #cc0000);
+  border-radius: 50% 50% 0 0;
+  top: 70px;
+  left: 0;
+  transform: rotateX(30deg);
+  box-shadow: 0 6px 20px rgba(204, 0, 0, 0.4);
+  animation: brim-glow 4s ease-in-out infinite alternate;
+}
+.fedora .band {
+  position: absolute;
+  width: 80%;
+  height: 12px;
+  background: linear-gradient(90deg, #333, #555, #333);
+  border-radius: 6px;
+  top: 85px;
+  left: 10%;
+  transform: rotateX(20deg);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+#caption {
+  margin-top: 40px;
+  color: #a0a0b0;
+  font-size: 1rem;
+  text-align: center;
+  opacity: 0.8;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+#particle-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+.fedora-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
+  opacity: 0;
+}
+@keyframes spin {
+  from { transform: rotateY(0deg) rotateX(15deg); }
+  to { transform: rotateY(360deg) rotateX(15deg); }
+}
+@keyframes tilt {
+  0%, 100% { transform: rotateX(45deg) rotateY(0deg); }
+  50% { transform: rotateX(45deg) rotateY(30deg); }
+}
+@keyframes tilt-reverse {
+  0%, 100% { transform: rotateX(60deg) rotateY(20deg); }
+  50% { transform: rotateX(60deg) rotateY(-30deg); }
+}
+@keyframes brim-glow {
+  from { box-shadow: 0 6px 20px rgba(204, 0, 0, 0.4); }
+  to { box-shadow: 0 6px 20px rgba(255, 77, 77, 0.7), 0 0 30px rgba(255, 77, 77, 0.3); }
+}
+@keyframes fedora-glow {
+  0%, 100% { filter: drop-shadow(0 0 15px rgba(255, 77, 77, 0.15)); }
+  50% { filter: drop-shadow(0 0 25px rgba(255, 77, 77, 0.3)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fedora {
+    animation: none;
+    transform: rotateY(0) rotateX(15deg);
+  }
+  .fedora::before { animation: none; }
+  .fedora::after { animation: none; }
+  .fedora .brim { animation: none; }
+}
+@media (max-width: 600px) {
+  .fedora {
+    width: 150px;
+    height: 90px;
+  }
+  .fedora::before {
+    width: 105px;
+    height: 60px;
+  }
+  .fedora::after {
+    width: 75px;
+    height: 45px;
+  }
+  .fedora .brim {
+    height: 30px;
+    top: 60px;
+  }
+  .fedora .band {
+    height: 9px;
+    top: 68px;
+  }
+}
+</style>
+</head>
+<body>
+<div id="scene">
+  <div id="hero-container">
+    <div class="fedora">
+      <div class="brim"></div>
+      <div class="band"></div>
+    </div>
+  </div>
+  <canvas id="particle-canvas"></canvas>
+  <div class="fedora-overlay"></div>
+  <div id="caption">Red Hat Fedora</div>
+</div>
+<script>
+(function() {
+  const canvas = document.getElementById('particle-canvas');
+  const ctx = canvas.getContext('2d');
+  const fedora = document.querySelector('.fedora');
+  const container = document.getElementById('hero-container');
+  const overlay = document.querySelector('.fedora-overlay');
+  
+  let particles = [];
+  let isDissolving = false;
+  let reforming = false;
+  let orbitParticles = [];
+  let animationId;
+  let currentRotation = 0;
+  const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let lastInteractionTime = 0;
+  
+  const fedoraWidth = 200;
+  const fedoraHeight = 120;
+  const particleCount = 150;
+  
+  class Particle {
+    constructor(x, y, vx, vy, life, color, type = 'ember') {
+      this.x = x;
+      this.y = y;
+      this.vx = vx;
+      this.vy = vy;
+      this.life = life;
+      this.maxLife = life;
+      this.color = color;
+      this.type = type;
+      this.size = Math.random() * 3 + 2;
+      this.alpha = 1;
+      this.rotation = Math.random() * Math.PI * 2;
+      this.rotationSpeed = (Math.random() - 0.5) * 0.2;
+    }
+    
+    update(dt) {
+      if (this.type === 'ember') {
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+        this.vy += 0.1 * dt;
+        this.vx *= 0.98;
+        this.life -= dt * 0.5;
+        this.alpha = this.life / this.maxLife;
+        this.rotation += this.rotationSpeed * dt;
+      } else if (this.type === 'orbit') {
+        this.life -= dt * 0.3;
+        this.alpha = 0.7 + 0.3 * Math.sin(this.life * 0.1);
+      }
+    }
+    
+    draw(ctx) {
+      if (this.alpha <= 0) return;
+      
+      ctx.save();
+      ctx.globalAlpha = this.alpha;
+      
+      if (this.type === 'ember') {
+        const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size);
+        grad.addColorStop(0, `rgba(255, 77, 77, ${this.alpha})`);
+        grad.addColorStop(0.5, `rgba(204, 0, 0, ${this.alpha * 0.5})`);
+        grad.addColorStop(1, `rgba(100, 0, 0, 0)`);
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.strokeStyle = `rgba(255, 100, 100, ${this.alpha * 0.3})`;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      } else if (this.type === 'orbit') {
+        ctx.fillStyle = `rgba(255, 77, 77, ${this.alpha})`;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size * 0.5, 0, Math.PI * 2);
+        ctx.fill();
+        
+        const trailGrad = ctx.createLinearGradient(
+          this.x - this.vx * 5, this.y - this.vy * 5,
+          this.x, this.y
+        );
+        trailGrad.addColorStop(0, `rgba(255, 77, 77, 0)`);
+        trailGrad.addColorStop(1, `rgba(255, 77, 77, ${this.alpha * 0.2})`);
+        ctx.strokeStyle = trailGrad;
+        ctx.lineWidth = this.size;
+        ctx.stroke();
+      }
+      
+      ctx.restore();
+    }
+  }
+  
+  function createOrbitParticles() {
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    const radius = 80;
+    
+    orbitParticles = [];
+    
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2;
+      const x = centerX + Math.cos(angle) * radius;
+      const y = centerY + Math.sin(angle) * radius;
+      const vx = -Math.sin(angle) * 0.3;
+      const vy = Math.cos(angle) * 0.3;
+      
+      orbitParticles.push(new Particle(x, y, vx * 2, vy * 2, 9999, '#ff4d4d', 'orbit'));
+    }
+  }
+  
+  function startDissolve() {
+    if (isDissolving || reforming || REDUCED_MOTION) return;
+    isDissolving = true;
+    
+    const rect = fedora.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    
+    for (let i = 0; i < particleCount; i++) {
+      const angle = (i / particleCount) * Math.PI * 2 + currentRotation * 0.5;
+      const distance = Math.random() * 80 + 40;
+      const x = centerX + Math.cos(angle) * distance;
+      const y = centerY + Math.sin(angle) * distance;
+      
+      const spreadAngle = angle + (Math.random() - 0.5) * 0.5;
+      const vx = Math.cos(spreadAngle) * (Math.random() * 3 + 2);
+      const vy = Math.sin(spreadAngle) * (Math.random() * 3 + 2) - 1;
+      
+      const life = 1000 + Math.random() * 500;
+      const color = `hsl(${10 + Math.random() * 20}, 100%, 50%)`;
+      
+      particles.push(new Particle(x, y, vx, vy, life, color, 'ember'));
+    }
+    
+    setTimeout(startReform, 2500);
+  }
+  
+  function startReform() {
+    if (!isDissolving || reforming) return;
+    reforming = true;
+    isDissolving = false;
+    
+    particles = particles.filter(p => p.life > 0);
+    
+    const targetCount = Math.min(30, particles.length);
+    const rect = fedora.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    
+    for (let i = 0; i < targetCount; i++) {
+      const angle = (i / targetCount) * Math.PI * 2;
+      const distance = Math.random() * 60 + 20;
+      const x = centerX + Math.cos(angle) * distance;
+      const y = centerY + Math.sin(angle) * distance;
+      
+      const vx = (Math.cos(angle + Math.PI) * (Math.random() * 2 + 1)) * 0.5;
+      const vy = (Math.sin(angle + Math.PI) * (Math.random() * 2 + 1) - 0.5) * 0.5;
+      
+      particles.push(new Particle(x, y, vx, vy, 500, '#ff4d4d', 'ember'));
+    }
+    
+    setTimeout(() => {
+      reforming = false;
+      particles = [];
+      createOrbitParticles();
+    }, 1500);
+  }
+  
+  function animate() {
+    const now = performance.now();
+    const dt = Math.min(16, now - (animate.lastTime || now)) / 1000;
+    animate.lastTime = now;
+    
+    currentRotation += dt * 0.1;
+    
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    if (isDissolving || reforming) {
+      particles.forEach(p => {
+        p.update(dt);
+        p.draw(ctx);
+      });
+      particles = particles.filter(p => p.life > 0);
+    }
+    
+    if (orbitParticles.length > 0) {
+      orbitParticles.forEach(p => {
+        p.update(dt);
+        p.draw(ctx);
+      });
+    }
+    
+    animationId = requestAnimationFrame(animate);
+  }
+  
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  
+  function handleInteraction() {
+    if (REDUCED_MOTION) return;
+    startDissolve();
+  }
+  
+  container.addEventListener('mouseleave', () => {
+    if (!isDissolving && !reforming) {
+      lastInteractionTime = performance.now();
+    }
+  });
+  
+  container.addEventListener('mouseenter', handleInteraction);
+  container.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    handleInteraction();
+  }, { passive: false });
+  
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', resize);
+  
+  resize();
+  animate();
+})();
+</script>
+</body>
+</html>
