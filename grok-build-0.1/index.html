@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Red Hat Fedora</title>
+<style>
+  :root {
+    --bg: #0a090f;
+    --accent:#c52d39;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    width: 100%;
+  }
+  body {
+    background: radial-gradient(circle at 50% 38%, #12111a 0%, #0a090f 72%);
+    color: #a1a1aa;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100dvh;
+    overflow: hidden;
+    user-select: none;
+  }
+  .hero {
+    width: 100%;
+    max-width: 520px;
+    padding: 40px 20px 60px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 22px;
+  }
+  canvas {
+    width: min(100%, 460px);
+    height: auto;
+    display: block;
+    touch-action: none;
+    cursor: pointer;
+  }
+  .caption {
+    font-size: 13px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    opacity: 0.55;
+    font-weight: 500;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+  <div class="hero">
+    <canvas id="canvas" width="480" height="480"></canvas>
+    <div class="caption">Crafted with precision</div>
+  </div>
+
+<script>
+// === Configuration (inline, zero dependencies)
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d', { alpha: true });
+
+const W = canvas.width;
+const H = canvas.height;
+const CX = W / 2;
+const CY = H / 2 + 18;
+
+const RED = '#c52d39';
+const RED_DARK = '#6e1b22';
+const BAND = '#382f36';
+const ORBIT_COLOR = '#ffcb92';
+
+let hatsPoints = [];
+let orbitalParticles = [];
+let isDissolving = false;
+let dissolveTime = 0;
+let currentAngle = 0.9;
+let angVel = 0.0031;
+let isMouseOver = false;
+let time = 0;
+
+const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// 3D light
+let lightDir = { x: -0.25, y: 0.9, z: 0.65 };
+(function normLight() {
+  const len = Math.hypot(lightDir.x, lightDir.y, lightDir.z) || 1;
+  lightDir.x /= len; lightDir.y /= len; lightDir.z /= len;
+})();
+
+function rotateY(p, ang) {
+  const c = Math.cos(ang);
+  const s = Math.sin(ang);
+  return {
+    x: p.x * c - p.z * s,
+    y: p.y,
+    z: p.x * s + p.z * c
+  };
+}
+
+function rotateNormal(nx, ny, nz, ang) {
+  const c = Math.cos(ang);
+  const s = Math.sin(ang);
+  return {
+    x: nx * c - nz * s,
+    y: ny,
+    z: nx * s + nz * c
+  };
+}
+
+function project(x, y, z) {
+  const D = 4.75;
+  const zcam = z + D;
+  if (zcam < 0.15) return null;
+  const s = D / zcam;
+  const projK = s * 92;
+  return {
+    sx: CX + x * projK,
+    sy: CY - y * projK,
+    depth: zcam,
+    scaleF: s
+  };
+}
+
+function makeHatPoints() {
+  const points = [];
+  const N_A = 64;
+  const N_R = 9;
+  const N_H = 21;
+
+  // Brim (slightly drooping edges)
+  const brimInner = 0.96;
+  const brimOuter = 2.12;
+  const brimY = -0.64;
+  for (let ai = 0; ai < N_A; ai++) {
+    const a = (ai / N_A) * Math.PI * 2;
+    for (let ri = 0; ri <= N_R; ri++) {
+      const f = ri / N_R;
+      const r = brimInner + (brimOuter - brimInner) * f;
+      const y = brimY + (f * 0.11) + Math.sin(f * Math.PI) * 0.018;
+      points.push({
+        origX: Math.cos(a) * r,
+        origY: y,
+        origZ: Math.sin(a) * r * 0.98,
+        nx: Math.cos(a),
+        ny: 0.1,
+        nz: Math.sin(a),
+        type: 'brim',
+        currX: 0, currY: 0, currZ: 0,
+        velX: 0, velY: 0, velZ: 0
+      });
+    }
+  }
+
+  // Crown sides
+  const crownBottomR = 0.98;
+  const crownTopR = 0.79;
+  const crownBY = -0.55;
+  const crownTY = 1.24;
+  for (let ai = 0; ai < N_A; ai++) {
+    const a = (ai / N_A) * Math.PI * 2;
+    for (let hi = 0; hi <= N_H; hi++) {
+      const f = hi / N_H;
+      const r = crownBottomR * (1 - f * 0.09) + crownTopR * f;
+      points.push({
+        origX: Math.cos(a) * r,
+        origY: crownBY + (crownTY - crownBY) * f,
+        origZ: Math.sin(a) * r,
+        nx: Math.cos(a),
+        ny: 0,
+        nz: Math.sin(a),
+        type: 'crown',
+        currX: 0, currY: 0, currZ: 0,
+        velX: 0, velY: 0, velZ: 0
+      });
+    }
+  }
+
+  // Dome cap
+  for (let ai = 0; ai < N_A; ai++) {
+    const a = (ai / N_A) * Math.PI * 2;
+    for (let ri = 0; ri <= 7; ri++) {
+      const f = ri / 7;
+      const r = crownTopR * f * 0.97;
+      const dome = (Math.cos(f * Math.PI * 0.92) * 0.24);
+      points.push({
+        origX: Math.cos(a) * r,
+        origY: crownTY + dome,
+        origZ: Math.sin(a) * r,
+        nx: 0,
+        ny: 1,
+        nz: 0,
+        type: 'crown',
+        currX: 0, currY: 0, currZ: 0,
+        velX: 0, velY: 0, velZ: 0
+      });
+    }
+  }
+
+  // Black band
+  const bandY = -0.38;
+  const bandR = 1.04;
+  for (let ai = 0; ai < Math.floor(N_A * 1.5); ai++) {
+    const a = (ai / (N_A * 1.5)) * Math.PI * 2;
+    for (let t = -1; t <= 1; t++) {
+      if (t === 0) continue;
+      points.push({
+        origX: Math.cos(a) * (bandR + t * 0.02),
+        origY: bandY + Math.random() * 0.015 - 0.007,
+        origZ: Math.sin(a) * (bandR + t * 0.015),
+        nx: Math.cos(a),
+        ny: 0.35,
+        nz: Math.sin(a),
+        type: 'band',
+        currX: 0, currY: 0, currZ: 0,
+        velX: 0, velY: 0, velZ: 0
+      });
+    }
+  }
+
+  // Initialize currents
+  points.forEach(p => {
+    p.currX = p.origX;
+    p.currY = p.origY;
+    p.currZ = p.origZ;
+  });
+
+  return points;
+}
+
+function getColor(p, ndot = 0.6, isParticle = false) {
+  let baseR, baseG, baseB;
+
+  if (p.type === 'band') {
+    baseR = 56; baseG = 48; baseB = 58;
+  } else {
+    baseR = 197; baseG = 45; baseB = 57; // rich red
+  }
+
+  let factor = Math.max(0.32, 0.58 + (ndot - 0.1) * 0.65);
+  let r = Math.max(30, Math.floor(baseR * factor));
+  let g = Math.max(18, Math.floor(baseG * factor));
+  let b = Math.max(23, Math.floor(baseB * factor));
+
+  if (isParticle) {
+    // tasteful warm ember
+    const warm = 38 + Math.random() * 23;
+    r = Math.min(255, r + warm * 1.05);
+    g = Math.min(240, g + warm * 0.6);
+    b = Math.min(200, b + warm * 0.3);
+    return `rgb(${r},${g},${b})`;
+  }
+  return `rgb(${r},${g},${b})`;
+}
+
+function normalize(v) {
+  const len = Math.hypot(v.x, v.y, v.z) || 1;
+  return { x: v.x / len, y: v.y / len, z: v.z / len };
+}
+
+function drawShadow() {
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.32)';
+  ctx.beginPath();
+  ctx.ellipse(CX, CY + 95, 118, 36, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function startDissolve() {
+  if (isDissolving || reducedMotion) return;
+  isDissolving = true;
+  dissolveTime = 0;
+
+  hatsPoints.forEach(pt => {
+    // start current from correct rotated position
+    const rot = rotateY({ x: pt.origX, y: pt.origY, z: pt.origZ }, currentAngle);
+    pt.currX = rot.x;
+    pt.currY = rot.y;
+    pt.currZ = rot.z;
+
+    // outward embers-ish impulse
+    const dist = Math.hypot(pt.origX, pt.origZ) || 0.8;
+    const push = 0.023 + Math.random() * 0.009;
+    const outX = (pt.origX / dist) * push * (0.8 + Math.random() * 1.1);
+    const outZ = (pt.origZ / dist) * push * (0.8 + Math.random() * 1.1);
+
+    pt.velX = outX + (Math.random() - 0.5) * 0.015;
+    pt.velY = (Math.random() - 0.5) * 0.034 - 0.005;
+    pt.velZ = outZ + (Math.random() - 0.5) * 0.012;
+  });
+}
+
+function updateAndDraw() {
+  time += 0.016;
+
+  drawShadow();
+
+  if (!reducedMotion) {
+    // slow spin on hover or dissolving
+    const targetRate = (isMouseOver || isDissolving) ? 0.00105 : 0.00315;
+    angVel = angVel * 0.86 + targetRate * 0.14;
+    currentAngle += angVel;
+  } else {
+    currentAngle = 1.12;
+    angVel = 0;
+  }
+
+  if (isDissolving && !reducedMotion) {
+    dissolveTime++;
+    const prog = Math.min(1, dissolveTime / 220);
+
+    hatsPoints.forEach(pt => {
+      // physics
+      pt.currX += pt.velX;
+      pt.currY += pt.velY;
+      pt.currZ += pt.velZ;
+
+      pt.velX *= 0.976;
+      pt.velY *= 0.982;
+      pt.velZ *= 0.976;
+
+      // swirl during middle phase — like embers
+      if (prog > 0.28 && prog < 0.73) {
+        const swirl = (prog - 0.28) / 0.45;
+        const dist = Math.hypot(pt.currX, pt.currZ) + 0.1;
+        const swirlS = 0.0034 * Math.sin(prog * 11 + dist * 0.7) * (1 + Math.cos(dist));
+        const ang = Math.atan2(pt.currZ, pt.currX);
+        pt.velX += Math.cos(ang + 1.58) * swirlS * dist * 0.6;
+        pt.velZ += Math.sin(ang + 1.58) * swirlS * dist * 0.6;
+      }
+
+      // gentle downward float + return attract
+      if (prog > 0.6) {
+        const reformP = Math.pow((prog - 0.6) / 0.4, 1.25);
+        const rotated = rotateY({ x: pt.origX, y: pt.origY, z: pt.origZ }, currentAngle);
+        pt.currX = pt.currX * (1 - reformP) + rotated.x * reformP;
+        pt.currY = pt.currY * (1 - reformP) + rotated.y * reformP;
+        pt.currZ = pt.currZ * (1 - reformP) + rotated.z * reformP;
+
+        const buck = 0.92 + reformP * 0.04;
+        pt.velX *= buck;
+        pt.velY *= buck;
+        pt.velZ *= buck;
+      } else {
+        pt.velY -= 0.00028;
+      }
+    });
+
+    if (dissolveTime > 218) {
+      isDissolving = false;
+      dissolveTime = 0;
+
+      // zero velocity for safety
+      hatsPoints.forEach(pt => {
+        pt.velX = pt.velY = pt.velZ = 0;
+      });
+    }
+  }
+
+  // prepare render list
+  const renderList = [];
+
+  if (!isDissolving && !reducedMotion) {
+    // rotate the entire model from origins
+    hatsPoints.forEach(pt => {
+      const rot = rotateY(pt, currentAngle);
+      const proj = project(rot.x, rot.y, rot.z);
+      if (!proj) return;
+
+      let nrot = rotateNormal(pt.nx, pt.ny, pt.nz, currentAngle);
+      let ndot = Math.max(0.25, nrot.x * lightDir.x + nrot.y * lightDir.y + nrot.z * lightDir.z);
+      renderList.push({
+        sx: proj.sx, sy: proj.sy,
+        depth: proj.depth,
+        scaleF: proj.scaleF,
+        color: getColor(pt, ndot, false),
+        size: 1.45
+      });
+    });
+  } else {
+    // particle positions (use currents)
+    hatsPoints.forEach(pt => {
+      const proj = project(pt.currX, pt.currY, pt.currZ);
+      if (!proj) return;
+      const isP = isDissolving;
+      renderList.push({
+        sx: proj.sx, sy: proj.sy,
+        depth: proj.depth,
+        scaleF: proj.scaleF,
+        color: getColor(pt, 0.75, isP),
+        size: isP ? 1.35 : 1.4
+      });
+    });
+  }
+
+  // back-to-front sort
+  renderList.sort((a, b) => b.depth - a.depth);
+
+  // draw main hat points (soft lighting / glow during dissolve)
+  const useGlow = isDissolving && !reducedMotion;
+  if (useGlow) {
+    ctx.shadowColor = '#ffcc9944';
+    ctx.shadowBlur = 4.5;
+  } else {
+    ctx.shadowBlur = 0;
+  }
+
+  ctx.lineCap = 'round';
+  ctx.globalAlpha = isDissolving ? 0.93 : 1;
+
+  for (let item of renderList) {
+    const r = item.size * Math.max(0.62, item.scaleF * 2.4);
+    ctx.fillStyle = item.color;
+    ctx.beginPath();
+    ctx.arc(item.sx, item.sy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.shadowBlur = 0;
+  ctx.globalAlpha = 1;
+
+  // orbital embers (appear after first complete cycle)
+  if ((!isDissolving || dissolveTime > 150) && orbitalParticles.length === 0 && !reducedMotion) {
+    for (let k = 0; k < 7; k++) {
+      const ref = hatsPoints[Math.floor(Math.random() * hatsPoints.length)];
+      orbitalParticles.push({
+        baseAngle: Math.random() * Math.PI * 2,
+        radius: 1.4 + Math.random() * 1.6,
+        speed: 0.013 * (Math.random() * 1.35 + 0.55) * (Math.random() > 0.5 ? 1 : -1),
+        yBase: ref.origY * 0.72,
+        trail: []
+      });
+    }
+  }
+
+  // draw & animate the orbiters + faint glow trails
+  if (orbitalParticles.length > 0 && !reducedMotion) {
+    ctx.shadowColor = '#ffdfab77';
+    ctx.shadowBlur = 7;
+
+    orbitalParticles.forEach(orb => {
+      orb.baseAngle += orb.speed;
+
+      const ox = Math.cos(orb.baseAngle) * orb.radius;
+      const oz = Math.sin(orb.baseAngle) * orb.radius;
+
+      const rotO = rotateY({ x: ox, y: orb.yBase, z: oz }, currentAngle);
+      const po = project(rotO.x, rotO.y, rotO.z);
+      if (!po) return;
+
+      // trail
+      orb.trail.push({ sx: po.sx, sy: po.sy });
+      if (orb.trail.length > 13) orb.trail.shift();
+
+      ctx.strokeStyle = 'rgba(255, 207, 160, 0.21)';
+      ctx.lineWidth = 1.4;
+      ctx.shadowBlur = 5.5;
+      ctx.beginPath();
+      let moved = false;
+      for (let i = 0; i < orb.trail.length; i++) {
+        const tp = orb.trail[i];
+        const a = i / orb.trail.length;
+        ctx.strokeStyle = `rgba(255, 195, 130, ${a * 0.27})`;
+        if (!moved) {
+          ctx.moveTo(tp.sx, tp.sy);
+          moved = true;
+        } else {
+          ctx.lineTo(tp.sx, tp.sy);
+        }
+      }
+      ctx.stroke();
+
+      // core particle
+      const size = Math.max(1.4, po.scaleF * 2.6);
+      ctx.fillStyle = ORBIT_COLOR;
+      ctx.beginPath();
+      ctx.arc(po.sx, po.sy, size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    ctx.shadowBlur = 0;
+  }
+
+  // final soft front rim light highlight for elegance (non-embolic)
+  if (!isDissolving) {
+    ctx.globalAlpha = 0.18;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    const top = project(0, 1.25, -0.55);
+    if (top) {
+      ctx.arc(top.sx, top.sy + 9, 18, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  requestAnimationFrame(updateAndDraw);
+}
+
+// === Initial setup ===
+hatsPoints = makeHatPoints();
+
+// Static view for reduced motion fallback: pre-render a nice angle once
+if (reducedMotion) {
+  currentAngle = 1.18;
+  ctx.fillStyle = '#0a090f';
+  ctx.fillRect(0, 0, W, H);
+  drawShadow();
+  const staticList = [];
+  hatsPoints.forEach(pt => {
+    const rot = rotateY(pt, currentAngle);
+    const proj = project(rot.x, rot.y, rot.z);
+    if (!proj) return;
+    const ndot = Math.max(0.5, Math.min(1, Math.random()));
+    staticList.push({
+      sx: proj.sx, sy: proj.sy,
+      depth: proj.depth, scaleF: proj.scaleF,
+      color: getColor(pt, ndot, false),
+      size: 1.4
+    });
+  });
+  staticList.sort((a, b) => b.depth - a.depth);
+  ctx.shadowBlur = 3.5;
+  ctx.shadowColor = '#ffcc9933';
+  staticList.forEach(item => {
+    const r = item.size * Math.max(0.7, item.scaleF * 2.35);
+    ctx.fillStyle = item.color;
+    ctx.beginPath();
+    ctx.arc(item.sx, item.sy, r, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.shadowBlur = 0;
+
+  // minimal caption hint only for stills
+  orbitalParticles = []; // none
+} else {
+  // normal animation loop
+  updateAndDraw();
+}
+
+// === Events (disabled in reduced-motion) ===
+function attachInteractions() {
+  const el = canvas;
+
+  el.addEventListener('mouseenter', () => {
+    isMouseOver = true;
+    if (!isDissolving) startDissolve();
+  });
+
+  el.addEventListener('mouseleave', () => {
+    isMouseOver = false;
+  });
+
+  el.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (reducedMotion) return;
+    isMouseOver = true;
+    startDissolve();
+    setTimeout(() => { isMouseOver = false; }, 180);
+  });
+
+  // Tap support
+  el.addEventListener('touchstart', (e) => {
+    if (reducedMotion) return;
+    e.preventDefault();
+    isMouseOver = true;
+    startDissolve();
+    setTimeout(() => { isMouseOver = false; }, 230);
+  }, { passive: false });
+}
+
+if (!reducedMotion) {
+  attachInteractions();
+}
+
+// Keyboard hint (nice elegance detail, disabled on reduced)
+if (!reducedMotion) {
+  window.addEventListener('keydown', (e) => {
+    if (e.key.toLowerCase() === 'r' || e.key === ' ') {
+      e.preventDefault();
+      startDissolve();
+    }
+  });
+}
+
+// Subtle accessibility note for screen readers (invisible visual)
+const sr = document.createElement('span');
+sr.setAttribute('aria-hidden', 'false');
+sr.style.position = 'absolute';
+sr.style.left = '-9999px';
+sr.textContent = 'Red Hat style fedora logo. Hover or tap to experience a soft dissolve into particles that reform.';
+document.body.appendChild(sr);
+</script>
+</body>
+</html>
