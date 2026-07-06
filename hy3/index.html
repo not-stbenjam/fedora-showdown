@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Red Hat Fedora</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: radial-gradient(ellipse at center, #1a1a2e 0%, #0a0a0f 100%);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    overflow: hidden;
+    color: #e0e0e0;
+    position: relative;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background:
+      radial-gradient(circle at 20% 50%, rgba(120, 20, 20, 0.08) 0%, transparent 50%),
+      radial-gradient(circle at 80% 50%, rgba(120, 20, 20, 0.08) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .scene {
+    position: relative;
+    width: 400px;
+    height: 400px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1;
+    cursor: pointer;
+  }
+
+  .hat-container {
+    position: relative;
+    width: 220px;
+    height: 220px;
+    transform-style: preserve-3d;
+    animation: spin 8s linear infinite;
+    transition: animation-duration 0.8s ease;
+  }
+
+  .scene:hover .hat-container,
+  .scene.touched .hat-container {
+    animation-duration: 20s;
+  }
+
+  @keyframes spin {
+    from { transform: rotateY(0deg) rotateX(-10deg); }
+    to { transform: rotateY(360deg) rotateX(-10deg); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hat-container {
+      animation: none;
+    }
+    .scene:hover .hat-container,
+    .scene.touched .hat-container {
+      animation: none;
+    }
+  }
+
+  canvas {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 2;
+  }
+
+  canvas.particles {
+    z-index: 3;
+    pointer-events: none;
+  }
+
+  .caption {
+    margin-top: 40px;
+    font-size: 14px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: rgba(200, 200, 200, 0.6);
+    z-index: 1;
+    position: relative;
+    text-align: center;
+    animation: fadeIn 2s ease-out;
+  }
+
+  .caption .red {
+    color: rgba(220, 50, 50, 0.8);
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .shadow {
+    position: absolute;
+    bottom: -20px;
+    width: 180px;
+    height: 30px;
+    background: radial-gradient(ellipse, rgba(0,0,0,0.4) 0%, transparent 70%);
+    border-radius: 50%;
+    z-index: 0;
+  }
+
+  @media (max-width: 500px) {
+    .scene { width: 300px; height: 300px; }
+    .hat-container { width: 160px; height: 160px; }
+    .caption { font-size: 11px; letter-spacing: 3px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="scene" id="scene">
+  <div class="hat-container" id="hatContainer">
+    <canvas id="hatCanvas" width="220" height="220"></canvas>
+  </div>
+  <div class="shadow"></div>
+  <canvas class="particles" id="particleCanvas" width="400" height="400"></canvas>
+</div>
+<div class="caption">Red <span class="red">Hat</span> &mdash; Style &amp; Substance</div>
+
+<script>
+(function() {
+  'use strict';
+
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const scene = document.getElementById('scene');
+  const hatContainer = document.getElementById('hatContainer');
+  const hatCanvas = document.getElementById('hatCanvas');
+  const particleCanvas = document.getElementById('particleCanvas');
+  const hatCtx = hatCanvas.getContext('2d');
+  const pCtx = particleCanvas.getContext('2d');
+
+  let isDissolved = false;
+  let isAnimating = false;
+  let particles = [];
+  let orbitingParticles = [];
+  let animationId = null;
+  let hatParticles = [];
+
+  // Draw fedora hat on canvas
+  function drawHat(ctx, cx, cy, size, rotation) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(rotation || 0);
+
+    const scale = size / 100;
+
+    // Hat shadow/depth
+    ctx.save();
+    ctx.translate(3, 3);
+
+    // Brim (wide part)
+    ctx.beginPath();
+    ctx.ellipse(0, 15 * scale, 80 * scale, 20 * scale, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(20, 20, 20, 0.3)';
+    ctx.fill();
+    ctx.restore();
+
+    // Main brim
+    ctx.beginPath();
+    ctx.ellipse(0, 10 * scale, 80 * scale, 20 * scale, 0, 0, Math.PI * 2);
+    const brimGrad = ctx.createRadialGradient(0, 10 * scale, 10 * scale, 0, 10 * scale, 80 * scale);
+    brimGrad.addColorStop(0, '#4a4a4a');
+    brimGrad.addColorStop(0.5, '#2a2a2a');
+    brimGrad.addColorStop(1, '#1a1a1a');
+    ctx.fillStyle = brimGrad;
+    ctx.fill();
+
+    // Brim edge highlight
+    ctx.beginPath();
+    ctx.ellipse(0, 8 * scale, 78 * scale, 18 * scale, 0, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(100, 100, 100, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Crown (top part of hat)
+    ctx.beginPath();
+    ctx.moveTo(-35 * scale, 10 * scale);
+    ctx.quadraticCurveTo(-40 * scale, -40 * scale, -15 * scale, -55 * scale);
+    ctx.lineTo(15 * scale, -55 * scale);
+    ctx.quadraticCurveTo(40 * scale, -40 * scale, 35 * scale, 10 * scale);
+    ctx.closePath();
+
+    const crownGrad = ctx.createLinearGradient(-40 * scale, -55 * scale, 40 * scale, 10 * scale);
+    crownGrad.addColorStop(0, '#5a5a5a');
+    crownGrad.addColorStop(0.3, '#3a3a3a');
+    crownGrad.addColorStop(0.7, '#2a2a2a');
+    crownGrad.addColorStop(1, '#1a1a1a');
+    ctx.fillStyle = crownGrad;
+    ctx.fill();
+
+    // Crown crease (dent on top)
+    ctx.beginPath();
+    ctx.moveTo(-10 * scale, -55 * scale);
+    ctx.quadraticCurveTo(0, -48 * scale, 10 * scale, -55 * scale);
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+    ctx.lineWidth = 2 * scale;
+    ctx.stroke();
+
+    // Ribbon/band around crown base
+    ctx.beginPath();
+    ctx.moveTo(-34 * scale, 5 * scale);
+    ctx.quadraticCurveTo(-38 * scale, 0, -34 * scale, -5 * scale);
+    ctx.lineTo(34 * scale, -5 * scale);
+    ctx.quadraticCurveTo(38 * scale, 0, 34 * scale, 5 * scale);
+    ctx.closePath();
+    const ribbonGrad = ctx.createLinearGradient(-34 * scale, -5 * scale, 34 * scale, 5 * scale);
+    ribbonGrad.addColorStop(0, '#8b0000');
+    ribbonGrad.addColorStop(0.5, '#cc0000');
+    ribbonGrad.addColorStop(1, '#8b0000');
+    ctx.fillStyle = ribbonGrad;
+    ctx.fill();
+
+    // Ribbon highlight
+    ctx.beginPath();
+    ctx.moveTo(-30 * scale, 0);
+    ctx.lineTo(30 * scale, 0);
+    ctx.strokeStyle = 'rgba(255, 100, 100, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Top highlight
+    ctx.beginPath();
+    ctx.ellipse(-10 * scale, -45 * scale, 25 * scale, 8 * scale, -0.2, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  // Initialize hat canvas
+  function renderHat() {
+    hatCtx.clearRect(0, 0, hatCanvas.width, hatCanvas.height);
+    drawHat(hatCtx, 110, 110, 100);
+  }
+
+  // Create particles from hat shape
+  function createHatParticles() {
+    hatParticles = [];
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = 220;
+    tempCanvas.height = 220;
+    const tempCtx = tempCanvas.getContext('2d');
+
+    drawHat(tempCtx, 110, 110, 100);
+
+    const imageData = tempCtx.getImageData(0, 0, 220, 220);
+    const data = imageData.data;
+
+    for (let y = 0; y < 220; y += 2) {
+      for (let x = 0; x < 220; x += 2) {
+        const idx = (y * 220 + x) * 4;
+        const alpha = data[idx + 3];
+
+        if (alpha > 20) {
+          const r = data[idx];
+          const g = data[idx + 1];
+          const b = data[idx + 2];
+
+          const isRed = r > 100 && g < 100 && b < 100;
+
+          hatParticles.push({
+            x: x,
+            y: y,
+            targetX: x,
+            targetY: y,
+            color: isRed ?
+              `rgba(${150 + Math.random() * 100}, ${0}, ${0}, 0.9)` :
+              `rgba(${r}, ${g}, ${b}, 0.8)`,
+            size: isRed ? 1.5 + Math.random() * 1.5 : 1 + Math.random() * 1,
+            isRed: isRed,
+            vx: 0,
+            vy: 0,
+            angle: Math.random() * Math.PI * 2,
+            speed: 0
+          });
+        }
+      }
+    }
+  }
+
+  // Dissolve hat into particles
+  function dissolveHat() {
+    if (isAnimating) return;
+    isAnimating = true;
+    isDissolved = true;
+
+    hatCanvas.style.opacity = '0';
+
+    const cx = particleCanvas.width / 2;
+    const cy = particleCanvas.height / 2;
+
+    particles = hatParticles.map(p => ({
+      ...p,
+      x: cx - 110 + p.x,
+      y: cy - 110 + p.y,
+      targetX: cx - 110 + p.targetX,
+      targetY: cy - 110 + p.targetY,
+      vx: (Math.random() - 0.5) * 2,
+      vy: (Math.random() - 0.5) * 2 - 1,
+      phase: Math.random() * Math.PI * 2,
+      delay: Math.random() * 0.3
+    }));
+
+    animateDissolve();
+  }
+
+  function animateDissolve() {
+    const startTime = Date.now();
+    const duration = 1500;
+
+    function animate() {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+
+      pCtx.clearRect(0, 0, particleCanvas.width, particleCanvas.height);
+
+      const angle = elapsed * 0.001;
+
+      particles.forEach((p, i) => {
+        if (p.delay > progress) return;
+
+        const pProgress = Math.max(0, (progress - p.delay) / (1 - p.delay));
+
+        // Spread out with swirl
+        const spread = pProgress * 120;
+        const swirlAngle = p.angle + pProgress * Math.PI * 3;
+        const dx = Math.cos(swirlAngle) * spread;
+        const dy = Math.sin(swirlAngle) * spread - pProgress * 30;
+
+        p.x += (p.targetX + dx - p.x) * 0.1;
+        p.y += (p.targetY + dy - p.y) * 0.1;
+
+        // Draw particle with glow
+        pCtx.save();
+        pCtx.globalAlpha = 0.8 - pProgress * 0.3;
+
+        if (p.isRed) {
+          pCtx.shadowColor = 'rgba(255, 50, 50, 0.8)';
+          pCtx.shadowBlur = 6;
+        } else {
+          pCtx.shadowColor = 'rgba(255, 255, 255, 0.3)';
+          pCtx.shadowBlur = 3;
+        }
+
+        pCtx.fillStyle = p.color;
+        pCtx.beginPath();
+        pCtx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        pCtx.fill();
+        pCtx.restore();
+      });
+
+      if (progress < 1) {
+        animationId = requestAnimationFrame(animate);
+      } else {
+        // Start reforming after a pause
+        setTimeout(reformHat, 800);
+      }
+    }
+
+    animate();
+  }
+
+  function reformHat() {
+    const startTime = Date.now();
+    const duration = 1800;
+    const cx = particleCanvas.width / 2;
+    const cy = particleCanvas.height / 2;
+
+    // Add some swirl before reforming
+    particles.forEach(p => {
+      p.swirlAngle = Math.random() * Math.PI * 2;
+      p.swirlRadius = 50 + Math.random() * 80;
+    });
+
+    function animateReform() {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+
+      pCtx.clearRect(0, 0, particleCanvas.width, particleCanvas.height);
+
+      particles.forEach((p, i) => {
+        // Swirl phase
+        if (progress < 0.3) {
+          const swirlProgress = progress / 0.3;
+          const angle = p.swirlAngle + swirlProgress * Math.PI * 2;
+          const targetX = cx - 110 + p.targetX;
+          const targetY = cy - 110 + p.targetY;
+          const offsetX = Math.cos(angle) * p.swirlRadius * (1 - swirlProgress);
+          const offsetY = Math.sin(angle) * p.swirlRadius * (1 - swirlProgress);
+
+          p.x += (targetX + offsetX - p.x) * 0.08;
+          p.y += (targetY + offsetY - p.y) * 0.08;
+        } else {
+          // Reform phase
+          const reformProgress = (progress - 0.3) / 0.7;
+          const targetX = cx - 110 + p.targetX;
+          const targetY = cy - 110 + p.targetY;
+
+          p.x += (targetX - p.x) * 0.06;
+          p.y += (targetY - p.y) * 0.06;
+        }
+
+        // Draw particle
+        pCtx.save();
+        pCtx.globalAlpha = 0.5 + progress * 0.5;
+
+        if (p.isRed) {
+          pCtx.shadowColor = 'rgba(255, 50, 50, 0.6)';
+          pCtx.shadowBlur = 4;
+        }
+
+        pCtx.fillStyle = p.color;
+        pCtx.beginPath();
+        pCtx.arc(p.x, p.y, p.size * (1 - progress * 0.3), 0, Math.PI * 2);
+        pCtx.fill();
+        pCtx.restore();
+      });
+
+      if (progress < 1) {
+        animationId = requestAnimationFrame(animateReform);
+      } else {
+        // Reform complete
+        hatCanvas.style.opacity = '1';
+        pCtx.clearRect(0, 0, particleCanvas.width, particleCanvas.height);
+        isAnimating = false;
+        isDissolved = false;
+
+        // Create orbiting particles
+        createOrbitingParticles();
+      }
+    }
+
+    animateReform();
+  }
+
+  function createOrbitingParticles() {
+    orbitingParticles = [];
+    const cx = particleCanvas.width / 2;
+    const cy = particleCanvas.height / 2;
+
+    for (let i = 0; i < 12; i++) {
+      const angle = (i / 12) * Math.PI * 2;
+      const radius = 90 + Math.random() * 40;
+      const speed = 0.003 + Math.random() * 0.002;
+
+      orbitingParticles.push({
+        angle: angle,
+        radius: radius,
+        baseRadius: radius,
+        speed: speed,
+        size: 1.5 + Math.random() * 2,
+        color: Math.random() > 0.7 ?
+          `rgba(255, ${50 + Math.random() * 50}, 50, 0.7)` :
+          `rgba(200, 200, 200, 0.5)`,
+        orbitOffset: Math.random() * Math.PI * 2
+      });
+    }
+
+    animateOrbiters();
+  }
+
+  function animateOrbiters() {
+    function animate() {
+      if (isDissolved || isAnimating) {
+        orbitingParticles = [];
+        return;
+      }
+
+      pCtx.clearRect(0, 0, particleCanvas.width, particleCanvas.height);
+
+      const cx = particleCanvas.width / 2;
+      const cy = particleCanvas.height / 2;
+      const time = Date.now() * 0.001;
+
+      orbitingParticles.forEach(p => {
+        p.angle += p.speed;
+        const radius = p.baseRadius + Math.sin(time * 2 + p.orbitOffset) * 10;
+        const x = cx + Math.cos(p.angle) * radius;
+        const y = cy + Math.sin(p.angle) * radius * 0.6; // Elliptical orbit
+
+        // Draw trail
+        for (let t = 1; t <= 3; t++) {
+          const pastAngle = p.angle - p.speed * t * 8;
+          const pastX = cx + Math.cos(pastAngle) * radius;
+          const pastY = cy + Math.sin(pastAngle) * radius * 0.6;
+
+          pCtx.save();
+          pCtx.globalAlpha = 0.2 / t;
+          pCtx.fillStyle = p.color;
+          pCtx.beginPath();
+          pCtx.arc(pastX, pastY, p.size * 0.5, 0, Math.PI * 2);
+          pCtx.fill();
+          pCtx.restore();
+        }
+
+        // Draw particle
+        pCtx.save();
+        pCtx.shadowColor = p.color;
+        pCtx.shadowBlur = 8;
+        pCtx.globalAlpha = 0.7;
+        pCtx.fillStyle = p.color;
+        pCtx.beginPath();
+        pCtx.arc(x, y, p.size, 0, Math.PI * 2);
+        pCtx.fill();
+        pCtx.restore();
+      });
+
+      animationId = requestAnimationFrame(animate);
+    }
+
+    animate();
+  }
+
+  // Handle hover/touch
+  let hoverTimeout;
+
+  scene.addEventListener('mouseenter', () => {
+    if (prefersReducedMotion || isAnimating) return;
+    clearTimeout(hoverTimeout);
+    dissolveHat();
+  });
+
+  scene.addEventListener('mouseleave', () => {
+    // Particles will reform automatically
+  });
+
+  scene.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (prefersReducedMotion || isAnimating) return;
+    scene.classList.add('touched');
+    dissolveHat();
+    setTimeout(() => scene.classList.remove('touched'), 3000);
+  });
+
+  // Initialize
+  renderHat();
+  createHatParticles();
+
+  // Subtle ambient glow animation
+  if (!prefersReducedMotion) {
+    let glowPhase = 0;
+    function ambientGlow() {
+      glowPhase += 0.01;
+      requestAnimationFrame(ambientGlow);
+    }
+    ambientGlow();
+  }
+})();
+</script>
+</body>
+</html>
