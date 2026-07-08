@@ -796,7 +796,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
         <span style="color: var(--muted);">Composer models</span> — Cursor<br>
         <span style="color: var(--muted);">All other models</span> — Pi + OpenRouter
         <br><br>
-        All models were run at the default effort level for their respective harness and model, unless otherwise noted. No cherry-picking, no retries, no manual edits. What you see is what each model produced on its first attempt. Entries marked <strong>Ultracode</strong> were run using Claude Code's ultracode multi-agent mode (parallel implementations → judge → best result) — this applies even when the model isn't from Anthropic; Claude Code drives the process regardless of which underlying model it's configured to use.
+        All models were run at the default effort level for their respective harness and model, unless otherwise noted. No cherry-picking, no retries, no manual edits. What you see is what each model produced on its first attempt. Entries marked <strong>Ultracode</strong> were run using Claude Code's ultracode multi-agent mode (parallel implementations → judge → best result) — this applies even when the model isn't from Anthropic. Claude Code supports <a href="https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration" target="_blank" rel="noopener">overriding the Anthropic base URL to OpenRouter</a>, so it orchestrates the multi-agent workflow while the underlying model can be swapped to any provider.
       </div>
     </div>
   </div>
