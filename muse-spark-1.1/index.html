@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>Fedora — Ember</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;background:#06070a}
+  body{
+    overscroll-behavior:none;
+    font-family: ui-sans-system, -apple-system, Sora, Inter, Helvetica, Arial, sans-serif;
+    background: radial-gradient(120% 80% at 50% 35%, #171923 0%, #0e0f14 22%, #08090c 52%, #050508 100%);
+    color:#e9e8e6;
+    overflow:hidden;
+  }
+  #scene{
+    position:fixed; inset:0;
+    display:grid; place-items:center;
+    isolation:isolate;
+  }
+  canvas{
+    width:100vw; height:100vh;
+    display:block;
+    outline:none;
+    cursor:pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #vignette{
+    pointer-events:none;
+    position:absolute; inset:-20%;
+    background:
+      radial-gradient(60% 45% at 50% 42%, transparent 55%, rgba(0,0,0,.55) 100%),
+      radial-gradient(30% 20% at 50% 95%, rgba(0,0,0,.7), transparent 70%);
+    mix-blend-mode:multiply;
+  }
+  #caption-wrap{
+    position:absolute;
+    bottom:0; left:0; right:0;
+    display:grid; place-items:center;
+    padding: min(6vh,48px) 24px;
+    pointer-events:none;
+  }
+  #cap{
+    text-align:center;
+    display:flex; flex-direction:column; align-items:center; gap:10px;
+    opacity:.9;
+  }
+  #cap b{
+    font-size:10.5px; letter-spacing:.28em; font-weight:600;
+    color:rgba(255,255,255,.72);
+    text-transform:uppercase;
+  }
+  #cap i{
+    font-style:normal;
+    font-size:11px; letter-spacing:.04em;
+    color:rgba(255,255,255,.32);
+    font-weight:400;
+  }
+  #cap b span{color:#ff1f1f; font-weight:700}
+  #hint{
+    margin-top:8px;
+    font-size:10px; letter-spacing:.16em; text-transform:uppercase;
+    color:rgba(255,255,255,.22);
+    border:1px solid rgba(255,255,255,.08);
+    padding:5px 9px; border-radius:999px;
+    background:rgba(255,255,255,.02);
+    backdrop-filter: blur(6px);
+  }
+  @media (prefers-reduced-motion: reduce){
+    #hint{display:none}
+  }
+  @media (max-width:600px){
+    #cap b{font-size:10px; letter-spacing:.22em}
+    #hint{font-size:9px}
+  }
+</style>
+</head>
+<body>
+<div id="scene">
+  <canvas id="c" aria-label="Red fedora in 3D, dissolves into glowing embers on hover"></canvas>
+  <div id="vignette"></div>
+  <div id="caption-wrap">
+    <div id="cap">
+      <b><span>Red</span> — Fedora Artifact</b>
+      <i>hover / tap to disperse — embers remember the form</i>
+      <div id="hint">soft particles • depth • shadow</div>
+    </div>
+  </div>
+</div>
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', { alpha:false, desynchronized:true });
+  const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let dpr = Math.min(window.devicePixelRatio||1, 2.2);
+  let W=0,H=0, CX=0,CY=0, S=0;
+  function resize(){
+    dpr = Math.min(window.devicePixelRatio||1, 2.2);
+    W = canvas.width = Math.floor(innerWidth * dpr);
+    H = canvas.height = Math.floor(innerHeight * dpr);
+    canvas.style.width = innerWidth+'px';
+    canvas.style.height = innerHeight+'px';
+    CX = W*0.5;
+    CY = H*0.46;
+    S = Math.min(W,H) * 0.62;
+  }
+  resize();
+  addEventListener('resize', resize, {passive:true});
+
+  // --- math helpers
+  const TAU = Math.PI*2;
+  const rng = (a=1,b=0) => Math.random()*(a-b)+b;
+  const lerp = (a,b,t)=> a+(b-a)*t;
+  const easeOut = t=> 1 - Math.pow(1-t,3);
+  const easeInOut = t=> t<.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2,3)/2;
+  const clamp = (v,a,b)=> Math.max(a,Math.min(b,v));
+
+  // --- fedora base geometry -> point cloud
+  const N_BRIM = 1100;
+  const N_SIDE = 1450;
+  const N_TOP  = 950;
+  const TOTAL = N_BRIM+N_SIDE+N_TOP;
+  const particles = [];
+
+  function addPoint(bx,by,bz,nx,ny,nz){
+    // explosion dir
+    const theta = Math.random()*TAU;
+    const phi = Math.acos(2*Math.random()-1);
+    const r = 0.7 + Math.pow(Math.random(),0.6)*1.7;
+    const ex = Math.sin(phi)*Math.cos(theta)*r;
+    const ey = (Math.random()-0.2)*r*0.7;
+    const ez = Math.sin(phi)*Math.sin(theta)*r;
+    // favor outward
+    particles.push({
+      bx,by,bz,
+      nx,ny,nz,
+      x:bx, y:by, z:bz,
+      vx:0, vy:0, vz:0,
+      ex, ey, ez,
+      sw: Math.random()*TAU,
+      sw2: rng(0.8,1.2),
+      isOrb:false,
+      orbitAngle: rng(TAU),
+      orbitR: 1.2 + Math.random()*0.85,
+      orbitSpeed: (0.6 + Math.random()*0.8) * (Math.random()<0.5?1:-1),
+      trail:[],
+      rnd: Math.random()
+    });
+  }
+
+  (function generate(){
+    // brim
+    for(let i=0;i<N_BRIM;i++){
+      const t = Math.random()*TAU;
+      // distribution bias to outer edge to fill
+      const u = Math.pow(Math.random(),0.7);
+      const inner=0.585, outer=1.18;
+      const r = inner + u*(outer-inner);
+      let x = Math.cos(t)*r;
+      let z = Math.sin(t)*r*0.92;
+      // subtle S-wave brim droop - elegant
+      const y = -0.06 - (r-inner)*0.18 + Math.sin(t*2 + r*2)*0.035 + Math.cos(t)*0.02;
+      // normal approx up with tilt
+      let nx = (x/r)*0.08, ny=1, nz=(z/r)*0.08;
+      const l = Math.hypot(nx,ny,nz); nx/=l; ny/=l; nz/=l;
+      addPoint(x,y,z,nx,ny,nz);
+    }
+    // side wall
+    for(let i=0;i<N_SIDE;i++){
+      const t = Math.random()*TAU;
+      const h = Math.pow(Math.random(),0.92); // bias lower?
+      const baseR = 0.615 - h*0.042;
+      let r = baseR;
+      // oval
+      let x = Math.cos(t)*r;
+      let z = Math.sin(t)*r*0.80;
+      let y = h*0.88;
+
+      // center crease / front pinch
+      if(h>0.52){
+        const ht = (h-0.52)/0.48; // 0..1
+        const absZ = Math.abs(z);
+        // central trough down middle of crown top: lower y and pinch z
+        if(absZ < 0.22){
+          const dent = Math.exp(-(absZ*absZ)/(0.018)) * ht;
+          y -= dent*0.18;
+          // narrow front slightly
+          if(x>0){
+            const front = Math.max(0, Math.cos(t)); // front is +x ?
+            // Actually x is front when cos positive. Use x.
+            const fx = clamp((x-0.1)/0.5,0,1);
+            z *= lerp(1, 0.72, dent*0.9*fx);
+          }
+        }
+      }
+      // normal: radial outward + slight up
+      let nx = Math.cos(t)*0.95;
+      let nz = Math.sin(t)*0.80;
+      let ny = 0.06;
+      // adjust for pinch
+      const nl = Math.hypot(nx,ny,nz); nx/=nl; ny/=nl; nz/=nl;
+      addPoint(x,y,z,nx,ny,nz);
+    }
+    // top cap
+    for(let i=0;i<N_TOP;i++){
+      const t = Math.random()*TAU;
+      const rad = Math.sqrt(Math.random())*0.60;
+      let x = Math.cos(t)*rad*0.98;
+      let z = Math.sin(t)*rad*0.80;
+      // dome profile
+      const dome = 0.16*Math.sqrt(Math.max(0,1 - Math.pow(rad/0.60,2)));
+      let y = 0.88 + dome;
+      // fedora dent on top
+      const absZ = Math.abs(z);
+      if(absZ < 0.22 && rad<0.42){
+        const dent = Math.exp(-(absZ*absZ)/0.02) * (1 - rad/0.45);
+        y -= dent*0.20;
+      }
+      // front pinch narrows top
+      if(x>0.05 && absZ<0.28){
+        const pinch = Math.max(0, 1 - Math.abs(z)/0.28) * Math.max(0,(x-0.05)/0.35);
+        y -= pinch*0.05;
+        z *= 1 - pinch*0.28;
+      }
+      let nx=0,ny=1,nz=0;
+      // approximate normal from dome
+      nx = x*0.6; nz = z*0.8; ny = 0.9;
+      const l = Math.hypot(nx,ny,nz); nx/=l; ny/=l; nz/=l;
+      addPoint(x,y,z,nx,ny,nz);
+    }
+  })();
+
+  // state
+  let rotY = -0.35;
+  let rotSpeed = prefersReduced ? 0 : 0.0065;
+  let targetRotSpeed = rotSpeed;
+  let state = 'idle'; // idle | dissolve
+  let stateT = 0;
+  let dissolveCooldown = 0;
+
+  let pointerInside = false;
+  let time = 0;
+  let lastT = performance.now();
+
+  const lightDir = (()=>{ const x=0.55,y=0.78,z=0.62; const l=Math.hypot(x,y,z); return {x:x/l,y:y/l,z:z/l}; })();
+
+  // projection
+  function project(x,y,z){
+    const camZ = 3.55;
+    const zz = z + camZ;
+    const persp = 1.0 / (1.0 + zz*0.165);
+    return {
+      x: CX + x*persp*S,
+      y: CY - y*persp*S,
+      p: persp,
+      zz
+    };
+  }
+
+  // interaction
+  function trigger(){
+    if(prefersReduced) return;
+    if(state!=='idle') return;
+    if(performance.now() < dissolveCooldown) return;
+    state='dissolve';
+    stateT=0;
+    targetRotSpeed = 0.0008;
+  }
+  canvas.addEventListener('pointerenter', ()=>{ pointerInside=true; trigger(); });
+  canvas.addEventListener('pointermove', (e)=>{
+    const dx = e.clientX - innerWidth*0.5;
+    const dy = e.clientY - innerHeight*0.46;
+    const dist = Math.hypot(dx,dy);
+    if(dist < Math.min(innerWidth,innerHeight)*0.38) trigger();
+  });
+  canvas.addEventListener('pointerdown', trigger);
+  canvas.addEventListener('focus', trigger);
+  canvas.tabIndex = 0;
+
+  // main loop
+  function frame(now){
+    const dtRaw = Math.min(32, now-lastT)/16.6667;
+    lastT = now;
+    const dt = prefersReduced ? 0 : dtRaw;
+    time += dt*0.016;
+
+    if(state==='idle'){
+      targetRotSpeed = prefersReduced ? 0 : 0.0065;
+    }
+    rotSpeed = lerp(rotSpeed, targetRotSpeed, 0.035*dt);
+    if(state==='idle') rotY += rotSpeed*dt;
+    else rotY += rotSpeed*dt*0.6;
+
+    // update particles
+    if(state==='idle'){
+      const cos = Math.cos(rotY), sin = Math.sin(rotY);
+      for(let i=0;i<particles.length;i++){
+        const p = particles[i];
+        const rx = p.bx*cos - p.bz*sin;
+        const rz = p.bx*sin + p.bz*cos;
+        const nx = p.nx*cos - p.nz*sin;
+        const nz = p.nx*sin + p.nz*cos;
+        const ry = p.by;
+        // orbiter offset
+        if(p.isOrb){
+          p.orbitAngle += p.orbitSpeed*0.012*dt;
+          const ox = Math.cos(p.orbitAngle)*p.orbitR;
+          const oz = Math.sin(p.orbitAngle)*p.orbitR;
+          const oy = Math.sin(p.orbitAngle*1.73 + p.sw)*0.32 + 0.28;
+          const tx = rx*0.25 + ox;
+          const tz = rz*0.25 + oz;
+          const ty = ry*0.2 + oy;
+          p.x = lerp(p.x, tx, 0.055*dt);
+          p.y = lerp(p.y, ty, 0.055*dt);
+          p.z = lerp(p.z, tz, 0.055*dt);
+          p.trail.push({x:p.x,y:p.y,z:p.z});
+          if(p.trail.length>14) p.trail.shift();
+        } else {
+          p.x = lerp(p.x, rx, 0.16*dt);
+          p.y = lerp(p.y, ry, 0.16*dt);
+          p.z = lerp(p.z, rz, 0.16*dt);
+          p._nx = nx; p._nz = nz; p._ny = p.ny;
+        }
+        if(!p.isOrb){
+          p._nx = nx; p._ny = p.ny; p._nz = nz;
+        } else {
+          p._nx = nx; p._ny = p.ny; p._nz = nz;
+        }
+      }
+    } else {
+      stateT += dt*0.016; // seconds approx (0.016 per frame * dt)
+      // Actually we used dt as normalized 1 per 16ms. So stateT in ~seconds/...
+      // Convert: dt * 0.016667 = seconds
+      const sec = stateT; // this is already seconds if dt=1 => 0.016
+      // phases: 0-0.45 slow, 0.45-1.3 explode, 1.3-2.9 swirl, 2.9-4.6 reform
+      let explode = 0;
+      if(sec < 1.15) explode = easeOut(clamp(sec/1.15,0,1));
+      else if(sec < 2.9) explode = 1;
+      else explode = 1 - easeInOut(clamp((sec-2.9)/1.7,0,1));
+
+      let swirl = sec*1.15;
+
+      const cos = Math.cos(rotY), sin = Math.sin(rotY);
+      for(let i=0;i<particles.length;i++){
+        const p = particles[i];
+        const rx = p.bx*cos - p.bz*sin;
+        const rz = p.bx*sin + p.bz*cos;
+        const ry = p.by;
+        // rotate explosion
+        const s = Math.sin(swirl*p.sw2 + p.sw)* (0.55 + explode*0.15);
+        const c = Math.cos(swirl*p.sw2 + p.sw)* (0.55 + explode*0.15);
+        // cheap 2D rot of ex/ez plus swirl
+        const ex = p.ex, ez = p.ez;
+        const erx = ex*c - ez*s;
+        const erz = ex*s + ez*c;
+        const ery = p.ey + Math.sin(swirl*0.8 + p.sw)*0.18*explode;
+
+        const tx = rx + erx*explode*1.65;
+        const ty = ry + ery*explode*1.35 + Math.sin(swirl + p.rnd*6)*0.04*explode;
+        const tz = rz + erz*explode*1.65;
+
+        // spring
+        const l = 0.064*dt;
+        p.x = lerp(p.x, tx, l);
+        p.y = lerp(p.y, ty, l);
+        p.z = lerp(p.z, tz, l);
+        p._nx = p.nx*cos - p.nz*sin;
+        p._nz = p.nx*sin + p.nz*cos;
+        p._ny = p.ny;
+      }
+      if(sec > 4.65){
+        state='idle';
+        stateT=0;
+        targetRotSpeed = 0.0065;
+        rotSpeed = 0.001;
+        dissolveCooldown = performance.now()+800;
+        // choose orbiters to keep
+        // clear old orbiters trails partially, keep a few
+        for(const p of particles) { if(p.isOrb){ p.isOrb=false; p.trail.length=0; } }
+        const numOrb = 28 + (Math.random()*10|0);
+        // pick with bias to brim & top edge for nice orbit
+        const shuffled = [...particles].sort(()=>Math.random()-0.5);
+        for(let k=0;k<numOrb;k++){
+          const p = shuffled[k];
+          p.isOrb = true;
+          p.orbitR = 0.95 + Math.random()*1.25;
+          p.orbitAngle = Math.random()*TAU;
+          p.orbitSpeed = (0.5+Math.random()*0.9)*(Math.random()<0.5?1:-1);
+          p.trail=[];
+        }
+      }
+    }
+
+    // ----- render -----
+    // clear
+    ctx.save();
+    ctx.fillStyle = '#08090d';
+    ctx.fillRect(0,0,W,H);
+
+    // subtle vignette + ground glow
+    const grad = ctx.createRadialGradient(CX, CY+ S*0.18, S*0.1, CX, CY, S*2.2);
+    grad.addColorStop(0, 'rgba(20,22,28,0.9)');
+    grad.addColorStop(0.35, 'rgba(10,11,14,0.6)');
+    grad.addColorStop(1, 'rgba(5,6,9,1)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0,0,W,H);
+
+    // ground plane fake: soft contact shadow
+    const shadowP = project(0,-0.28,0);
+    const shSize = S*1.15*shadowP.p;
+    const shGrad = ctx.createRadialGradient(shadowP.x, shadowP.y, shSize*0.1, shadowP.x, shadowP.y, shSize);
+    shGrad.addColorStop(0, 'rgba(0,0,0,0.55)');
+    shGrad.addColorStop(0.5, 'rgba(0,0,0,0.22)');
+    shGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = shGrad;
+    ctx.beginPath();
+    ctx.ellipse(shadowP.x, shadowP.y, shSize*0.95, shSize*0.26, 0, 0, TAU);
+    ctx.fill();
+
+    // depth sort - only when idle? always for correctness
+    // we can skip sorting during fast reform to save? but keep.
+    // sort by z ascending (far first)
+    particles.sort((a,b)=> a.z - b.z);
+
+    // trails first (only orbiters)
+    if(state==='idle'){
+      for(let i=0;i<particles.length;i++){
+        const p = particles[i];
+        if(!p.isOrb || p.trail.length<2) continue;
+        // project trail
+        ctx.beginPath();
+        for(let j=0;j<p.trail.length;j++){
+          const tp = p.trail[j];
+          const pr = project(tp.x, tp.y, tp.z);
+          if(j===0) ctx.moveTo(pr.x, pr.y);
+          else ctx.lineTo(pr.x, pr.y);
+        }
+        const alpha = 0.18;
+        ctx.strokeStyle = `rgba(255, 70, 70, ${alpha})`;
+        ctx.lineWidth = 1.1*dpr*0.5;
+        ctx.lineCap='round';
+        ctx.lineJoin='round';
+        // fade via globalAlpha gradient manual -> simple opacity
+        ctx.globalAlpha = 0.9;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    // particles
+    // precompute color base
+    const baseR= 232, baseG= 26, baseB= 32;
+    const isDissolving = state!=='idle';
+    const sec = stateT;
+
+    for(let i=0;i<particles.length;i++){
+      const p = particles[i];
+      const pr = project(p.x,p.y,p.z);
+      if(pr.zz < -1.2) continue; // clip behind
+      // lighting
+      let nx = p._nx ?? p.nx, ny = p._ny ?? p.ny, nz = p._nz ?? p.nz;
+      let diff = 0;
+      if(!isDissolving) diff = Math.max(0, nx*lightDir.x + ny*lightDir.y + nz*lightDir.z);
+      else diff = 0.5 + 0.5*Math.max(0, nx*0.2 + ny*0.7 + nz*0.3);
+
+      let bright = 0.32 + diff*0.78;
+      // rim light
+      const rim = Math.pow(1 - Math.max(0, -nz*0.5 + 0.2), 2.2)*0.22;
+      bright += rim;
+
+      // during dissolve make them glow brighter
+      if(isDissolving){
+        const glowBoost = clamp((sec<2.9? 0.4+sec*0.2 : 0.9 - (sec-2.9)*0.3),0,1);
+        bright = lerp(bright, 1.0, glowBoost*0.55);
+      }
+
+      let r = clamp(baseR*bright + 22*rim, 0, 255);
+      let g = clamp(baseG*bright*0.55 + 6*rim, 0, 255);
+      let b = clamp(baseB*bright*0.55 + 8*rim, 0, 255);
+
+      let alpha = p.isOrb ? 0.95 : 1;
+      if(isDissolving){
+        const fade = sec<4 ? 1 : lerp(1,0.3, clamp((sec-4)/0.65,0,1));
+        alpha *= fade;
+      }
+
+      let rad = (p.isOrb ? 1.9 : 2.35) * dpr * pr.p * (1 + p.rnd*0.25);
+      if(isDissolving) rad *= lerp(1, 0.85, clamp(sec/1.2,0,1));
+
+      // outer glow for embers
+      if(isDissolving || p.isOrb){
+        const glowR = rad* (p.isOrb? 3.2 : 2.8 + Math.sin(sec*4 + p.sw)*0.6);
+        ctx.beginPath();
+        ctx.fillStyle = `rgba(${r|0},${(g*0.5)|0},${(b*0.5)|0},${(isDissolving?0.22:0.16)*alpha})`;
+        ctx.arc(pr.x, pr.y, glowR, 0, TAU);
+        ctx.fill();
+      }
+
+      // core
+      ctx.beginPath();
+      ctx.fillStyle = `rgba(${r|0},${g|0},${b|0},${alpha})`;
+      ctx.arc(pr.x, pr.y, rad, 0, TAU);
+      ctx.fill();
+
+      // specular highlight speck on top particles when idle
+      if(!isDissolving && diff>0.78 && p.rnd>0.86){
+        ctx.beginPath();
+        ctx.fillStyle = `rgba(255,255,255,${0.18*alpha})`;
+        ctx.arc(pr.x - rad*0.2, pr.y - rad*0.35, rad*0.55,0,TAU);
+        ctx.fill();
+      }
+    }
+
+    ctx.restore();
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  // initial orbiters for tasteful after first load? keep clean until first interaction
+  // but add 3 subtle ones after 2s to hint
+  setTimeout(()=>{
+    if(prefersReduced) return;
+    if(state!=='idle') return;
+    for(let k=0;k<3;k++){
+      const p = particles[(Math.random()*particles.length)|0];
+      p.isOrb = true;
+      p.orbitR = 1.1+Math.random()*0.6;
+      p.orbitSpeed = (0.3+Math.random()*0.3)*(k%2?1:-1);
+    }
+  }, 2100);
+})();
+</script>
+</body>
+</html>
