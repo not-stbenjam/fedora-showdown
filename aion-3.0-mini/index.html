@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Red Hat Fedora</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+body{background:#08080c;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;min-height:100dvh;overflow:hidden;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+canvas{display:block;width:min(75vh,75vw,600px);height:min(75vh,75vw,600px);cursor:pointer;touch-action:manipulation;border-radius:24px;background:radial-gradient(ellipse at 50% 40%,#14141e 0%,#0a0a0f 60%,#050508 100%)}
+.caption{color:rgba(255,255,255,0.5);font-size:clamp(10px,1.4vw,14px);letter-spacing:5px;text-transform:uppercase;margin-top:clamp(12px,2vh,24px);font-weight:300;user-select:none;-webkit-user-select:none}
+.caption span{display:inline-block;background:rgba(180,40,40,0.15);padding:0 14px;border-radius:3px}
+@media(prefers-reduced-motion:reduce){canvas{animation:none}.caption span{background:rgba(180,40,40,0.2)}}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<p class="caption"><span>red hat fedora</span></p>
+<script>
+(function(){
+'use strict';
+
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+let W,H,dpr,size3D=5.5;
+
+function resize(){
+ dpr=window.devicePixelRatio||1;
+ const sz=Math.min(window.innerWidth*0.75,window.innerHeight*0.75,600);
+ canvas.style.width=sz+'px';
+ canvas.style.height=sz+'px';
+ W=canvas.width=Math.round(sz*dpr);
+ H=canvas.height=Math.round(sz*dpr);
+ size3D=5.5*(W/600);
+}
+resize();
+window.addEventListener('resize',resize);
+
+// ---- 3D Math ----
+class Vec3{
+ constructor(x=0,y=0,z=0){this.x=x;this.y=y;this.z=z}
+ clone(){return new Vec3(this.x,this.y,this.z)}
+ add(v){return new Vec3(this.x+v.x,this.y+v.y,this.z+v.z)}
+ sub(v){return new Vec3(this.x-v.x,this.y-v.y,this.z-v.z)}
+ scale(s){return new Vec3(this.x*s,this.y*s,this.z*s)}
+ len(){return Math.sqrt(this.x*this.x+this.y*this.y+this.z*this.z)}
+ normalize(){const l=this.len();return l>0?this.scale(1/l):new Vec3()}
+ dot(v){return this.x*v.x+this.y*v.y+this.z*v.z}
+ cross(v){return new Vec3(this.y*v.z-this.z*v.y,this.z*v.x-this.x*v.z,this.x*v.y-this.y*v.x)}
+ lerp(v,t){return new Vec3(this.x+(v.x-this.x)*t,this.y+(v.y-this.y)*t,this.z+(v.z-this.z)*t)}
+ rotateY(a){
+  const c=Math.cos(a),s=Math.sin(a);
+  return new Vec3(this.x*c+this.z*s,this.y,-this.x*s+this.z*c);
+ }
+ rotateX(a){
+  const c=Math.cos(a),s=Math.sin(a);
+  return new Vec3(this.x,this.y*c-this.z*s,this.y*s+this.z*c);
+ }
+}
+
+// ---- Geometry: Fedora Hat ----
+const BRIM_R=2.2,CROWN_BR=1.3,CROWN_TR=1.1,CROWN_H=1.7,BAND_H=0.14,DENT=0.3;
+const NUM_P=3600;
+const LIGHT_DIR=new Vec3(0.4,0.7,-0.6).normalize();
+const AMBIENT=0.3;
+
+// Pre-compute hat particles
+function generateHat(){
+ const parts=[];
+ const counts={
+  brim:Math.floor(NUM_P*0.33),
+  crown:Math.floor(NUM_P*0.40),
+  top:Math.floor(NUM_P*0.17),
+  band:NUM_P-Math.floor(NUM_P*0.33)-Math.floor(NUM_P*0.40)-Math.floor(NUM_P*0.17)
+ };
+ // Brim: flat ring
+ for(let i=0;i<counts.brim;i++){
+  const th=Math.random()*Math.PI*2;
+  const r=CROWN_BR+(BRIM_R-CROWN_BR)*Math.sqrt(Math.random());
+  const x=r*Math.cos(th),z=r*Math.sin(th);
+  const y=(Math.random()-0.5)*0.04;
+  const nx=0,ny=1,nz=0;
+  parts.push({x,y,z,nx,ny,nz});
+ }
+ // Crown body: tapered cylinder wall
+ for(let i=0;i<counts.crown;i++){
+  const th=Math.random()*Math.PI*2;
+  const t=Math.random();
+  const r=CROWN_BR+(CROWN_TR-CROWN_BR)*t;
+  const x=r*Math.cos(th),z=r*Math.sin(th);
+  const y=t*CROWN_H;
+  const nx=Math.cos(th),nz=Math.sin(th),ny=0;
+  parts.push({x,y,z,nx,ny,nz});
+ }
+ // Crown top: circle with dent
+ for(let i=0;i<counts.top;i++){
+  const th=Math.random()*Math.PI*2;
+  const r=CROWN_TR*Math.sqrt(Math.random());
+  const x=r*Math.cos(th),z=r*Math.sin(th);
+  const dentF=1-Math.pow(r/CROWN_TR,2);
+  const y=CROWN_H-dentF*DENT+(Math.random()-0.5)*0.02;
+  const nx=0,ny=1,nz=0;
+  parts.push({x,y,z,nx,ny,nz});
+ }
+ // Hat band
+ for(let i=0;i<counts.band;i++){
+  const th=Math.random()*Math.PI*2;
+  const r=CROWN_BR+(Math.random()-0.5)*0.06;
+  const x=r*Math.cos(th),z=r*Math.sin(th);
+  const y=BAND_H*Math.random();
+  const nx=Math.cos(th),nz=Math.sin(th),ny=0;
+  parts.push({x,y,z,nx,ny,nz});
+ }
+ return parts;
+}
+
+const hatGeom=generateHat();
+
+// Convert to particle data
+class Particle{
+ constructor(i){
+  const g=hatGeom[i];
+  this.target=new Vec3(g.x,g.y,g.z);
+  this.pos=this.target.clone();
+  this.vel=new Vec3();
+  this.normal=new Vec3(g.nx,g.ny,g.nz);
+  this.rand=Math.random();
+  this.idx=i;
+  // Scatter direction: normal + random perturbation
+  const sd=this.normal.add(new Vec3((Math.random()-0.5)*1.2,(Math.random()-0.5)*0.8,(Math.random()-0.5)*1.2)).normalize();
+  this.scatterDir=sd;
+  this.scatterDist=1.5+Math.random()*2.0;
+  this.orbitAngle=Math.random()*Math.PI*2;
+  this.orbitR=0.8+Math.random()*1.8;
+  this.orbitSpeed=0.3+Math.random()*0.6;
+  this.driftOffs=3.0+Math.random()*2.5;
+  // Surface type for color
+  const isBand=g.y>=0&&g.y<BAND_H*1.2&&Math.abs(Math.sqrt(g.x*g.x+g.z*g.z)-CROWN_BR)<0.2;
+  this.isBand=isBand;
+  this.isTop=g.y>CROWN_H*0.7;
+  // Pre-compute offset for normal timing variation
+  this.toff=Math.random()*0.15;
+  // Orbiting flag (set later)
+  this.isOrbiter=false;
+  this.trail=[];
+  this.maxTrail=18;
+ }
+}
+
+const particles=[];
+for(let i=0;i<hatGeom.length;i++)particles.push(new Particle(i));
+
+// Orbiter selection
+function pickOrbiters(){
+ for(const p of particles)p.isOrbiter=false;
+ const n=Math.min(10+Math.floor(Math.random()*6),particles.length);
+ const picked=new Set();
+ for(let i=0;i<n;i++){
+  let idx;
+  do{idx=Math.floor(Math.random()*particles.length)}while(picked.has(idx));
+  picked.add(idx);
+  particles[idx].isOrbiter=true;
+  particles[idx].trail=[];
+ }
+}
+pickOrbiters();
+
+// ---- Animation State ----
+let hoverProgress=0; // 0=normal, 1=full hover sequence
+let isHovering=false;
+let hoverDir=0; // 1 entering, -1 exiting
+let angleY=0;
+let time=0;
+let slowSpinFactor=1;
+let orbitTime=0;
+const ORBITER_SPEED=0.8;
+
+// Movement cache for particle positions after rotation
+const sorted=[];
+
+function getColor(p,lit){
+ const {isBand,isTop,rand}=p;
+ let r,g,b;
+ if(isBand){
+  r=40+lit*20;g=10+lit*8;b=10+lit*6;
+ }else if(isTop&&Math.random()<0.3){
+  r=90+lit*40;g=20+lit*15;b=18+lit*12;
+ }else{
+  r=90+lit*50;g=18+lit*18;b=14+lit*12;
+ }
+ return {r:Math.min(255,r),g:Math.min(255,g),b:Math.min(255,b)};
+}
+
+function getDissolveColor(p,t){
+ // t: 0=hat red, 1=ember gold
+ const r=Math.round(90+t*165);
+ const g=Math.round(18+t*150);
+ const b=Math.round(14+t*60);
+ return {r:Math.min(255,r),g:Math.min(255,g),b:Math.min(255,b)};
+}
+
+function easeOutCubic(t){t=Math.max(0,Math.min(1,t));return 1-Math.pow(1-t,3)}
+function easeInCubic(t){t=Math.max(0,Math.min(1,t));return t*t*t}
+function easeInOutCubic(t){t=Math.max(0,Math.min(1,t));return t<0.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2}
+function easeOutQuart(t){t=Math.max(0,Math.min(1,t));return 1-Math.pow(1-t,4)}
+
+function getParticlePos(p,prog){
+ // prog: 0=normal, 1=dissolve peak, then swirl, reform, orbit
+ if(prog<=0)return p.target.clone();
+ if(prog>0&&prog<0.35){
+  // Dissolve outward
+  const tp=prog/0.35;
+  const et=easeOutCubic(tp);
+  const d=p.scatterDir.scale(p.scatterDist*et);
+  // Add some upward drift
+  const up=Math.min(1,et)*0.8;
+  const drift=new Vec3(0,up*p.driftOffs*et*0.4,0);
+  return p.target.add(d).add(drift);
+ }
+ if(prog<0.55){
+  // Swirl phase
+  const tp=(prog-0.35)/0.2;
+  const et=easeInOutCubic(tp);
+  const angle=p.orbitAngle+et*Math.PI*3;
+  const r=p.orbitR*(1+0.3*Math.sin(et*Math.PI));
+  const x=r*Math.cos(angle);
+  const z=r*Math.sin(angle);
+  const y=0.8*Math.sin(et*Math.PI*2+p.toff*Math.PI*2)+0.4;
+  const base=p.target.scale(0.3+0.7*(1-et));
+  return new Vec3(base.x+x,base.y+y+p.driftOffs*0.2,base.z+z);
+ }
+ if(prog<0.78){
+  // Reform phase
+  const tp=(prog-0.55)/0.23;
+  const et=easeInCubic(tp);
+  // Get dissolve position at peak
+  const dPeak=p.scatterDir.scale(p.scatterDist*1.1);
+  const upPeak=new Vec3(0,0.8*p.driftOffs*0.4,0);
+  const peakPos=p.target.add(dPeak).add(upPeak);
+  // Get swirl position at end
+  const sa=p.orbitAngle+Math.PI*3;
+  const sr=p.orbitR*1.3;
+  const sx=sr*Math.cos(sa);
+  const sz=sr*Math.sin(sa);
+  const sy=0.4;
+  const swirlPos=new Vec3(sx,sy+p.driftOffs*0.2,sz);
+  // Blend from path back to target
+  const midPos=peakPos.lerp(swirlPos,0.5);
+  const fromPos=swirlPos;
+  return fromPos.lerp(p.target,et);
+ }
+ // Orbit phase: particles are back, a few orbit
+ if(p.isOrbiter){
+  const base=p.target;
+  const oa=p.orbitAngle+orbitTime*p.orbitSpeed;
+  const or=p.orbitR*0.4;
+  const ox=or*Math.cos(oa);
+  const oz=or*Math.sin(oa);
+  const oy=0.3*Math.sin(oa*2);
+  return new Vec3(base.x+ox,base.y+oy,base.z+oz);
+ }
+ return p.target;
+}
+
+function updateParticles(dt){
+ if(!dt)return;
+ // Check reduced motion
+ const reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+ if(reduced){
+  angleY+=0.2*dt;
+  for(const p of particles)p.pos=p.target.clone();
+  return;
+ }
+ 
+ time+=dt;
+ 
+ // Hover state machine
+ const HOVER_DUR=5.0; // total hover sequence time
+ if(isHovering){
+  hoverDir=1;
+  hoverProgress=Math.min(1,hoverProgress+dt/HOVER_DUR);
+  // Slow spin
+  slowSpinFactor=Math.max(0.06,slowSpinFactor-dt*1.5);
+ }else{
+  hoverDir=-1;
+  hoverProgress=Math.max(0,hoverProgress-dt*0.8);
+  slowSpinFactor=Math.min(1,slowSpinFactor+dt*2.0);
+ }
+ 
+ const prog=hoverProgress;
+ 
+ // Rotation
+ const baseSpeed=0.8;
+ const spinSpeed=baseSpeed*slowSpinFactor;
+ angleY+=spinSpeed*dt;
+ orbitTime+=dt*ORBITER_SPEED;
+ 
+ // Update each particle
+ for(let i=0;i<particles.length;i++){
+  const p=particles[i];
+  const pos=getParticlePos(p,prog);
+  p.pos=pos;
+  
+  // Trail for orbiters
+  if(prog>=0.78&&p.isOrbiter){
+   p.trail.push(pos.clone());
+   if(p.trail.length>p.maxTrail)p.trail.shift();
+  }else{
+   p.trail=[];
+  }
+ }
+}
+
+function render(){
+ const W2=W/2,H2=H/2;
+ const s=size3D;
+ 
+ ctx.clearRect(0,0,W,H);
+ 
+ const reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+ const prog=hoverProgress;
+ const hasDissolve=prog>0.02&&!reduced;
+ 
+ // Camera tilt
+ const camTilt=0.2;
+ 
+ // Transform all particles
+ const transformed=[];
+ const lightDirRot=LIGHT_DIR.rotateY(angleY);
+ 
+ for(let i=0;i<particles.length;i++){
+  const p=particles[i];
+  let pos=p.pos;
+  // Apply rotation
+  pos=pos.rotateY(angleY);
+  pos=pos.rotateX(camTilt);
+  
+  // Perspective
+  const d=7.0;
+  const persp=d/(d+pos.z);
+  const px=pos.x*persp*s;
+  const py=pos.y*persp*s;
+  const depth=pos.z;
+  
+  // Lighting
+  const normalRot=p.normal.rotateY(angleY).rotateX(camTilt);
+  const diff=Math.max(0,normalRot.dot(lightDirRot));
+  const lit=AMBIENT+(1-AMBIENT)*diff;
+  
+  transformed.push({px,py,depth,lit,particle:p,persp});
+ }
+ 
+ // Sort by depth (back to front)
+ transformed.sort((a,b)=>a.depth-b.depth);
+ 
+ // --- Draw ground shadow ---
+ {
+  const shadowY=-1.8;
+  const shadowPos=new Vec3(0,shadowY,0).rotateY(angleY).rotateX(camTilt);
+  const sd=d/(d+shadowPos.z);
+  const sx=0,sy=shadowPos.y*sd*s;
+  const sr=2.8*sd*s;
+  const grd=ctx.createRadialGradient(W2+sx,H2+sy+sr*0.2,0,W2+sx,H2+sy+sr*0.2,sr*1.4);
+  const shadowAlpha=hasDissolve?0.02:0.12;
+  grd.addColorStop(0,`rgba(0,0,0,${shadowAlpha})`);
+  grd.addColorStop(0.5,`rgba(0,0,0,${shadowAlpha*0.6})`);
+  grd.addColorStop(1,`rgba(0,0,0,0)`);
+  ctx.fillStyle=grd;
+  ctx.beginPath();
+  ctx.ellipse(W2+sx,H2+sy+sr*0.2,sr*1.2,sr*0.5,0,0,Math.PI*2);
+  ctx.fill();
+ }
+ 
+ // --- Draw particles ---
+ for(let i=0;i<transformed.length;i++){
+  const t=transformed[i];
+  const p=t.particle;
+  const x=W2+t.px,y=H2+t.py;
+  
+  // Compute color
+  let cr,cg,cb,alpha=1,size=1.2;
+  const isOrbiter=p.isOrbiter&&prog>=0.78;
+  
+  if(hasDissolve&&prog>0){
+   // Interpolate between hat color and dissolve color based on progress
+   const dissolveAmt=prog<0.78?Math.min(1,prog*2.5):Math.max(0,1-(prog-0.78)/0.05);
+   const dc=getDissolveColor(p,dissolveAmt);
+   const hc=getColor(p,t.lit);
+   const mix=prog<0.35?prog/0.35:(prog<0.78?1:Math.max(0,1-(prog-0.78)/0.1));
+   cr=Math.round(hc.r*(1-mix)+dc.r*mix);
+   cg=Math.round(hc.g*(1-mix)+dc.g*mix);
+   cb=Math.round(hc.b*(1-mix)+dc.b*mix);
+   alpha=prog<0.78?1:Math.min(1,0.6+(1-(prog-0.78))/0.05*0.4);
+   size=1.2+2.5*dissolveAmt;
+  }else{
+   const c=getColor(p,t.lit);
+   cr=c.r;cg=c.g;cb=c.b;
+   size=1.2;
+  }
+  
+  if(isOrbiter&&prog>=0.78){
+   // Draw trail
+   const trail=p.trail;
+   for(let ti=0;ti<trail.length;ti++){
+    const tr=trail[ti].rotateY(angleY).rotateX(camTilt);
+    const td=d/(d+tr.z);
+    const tx=W2+tr.x*td*s,ty=H2+tr.y*td*s;
+    const tf=ti/trail.length;
+    const ta=tf*0.6;
+    const tr2=Math.round(cr*0.7+120*tf);
+    const tg2=Math.round(cg*0.7+130*tf);
+    const tb2=Math.round(cb*0.7+50*tf);
+    ctx.beginPath();
+    ctx.arc(tx,ty,size*0.8*tf,0,Math.PI*2);
+    ctx.fillStyle=`rgba(${tr2},${tg2},${tb2},${ta})`;
+    ctx.fill();
+   }
+   // Draw orbiter brighter
+   cr=Math.min(255,cr+60);
+   cg=Math.min(255,cg+80);
+   cb=Math.min(255,cb+30);
+   size+=1.5;
+   alpha=1;
+  }
+  
+  // Draw particle
+  const rad=size*t.persp*2.2;
+  if(rad<0.5)continue;
+  
+  // Glow for dissolving/orbiting particles
+  if((hasDissolve&&prog>0.08&&prog<0.78)||(isOrbiter&&prog>=0.78)){
+   const glowSize=rad*4;
+   ctx.save();
+   ctx.shadowBlur=glowSize*1.2;
+   const gc=`rgba(${cr},${cg},${cb},${alpha*0.3})`;
+   ctx.shadowColor=gc;
+   ctx.fillStyle=`rgba(${cr},${cg},${cb},${alpha})`;
+   ctx.beginPath();
+   ctx.arc(x,y,rad,0,Math.PI*2);
+   ctx.fill();
+   ctx.restore();
+  }else{
+   ctx.fillStyle=`rgba(${cr},${cg},${cb},${alpha})`;
+   ctx.beginPath();
+   ctx.arc(x,y,rad,0,Math.PI*2);
+   ctx.fill();
+  }
+ }
+ 
+ // --- Additional glow aura behind hat in normal state ---
+ if(!hasDissolve){
+  const grd2=ctx.createRadialGradient(W2,H2-20*dpr,0,W2,H2-20*dpr,120*dpr);
+  grd2.addColorStop(0,'rgba(120,30,20,0.04)');
+  grd2.addColorStop(0.5,'rgba(100,20,10,0.02)');
+  grd2.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=grd2;
+  ctx.fillRect(0,0,W,H);
+ }
+}
+
+// ---- Main Loop ----
+let lastTime=0;
+function frame(t){
+ const dt=Math.min(0.05,(t-lastTime)/1000);
+ lastTime=t;
+ 
+ const reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+ if(!reduced){
+  updateParticles(dt);
+ }else{
+  angleY+=0.15*dt;
+  for(const p of particles)p.pos=p.target.clone();
+ }
+ 
+ render();
+ requestAnimationFrame(frame);
+}
+
+// ---- Interaction ----
+let hoverTimer=0;
+
+function onHoverStart(e){
+ e&&e.preventDefault();
+ const reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+ if(reduced)return;
+ isHovering=true;
+ hoverTimer=Date.now();
+}
+
+function onHoverEnd(e){
+ e&&e.preventDefault();
+ const reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+ if(reduced)return;
+ isHovering=false;
+ // If progress is far enough, let orbiter phase finish smoothly
+ if(hoverProgress>0.4){
+  // Allow natural decay
+ }else{
+  hoverProgress=0;
+  slowSpinFactor=1;
+ }
+ // Re-pick orbiters for next time
+ setTimeout(()=>{if(!isHovering)pickOrbiters()},2000);
+}
+
+canvas.addEventListener('mouseenter',onHoverStart);
+canvas.addEventListener('mouseleave',onHoverEnd);
+canvas.addEventListener('touchstart',onHoverStart,{passive:true});
+canvas.addEventListener('touchend',onHoverEnd,{passive:true});
+canvas.addEventListener('touchcancel',onHoverEnd,{passive:true});
+
+// ---- Resize ----
+window.addEventListener('resize',resize);
+
+// ---- Start ----
+requestAnimationFrame(frame);
+
+})();
+</script>
+</body>
+</html>
