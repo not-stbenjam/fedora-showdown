@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Red Hat Fedora — 3D Scene</title>
+    <style>
+        :root {
+            --redhat-red: #ee0000;
+            --bg-color: #0a0a0a;
+            --text-color: #ffffff;
+            --font-stack: "Inter", "Helvetica Neue", system-ui, -apple-system, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: var(--font-stack);
+            overflow: hidden; /* Prevent scroll */
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Canvas Container */
+        #canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            background: radial-gradient(circle at center, #1a0505 0%, #000000 100%);
+        }
+
+        /* UI Overlay */
+        #ui-layer {
+            position: absolute;
+            z-index: 10;
+            pointer-events: none; /* Let clicks pass through to canvas */
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-end;
+            padding-bottom: 10vh;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            letter-spacing: -0.05em;
+            margin-bottom: 0.5rem;
+            opacity: 0;
+            transform: translateY(20px);
+            animation: fadeUp 1s ease-out 0.5s forwards;
+            text-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+
+        p {
+            font-size: 1rem;
+            font-weight: 300;
+            color: rgba(255, 255, 255, 0.7);
+            max-width: 400px;
+            line-height: 1.6;
+            opacity: 0;
+            transform: translateY(20px);
+            animation: fadeUp 1s ease-out 0.8s forwards;
+        }
+
+        .highlight {
+            color: var(--redhat-red);
+            font-weight: 500;
+        }
+
+        .instructions {
+            margin-top: 2rem;
+            font-size: 0.8rem;
+            opacity: 0.5;
+            display: flex;
+            gap: 1.5rem;
+            justify-content: center;
+        }
+
+        .instruction-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        /* Loading Screen */
+        #loader {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            z-index: 100;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 0.5s ease;
+        }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(238, 0, 0, 0.3);
+            border-radius: 50%;
+            border-top-color: var(--redhat-red);
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes fadeUp { to { opacity: 1; transform: translateY(0); } }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            h1 { font-size: 1.8rem; }
+            p { font-size: 0.9rem; padding: 0 1.5rem; }
+            #ui-layer { padding-bottom: 8vh; }
+        }
+    </style>
+    
+    <!-- Import Map for Three.js -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <!-- Loading Screen -->
+    <div id="loader"><div class="spinner"></div></div>
+
+    <!-- 3D Canvas -->
+    <div id="canvas-container"></div>
+
+    <!-- UI Overlay -->
+    <div id="ui-layer">
+        <h1>Open Source Innovation</h1>
+        <p>Experience the future of technology with the iconic <span class="highlight">Fedora</span>. <br>Built for creators, developers, and visionaries.</p>
+        
+        <div class="instructions">
+            <div class="instruction-item">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s-8-4.5-8-11.8A8 8 0 0 1 12 2a8 8 0 0 1 8 8.2c0 7.3-8 11.8-8 11.8z"/><circle cx="12" cy="10" r="3"/></svg>
+                <span>Hover to Slow</span>
+            </div>
+            <div class="instruction-item">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/><path d="m4.9 4.9 2.9 2.9"/></svg>
+                <span>Click to Dissolve</span>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- Configuration ---
+        const CONFIG = {
+            colors: {
+                red: 0xee0000,
+                darkRed: 0x880000,
+                black: 0x111111,
+                band: 0x222222,
+                bgTop: 0x1a0505,
+                bgBottom: 0x000000
+            },
+            rotation: {
+                baseSpeed: 0.005,
+                hoverSpeed: 0.001,
+                damping: 0.05
+            },
+            particles: {
+                count: 2000,
+                dissolveSpeed: 0.02,
+                reformSpeed: 0.015,
+                driftFactor: 0.002
+            }
+        };
+
+        // --- Global Variables ---
+        let scene, camera, renderer, controls;
+        let hatGroup, hatMeshes = [];
+        let particleSystem, particleData = [];
+        let raycaster, mouse;
+        
+        // State
+        const state = {
+            isHovering: false,
+            currentSpeed: CONFIG.rotation.baseSpeed,
+            targetSpeed: CONFIG.rotation.baseSpeed,
+            isDissolving: false,
+            dissolveProgress: 0, // 0 = solid, 1 = fully dissolved
+            time: 0
+        };
+
+        // --- Initialization ---
+        function init() {
+            const container = document.getElementById('canvas-container');
+
+            // 1. Scene & Camera
+            scene = new THREE.Scene();
+            // Fog for depth
+            scene.fog = new THREE.FogExp2(CONFIG.colors.bgBottom, 0.02);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(0, 2, 8);
+
+            // 2. Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            // 3. Controls
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.enablePan = false;
+            controls.minDistance = 4;
+            controls.maxDistance = 15;
+            controls.maxPolarAngle = Math.PI / 2 - 0.1; // Don't go below ground
+
+            // 4. Lighting
+            setupLighting();
+
+            // 5. Objects
+            createHat();
+            createParticles();
+            createFloor();
+
+            // 6. Event Listeners
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+            
+            window.addEventListener('resize', onWindowResize);
+            window.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('click', onClick);
+            
+            // Remove loader
+            setTimeout(() => {
+                document.getElementById('loader').style.opacity = '0';
+                setTimeout(() => document.getElementById('loader').remove(), 500);
+            }, 800);
+
+            // Start Loop
+            animate();
+        }
+
+        function setupLighting() {
+            // Ambient
+            const ambient = new THREE.AmbientLight(0xffffff, 0.2);
+            scene.add(ambient);
+
+            // Main Spotlight (The "Stage" light)
+            const spotLight = new THREE.SpotLight(0xffffff, 20);
+            spotLight.position.set(5, 10, 5);
+            spotLight.angle = Math.PI / 6;
+            spotLight.penumbra = 0.5;
+            spotLight.decay = 2;
+            spotLight.distance = 50;
+            spotLight.castShadow = true;
+            spotLight.shadow.mapSize.width = 1024;
+            spotLight.shadow.mapSize.height = 1024;
+            scene.add(spotLight);
+
+            // Red Rim Light (The "Red Hat" branding glow)
+            const rimLight = new THREE.PointLight(CONFIG.colors.red, 10, 20);
+            rimLight.position.set(-5, 2, -5);
+            scene.add(rimLight);
+
+            // Fill Light
+            const fillLight = new THREE.DirectionalLight(0xffeedd, 0.5);
+            fillLight.position.set(0, 5, 5);
+            scene.add(fillLight);
+        }
+
+        function createHat() {
+            hatGroup = new THREE.Group();
+
+            const feltMaterial = new THREE.MeshStandardMaterial({
+                color: CONFIG.colors.red,
+                roughness: 0.8,
+                metalness: 0.1,
+            });
+
+            const bandMaterial = new THREE.MeshStandardMaterial({
+                color: CONFIG.colors.black,
+                roughness: 0.6,
+                metalness: 0.2,
+            });
+
+            // 1. Brim
+            const brimGeo = new THREE.CylinderGeometry(2.2, 2.2, 0.05, 64);
+            const brim = new THREE.Mesh(brimGeo, feltMaterial);
+            brim.position.y = 0;
+            brim.receiveShadow = true;
+            brim.castShadow = true;
+            hatGroup.add(brim);
+            hatMeshes.push(brim);
+
+            // 2. Crown (Top part)
+            // Using a cylinder with fewer segments for the top, tapering slightly
+            const crownGeo = new THREE.CylinderGeometry(1.4, 1.6, 1.5, 32, 4, true); 
+            const crown = new THREE.Mesh(crownGeo, feltMaterial);
+            crown.position.y = 0.75 + 0.025; // Sit on top of brim
+            crown.castShadow = true;
+            crown.receiveShadow = true;
+            
+            // Pinch the top of the crown
+            const crownPos = crownGeo.attributes.position;
+            for(let i=0; i<crownPos.count; i++){
+                const y = crownPos.getY(i);
+                if(y > 1.0) {
+                    // Taper the top vertices inward
+                    crownPos.setX(i, crownPos.getX(i) * 0.6);
+                    crownPos.setZ(i, crownPos.setZ(i) * 0.6);
+                }
+            }
+            crownGeo.computeVertexNormals();
+            
+            hatGroup.add(crown);
+            hatMeshes.push(crown);
+
+            // 3. Band
+            const bandGeo = new THREE.CylinderGeometry(1.62, 1.62, 0.4, 32);
+            const band = new THREE.Mesh(bandGeo, bandMaterial);
+            band.position.y = 0.4;
+            band.castShadow = true;
+            hatGroup.add(band);
+            hatMeshes.push(band);
+
+            // Initial Rotation
+            hatGroup.rotation.y = -Math.PI / 4;
+            hatGroup.rotation.x = 0.1;
+
+            scene.add(hatGroup);
+        }
+
+        function createFloor() {
+            // Invisible floor for shadows
+            const planeGeo = new THREE.PlaneGeometry(50, 50);
+            const planeMat = new THREE.ShadowMaterial({ opacity: 0.3 });
+            const plane = new THREE.Mesh(planeGeo, planeMat);
+            plane.rotation.x = -Math.PI / 2;
+            plane.position.y = -0.1;
+            plane.receiveShadow = true;
+            scene.add(plane);
+            
+            // Visual Grid (Optional, for "Tech" feel)
+            const grid = new THREE.GridHelper(50, 50, 0x333333, 0x111111);
+            grid.position.y = -0.15;
+            scene.add(grid);
+        }
+
+        function createParticles() {
+            // Create a geometry to hold particles
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(CONFIG.particles.count * 3);
+            const targetPositions = new Float32Array(CONFIG.particles.count * 3); // Where they want to be (on hat)
+            const randoms = new Float32Array(CONFIG.particles.count * 3); // For noise movement
+            const sizes = new Float32Array(CONFIG.particles.count);
+
+            for (let i = 0; i < CONFIG.particles.count; i++) {
+                // Initial random positions in a cloud around center
+                const r = 2 + Math.random() * 2;
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.random() * Math.PI;
+
+                positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+                positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta) + 1;
+                positions[i * 3 + 2] = r * Math.cos(phi);
+
+                // Target positions will be assigned dynamically when dissolving
+                targetPositions[i * 3] = 0;
+                targetPositions[i * 3 + 1] = 0;
+                targetPositions[i * 3 + 2] = 0;
+
+                randoms[i * 3] = Math.random();
+                randoms[i * 3 + 1] = Math.random();
+                randoms[i * 3 + 2] = Math.random();
+
+                sizes[i] = Math.random() * 2;
+                
+                particleData.push({
+                    velocity: new THREE.Vector3(),
+                    phase: Math.random() * Math.PI * 2
+                });
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+
+            // Shader Material for glowing particles
+            const material = new THREE.ShaderMaterial({
+                uniforms: {
+                    color: { value: new THREE.Color(CONFIG.colors.red) },
+                    time: { value: 0 }
+                },
+                vertexShader: `
+                    attribute float size;
+                    varying float vAlpha;
+                    uniform float time;
+                    void main() {
+                        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                        gl_PointSize = size * (300.0 / -mvPosition.z);
+                        gl_Position = projectionMatrix * mvPosition;
+                        // Pulse effect
+                        vAlpha = 0.5 + 0.5 * sin(time * 2.0 + position.x * 10.0);
+                    }
+                `,
+                fragmentShader: `
+                    uniform vec3 color;
+                    varying float vAlpha;
+                    void main() {
+                        // Circular particle
+                        vec2 coord = gl_PointCoord - vec2(0.5);
+                        if(length(coord) > 0.5) discard;
+                        
+                        // Soft glow
+                        float strength = 1.0 - (length(coord) * 2.0);
+                        strength = pow(strength, 1.5);
+                        
+                        gl_FragColor = vec4(color, strength * vAlpha);
+                    }
+                `,
+                transparent: true,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            });
+
+            particleSystem = new THREE.Points(geometry, material);
+            particleSystem.frustumCulled = false;
+            scene.add(particleSystem);
+        }
+
+        function assignParticleTargets() {
+            // When dissolving, particles fly to positions occupied by the hat vertices
+            const positions = particleSystem.geometry.attributes.position.array;
+            const targetPositions = particleSystem.geometry.attributes.targetPositions.array;
+            
+            // Collect all vertices from hat meshes
+            let allVertices = [];
+            hatMeshes.forEach(mesh => {
+                const geo = mesh.geometry;
+                const posAttr = geo.attributes.position;
+                const matrix = mesh.matrixWorld;
+                
+                for(let i=0; i<posAttr.count; i++){
+                    const v = new THREE.Vector3().fromBufferAttribute(posAttr, i);
+                    v.applyMatrix4(matrix);
+                    allVertices.push(v);
+                }
+            });
+
+            // Assign targets randomly from collected vertices
+            for(let i=0; i<CONFIG.particles.count; i++){
+                const v = allVertices[Math.floor(Math.random() * allVertices.length)];
+                // Add some noise to target so they don't look like a wireframe
+                targetPositions[i*3] = v.x + (Math.random() - 0.5) * 0.2;
+                targetPositions[i*3+1] = v.y + (Math.random() - 0.5) * 0.2;
+                targetPositions[i*3+2] = v.z + (Math.random() - 0.5) * 0.2;
+            }
+            
+            particleSystem.geometry.attributes.targetPositions.needsUpdate = true;
+        }
+
+        // --- Interaction Handlers ---
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function onMouseMove(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            // Raycasting for hover effect
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(hatMeshes);
+
+            if (intersects.length > 0) {
+                if (!state.isHovering) {
+                    state.isHovering = true;
+                    state.targetSpeed = CONFIG.rotation.hoverSpeed;
+                    document.body.style.cursor = 'pointer';
+                }
+            } else {
+                if (state.isHovering) {
+                    state.isHovering = false;
+                    state.targetSpeed = CONFIG.rotation.baseSpeed;
+                    document.body.style.cursor = 'default';
+                }
+            }
+        }
+
+        function onClick(event) {
+            if (state.isHovering) {
+                // Toggle dissolve
+                state.isDissolving = !state.isDissolving;
+                
+                // If starting dissolve, calculate targets now
+                if(state.isDissolving) {
+                    assignParticleTargets();
+                    // Hide hat meshes visually but keep them for raycasting logic if needed
+                    // Actually, let's just let particles cover them.
+                }
+            }
+        }
+
+        // --- Animation Loop ---
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const dt = 0.016; // Approx delta time
+            state.time += dt;
+
+            // 1. Rotation Logic
+            // Smoothly interpolate current speed to target speed
+            state.currentSpeed += (state.targetSpeed - state.currentSpeed) * CONFIG.rotation.damping;
+            
+            // Rotate hat group
+            if (hatGroup) {
+                hatGroup.rotation.y += state.currentSpeed;
+                // Gentle floating
+                hatGroup.position.y = Math.sin(state.time * 0.5) * 0.1; 
+            }
+
+            // 2. Particle Logic
+            if (particleSystem) {
+                const positions = particleSystem.geometry.attributes.position.array;
+                const targets = particleSystem.geometry.attributes.targetPositions.array;
+                const sizes = particleSystem.geometry.attributes.size.array;
+                
+                particleSystem.material.uniforms.time.value = state.time;
+
+                for (let i = 0; i < CONFIG.particles.count; i++) {
+                    const ix = i * 3;
+                    const iy = i * 3 + 1;
+                    const iz = i * 3 + 2;
+
+                    const px = positions[ix];
+                    const py = positions[iy];
+                    const pz = positions[iz];
+
+                    if (state.isDissolving) {
+                        // DISSOLVE STATE
+                        // Move towards target (on hat surface) + noise
+                        const tx = targets[ix];
+                        const ty = targets[iy];
+                        const tz = targets[iz];
+
+                        // Lerp towards target
+                        positions[ix] += (tx - px) * CONFIG.particles.dissolveSpeed;
+                        positions[iy] += (ty - py) * CONFIG.particles.dissolveSpeed;
+                        positions[iz] += (tz - pz) * CONFIG.particles.dissolveSpeed;
+
+                        // Add drift
+                        positions[ix] += Math.sin(state.time + particleData[i].phase) * CONFIG.particles.driftFactor;
+                        positions[iy] += Math.cos(state.time * 0.5 + particleData[i].phase) * CONFIG.particles.driftFactor;
+
+                        // Grow size
+                        sizes[i] = THREE.MathUtils.lerp(sizes[i], 4.0, 0.05);
+
+                    } else {
+                        // REFORM / AMBIENT STATE
+                        // If we were dissolved, we need to go back to a "cloud" state or just hide
+                        // Let's make them float in a cloud around the hat when not dissolving
+                        
+                        // Simple noise drift
+                        positions[ix] += Math.sin(state.time * 0.5 + ix) * 0.005;
+                        positions[iy] += Math.cos(state.time * 0.3 + iy) * 0.005;
+                        positions[iz] += Math.sin(state.time * 0.4 + iz) * 0.005;
+
+                        // Keep them somewhat centered but loose
+                        const dist = Math.sqrt(px*px + py*py + pz*pz);
+                        if (dist > 6) {
+                            positions[ix] *= 0.99;
+                            positions[iy] *= 0.99;
+                            positions[iz] *= 0.99;
+                        }
+                        
+                        // Shrink size
+                        sizes[i] = THREE.MathUtils.lerp(sizes[i], Math.random() * 2, 0.05);
+                    }
+                }
+
+                particleSystem.geometry.attributes.position.needsUpdate = true;
+                particleSystem.geometry.attributes.size.needsUpdate = true;
+                
+                // Rotate entire particle system slowly
+                particleSystem.rotation.y -= 0.001;
+            }
+
+            // 3. Controls
+            controls.update();
+
+            renderer.render(scene, camera);
+        }
+
+        // Start
+        init();
+
+    </script>
+</body>
+</html>
