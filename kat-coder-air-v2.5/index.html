@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Red Hat Fedora</title>
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: #0a0a0f;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 40%, rgba(180,40,40,0.08) 0%, transparent 70%),
+    radial-gradient(ellipse 120% 100% at 50% 50%, #0d0d18 0%, #06060c 100%);
+}
+
+#scene {
+  position: relative;
+  width: 100vw; height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+canvas {
+  display: block;
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+}
+
+#caption {
+  position: absolute;
+  bottom: 8vh;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255,255,255,0.45);
+  font-size: clamp(11px, 1.4vw, 15px);
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  pointer-events: none;
+  user-select: none;
+  text-shadow: 0 0 20px rgba(220,60,60,0.3);
+  transition: opacity 0.6s ease;
+}
+
+#hint {
+  position: absolute;
+  top: 6vh;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255,255,255,0.2);
+  font-size: clamp(9px, 1.1vw, 12px);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  pointer-events: none;
+  user-select: none;
+  transition: opacity 0.4s ease;
+}
+</style>
+</head>
+<body>
+<div id="scene">
+  <canvas id="c"></canvas>
+  <div id="hint">hover or tap to interact</div>
+  <div id="caption">Red Hat &middot; Fedora</div>
+</div>
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const scene = document.getElementById('scene');
+  const hint = document.getElementById('hint');
+
+  let W, H, cx, cy, scale;
+  const isReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cx = W / 2;
+    cy = H / 2;
+    scale = Math.min(W, H) * 0.28;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ── Fedora geometry ──────────────────────────────────────────
+  // Build a point cloud representing the fedora surface
+  function buildFedoraPoints() {
+    const pts = [];
+    const R = 1.0; // unit radius
+
+    // Crown: truncated cone (wider at bottom, narrower at top) with crown indent
+    const crownSegments = 48;
+    const crownRings = 32;
+    for (let i = 0; i < crownSegments; i++) {
+      const theta = (i / crownSegments) * Math.PI * 2;
+      const ct = Math.cos(theta), st = Math.sin(theta);
+      for (let j = 0; j <= crownRings; j++) {
+        const v = j / crownRings; // 0=bottom, 1=top
+        const r = 0.55 + 0.15 * (1 - v) + 0.06 * Math.sin(v * Math.PI); // slight bulge
+        const y = 0.3 + v * 1.1;
+        // Crown front indent
+        const indent = Math.max(0, 0.12 * (1 - Math.abs(st) * 1.2)) * (1 - Math.pow(v, 1.5));
+        const x = (r - indent * Math.max(0, ct)) * ct;
+        const z = (r - indent * Math.max(0, ct)) * st;
+        pts.push([x * R, y * R, z * R]);
+      }
+    }
+
+    // Crown top (elliptical lid with crease)
+    for (let i = 0; i < crownSegments; i++) {
+      const theta = (i / crownSegments) * Math.PI * 2;
+      const ct = Math.cos(theta), st = Math.sin(theta);
+      const ry = 1.4;
+      const rxz = 0.48;
+      const crease = 0.06 * Math.pow(Math.abs(ct), 0.6);
+      const x = rxz * ct;
+      const z = rxz * st;
+      const y = ry + crease;
+      pts.push([x * R, y * R, z * R]);
+    }
+
+    // Brim: flat disc, wider at edges, slight upward curve at rim
+    const brimSegments = 64;
+    const brimRings = 8;
+    for (let i = 0; i < brimSegments; i++) {
+      const theta = (i / brimSegments) * Math.PI * 2;
+      const ct = Math.cos(theta), st = Math.sin(theta);
+      for (let j = 0; j <= brimRings; j++) {
+        const u = j / brimRings; // 0=inner, 1=outer
+        const r = 0.5 + u * 1.0;
+        const droop = -0.08 * Math.pow(u, 1.5) * (1 + 0.3 * Math.sin(theta * 3));
+        const x = r * ct;
+        const z = r * st;
+        const y = -0.02 + droop;
+        pts.push([x * R, y * R, z * R]);
+      }
+    }
+
+    // Band: thin torus-like strip at crown base
+    const bandSegments = 48;
+    const bandRings = 8;
+    for (let i = 0; i < bandSegments; i++) {
+      const theta = (i / bandSegments) * Math.PI * 2;
+      const ct = Math.cos(theta), st = Math.sin(theta);
+      const bandR = 0.58;
+      const bandTube = 0.045;
+      for (let j = 0; j <= bandRings; j++) {
+        const phi = (j / bandRings) * Math.PI * 2;
+        const cp = Math.cos(phi), sp = Math.sin(phi);
+        const x = (bandR + bandTube * cp) * ct;
+        const y = 0.05 + bandTube * sp;
+        const z = (bandR + bandTube * cp) * st;
+        pts.push([x * R, y * R, z * R]);
+      }
+    }
+
+    // Add some interior/depth points for volume
+    for (let k = 0; k < 600; k++) {
+      const theta = Math.random() * Math.PI * 2;
+      const v = Math.random();
+      const ct = Math.cos(theta), st = Math.sin(theta);
+      const r = (0.45 + 0.12 * (1 - v)) * (0.85 + Math.random() * 0.15);
+      const y = 0.3 + v * 1.05;
+      pts.push([r * ct * R, y * R, r * st * R]);
+    }
+    for (let k = 0; k < 400; k++) {
+      const theta = Math.random() * Math.PI * 2;
+      const u = Math.random();
+      const r = (0.5 + u * 1.0) * (0.9 + Math.random() * 0.1);
+      const x = r * Math.cos(theta);
+      const z = r * Math.sin(theta);
+      const y = -0.02 + (Math.random() - 0.5) * 0.06;
+      pts.push([x * R, y * R, z * R]);
+    }
+
+    return pts;
+  }
+
+  const fedoraPoints = buildFedoraPoints();
+  const N = fedoraPoints.length;
+
+  // ── Particle state ───────────────────────────────────────────
+  class Particle {
+    constructor(x, y, z, color) {
+      this.homeX = x; this.homeY = y; this.homeZ = z;
+      this.x = x; this.y = y; this.z = z;
+      this.vx = 0; this.vy = 0; this.vz = 0;
+      this.color = color;
+      this.size = 1.2 + Math.random() * 1.8;
+      this.orbitPhase = Math.random() * Math.PI * 2;
+      this.orbitSpeed = (0.3 + Math.random() * 0.7) * (Math.random() < 0.5 ? 1 : -1);
+      this.orbitRadius = 0.15 + Math.random() * 0.35;
+      this.trail = [];
+      this.isOrbiting = false;
+      this.opacity = 1;
+    }
+  }
+
+  const particles = fedoraPoints.map(p => {
+    const red = 0.75 + Math.random() * 0.25;
+    const green = 0.08 + Math.random() * 0.12;
+    const blue = 0.06 + Math.random() * 0.1;
+    const color = `rgb(${Math.floor(red*255)},${Math.floor(green*255)},${Math.floor(blue*255)})`;
+    return new Particle(p[0], p[1], p[2], color);
+  });
+
+  const orbitCount = Math.floor(N * 0.06);
+  for (let i = 0; i < orbitCount; i++) {
+    particles[i].isOrbiting = true;
+    particles[i].size = 1.5 + Math.random() * 2;
+  }
+
+  // ── Rotation ─────────────────────────────────────────────────
+  let rotY = 0, rotX = 0.25;
+  let rotSpeed = isReducedMotion ? 0 : 0.008;
+  let targetRotSpeed = rotSpeed;
+
+  function rotatePoint(x, y, z, ry, rx) {
+    // Rotate around Y
+    let x1 = x * Math.cos(ry) - z * Math.sin(ry);
+    let z1 = x * Math.sin(ry) + z * Math.cos(ry);
+    let y1 = y;
+    // Rotate around X
+    let y2 = y1 * Math.cos(rx) - z1 * Math.sin(rx);
+    let z2 = y1 * Math.sin(rx) + z1 * Math.cos(rx);
+    return [x1, y2, z2];
+  }
+
+  // ── Projection ───────────────────────────────────────────────
+  const FOV = 5;
+  function project(x, y, z) {
+    const dist = FOV + z;
+    const factor = Math.max(0.1, dist);
+    const sx = cx + (x / factor) * scale;
+    const sy = cy - (y / factor) * scale;
+    return [sx, sy, z];
+  }
+
+  // ── Interaction state ────────────────────────────────────────
+  let interacting = false;
+  let interactPhase = 0; // 0=idle, 1=slow, 2=dissolve, 3=swirl, 4=reform, 5=orbit
+  let phaseTime = 0;
+  let hoverActive = false;
+
+  function startInteraction() {
+    if (isReducedMotion) return;
+    if (interacting) return;
+    interacting = true;
+    interactPhase = 1;
+    phaseTime = 0;
+    hint.style.opacity = '0';
+  }
+
+  scene.addEventListener('mouseenter', startInteraction);
+  scene.addEventListener('touchstart', startInteraction, { passive: true });
+  scene.addEventListener('mouseleave', () => { if (!hoverActive) { hoverActive = false; } });
+
+  // ── Dissolve / reform physics ────────────────────────────────
+  const dissolveTime = 2.0;
+  const swirlTime = 3.0;
+  const reformTime = 2.5;
+  const orbitDelay = 1.0;
+
+  function easeInOutCubic(t) {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  }
+  function easeOutExpo(t) {
+    return t === 1 ? 1 : 1 - Math.pow(2, -10 * t);
+  }
+  function easeInExpo(t) {
+    return t === 0 ? 0 : Math.pow(2, 10 * t - 10);
+  }
+
+  // Wind / drift vectors for each particle
+  const drifts = Array.from({ length: N }, () => {
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.random() * Math.PI;
+    const speed = 0.3 + Math.random() * 1.2;
+    return {
+      dx: Math.sin(phi) * Math.cos(theta) * speed,
+      dy: Math.cos(phi) * speed * 0.6 + 0.2,
+      dz: Math.sin(phi) * Math.sin(theta) * speed,
+      swirlAngle: Math.random() * Math.PI * 2,
+      swirlRadius: 0.2 + Math.random() * 0.8,
+      swirlSpeed: (0.5 + Math.random() * 1.5) * (Math.random() < 0.5 ? 1 : -1),
+    };
+  });
+
+  // ── Stars background ─────────────────────────────────────────
+  const stars = Array.from({ length: 120 }, () => ({
+    x: Math.random(),
+    y: Math.random(),
+    r: 0.3 + Math.random() * 1.0,
+    twinkle: Math.random() * Math.PI * 2,
+    speed: 0.5 + Math.random() * 2,
+  }));
+
+  // ── Main loop ────────────────────────────────────────────────
+  let lastTime = performance.now();
+
+  function frame(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05);
+    lastTime = now;
+    phaseTime += dt;
+
+    // ── Update rotation ──
+    if (!isReducedMotion) {
+      if (interacting) {
+        if (interactPhase === 1) {
+          targetRotSpeed = rotSpeed * 0.15;
+        } else if (interactPhase >= 2 && interactPhase <= 4) {
+          targetRotSpeed = rotSpeed * 0.05;
+        } else {
+          targetRotSpeed = rotSpeed;
+        }
+        rotSpeed += (targetRotSpeed - rotSpeed) * dt * 2;
+      }
+      rotY += rotSpeed;
+    }
+
+    // ── Phase transitions ──
+    if (interacting) {
+      if (interactPhase === 1 && phaseTime > 0.5) {
+        interactPhase = 2; phaseTime = 0;
+      } else if (interactPhase === 2 && phaseTime > dissolveTime) {
+        interactPhase = 3; phaseTime = 0;
+      } else if (interactPhase === 3 && phaseTime > swirlTime) {
+        interactPhase = 4; phaseTime = 0;
+      } else if (interactPhase === 4 && phaseTime > reformTime) {
+        interactPhase = 5; phaseTime = 0;
+      } else if (interactPhase === 5 && phaseTime > orbitDelay) {
+        interacting = false;
+        interactPhase = 0;
+        phaseTime = 0;
+        rotSpeed = rotSpeed * 0.3 + rotSpeed * 0.7;
+      }
+    }
+
+    // ── Update particles ──
+    for (let i = 0; i < N; i++) {
+      const p = particles[i];
+      const d = drifts[i];
+      const home = rotatePoint(p.homeX, p.homeY, p.homeZ, rotY, rotX);
+
+      if (!interacting) {
+        // Return to home position
+        p.x += (home[0] - p.x) * dt * 8;
+        p.y += (home[1] - p.y) * dt * 8;
+        p.z += (home[2] - p.z) * dt * 8;
+        p.isOrbiting = false;
+        p.trail = [];
+      } else if (interactPhase === 1) {
+        // Slow down, slight drift
+        const t = easeInOutCubic(Math.min(phaseTime / 0.5, 1));
+        p.x += (home[0] - p.x) * (1 - t * 0.3) * dt * 4;
+        p.y += (home[1] - p.y) * (1 - t * 0.3) * dt * 4;
+        p.z += (home[2] - p.z) * (1 - t * 0.3) * dt * 4;
+        p.trail = [];
+      } else if (interactPhase === 2) {
+        // Dissolve: drift apart
+        const t = Math.min(phaseTime / dissolveTime, 1);
+        const e = easeInOutCubic(t);
+        p.x = home[0] + d.dx * e * 3.5;
+        p.y = home[1] + d.dy * e * 3.5 + e * e * 1.5; // float up
+        p.z = home[2] + d.dz * e * 3.5;
+        p.trail = [];
+      } else if (interactPhase === 3) {
+        // Swirl
+        const t = Math.min(phaseTime / swirlTime, 1);
+        d.swirlAngle += d.swirlSpeed * dt * 2;
+        const swirlX = Math.cos(d.swirlAngle) * d.swirlRadius;
+        const swirlZ = Math.sin(d.swirlAngle) * d.swirlRadius;
+        const swirlY = Math.sin(d.swirlAngle * 0.7) * d.swirlRadius * 0.5;
+        // Blend between scattered and swirling
+        const scatterT = 1 - easeInOutCubic(t);
+        p.x = home[0] * scatterT + (home[0] + d.dx * 3.5 + swirlX * (1 - scatterT * 0.5)) * (1 - scatterT);
+        p.y = home[1] * scatterT + (home[1] + d.dy * 3.5 + swirlY * (1 - scatterT * 0.5) + 1.5) * (1 - scatterT);
+        p.z = home[2] * scatterT + (home[2] + d.dz * 3.5 + swirlZ * (1 - scatterT * 0.5)) * (1 - scatterT);
+        p.trail = [];
+      } else if (interactPhase === 4) {
+        // Reform: swirl back to home
+        const t = easeInExpo(Math.min(phaseTime / reformTime, 1));
+        d.swirlAngle += d.swirlSpeed * dt * 1.5;
+        const swirlX = Math.cos(d.swirlAngle) * d.swirlRadius * 0.3;
+        const swirlZ = Math.sin(d.swirlAngle) * d.swirlRadius * 0.3;
+        const swirlY = Math.sin(d.swirlAngle * 0.7) * d.swirlRadius * 0.3;
+        const floatBack = 1.5 * (1 - t);
+        p.x = home[0] + swirlX * (1 - t);
+        p.y = home[1] + (swirlY + floatBack) * (1 - t);
+        p.z = home[2] + swirlZ * (1 - t);
+        p.trail = [];
+      } else if (interactPhase === 5) {
+        // Orbiting particles
+        if (p.isOrbiting) {
+          const orbitT = Math.min(phaseTime / orbitDelay, 1);
+          const e = easeOutExpo(orbitT);
+          p.orbitPhase += p.orbitSpeed * dt * 2;
+          const ox = Math.cos(p.orbitPhase) * p.orbitRadius * e;
+          const oz = Math.sin(p.orbitPhase) * p.orbitRadius * e;
+          const oy = Math.sin(p.orbitPhase * 1.3) * p.orbitRadius * 0.4 * e;
+          p.x = home[0] + ox;
+          p.y = home[1] + oy;
+          p.z = home[2] + oz;
+          // Trail
+          p.trail.push({ x: p.x, y: p.y, z: p.z });
+          if (p.trail.length > 8) p.trail.shift();
+        } else {
+          p.x += (home[0] - p.x) * dt * 6;
+          p.y += (home[1] - p.y) * dt * 6;
+          p.z += (home[2] - p.z) * dt * 6;
+          p.trail = [];
+        }
+      }
+    }
+
+
+
+    // ── Render ──
+    ctx.clearRect(0, 0, W, H);
+
+    // Stars
+    for (const s of stars) {
+      s.twinkle += s.speed * dt;
+      const alpha = 0.15 + 0.15 * Math.sin(s.twinkle);
+      ctx.beginPath();
+      ctx.arc(s.x * W, s.y * H * 0.7, s.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+      ctx.fill();
+    }
+
+    // Sort particles by z for depth
+    const projected = [];
+    for (let i = 0; i < N; i++) {
+      const p = particles[i];
+      const [sx, sy, sz] = project(p.x, p.y, p.z);
+      projected.push({ p, sx, sy, sz, i });
+    }
+    projected.sort((a, b) => a.sz - b.sz);
+
+    // Draw particles
+    for (const { p, sx, sy, sz } of projected) {
+      const depthFactor = (sz + 2) / 4; // normalize roughly
+      const alpha = 0.5 + 0.5 * depthFactor;
+      const size = p.size * (0.7 + 0.3 * depthFactor) * (scale / Math.min(W, H) * 3.5);
+
+      if (p.isOrbiting && p.trail.length > 1) {
+        // Draw trail
+        ctx.beginPath();
+        for (let t = 0; t < p.trail.length; t++) {
+          const tp = p.trail[t];
+          const [tsx, tsy] = project(tp.x, tp.y, tp.z);
+          if (t === 0) ctx.moveTo(tsx, tsy);
+          else ctx.lineTo(tsx, tsy);
+        }
+        ctx.lineTo(sx, sy);
+        ctx.strokeStyle = `rgba(255,100,80,${0.08 * alpha})`;
+        ctx.lineWidth = size * 0.4;
+        ctx.stroke();
+      }
+
+      // Glow
+      const glowSize = size * 3;
+      const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, glowSize);
+      grad.addColorStop(0, p.color.replace('rgb', 'rgba').replace(')', `,${alpha * 0.9})`));
+      grad.addColorStop(0.3, p.color.replace('rgb', 'rgba').replace(')', `,${alpha * 0.3})`));
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.beginPath();
+      ctx.arc(sx, sy, glowSize, 0, Math.PI * 2);
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      // Core
+      ctx.beginPath();
+      ctx.arc(sx, sy, size, 0, Math.PI * 2);
+      ctx.fillStyle = p.color.replace('rgb', 'rgba').replace(')', `,${alpha})`);
+      ctx.fill();
+    }
+
+    // Subtle ground glow
+    const groundGrad = ctx.createRadialGradient(cx, cy + scale * 1.5, 0, cx, cy + scale * 1.5, scale * 1.8);
+    groundGrad.addColorStop(0, 'rgba(180,40,40,0.06)');
+    groundGrad.addColorStop(0.5, 'rgba(120,20,20,0.03)');
+    groundGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + scale * 1.5, scale * 1.8, scale * 0.4, 0, 0, Math.PI * 2);
+    ctx.fillStyle = groundGrad;
+    ctx.fill();
+
+    requestAnimationFrame(frame);
+  }
+
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
