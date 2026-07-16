@@ -152,6 +152,15 @@ def get_existing_openrouter_ids():
     return set(re.findall(r'openrouterId:\s*"([^"]+)"', content))
 
 
+def branch_exists(branch):
+    """A pre-existing bot branch means a PR was already created (possibly closed)."""
+    result = subprocess.run(
+        ["git", "ls-remote", "--exit-code", "--heads", "origin", branch],
+        capture_output=True, text=True, cwd=REPO_ROOT,
+    )
+    return result.returncode == 0
+
+
 def has_open_pr(slug):
     result = subprocess.run(
         ["gh", "pr", "list", "--state", "open",
@@ -403,6 +412,13 @@ def main():
         slug = generate_slug(model["id"])
         if (REPO_ROOT / slug / "index.html").exists():
             logging.info(f"Skipping {model['id']} - directory {slug}/ already exists")
+            continue
+
+        if branch_exists(f"bot/add-{slug}"):
+            logging.info(
+                f"Skipping {model['id']} - branch bot/add-{slug} already exists "
+                f"(PR was already created, possibly closed)"
+            )
             continue
 
         if has_open_pr(slug):
