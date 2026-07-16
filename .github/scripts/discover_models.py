@@ -22,7 +22,7 @@ PROMPT_FILE = REPO_ROOT / "PROMPT.md"
 MAX_MODELS = int(os.environ.get("MAX_MODELS", "5"))
 DRY_RUN = os.environ.get("DRY_RUN", "false").lower() == "true"
 MODEL_FILTER = os.environ.get("MODEL_FILTER", "").strip()
-PI_TIMEOUT = 600
+PI_TIMEOUT = 1800
 MIN_HTML_SIZE = 1024
 LOOKBACK_SECONDS = 30 * 24 * 3600
 ARTIFACTS_DIR = REPO_ROOT / "artifacts"
