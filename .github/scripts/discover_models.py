@@ -161,6 +161,17 @@ def branch_exists(branch):
     return result.returncode == 0
 
 
+def pick_branch_name(slug):
+    """Return bot/add-<slug>, or the first free numbered variant if taken."""
+    branch = f"bot/add-{slug}"
+    if not branch_exists(branch):
+        return branch
+    n = 2
+    while branch_exists(f"{branch}-{n}"):
+        n += 1
+    return f"{branch}-{n}"
+
+
 def has_open_pr(slug):
     result = subprocess.run(
         ["gh", "pr", "list", "--state", "open",
@@ -301,7 +312,7 @@ def update_models_array(slug, display_name, group, openrouter_id):
 
 
 def create_pr(slug, display_name, group, model_id):
-    branch = f"bot/add-{slug}"
+    branch = pick_branch_name(slug)
 
     subprocess.run(
         ["git", "checkout", "-b", branch, "main"],
@@ -414,7 +425,7 @@ def main():
             logging.info(f"Skipping {model['id']} - directory {slug}/ already exists")
             continue
 
-        if branch_exists(f"bot/add-{slug}"):
+        if not MODEL_FILTER and branch_exists(f"bot/add-{slug}"):
             logging.info(
                 f"Skipping {model['id']} - branch bot/add-{slug} already exists "
                 f"(PR was already created, possibly closed)"
