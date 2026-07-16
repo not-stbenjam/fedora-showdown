@@ -366,7 +366,12 @@ def main():
     all_models = resp.json()["data"]
     logging.info(f"Total models from API: {len(all_models)}")
 
-    cost_ceiling = get_cost_ceiling(all_models)
+    if MODEL_FILTER:
+        # An explicitly requested model bypasses the cost cap.
+        cost_ceiling = float("inf")
+        logging.info("MODEL_FILTER set - skipping cost ceiling")
+    else:
+        cost_ceiling = get_cost_ceiling(all_models)
 
     candidates = [m for m in all_models if should_include(m, cost_ceiling)]
     logging.info(f"After filtering: {len(candidates)} candidates")
