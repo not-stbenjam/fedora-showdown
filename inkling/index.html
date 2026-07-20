@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fedora</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,300&display=swap');
+  :root {
+    --bg: #0a0a0f;
+    --text: #e8e6e3;
+    --accent: #c43b3b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: var(--bg); color: var(--text); overflow: hidden; font-family: system-ui, -apple-system, sans-serif; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+  .scene {
+    position: relative; width: 100%; height: 100vh; display: flex; align-items: center; justify-content: center; perspective: 1200px;
+  }
+  .caption {
+    position: absolute; bottom: 10vh; text-align: center; pointer-events: none; z-index: 10;
+  }
+  .caption h1 {
+    font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 300; font-style: italic; font-size: clamp(1.5rem, 3vw, 2.8rem); letter-spacing: 0.15em; color: rgba(232,230,227,0.85); text-shadow: 0 10px 30px rgba(0,0,0,0.6);
+  }
+  .caption p {
+    margin-top: 0.6rem; font-size: 0.85rem; letter-spacing: 0.25em; text-transform: uppercase; color: rgba(232,230,227,0.45);
+  }
+  /* 3D Hat */
+  .hat-stage {
+    position: relative; width: 260px; height: 260px; transform-style: preserve-3d; animation: spin 8s linear infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hat-stage { animation: none; transform: rotateY(0deg); }
+  }
+  .hat-stage.slow { animation-duration: 20s !important; }
+  .hat-stage:hover { animation-duration: 20s; }
+  @keyframes spin { from { transform: rotateY(0deg) rotateX(10deg); } to { transform: rotateY(360deg) rotateX(10deg); } }
+
+  /* Brim */
+  .brim {
+    position: absolute; width: 220px; height: 70px; left: 20px; top: 140px; border-radius: 50%; background: linear-gradient(135deg, #1a0f0f 0%, #2a1616 40%, #4a2323 70%, #1a0f0f 100%);
+    box-shadow: inset 0 -15px 40px rgba(0,0,0,0.8), inset 0 10px 20px rgba(255,255,255,0.05), 0 30px 60px rgba(0,0,0,0.9);
+    transform: rotateX(70deg) translateZ(-15px); transform-style: preserve-3d;
+  }
+  /* Crown */
+  .crown {
+    position: absolute; width: 130px; height: 100px; left: 65px; top: 40px; border-radius: 50% 50% 10% 10% / 60% 60% 30% 30%; background: linear-gradient(160deg, #5a1515 0%, #c43b3b 30%, #8a2020 60%, #3a1010 100%);
+    box-shadow: inset -20px -20px 40px rgba(0,0,0,0.7), inset 20px 20px 30px rgba(255,255,255,0.08), 0 20px 50px rgba(0,0,0,0.8);
+    transform: translateZ(35px); transform-style: preserve-3d;
+  }
+  /* Band */
+  .band {
+    position: absolute; width: 140px; height: 28px; left: 60px; top: 110px; border-radius: 8px; background: linear-gradient(180deg, #1f1f25, #2a2a35);
+    box-shadow: inset 0 2px 6px rgba(255,255,255,0.05), 0 2px 8px rgba(0,0,0,0.6); transform: translateZ(20px);
+  }
+  .band::after {
+    content: ''; position: absolute; width: 18px; height: 18px; left: 10px; top: 5px; background: linear-gradient(135deg, #6a6a7a, #3a3a4a); border-radius: 50%; box-shadow: inset 0 -2px 3px rgba(0,0,0,0.6);
+  }
+
+  /* Canvas overlay for particles */
+  canvas {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5;
+  }
+</style>
+</head>
+<body>
+<div class="scene" id="scene">
+  <div class="hat-stage" id="hat" aria-label="Spinning fedora" role="img">
+    <div class="brim"></div>
+    <div class="crown"></div>
+    <div class="band"></div>
+  </div>
+  <canvas id="canvas"></canvas>
+  <div class="caption">
+    <h1>Elegance in motion</h1>
+    <p>Hover to dissolve · Tap to release</p>
+  </div>
+</div>
+
+<script>
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  let W, H, cx, cy;
+  const resize = () => { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; cx = W/2; cy = H/2; };
+  window.addEventListener('resize', resize);
+  resize();
+
+  const isReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Particle data
+  const count = 600;
+  const particles = [];
+  const orbiters = [];
+  let exploded = false;
+  let animId = 0;
+
+  // Initialize particles around hat center
+  function initParticles() {
+    particles.length = 0;
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const r = 60 + Math.random() * 90;
+      particles.push({
+        x: cx, y: cy,
+        ox: cx + Math.cos(angle) * r, oy: cy + Math.sin(angle) * r,
+        vx: 0, vy: 0,
+        life: 1,
+        size: 1.5 + Math.random() * 2.5,
+        color: Math.random() > 0.7 ? '#e8b07a' : (Math.random() > 0.5 ? '#d4886a' : '#c43b3b'),
+        phase: Math.random() * Math.PI * 2
+      });
+    }
+  }
+  initParticles();
+
+  let time = 0;
+  let hover = false;
+
+  const scene = document.getElementById('scene');
+  const hat = document.getElementById('hat');
+
+  scene.addEventListener('mouseenter', () => { if (isReduced) return; hover = true; });
+  scene.addEventListener('mouseleave', () => { hover = false; });
+  scene.addEventListener('touchstart', () => { if (isReduced) return; hover = true; }, {passive:true});
+  scene.addEventListener('touchend', () => { hover = false; });
+
+  function easeInOut(t) { return t < 0.5 ? 2*t*t : -1 + (4 - 2*t)*t; }
+
+  function tick() {
+    time += 0.05;
+    ctx.clearRect(0, 0, W, H);
+
+    if (!isReduced) {
+      if (hover && !exploded) {
+        exploded = true;
+        hat.classList.add('slow');
+      }
+      if (!hover && exploded) {
+        exploded = false;
+        hat.classList.remove('slow');
+      }
+    }
+
+    // Draw hat glow in background when not exploded
+    if (!exploded) {
+      const glow = ctx.createRadialGradient(cx, cy - 20, 10, cx, cy - 20, 180);
+      glow.addColorStop(0, 'rgba(196,59,59,0.18)');
+      glow.addColorStop(1, 'rgba(196,59,59,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // Particle physics
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      if (exploded) {
+        // Drift out in swirl
+        const t = time * 0.015 + p.phase;
+        const driftX = Math.sin(t) * 200 + Math.cos(t*0.7) * 80;
+        const driftY = Math.cos(t) * 200 + Math.sin(t*0.6) * 80;
+        p.ox = cx + driftX;
+        p.oy = cy - 40 + driftY;
+        p.vx += (p.ox - p.x) * 0.03;
+        p.vy += (p.oy - p.y) * 0.03;
+      } else {
+        // Reform
+        p.ox = cx + Math.cos(p.phase) * (70 + Math.random()*40);
+        p.oy = cy - 10 + Math.sin(p.phase) * (50 + Math.random()*40);
+        p.vx += (p.ox - p.x) * 0.08;
+        p.vy += (p.oy - p.y) * 0.08;
+      }
+      p.vx *= 0.92;
+      p.vy *= 0.92;
+      p.x += p.vx;
+      p.y += p.vy;
+    }
+
+    // Orbiters
+    if (exploded) {
+      for (let j = 0; j < 30; j++) {
+        const angle = time * 0.02 + (j / 30) * Math.PI * 2;
+        const r = 160 + Math.sin(time + j) * 30;
+        orbiters[j] = orbiters[j] || { x: cx, y: cy, size: 2 + Math.random()*2, color: '#e8b07a' };
+        const o = orbiters[j];
+        o.x = cx + Math.cos(angle) * r;
+        o.y = cy + Math.sin(angle) * r;
+        o.life = 1;
+        const glow = ctx.createRadialGradient(o.x, o.y, 0, o.x, o.y, 12);
+        glow.addColorStop(0, o.color);
+        glow.addColorStop(0.4, o.color + '40');
+        glow.addColorStop(1, 'transparent');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(o.x, o.y, 6, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = o.color;
+        ctx.beginPath();
+        ctx.arc(o.x, o.y, 2, 0, Math.PI*2);
+        ctx.fill();
+      }
+    }
+
+    // Draw particles
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      const alpha = Math.min(1, Math.abs(p.x - cx) < 300 ? 0.9 : 0.25);
+      const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 8);
+      glow.addColorStop(0, p.color + 'FF');
+      glow.addColorStop(0.5, p.color + '40');
+      glow.addColorStop(1, 'transparent');
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * 6, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    requestAnimationFrame(tick);
+  }
+  tick();
+</script>
+</body>
+</html>
