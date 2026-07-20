@@ -199,8 +199,52 @@ def _extract_html_from_stdout(stdout):
     return None
 
 
-def run_pi(model_id, slug, work_dir):
+def write_pi_model_config(model, work_dir):
+    """Give Pi current OpenRouter metadata instead of its stale fallback model."""
+    supported = set(model.get("supported_parameters", []))
+    architecture = model.get("architecture", {})
+    pricing = model.get("pricing", {})
+    top_provider = model.get("top_provider") or {}
+    context_window = model.get("context_length") or 128_000
+    max_tokens = top_provider.get("max_completion_tokens") or 16_384
+
+    input_modalities = [
+        modality
+        for modality in architecture.get("input_modalities", ["text"])
+        if modality in {"text", "image"}
+    ]
+
+    definition = {
+        "id": model["id"],
+        "name": model.get("name") or model["id"],
+        "reasoning": bool({"reasoning", "include_reasoning"} & supported),
+        "input": input_modalities or ["text"],
+        "cost": {
+            "input": float(pricing.get("prompt") or "0") * 1_000_000,
+            "output": float(pricing.get("completion") or "0") * 1_000_000,
+            "cacheRead": float(pricing.get("input_cache_read") or "0") * 1_000_000,
+            "cacheWrite": float(pricing.get("input_cache_write") or "0") * 1_000_000,
+        },
+        "contextWindow": context_window,
+        "maxTokens": max_tokens,
+        "compat": {
+            "maxTokensField": (
+                "max_tokens" if "max_tokens" in supported else "max_completion_tokens"
+            ),
+            "supportsStore": False,
+            "supportsStrictMode": "structured_outputs" in supported,
+        },
+    }
+    config = {"providers": {"openrouter": {"models": [definition]}}}
+    config_path = work_dir / "models.json"
+    config_path.write_text(json.dumps(config, indent=2) + "\n")
+    return config_path.parent
+
+
+def run_pi(model, slug, work_dir):
+    model_id = model["id"]
     prompt = PROMPT_FILE.read_text().strip()
+    pi_config_dir = write_pi_model_config(model, work_dir)
 
     cmd = [
         "pi",
@@ -217,6 +261,7 @@ def run_pi(model_id, slug, work_dir):
         result = subprocess.run(
             cmd, cwd=work_dir, timeout=PI_TIMEOUT,
             capture_output=True, text=True,
+            env={**os.environ, "PI_CODING_AGENT_DIR": str(pi_config_dir)},
         )
         logging.info(f"Pi exit code: {result.returncode}")
         if result.stdout:
@@ -483,7 +528,7 @@ def main():
         subprocess.run(["git", "checkout", "--", "."], cwd=REPO_ROOT)
 
         with tempfile.TemporaryDirectory(prefix=f"pi-{slug}-") as tmp:
-            if not run_pi(model_id, slug, Path(tmp)):
+            if not run_pi(nm["model"], slug, Path(tmp)):
                 logging.error(f"Skipping {slug} - Pi generation failed")
                 continue
 
