@@ -221,6 +221,13 @@ def run_pi(model_id, slug, work_dir):
         logging.info(f"Pi exit code: {result.returncode}")
         if result.stdout:
             logging.info(f"Pi stdout length: {len(result.stdout)} chars")
+        if result.returncode != 0:
+            stderr = result.stderr.strip()
+            if stderr:
+                logging.error("Pi stderr:\n%s", stderr[-8000:])
+            else:
+                logging.error("Pi failed without writing to stderr")
+            return False
     except subprocess.TimeoutExpired:
         logging.error(f"Pi timed out after {PI_TIMEOUT}s for {model_id}")
         return False
@@ -462,8 +469,9 @@ def main():
         logging.info("No new models found")
         return
 
+    attempted_models = new_models[:MAX_MODELS]
     processed = 0
-    for nm in new_models[:MAX_MODELS]:
+    for nm in attempted_models:
         model_id = nm["model"]["id"]
         slug = nm["slug"]
         display_name = nm["display_name"]
@@ -487,7 +495,9 @@ def main():
         subprocess.run(["git", "checkout", "main"], cwd=REPO_ROOT, check=True)
         subprocess.run(["git", "checkout", "--", "."], cwd=REPO_ROOT)
 
-    logging.info(f"Done. Processed {processed}/{len(new_models)} new models.")
+    logging.info(f"Done. Processed {processed}/{len(attempted_models)} attempted models.")
+    if processed != len(attempted_models):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
