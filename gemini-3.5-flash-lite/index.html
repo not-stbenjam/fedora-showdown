@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Red Hat Fedora — 3D Particle Dissolution</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background: radial-gradient(circle at 50% 40%, #1a0808 0%, #0d0404 60%, #050101 100%);
+            color: #e0e0e0;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .scene-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            height: 70vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            touch-action: none;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        .caption {
+            margin-top: 1.5rem;
+            text-align: center;
+            z-index: 10;
+            pointer-events: none;
+            opacity: 0.85;
+            transition: opacity 0.3s ease;
+        }
+
+        .caption h1 {
+            font-size: 1.25rem;
+            font-weight: 500;
+            letter-spacing: 0.15em;
+            color: #ffcccc;
+            text-shadow: 0 0 20px rgba(255, 0, 0, 0.4);
+            margin-bottom: 0.35rem;
+            text-transform: uppercase;
+        }
+
+        .caption p {
+            font-size: 0.85rem;
+            color: #997777;
+            letter-spacing: 0.05em;
+        }
+
+        /* Ambient background glow */
+        .ambient-glow {
+            position: absolute;
+            width: 350px;
+            height: 350px;
+            background: radial-gradient(circle, rgba(220, 0, 0, 0.12) 0%, rgba(100, 0, 0, 0.03) 50%, transparent 70%);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 0;
+            filter: blur(40px);
+            animation: pulseGlow 6s ease-in-out infinite alternate;
+        }
+
+        @keyframes pulseGlow {
+            0% { transform: scale(0.9); opacity: 0.7; }
+            100% { transform: scale(1.15); opacity: 1; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .ambient-glow {
+                animation: none;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="ambient-glow"></div>
+
+    <div class="scene-container" id="sceneContainer" aria-label="Interactive 3D Fedora Hat. Hover or tap to dissolve and reform.">
+        <canvas id="canvas"></canvas>
+        <div class="caption">
+            <h1>Red Hat</h1>
+            <p>Hover or tap to dissolve &amp; reform</p>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const container = document.getElementById('sceneContainer');
+
+        // Check reduced motion preference
+        const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        // High DPI canvas scaling
+        function resize() {
+            const rect = container.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            ctx.scale(dpr, dpr);
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+
+        // Particle & Fedora parameters
+        const particles = [];
+        const TOTAL_PARTICLES = 3500;
+        
+        // Interaction state: 'solid', 'dissolving', 'swirling', 'reforming', 'orbiting'
+        let state = 'solid';
+        let interactionTimer = 0;
+        let globalAngleY = 0;
+        let targetSpinSpeed = 0.008;
+        let currentSpinSpeed = 0.008;
+        
+        // Mouse / Touch interaction coordinates
+        let isHovered = false;
+
+        // Generate Fedora 3D Geometry Points
+        function generateFedoraPoints() {
+            particles.length = 0;
+
+            // We divide particles among: Brim (45%), Crown (40%), Band (15%)
+            const brimCount = Math.floor(TOTAL_PARTICLES * 0.45);
+            const crownCount = Math.floor(TOTAL_PARTICLES * 0.40);
+            const bandCount = TOTAL_PARTICLES - brimCount - crownCount;
+
+            // 1. Brim Points
+            for (let i = 0; i < brimCount; i++) {
+                // Distribute evenly in polar coordinates with more density near edge
+                const u = Math.random();
+                const r = 35 + u * 85; // radius from 35 to 120
+                const theta = Math.random() * Math.PI * 2;
+
+                const x = Math.cos(theta) * r;
+                const z = Math.sin(theta) * r;
+                
+                // Fedora brim shape: wavy up at sides (cos(2theta)), down at front/back
+                const wave = Math.cos(2 * theta) * 12 * (r / 120);
+                const dip = -Math.cos(theta) * 6 * (r / 120);
+                const y = 25 + wave + dip;
+
+                // Color variation (darker crimson to bright red)
+                const isRibbonSide = Math.abs(theta - Math.PI/2) < 0.4;
+                const colorType = isRibbonSide && Math.random() < 0.3 ? 'ribbon' : 'brim';
+
+                addParticle(x, y, z, colorType, r / 120);
+            }
+
+            // 2. Crown Points (truncated cone with pinched top / crease)
+            for (let i = 0; i < crownCount; i++) {
+                const hNorm = Math.random(); // 0 (base) to 1 (top)
+                const y = 25 - hNorm * 75; // height ranges from y = 25 up to y = -50
+                
+                // Radius tapers as it goes up
+                const baseRadius = 42;
+                const topRadius = 34;
+                let r = baseRadius - (baseRadius - topRadius) * Math.pow(hNorm, 0.8);
+
+                let theta = Math.random() * Math.PI * 2;
+
+                // Pinch the top into a fedora crease (dent along front-back axis, e.g. theta near 0 and PI)
+                if (hNorm > 0.6) {
+                    const pinchFactor = (hNorm - 0.6) / 0.4;
+                    const frontBackAlignment = Math.abs(Math.sin(theta)); // 0 at front/back, 1 at sides
+                    r *= (0.75 + 0.25 * frontBackAlignment);
+                    // Add center crease indentation
+                    if (Math.abs(theta) < 0.5 || Math.abs(theta - Math.PI) < 0.5) {
+                        // slightly push inwards or modify y
+                    }
+                }
+
+                const x = Math.cos(theta) * r;
+                const z = Math.sin(theta) * r;
+
+                addParticle(x, y, z, 'crown', hNorm);
+            }
+
+            // 3. Hat Band Points (ring right above brim base)
+            for (let i = 0; i < bandCount; i++) {
+                const hNorm = Math.random();
+                const y = 20 - hNorm * 8; // thin strip around y = 12 to 20
+                const theta = Math.random() * Math.PI * 2;
+                const r = 43 - hNorm * 0.5;
+
+                const x = Math.cos(theta) * r;
+                const z = Math.sin(theta) * r;
+
+                addParticle(x, y, z, 'band', theta);
+            }
+        }
+
+        function addParticle(x, y, z, type, meta) {
+            particles.push({
+                ox: x, oy: y, oz: z, // Original home position
+                x: x, y: y, z: z,    // Current position
+                vx: 0, vy: 0, vz: 0, // Velocity
+                type: type,          // 'brim', 'crown', 'band', 'ribbon'
+                meta: meta,
+                size: Math.random() * 1.5 + 1.2,
+                baseAlpha: Math.random() * 0.3 + 0.7,
+                
+                // Orbit properties for post-reform particles
+                isOrchestrator: Math.random() < 0.08, // 8% keep orbiting
+                orbitAngle: Math.random() * Math.PI * 2,
+                orbitRadius: Math.sqrt(x*x + z*z) * (0.8 + Math.random() * 0.5),
+                orbitSpeed: (Math.random() - 0.5) * 0.03,
+                orbitY: y + (Math.random() - 0.5) * 20
+            });
+        }
+
+        generateFedoraPoints();
+
+        // Trigger Dissolution
+        function triggerDissolve() {
+            if (prefersReducedMotion) return;
+            if (state === 'solid' || state === 'orbiting') {
+                state = 'dissolving';
+                interactionTimer = 0;
+                targetSpinSpeed = 0.002;
+
+                particles.forEach(p => {
+                    // Explode outward with upward/outward embers velocity
+                    const angle = Math.atan2(p.oz, p.ox) + (Math.random() - 0.5) * 0.5;
+                    const speed = 2 + Math.random() * 6;
+                    p.vx = Math.cos(angle) * speed + (Math.random() - 0.5) * 2;
+                    p.vy = -1.5 - Math.random() * 4; // drift upward
+                    p.vz = Math.sin(angle) * speed + (Math.random() - 0.5) * 2;
+                });
+            }
+        }
+
+        // Event Listeners for Hover / Touch / Click
+        container.addEventListener('mouseenter', () => {
+            isHovered = true;
+            triggerDissolve();
+        });
+
+        container.addEventListener('mouseleave', () => {
+            isHovered = false;
+        });
+
+        container.addEventListener('pointerdown', (e) => {
+            triggerDissolve();
+        });
+
+        // Animation Loop
+        let lastTime = performance.now();
+
+        function animate(currentTime) {
+            const dt = (currentTime - lastTime) / 1000;
+            lastTime = currentTime;
+
+            // Clear canvas
+            const rect = container.getBoundingClientRect();
+            ctx.clearRect(0, 0, rect.width, rect.height);
+
+            const cx = rect.width / 2;
+            const cy = rect.height / 2 + 20;
+
+            // Smooth spin speed interpolation
+            currentSpinSpeed += (targetSpinSpeed - currentSpinSpeed) * 0.05;
+            if (!prefersReducedMotion) {
+                globalAngleY += currentSpinSpeed;
+            }
+
+            // State machine updates
+            interactionTimer += dt;
+
+            if (state === 'dissolving') {
+                if (interactionTimer > 1.2) {
+                    state = 'swirling';
+                    interactionTimer = 0;
+                }
+            } else if (state === 'swirling') {
+                if (interactionTimer > 2.0) {
+                    state = 'reforming';
+                    interactionTimer = 0;
+                }
+            } else if (state === 'reforming') {
+                if (interactionTimer > 1.8) {
+                    state = isHovered ? 'dissolving' : 'orbiting'; // if still hovered, redissolve, else orbit/solid
+                    if (state === 'orbiting') targetSpinSpeed = 0.008;
+                    interactionTimer = 0;
+                }
+            } else if (state === 'orbiting') {
+                if (!isHovered && interactionTimer > 3.0 && Math.random() < 0.01) {
+                    // back to pure solid after a while if no hover
+                    state = 'solid';
+                }
+            }
+
+            // Rotate and project particles
+            const cosY = Math.cos(globalAngleY);
+            const sinY = Math.sin(globalAngleY);
+
+            // Slight tilt angles for aesthetic 3D hero view
+            const tiltX = 0.35; // pitch down to see top of brim and crown
+            const cosX = Math.cos(tiltX);
+            const sinX = Math.sin(tiltX);
+
+            particles.forEach(p => {
+                // Physics update based on state
+                if (state === 'dissolving') {
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.z += p.vz;
+                    // drag
+                    p.vx *= 0.96;
+                    p.vy *= 0.96;
+                    p.vz *= 0.96;
+                } else if (state === 'swirling') {
+                    // swirl around central axis
+                    p.orbitAngle = (p.orbitAngle || Math.atan2(p.z, p.x)) + 0.04;
+                    const curRadius = Math.sqrt(p.x*p.x + p.z*p.z);
+                    const targetR = 60 + Math.sin(p.y * 0.1) * 20;
+                    const r = curRadius + (targetR - curRadius) * 0.1;
+                    p.x = Math.cos(p.orbitAngle) * r;
+                    p.z = Math.sin(p.orbitAngle) * r;
+                    p.y += (Math.sin(currentTime * 0.003 + p.ox) * 1.5);
+                    p.vx = 0; p.vy = 0; p.vz = 0;
+                } else if (state === 'reforming' || state === 'solid') {
+                    // Interpolate smoothly back to home position (ox, oy, oz) rotated
+                    // Calculate target rotated position
+                    const rx = p.ox * cosY + p.oz * sinY;
+                    const rz = -p.ox * sinY + p.oz * cosY;
+                    const ry = p.oy;
+
+                    // Apply tilt projection space coordinates
+                    const finalTargetX = rx;
+                    const finalTargetY = ry * cosX - rz * sinX;
+                    const finalTargetZ = ry * sinX + rz * cosX;
+
+                    // Spring lerp back to home
+                    const ease = state === 'reforming' ? 0.08 : 0.2;
+                    p.x += (rx - p.x) * ease;
+                    p.y += (p.oy - p.y) * ease;
+                    p.z += (p.oz - p.z) * ease;
+                } else if (state === 'orbiting') {
+                    if (p.isOrchestrator) {
+                        // Keep a few particles orbiting gracefully around the hat
+                        p.orbitAngle += p.orbitSpeed;
+                        const rx = Math.cos(p.orbitAngle) * p.orbitRadius;
+                        const rz = Math.sin(p.orbitAngle) * p.orbitRadius;
+                        const ry = p.orbitY;
+                        
+                        p.x += (rx - p.x) * 0.05;
+                        p.y += (ry - p.y) * 0.05;
+                        p.z += (rz - p.z) * 0.05;
+                    } else {
+                        // Rest back in solid hat
+                        const rx = p.ox * cosY + p.oz * sinY;
+                        const rz = -p.ox * sinY + p.oz * cosY;
+                        p.x += (rx - p.x) * 0.15;
+                        p.y += (p.oy - p.y) * 0.15;
+                        p.z += (p.oz - p.z) * 0.15;
+                    }
+                }
+            });
+
+            // Calculate 3D transformation for rendering all particles
+            const renderList = particles.map(p => {
+                let rx, ry, rz;
+                
+                if ((state === 'dissolving' || state === 'swirling') || (state === 'orbiting' && p.isOrchestrator && Math.abs(p.x - (p.ox*cosY + p.oz*sinY)) > 5)) {
+                    // Use world coords (p.x, p.y, p.z) and rotate them for camera view
+                    rx = p.x * cosY + p.z * sinY;
+                    rz = -p.x * sinY + p.z * cosY;
+                    ry = p.y;
+                } else {
+                    // Standard rotation around Y axis
+                    rx = p.ox * cosY + p.oz * sinY;
+                    rz = -p.ox * sinY + p.oz * cosY;
+                    ry = p.oy;
+                    
+                    // If transitioning/reforming, lerp current position towards rotated home
+                    if (state === 'reforming' || state === 'solid' || (state === 'orbiting' && !p.isOrchestrator)) {
+                        p.x += (rx - p.x) * 0.15;
+                        p.y += (ry - p.y) * 0.15;
+                        p.z += (rz - p.z) * 0.15;
+                        rx = p.x;
+                        ry = p.y;
+                        rz = p.z;
+                    }
+                }
+
+                // Apply 3D tilt (X axis rotation)
+                const finalY = ry * cosX - rz * sinX;
+                const finalZ = ry * sinX + rz * cosX;
+
+                // Perspective projection
+                const perspective = 500;
+                const scale = perspective / (perspective + finalZ + 200);
+                const screenX = cx + rx * scale;
+                const screenY = cy + finalY * scale;
+
+                return {
+                    screenX,
+                    screenY,
+                    depth: finalZ,
+                    scale,
+                    type: p.type,
+                    size: p.size,
+                    baseAlpha: p.baseAlpha,
+                    isOrchestrator: p.isOrchestrator,
+                    state: state
+                };
+            });
+
+            // Sort by depth (painter's algorithm) for proper 3D occlusion
+            renderList.sort((a, b) => a.depth - b.depth);
+
+            // Render particles
+            renderList.forEach(item => {
+                const alpha = Math.max(0.1, Math.min(1, (item.depth + 150) / 300)) * item.baseAlpha;
+                
+                ctx.beginPath();
+                const radius = Math.max(0.5, item.size * item.scale);
+                ctx.arc(item.screenX, item.screenY, radius, 0, Math.PI * 2);
+
+                if (item.type === 'ribbon') {
+                    // Elegant dark ribbon with subtle crimson glow
+                    ctx.fillStyle = `rgba(180, 20, 20, ${alpha})`;
+                } else if (state === 'dissolving' || state === 'swirling') {
+                    // Glowing embers during dissolution (warm red, orange, yellow-white core)
+                    ctx.fillStyle = `rgba(255, ${Math.floor(100 + Math.random()*100)}, 50, ${alpha * 1.2})`;
+                    ctx.shadowColor = '#ff3300';
+                    ctx.shadowBlur = 6;
+                } else if (item.isOrchestrator && state === 'orbiting') {
+                    // Orbiting glowing trail particles
+                    ctx.fillStyle = `rgba(255, 120, 80, ${alpha})`;
+                    ctx.shadowColor = '#ff5522';
+                    ctx.shadowBlur = 8;
+                } else {
+                    // Red Hat crimson signature color with lighting shading based on depth/position
+                    const redVal = Math.floor(180 + item.depth * 0.3);
+                    ctx.fillStyle = `rgba(${Math.min(255, Math.max(120, redVal))}, 10, 10, ${alpha})`;
+                    ctx.shadowBlur = 0;
+                }
+
+                ctx.fill();
+                ctx.shadowBlur = 0; // reset shadow
+            });
+
+            requestAnimationFrame(animate);
+        }
+
+        requestAnimationFrame(animate);
+    </script>
+</body>
+</html>
