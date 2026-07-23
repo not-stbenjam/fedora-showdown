@@ -241,6 +241,19 @@ def write_pi_model_config(model, work_dir):
     return config_path.parent
 
 
+def _save_workdir_artifact(slug, work_dir):
+    """Copy the Pi working directory to artifacts/ for debugging."""
+    artifact_dest = ARTIFACTS_DIR / slug
+    artifact_dest.mkdir(parents=True, exist_ok=True)
+    for f in work_dir.rglob("*"):
+        if f.is_file():
+            rel = f.relative_to(work_dir)
+            target = artifact_dest / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(f, target)
+    logging.info(f"Saved Pi working directory to artifacts/{slug}/")
+
+
 def run_pi(model, slug, work_dir):
     model_id = model["id"]
     prompt = PROMPT_FILE.read_text().strip()
@@ -272,12 +285,21 @@ def run_pi(model, slug, work_dir):
                 logging.error("Pi stderr:\n%s", stderr[-8000:])
             else:
                 logging.error("Pi failed without writing to stderr")
+            _save_workdir_artifact(slug, work_dir)
             return False
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as e:
         logging.error(f"Pi timed out after {PI_TIMEOUT}s for {model_id}")
+        if e.stdout:
+            stdout_path = work_dir / "pi-stdout.log"
+            stdout_path.write_bytes(e.stdout if isinstance(e.stdout, bytes) else e.stdout.encode())
+        if e.stderr:
+            stderr_path = work_dir / "pi-stderr.log"
+            stderr_path.write_bytes(e.stderr if isinstance(e.stderr, bytes) else e.stderr.encode())
+        _save_workdir_artifact(slug, work_dir)
         return False
     except Exception as e:
         logging.error(f"Pi failed for {model_id}: {e}")
+        _save_workdir_artifact(slug, work_dir)
         return False
 
     output_file = work_dir / "index.html"
@@ -294,30 +316,26 @@ def run_pi(model, slug, work_dir):
                 logging.info(f"Recovered HTML from stdout ({len(html)} chars)")
             else:
                 logging.error(f"No HTML file produced for {model_id}")
+                _save_workdir_artifact(slug, work_dir)
                 return False
         else:
             logging.error(f"No HTML file produced for {model_id}")
+            _save_workdir_artifact(slug, work_dir)
             return False
 
     size = output_file.stat().st_size
     if size < MIN_HTML_SIZE:
         logging.error(f"index.html too small ({size} bytes) for {model_id}")
+        _save_workdir_artifact(slug, work_dir)
         return False
 
     content = output_file.read_text(errors="replace")
     if not re.search(r"<!DOCTYPE|<html", content, re.IGNORECASE):
         logging.error(f"index.html doesn't look like valid HTML for {model_id}")
+        _save_workdir_artifact(slug, work_dir)
         return False
 
-    artifact_dest = ARTIFACTS_DIR / slug
-    artifact_dest.mkdir(parents=True, exist_ok=True)
-    for f in work_dir.rglob("*"):
-        if f.is_file():
-            rel = f.relative_to(work_dir)
-            target = artifact_dest / rel
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(f, target)
-    logging.info(f"Saved Pi working directory to artifacts/{slug}/")
+    _save_workdir_artifact(slug, work_dir)
 
     dest = REPO_ROOT / slug
     dest.mkdir(exist_ok=True)
