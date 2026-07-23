@@ -270,35 +270,39 @@ def run_pi(model, slug, work_dir):
 
     logging.info(f"Running Pi with model {model_id} in {work_dir}")
 
+    stdout_path = work_dir / "pi-stdout.log"
+    stderr_path = work_dir / "pi-stderr.log"
+
     try:
-        result = subprocess.run(
-            cmd, cwd=work_dir, timeout=PI_TIMEOUT,
-            capture_output=True, text=True,
-            env={**os.environ, "PI_CODING_AGENT_DIR": str(pi_config_dir)},
-        )
-        logging.info(f"Pi exit code: {result.returncode}")
-        if result.stdout:
-            logging.info(f"Pi stdout length: {len(result.stdout)} chars")
-        if result.returncode != 0:
-            stderr = result.stderr.strip()
-            if stderr:
-                logging.error("Pi stderr:\n%s", stderr[-8000:])
-            else:
-                logging.error("Pi failed without writing to stderr")
-            _save_workdir_artifact(slug, work_dir)
-            return False
-    except subprocess.TimeoutExpired as e:
+        with open(stdout_path, "w") as out_f, open(stderr_path, "w") as err_f:
+            proc = subprocess.Popen(
+                cmd, cwd=work_dir,
+                stdout=out_f, stderr=err_f, text=True,
+                env={**os.environ, "PI_CODING_AGENT_DIR": str(pi_config_dir)},
+            )
+            returncode = proc.wait(timeout=PI_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
         logging.error(f"Pi timed out after {PI_TIMEOUT}s for {model_id}")
-        if e.stdout:
-            stdout_path = work_dir / "pi-stdout.log"
-            stdout_path.write_bytes(e.stdout if isinstance(e.stdout, bytes) else e.stdout.encode())
-        if e.stderr:
-            stderr_path = work_dir / "pi-stderr.log"
-            stderr_path.write_bytes(e.stderr if isinstance(e.stderr, bytes) else e.stderr.encode())
         _save_workdir_artifact(slug, work_dir)
         return False
     except Exception as e:
         logging.error(f"Pi failed for {model_id}: {e}")
+        _save_workdir_artifact(slug, work_dir)
+        return False
+
+    stdout = stdout_path.read_text(errors="replace")
+    stderr = stderr_path.read_text(errors="replace")
+
+    logging.info(f"Pi exit code: {returncode}")
+    if stdout:
+        logging.info(f"Pi stdout length: {len(stdout)} chars")
+    if returncode != 0:
+        if stderr.strip():
+            logging.error("Pi stderr:\n%s", stderr.strip()[-8000:])
+        else:
+            logging.error("Pi failed without writing to stderr")
         _save_workdir_artifact(slug, work_dir)
         return False
 
@@ -308,8 +312,8 @@ def run_pi(model, slug, work_dir):
         if candidates:
             output_file = candidates[0]
             logging.info(f"Found {output_file.name} instead of index.html")
-        elif result.stdout:
-            html = _extract_html_from_stdout(result.stdout)
+        elif stdout:
+            html = _extract_html_from_stdout(stdout)
             if html:
                 output_file = work_dir / "index.html"
                 output_file.write_text(html)
