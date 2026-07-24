@@ -1,0 +1,1699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Fedora — ember study</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  html,body{margin:0;padding:0;height:100%}
+  html{background:#07050c}
+  body{
+    background:#07050c;
+    color:#f3e6ea;
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    overflow:hidden;
+    overscroll-behavior:none;
+    -webkit-text-size-adjust:100%;
+    -webkit-tap-highlight-color:transparent;
+  }
+  /* One canvas behind EVERYTHING, viewport-sized, so the vignette is continuous
+     all the way to the bottom edge and the caption sits inside the same wash. */
+  #cv{
+    position:fixed;inset:0;
+    width:100%;height:100%;
+    display:block;
+    z-index:0;
+  }
+  .wrap{
+    position:fixed;inset:0;
+    z-index:1;
+    display:flex;flex-direction:column;
+    align-items:stretch;
+    overflow:hidden;
+    pointer-events:none;
+  }
+  .stage{
+    position:relative;
+    flex:1 1 auto;
+    min-height:0;
+    outline:none;
+    cursor:pointer;
+    pointer-events:auto;
+    touch-action:manipulation;
+  }
+  /* focus ring: a soft inner glow rather than a hard rectangle */
+  .stage::after{
+    content:"";
+    position:absolute;inset:10px;
+    border-radius:18px;
+    border:1px solid rgba(255,138,102,0);
+    box-shadow:0 0 0 0 rgba(255,110,70,0);
+    transition:border-color .22s ease, box-shadow .22s ease;
+    pointer-events:none;
+  }
+  .stage:focus-visible::after{
+    border-color:rgba(255,150,110,.55);
+    box-shadow:0 0 34px 0 rgba(255,90,60,.13), inset 0 0 34px 0 rgba(255,90,60,.07);
+  }
+
+  .caption{
+    flex:0 0 auto;
+    text-align:center;
+    padding:0 clamp(16px,5vw,40px) clamp(22px,4.4vh,46px);
+    user-select:none;
+  }
+  .rule{
+    width:clamp(34px,6vw,64px);
+    height:1px;margin:0 auto clamp(14px,2.2vh,21px);
+    background:linear-gradient(90deg,rgba(255,124,84,0),rgba(255,124,84,.5),rgba(255,124,84,0));
+  }
+  .caption .kicker{
+    margin:0 0 clamp(9px,1.5vh,14px);
+    font-size:clamp(9.5px,.82vw,11px);
+    font-weight:600;
+    letter-spacing:.4em;
+    text-indent:.4em;
+    text-transform:uppercase;
+    color:rgba(238,180,160,.74);
+  }
+  .caption h1{
+    margin:0;
+    font-size:clamp(20px,2.5vw,31px);
+    font-weight:450;
+    letter-spacing:-.004em;
+    line-height:1.16;
+    color:#f4e9e7;
+  }
+  .caption h1 em{
+    font-style:normal;
+    font-weight:450;
+    color:#ff8f6a;
+  }
+  .caption .hint{
+    margin:clamp(9px,1.5vh,14px) 0 0;
+    font-size:clamp(11.5px,1vw,13px);
+    font-weight:400;
+    letter-spacing:.07em;
+    color:rgba(228,201,201,.64);
+  }
+  .caption .hint b{font-weight:600;color:rgba(255,176,146,.9)}
+  @media (max-height:520px){
+    .caption{padding-bottom:15px}
+    .rule{margin-bottom:10px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    .stage::after{transition:none}
+  }
+</style>
+</head>
+<body>
+<canvas id="cv" aria-hidden="true"></canvas>
+<div class="wrap">
+  <div class="stage" id="stage" tabindex="0" role="button"
+       aria-label="Spinning red fedora. Activate to scatter it into embers and reform it."></div>
+  <footer class="caption">
+    <div class="rule"></div>
+    <p class="kicker">Canvas&nbsp;2D &middot; Real&#8209;time</p>
+    <h1>A hat made of <em>embers</em></h1>
+    <p class="hint" id="hint">Hover, tap or press <b>Enter</b> to scatter it</p>
+  </footer>
+</div>
+
+<script>
+(function () {
+'use strict';
+
+/* ==========================================================================
+   0.  small maths helpers
+   ========================================================================== */
+const TAU = Math.PI * 2;
+const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
+const mix = (a, b, t) => a + (b - a) * t;
+function smoothstep(e0, e1, x) { const t = clamp((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); }
+function smoother(t) { t = clamp(t, 0, 1); return t * t * t * (t * (t * 6 - 15) + 10); }
+/* small deterministic PRNG so the hat is identical every run */
+function mulberry(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* ==========================================================================
+   1.  FEDORA — pure scalar-field geometry
+   --------------------------------------------------------------------------
+   +Y up, +Z front, +X right.   theta measured from +Z toward +X:
+     x = r sin(theta),  z = r cos(theta)
+   Units: brim half-width along X == 1.0
+   ========================================================================== */
+const P = {
+  /* plan-view ellipses --------------------------------------------------- */
+  BRIM_RX: 1.000, BRIM_RZ: 1.195,        // decisive front-back oval (1.195)
+  CROWN_RX: 0.598, CROWN_RZ: 0.712,
+
+  /* crown ---------------------------------------------------------------- */
+  CROWN_H: 0.645,                        // crownH/brimR ~ 0.69 at the ridge line
+  TOP_T: 0.775,                          // top ring / base ring  (spec .72-.82)
+  SHOULDER: 0.190,
+  DOME_H: 0.046,
+  RAKE: 0.030,                           // front ridge sits above rear ridge
+
+  /* the dent ------------------------------------------------------------- */
+  CREASE_D: 0.182,                       // peak depth
+  CREASE_QC: 0.16, CREASE_QW: 0.86,      // where along the length it peaks
+  CREASE_A: 0.452, CREASE_B: 0.548,      // -> .66 of peak at the front rim,
+                                         //    .54 of peak at the rear rim
+  FLOOR_W: 0.152,                        // flat channel floor half-width (p)
+  CREASE_W: 0.520,                       // outer edge of the crease walls
+  CREASE_VMASK: 0.28,                    // crease carries this far down the wall
+  GROOVE: 0.058,                         // radial groove on the wall
+
+  /* ridges flanking the crease ------------------------------------------- */
+  RIDGE_H: 0.048, RIDGE_P: 0.655, RIDGE_W: 0.275,
+
+  /* finger pinches -------------------------------------------------------- */
+  PINCH_R: 0.118, PINCH_A: 0.600, PINCH_AW: 0.400,
+  PINCH_D: 0.049, PINCH_PX: 0.575, PINCH_PZ: 0.680,
+  PINCH_SX: 0.380, PINCH_SZ: 0.360,
+
+  /* hat band -------------------------------------------------------------- */
+  BAND_LO: 0.078, BAND_HI: 0.222,        // 14.4% of crown height, floated
+  BAND_BULGE: 0.026, BAND_LIP: 0.015,
+
+  /* brim ------------------------------------------------------------------ */
+  BRIM_T0: 0.070, BRIM_T1: 0.052, BRIM_REAR_T: 0.44,
+  BRIM_DROOP: 0.056,
+  SNAP_FRONT: 0.442, SNAP_BACK: 0.262,
+  SIDE_DROOP: 0.094,
+  CURL_START: 0.600, CURL_H: 0.158, LIP_H: 0.036,
+
+  Y_CENTRE: -0.200,
+};
+
+function ellipseR(theta, ax, az) {
+  const s = Math.sin(theta), c = Math.cos(theta);
+  return (ax * az) / Math.sqrt(az * az * s * s + ax * ax * c * c);
+}
+function angGauss(theta, c, w) {
+  let d = theta - c;
+  while (d > Math.PI) d -= TAU;
+  while (d < -Math.PI) d += TAU;
+  return Math.exp(-(d * d) / (w * w));
+}
+
+/* --- FIELD 1 : crown wall profile ---------------------------------------- */
+const _KNEE = 1 - P.SHOULDER;
+const _ROLL = P.SHOULDER * 0.56;
+const _RKNEE = P.TOP_T + _ROLL;
+function wallProfile(v, out) {
+  if (v <= _KNEE) {
+    const t = v / _KNEE;
+    /* back-loaded: almost no taper low down, most of it in the upper third */
+    const prog = smoothstep(0.30, 1.0, t);
+    out[0] = 1 - (1 - _RKNEE) * prog;
+    out[1] = v;
+  } else {
+    const a = ((v - _KNEE) / P.SHOULDER) * Math.PI * 0.5;
+    out[0] = _RKNEE - _ROLL * (1 - Math.cos(a));
+    out[1] = _KNEE + P.SHOULDER * Math.sin(a);
+  }
+  return out;
+}
+const _wp = [0, 0];
+function wallRF(v) { wallProfile(v, _wp); return _wp[0]; }
+
+/* --- FIELD 2 : radial pinch (makes the plan view a teardrop) -------------- */
+function pinchAng(theta) {
+  return angGauss(theta, P.PINCH_A, P.PINCH_AW) + angGauss(theta, -P.PINCH_A, P.PINCH_AW);
+}
+function pinchFactor(theta, v) {
+  return 1 - P.PINCH_R * pinchAng(theta) * smoothstep(0.26, 1.0, v);
+}
+
+/* --- FIELD 3 : crown top height field (the dent) -------------------------- */
+function creaseDepth(q) {
+  const e = (q - P.CREASE_QC) / P.CREASE_QW;
+  return P.CREASE_D * (P.CREASE_A + P.CREASE_B * Math.exp(-e * e));
+}
+/* flat-floored channel with near-parallel walls */
+function creaseCross(ap) {
+  if (ap >= P.CREASE_W) return 0;
+  if (ap <= P.FLOOR_W) return 1;
+  return 1 - smoother((ap - P.FLOOR_W) / (P.CREASE_W - P.FLOOR_W));
+}
+function ridgeShape(ap) {
+  const d = Math.abs(ap - P.RIDGE_P) / P.RIDGE_W;
+  /* super-gaussian -> a small flat on the crest, "blocked felt" */
+  return Math.exp(-Math.pow(d, 3.1));
+}
+function dimple(p, q) {
+  const dz = (q - P.PINCH_PZ) / P.PINCH_SZ;
+  const a = (p - P.PINCH_PX) / P.PINCH_SX;
+  const b = (p + P.PINCH_PX) / P.PINCH_SX;
+  return P.PINCH_D * (Math.exp(-(a * a + dz * dz)) + Math.exp(-(b * b + dz * dz)));
+}
+function capY(p, q) {
+  const s2 = Math.min(1, p * p + q * q);
+  let y = P.CROWN_H;
+  y += P.DOME_H * (1 - s2);
+  y += P.RAKE * q;                                  // rear rides lower
+  const ap = Math.abs(p);
+  y += P.RIDGE_H * ridgeShape(ap);
+  y -= creaseDepth(q) * creaseCross(ap);
+  y -= dimple(p, q);
+  return y;
+}
+function capRimY(theta) { return capY(Math.sin(theta), Math.cos(theta)); }
+
+function creaseOcclusion(p, q) {
+  const ap = Math.abs(p);
+  let a = creaseCross(ap);
+  a = a * a;
+  const dz = (q - P.PINCH_PZ) / P.PINCH_SZ;
+  const x1 = (p - P.PINCH_PX) / P.PINCH_SX, x2 = (p + P.PINCH_PX) / P.PINCH_SX;
+  a = Math.max(a, 0.9 * Math.max(Math.exp(-(x1 * x1 + dz * dz)), Math.exp(-(x2 * x2 + dz * dz))));
+  return Math.min(1, a);
+}
+
+/* --- band profile (a real wrapped ribbon, with lips) --------------------- */
+function bandFactor(v) {
+  const lo = P.BAND_LO, hi = P.BAND_HI, e = 0.016;
+  if (v < lo - e || v > hi + e) return 1;
+  const inside = smoothstep(lo - e, lo + e * 0.35, v) * (1 - smoothstep(hi - e * 0.35, hi + e, v));
+  let f = 1 + P.BAND_BULGE * inside;
+  const lw = 0.026;
+  const lt = Math.exp(-Math.pow((v - (hi - 0.014)) / lw, 2));
+  const lb = Math.exp(-Math.pow((v - (lo + 0.014)) / lw, 2));
+  f += P.BAND_LIP * inside * Math.max(lt, lb);
+  return f;
+}
+
+/* --- crown samplers ------------------------------------------------------ */
+function crownWallPoint(theta, v, out) {
+  wallProfile(v, _wp);
+  const st = Math.sin(theta), ct = Math.cos(theta);
+  let rf = _wp[0] * pinchFactor(theta, v) * bandFactor(v);
+  /* a radial groove continuing the crease down the front & back of the wall */
+  rf *= 1 - P.GROOVE * creaseCross(Math.abs(st)) * smoothstep(0.42, 1.0, v);
+  const r = ellipseR(theta, P.CROWN_RX, P.CROWN_RZ) * rf;
+  const carry = Math.pow(smoothstep(P.CREASE_VMASK, 1.0, v), 1.40);
+  const y = P.CROWN_H * _wp[1] + (capRimY(theta) - P.CROWN_H) * carry;
+  out[0] = r * st; out[1] = y; out[2] = r * ct;
+  return out;
+}
+/* square -> disc (elliptical grid mapping): no polar fan, even quads */
+function capPoint(a, b, out) {
+  const p = a * Math.sqrt(1 - b * b * 0.5);
+  const q = b * Math.sqrt(1 - a * a * 0.5);
+  const s = Math.sqrt(p * p + q * q);
+  const theta = Math.atan2(p, q);
+  const k = P.TOP_T * pinchFactor(theta, 1);
+  const r = ellipseR(theta, P.CROWN_RX, P.CROWN_RZ) * k * s;
+  out[0] = r * Math.sin(theta); out[1] = capY(p, q); out[2] = r * Math.cos(theta);
+  return out;
+}
+
+/* --- FIELD 4 : brim height field ----------------------------------------- */
+function brimY(theta, u) {
+  const uc = clamp(u, 0, 1);
+  const d = Math.cos(theta);
+  const w = 0.5 + 0.5 * d;
+  let y = -P.BRIM_DROOP * Math.pow(uc, 1.6);
+  const uS = Math.pow(uc, 1.75);
+  y += -P.SNAP_FRONT * Math.pow(w, 1.30) * uS;
+  y += P.SNAP_BACK * Math.pow(1 - w, 1.30) * uS;
+  y += -P.SIDE_DROOP * (1 - d * d) * uc * uc;
+  const c = Math.max(0, (uc - P.CURL_START) / (1 - P.CURL_START));
+  /* rear curl is broader/softer so the back never projects as a spike */
+  y += P.CURL_H * Math.pow(c, mix(1.72, 2.40, w));
+  const l = Math.max(0, (uc - 0.885) / 0.115);      // uniform lip, all the way round
+  y += P.LIP_H * (l * l * (3 - 2 * l));
+  return y;
+}
+function brimThickness(theta, u) {
+  const back = 0.5 - 0.5 * Math.cos(theta);
+  const t = mix(P.BRIM_T0, P.BRIM_T1, clamp(u, 0, 1));
+  return t * (1 + P.BRIM_REAR_T * back * smoothstep(0.25, 1.0, u));
+}
+function brimRadius(theta, u) {
+  const rc = ellipseR(theta, P.CROWN_RX, P.CROWN_RZ);
+  const rb = ellipseR(theta, P.BRIM_RX, P.BRIM_RZ);
+  return mix(rc, rb, clamp(u, 0, 1));
+}
+/* surface normal of the brim's top sheet in the (r,y) half-plane */
+const _f2 = [0, 0, 0, 0];
+function brimFrame(theta, u) {
+  const e = 0.0045;
+  const u0 = Math.max(0, u - e), u1 = Math.min(1, u + e);
+  const dr = brimRadius(theta, u1) - brimRadius(theta, u0);
+  const dy = brimY(theta, u1) - brimY(theta, u0);
+  const L = Math.hypot(dr, dy) || 1;
+  _f2[0] = dr / L; _f2[1] = dy / L;      // tangent (outward)
+  _f2[2] = -dy / L; _f2[3] = dr / L;     // normal  (upward)
+  return _f2;
+}
+function brimTopPoint(theta, u, out) {
+  const r = brimRadius(theta, u);
+  out[0] = r * Math.sin(theta); out[1] = brimY(theta, u); out[2] = r * Math.cos(theta);
+  return out;
+}
+function brimBotPoint(theta, u, out) {
+  const f = brimFrame(theta, u);
+  const T = brimThickness(theta, u);
+  const r = brimRadius(theta, u) - f[2] * T;
+  const y = brimY(theta, u) - f[3] * T;
+  out[0] = r * Math.sin(theta); out[1] = y; out[2] = r * Math.cos(theta);
+  return out;
+}
+/* rounded outer roll: phi 0 = top sheet, phi = PI = underside */
+function brimEdgePoint(theta, phi, out) {
+  const f = brimFrame(theta, 1);
+  const T = brimThickness(theta, 1);
+  const r1 = brimRadius(theta, 1), y1 = brimY(theta, 1);
+  const cr = r1 - f[2] * (T / 2), cy = y1 - f[3] * (T / 2);
+  const ca = Math.cos(phi), sa = Math.sin(phi);
+  const r = cr + f[2] * (T / 2) * ca + f[0] * (T / 2) * sa;
+  const y = cy + f[3] * (T / 2) * ca + f[1] * (T / 2) * sa;
+  out[0] = r * Math.sin(theta); out[1] = y; out[2] = r * Math.cos(theta);
+  return out;
+}
+function brimEdgeHint(theta, phi, out) {
+  const f = brimFrame(theta, 1);
+  const ca = Math.cos(phi), sa = Math.sin(phi);
+  const nr = f[2] * ca + f[0] * sa;
+  const ny = f[3] * ca + f[1] * sa;
+  out[0] = nr * Math.sin(theta); out[1] = ny; out[2] = nr * Math.cos(theta);
+  return out;
+}
+
+/* ==========================================================================
+   2.  mesh builder  — closed quad mesh + SMOOTH per-vertex normals
+   ========================================================================== */
+const REG = { crownTop: 0, crownWall: 1, band: 2, brimTop: 3, brimEdge: 4, brimBottom: 5, underCap: 6 };
+const NREG = 7;
+
+function buildMesh(q) {
+  const px = [], py = [], pz = [], nx = [], ny = [], nz = [];
+  const qi = [], qreg = [], qao = [], qex = [], qcx = [], qcy = [], qcz = [];
+  const qnx = [], qny = [], qnz = [], qdit = [];
+  let nv = 0;
+  const rr = mulberry(20260724);
+
+  const pa = [0, 0, 0], pb = [0, 0, 0], pc = [0, 0, 0], pd = [0, 0, 0], p0 = [0, 0, 0], hh = [0, 0, 0];
+
+  /* generic grid patch; normals by central differences on the (u,v) grid */
+  function patch(nu, nv2, wrapU, f, meta) {
+    const cols = nu, rows = nv2 + 1;
+    const G = new Float64Array(cols * rows * 3);
+    const uOf = i => (wrapU ? i / nu : i / (nu - 1));
+    for (let i = 0; i < cols; i++) {
+      const u = uOf(i);
+      for (let j = 0; j < rows; j++) {
+        f(u, j / nv2, p0);
+        const k = (i * rows + j) * 3;
+        G[k] = p0[0]; G[k + 1] = p0[1]; G[k + 2] = p0[2];
+      }
+    }
+    const base = nv;
+    for (let i = 0; i < cols; i++) {
+      const ip = wrapU ? (i + 1) % cols : Math.min(i + 1, cols - 1);
+      const im = wrapU ? (i - 1 + cols) % cols : Math.max(i - 1, 0);
+      const u = uOf(i);
+      for (let j = 0; j < rows; j++) {
+        const jp = Math.min(j + 1, rows - 1), jm = Math.max(j - 1, 0);
+        const ka = (ip * rows + j) * 3, kb = (im * rows + j) * 3;
+        const kc = (i * rows + jp) * 3, kd = (i * rows + jm) * 3;
+        const ax = G[ka] - G[kb], ay = G[ka + 1] - G[kb + 1], az = G[ka + 2] - G[kb + 2];
+        const bx = G[kc] - G[kd], by = G[kc + 1] - G[kd + 1], bz = G[kc + 2] - G[kd + 2];
+        let vx = ay * bz - az * by, vy = az * bx - ax * bz, vz = ax * by - ay * bx;
+        let L = Math.hypot(vx, vy, vz);
+        meta.hint(u, j / nv2, hh);
+        if (L < 1e-10) { vx = hh[0]; vy = hh[1]; vz = hh[2]; L = Math.hypot(vx, vy, vz) || 1; }
+        vx /= L; vy /= L; vz /= L;
+        if (vx * hh[0] + vy * hh[1] + vz * hh[2] < 0) { vx = -vx; vy = -vy; vz = -vz; }
+        const k = (i * rows + j) * 3;
+        px.push(G[k]); py.push(G[k + 1] + P.Y_CENTRE); pz.push(G[k + 2]);
+        nx.push(vx); ny.push(vy); nz.push(vz);
+        nv++;
+      }
+    }
+    const iMax = wrapU ? cols : cols - 1;
+    for (let i = 0; i < iMax; i++) {
+      const i2 = wrapU ? (i + 1) % cols : i + 1;
+      const u = wrapU ? (i + 0.5) / nu : (i + 0.5) / (nu - 1);
+      for (let j = 0; j < nv2; j++) {
+        const a = base + i * rows + j, b = base + i2 * rows + j;
+        const c = base + i2 * rows + j + 1, d = base + i * rows + j + 1;
+        const dAB = Math.abs(px[a] - px[b]) + Math.abs(py[a] - py[b]) + Math.abs(pz[a] - pz[b]);
+        const dBC = Math.abs(px[b] - px[c]) + Math.abs(py[b] - py[c]) + Math.abs(pz[b] - pz[c]);
+        if (dAB < 1e-9 && dBC < 1e-9) continue;
+        const v = (j + 0.5) / nv2;
+        qi.push(a, b, c, d);
+        qreg.push(meta.region(u, v));
+        qao.push(meta.ao ? meta.ao(u, v) : 1);
+        qex.push(meta.ex ? meta.ex(u, v) : 0);
+        const cx = (px[a] + px[b] + px[c] + px[d]) * 0.25;
+        const cy = (py[a] + py[b] + py[c] + py[d]) * 0.25;
+        const cz = (pz[a] + pz[b] + pz[c] + pz[d]) * 0.25;
+        qcx.push(cx); qcy.push(cy); qcz.push(cz);
+        let mx = nx[a] + nx[b] + nx[c] + nx[d];
+        let my = ny[a] + ny[b] + ny[c] + ny[d];
+        let mz = nz[a] + nz[b] + nz[c] + nz[d];
+        const ml = Math.hypot(mx, my, mz) || 1;
+        qnx.push(mx / ml); qny.push(my / ml); qnz.push(mz / ml);
+        /* a grain of per-quad noise: enough that neighbouring faces cross ramp
+           levels incoherently, so the flat-shaded lattice reads as felt rather
+           than as a woven grid / interference rings */
+        qdit.push((rr() + rr() - 1) * 0.0075);
+      }
+    }
+  }
+
+  const NT = Math.max(50, Math.round(124 * q));   // crown wall theta
+  const NW = Math.max(18, Math.round(40 * q));    // crown wall rows
+  const NC = Math.max(24, Math.round(56 * q));    // cap grid (per side)
+  const NB = Math.max(52, Math.round(126 * q));   // brim theta
+  const NBT = Math.max(12, Math.round(26 * q));   // brim top rows
+  const NBE = Math.max(10, Math.round(16 * q));   // brim roll segments
+  const NBB = Math.max(7, Math.round(14 * q));    // brim underside rows
+
+  /* --- crown wall ------------------------------------------------------- */
+  patch(NT, NW, true,
+    (u, v, o) => crownWallPoint(u * TAU, v, o),
+    {
+      region: (u, v) => (v > P.BAND_LO - 0.012 && v < P.BAND_HI + 0.012) ? REG.band : REG.crownWall,
+      ao: (u, v) => {
+        const t = u * TAU;
+        const occ = creaseOcclusion(Math.sin(t), Math.cos(t)) * smoothstep(0.36, 0.96, v);
+        /* contact darkening where the skirt meets the brim + under the band lip */
+        const foot = 0.40 + 0.60 * smoothstep(0.0, 0.13, v);
+        const lipShadow = 1 - 0.30 * Math.exp(-Math.pow((v - (P.BAND_LO - 0.016)) / 0.020, 2));
+        return foot * lipShadow * (1 - 0.42 * occ);
+      },
+      hint: (u, v, o) => { const t = u * TAU; o[0] = Math.sin(t); o[1] = 0.26; o[2] = Math.cos(t); },
+    });
+
+  /* --- crown top plate (square->disc grid, no polar fan) ---------------- */
+  patch(NC + 1, NC, false,
+    (u, v, o) => capPoint(u * 2 - 1, v * 2 - 1, o),
+    {
+      region: () => REG.crownTop,
+      ao: (u, v) => {
+        const a = u * 2 - 1, b = v * 2 - 1;
+        const p = a * Math.sqrt(1 - b * b * 0.5), q2 = b * Math.sqrt(1 - a * a * 0.5);
+        return 1 - 0.50 * creaseOcclusion(p, q2);
+      },
+      hint: (u, v, o) => {
+        const a = u * 2 - 1, b = v * 2 - 1;
+        o[0] = 0.30 * a; o[1] = 1; o[2] = 0.30 * b;
+      },
+    });
+
+  /* --- brim top sheet --------------------------------------------------- */
+  patch(NB, NBT, true,
+    (u, v, o) => brimTopPoint(u * TAU, v, o),
+    {
+      region: () => REG.brimTop,
+      ao: (u, v) => 0.21 + 0.79 * smoothstep(0.0, 0.26, v) - 0.13 * smoothstep(0.42, 1.0, v),
+      hint: (u, v, o) => {
+        const t = u * TAU, f = brimFrame(t, v);
+        o[0] = f[2] * Math.sin(t); o[1] = f[3]; o[2] = f[2] * Math.cos(t);
+      },
+    });
+
+  /* --- brim outer roll -------------------------------------------------- */
+  patch(NB, NBE, true,
+    (u, v, o) => brimEdgePoint(u * TAU, v * Math.PI, o),
+    {
+      region: () => REG.brimEdge,
+      ao: (u, v) => 1 - 0.45 * smoothstep(0.55, 1.0, v),
+      hint: (u, v, o) => brimEdgeHint(u * TAU, v * Math.PI, o),
+    });
+
+  /* --- brim underside --------------------------------------------------- */
+  patch(NB, NBB, true,
+    (u, v, o) => brimBotPoint(u * TAU, 1 - v, o),
+    {
+      region: () => REG.brimBottom,
+      ao: (u, v) => 0.62 - 0.30 * v,
+      /* warm bounce on the inner underside, near the crown skirt */
+      ex: (u, v) => 0.085 * smoothstep(0.72, 1.0, v),
+      hint: (u, v, o) => {
+        const t = u * TAU, f = brimFrame(t, 1 - v);
+        o[0] = -f[2] * Math.sin(t); o[1] = -f[3]; o[2] = -f[2] * Math.cos(t);
+      },
+    });
+
+  /* --- flat disc closing the underside (seals the crown cavity) --------- */
+  patch(NB, 2, true,
+    (u, v, o) => {
+      const t = u * TAU;
+      brimBotPoint(t, 0, o);
+      o[0] *= (1 - v); o[2] *= (1 - v);
+    },
+    { region: () => REG.underCap, ao: () => 0.18, hint: (u, v, o) => { o[0] = 0; o[1] = -1; o[2] = 0; } });
+
+  /* --- pack ------------------------------------------------------------- */
+  const NQ = qreg.length;
+  const M = {
+    nv, nq: NQ,
+    px: Float32Array.from(px), py: Float32Array.from(py), pz: Float32Array.from(pz),
+    nx: Float32Array.from(nx), ny: Float32Array.from(ny), nz: Float32Array.from(nz),
+    qi: Uint32Array.from(qi),
+    qreg: Uint8Array.from(qreg),
+    qao: Float32Array.from(qao), qex: Float32Array.from(qex),
+    qcx: Float32Array.from(qcx), qcy: Float32Array.from(qcy), qcz: Float32Array.from(qcz),
+    qnx: Float32Array.from(qnx), qny: Float32Array.from(qny), qnz: Float32Array.from(qnz),
+    qdit: Float32Array.from(qdit),
+    qstg: new Float32Array(NQ),
+  };
+  /* bounds + per-quad stagger (used by the dissolve wipe) */
+  let ymin = Infinity, ymax = -Infinity, rmax = 0;
+  for (let i = 0; i < nv; i++) {
+    if (M.py[i] < ymin) ymin = M.py[i];
+    if (M.py[i] > ymax) ymax = M.py[i];
+    const r = Math.hypot(M.px[i], M.pz[i]);
+    if (r > rmax) rmax = r;
+  }
+  M.ymin = ymin; M.ymax = ymax; M.rmax = rmax;
+  for (let f = 0; f < NQ; f++) M.qstg[f] = stagger(M.qcx[f], M.qcy[f], M.qcz[f], ymin, ymax);
+  return M;
+}
+
+/* dissolve order: sweeps top-down with a gentle angular swirl.
+   A spatial hash jitters the front so the wipe edge dithers instead of
+   reading as a clean slice through the solid. */
+function hash3(x, y, z) {
+  let h = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453;
+  return h - Math.floor(h);
+}
+function stagger(x, y, z, ymin, ymax) {
+  const h = (y - ymin) / (ymax - ymin);
+  const th = Math.atan2(x, z);
+  const j = (hash3(x * 7.3, y * 7.3, z * 7.3) - 0.5) * 0.085;
+  return clamp(0.72 * (1 - h) + 0.19 * (0.5 + 0.5 * Math.sin(th + 0.9)) + 0.07 + j, 0, 1);
+}
+
+/* ==========================================================================
+   3.  area-weighted surface sampling (region aware)
+   ========================================================================== */
+const REGION_WEIGHT = [1.0, 1.0, 1.05, 0.92, 1.15, 0.34, 0.0];
+function sampleSurface(M, N, rng) {
+  const cum = new Float64Array(M.nq * 2);
+  const tri = new Int32Array(M.nq * 2 * 4);
+  let total = 0, n = 0;
+  for (let f = 0; f < M.nq; f++) {
+    const w = REGION_WEIGHT[M.qreg[f]];
+    if (w <= 0) continue;
+    const i0 = M.qi[f * 4], i1 = M.qi[f * 4 + 1], i2 = M.qi[f * 4 + 2], i3 = M.qi[f * 4 + 3];
+    const ts = [i0, i1, i2, i0, i2, i3];
+    for (let k = 0; k < 2; k++) {
+      const a = ts[k * 3], b = ts[k * 3 + 1], c = ts[k * 3 + 2];
+      const ax = M.px[b] - M.px[a], ay = M.py[b] - M.py[a], az = M.pz[b] - M.pz[a];
+      const bx = M.px[c] - M.px[a], by = M.py[c] - M.py[a], bz = M.pz[c] - M.pz[a];
+      const cx = ay * bz - az * by, cy = az * bx - ax * bz, cz = ax * by - ay * bx;
+      const A = 0.5 * Math.hypot(cx, cy, cz) * w;
+      if (A <= 0) continue;
+      total += A;
+      tri[n * 4] = a; tri[n * 4 + 1] = b; tri[n * 4 + 2] = c; tri[n * 4 + 3] = f;
+      cum[n] = total; n++;
+    }
+  }
+  const pos = new Float32Array(N * 3), nor = new Float32Array(N * 3);
+  const reg = new Uint8Array(N), stg = new Float32Array(N);
+  for (let s = 0; s < N; s++) {
+    const x = rng() * total;
+    let lo = 0, hi = n - 1;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (cum[m] < x) lo = m + 1; else hi = m; }
+    const a = tri[lo * 4], b = tri[lo * 4 + 1], c = tri[lo * 4 + 2], f = tri[lo * 4 + 3];
+    let u = rng(), v = rng();
+    if (u + v > 1) { u = 1 - u; v = 1 - v; }
+    const w0 = 1 - u - v;
+    const X = w0 * M.px[a] + u * M.px[b] + v * M.px[c];
+    const Y = w0 * M.py[a] + u * M.py[b] + v * M.py[c];
+    const Z = w0 * M.pz[a] + u * M.pz[b] + v * M.pz[c];
+    let NX = w0 * M.nx[a] + u * M.nx[b] + v * M.nx[c];
+    let NY = w0 * M.ny[a] + u * M.ny[b] + v * M.ny[c];
+    let NZ = w0 * M.nz[a] + u * M.nz[b] + v * M.nz[c];
+    const L = Math.hypot(NX, NY, NZ) || 1;
+    pos[s * 3] = X; pos[s * 3 + 1] = Y; pos[s * 3 + 2] = Z;
+    nor[s * 3] = NX / L; nor[s * 3 + 1] = NY / L; nor[s * 3 + 2] = NZ / L;
+    reg[s] = M.qreg[f];
+    stg[s] = stagger(X, Y, Z, M.ymin, M.ymax);
+  }
+  return { pos, nor, reg, stg, n: N };
+}
+
+/* ==========================================================================
+   4.  palette — one warm ramp, per-region gain/bias, pre-baked css strings
+   ========================================================================== */
+/* warm light, cool shadow: the low end drifts into a deep aubergine so the
+   opposite-side fill reads cool without a second colour channel. */
+const RAMP = [
+  [0.00, 13, 5, 16],
+  [0.07, 27, 6, 17],
+  [0.16, 48, 5, 15],
+  [0.28, 79, 4, 12],
+  [0.40, 114, 3, 10],
+  [0.52, 150, 2, 8],
+  [0.63, 183, 3, 7],
+  [0.74, 212, 6, 7],     /* #d40607 */
+  [0.83, 234, 16, 11],   /* #ea100b */
+  [0.91, 249, 68, 41],
+  [1.00, 255, 158, 122],
+];
+function rampAt(t) {
+  t = clamp(t, 0, 1);
+  for (let i = 1; i < RAMP.length; i++) {
+    if (t <= RAMP[i][0]) {
+      const a = RAMP[i - 1], b = RAMP[i];
+      const k = (t - a[0]) / (b[0] - a[0]);
+      return [mix(a[1], b[1], k), mix(a[2], b[2], k), mix(a[3], b[3], k)];
+    }
+  }
+  const l = RAMP[RAMP.length - 1];
+  return [l[1], l[2], l[3]];
+}
+const RGAIN = [0.930, 0.925, 0.580, 0.900, 0.950, 0.330, 0.110];
+const RBIAS = [0.022, 0.016, 0.000, 0.012, 0.026, 0.118, 0.034];
+const NLEV = 512;
+const COLSTR = new Array(NLEV);
+for (let i = 0; i < NLEV; i++) {
+  const c = rampAt(i / (NLEV - 1));
+  COLSTR[i] = 'rgb(' + Math.round(c[0]) + ',' + Math.round(c[1]) + ',' + Math.round(c[2]) + ')';
+}
+
+/* ==========================================================================
+   5.  scene / renderer
+   ========================================================================== */
+const stage = document.getElementById('stage');
+const wrap = document.querySelector('.wrap');
+const hintEl = document.getElementById('hint');
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d', { alpha: false });
+
+const rmq = window.matchMedia('(prefers-reduced-motion: reduce)');
+let reduced = rmq.matches;
+
+let W = 0, H = 0, DPR = 1, CX = 0, CY = 0, SCALE = 1;
+const CAM_D = 7.4, FOCAL = 4.3;
+let PITCH = 0.295;
+let shadeLift = 0;
+
+let MESH = null, meshQ = 0, particlesStale = false;
+let VSX = null, VSY = null, VSZ = null;         // projected vertex cache
+
+/* lighting (camera space) */
+/* camera sits at the origin looking down +Z; L = surface -> light */
+const L_KEY = norm3([-0.60, 0.46, -0.66]);   // warm key, raking from upper left
+const L_FILL = norm3([0.86, 0.22, 0.32]);    // cool fill from the far side
+const L_RIM = norm3([0.20, 0.42, 0.88]);     // rim from behind
+function norm3(v) { const l = Math.hypot(v[0], v[1], v[2]); return [v[0] / l, v[1] / l, v[2] / l]; }
+
+/* per-frame model-space light directions */
+const mKey = [0, 0, 0], mFill = [0, 0, 0], mRim = [0, 0, 0], mHalf = [0, 0, 0], mCam = [0, 0, 0];
+
+/* view rotation R = rotX(PITCH) * rotY(yaw) */
+const R = new Float64Array(9);
+function setView(yaw) {
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const cp = Math.cos(PITCH), sp = Math.sin(PITCH);
+  /* rotY */
+  const a = [cy, 0, sy, 0, 1, 0, -sy, 0, cy];
+  /* camera basis (right, up, forward) for an eye at +Z, raised by PITCH.
+     forward is +Z in view space, so this basis is intentionally left-handed. */
+  const b = [1, 0, 0, 0, cp, -sp, 0, -sp, -cp];
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+    let s = 0;
+    for (let k = 0; k < 3; k++) s += b[i * 3 + k] * a[k * 3 + j];
+    R[i * 3 + j] = s;
+  }
+  /* transpose-multiply lights into model space */
+  const T = (v, o) => {
+    o[0] = R[0] * v[0] + R[3] * v[1] + R[6] * v[2];
+    o[1] = R[1] * v[0] + R[4] * v[1] + R[7] * v[2];
+    o[2] = R[2] * v[0] + R[5] * v[1] + R[8] * v[2];
+  };
+  T(L_KEY, mKey); T(L_FILL, mFill); T(L_RIM, mRim);
+  /* camera position in model space: R*c + (0,0,D) = 0 */
+  T([0, 0, -CAM_D], mCam);
+  const hx = L_KEY[0], hy = L_KEY[1], hz = L_KEY[2] - 1;  // V = (0,0,-1) in cam space
+  const hl = Math.hypot(hx, hy, hz) || 1;
+  T([hx / hl, hy / hl, hz / hl], mHalf);
+}
+
+/* Backing-store budget. devicePixelRatio is capped at 2, then capped again by a
+   total-pixel budget so a 2x retina laptop at full screen does not quadruple the
+   rasterising cost. Phones (small viewports) keep the full 2x. DPRMIN is 1 until
+   the governor decides the device genuinely cannot keep up. */
+let PIXBUDGET = 2.15e6, DPRMIN = 1;
+let SH = 0;                 /* height of the interactive stage (above the caption) */
+function resize() {
+  W = Math.max(1, Math.round(wrap.clientWidth));
+  H = Math.max(1, Math.round(wrap.clientHeight));
+  SH = Math.max(1, Math.round(stage.getBoundingClientRect().height));
+  const raw = Math.min(2, window.devicePixelRatio || 1);
+  DPR = Math.max(DPRMIN, Math.min(raw, Math.sqrt(PIXBUDGET / (W * H))));
+  cv.width = Math.round(W * DPR);
+  cv.height = Math.round(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  CX = W / 2;
+  /* the hat's projected mass hangs below the model origin, so bias the optical
+     centre up a touch — otherwise it crowds the caption and leaves dead air. */
+  CY = SH * 0.448;
+  /* Fit for the *perspective* silhouette, not the orthographic one: the near
+     side of the brim projects ~3% larger than r/CAM_D would suggest, and we
+     want real breathing room at the viewport edges on top of that. */
+  const half = Math.min(W * 0.400, SH * 0.442);
+  SCALE = half / (FOCAL * P.BRIM_RZ / (CAM_D - P.BRIM_RZ * 0.22));
+  buildBackground();
+}
+
+/* --- background: vignette + warm bleed (cached) ------------------------- */
+let bgCanvas = null, glowGrad = null, shadowGrad = null;
+function buildBackground() {
+  bgCanvas = document.createElement('canvas');
+  bgCanvas.width = cv.width; bgCanvas.height = cv.height;
+  const g = bgCanvas.getContext('2d');
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  g.fillStyle = '#07050c';
+  g.fillRect(0, 0, W, H);
+  /* broad cool vignette — the canvas spans the whole viewport, caption
+     included, so this wash never terminates in a seam */
+  const rad = Math.hypot(W, H) * 0.66;
+  const v = g.createRadialGradient(CX, CY * 0.94, 0, CX, CY * 0.94, rad);
+  v.addColorStop(0, 'rgba(35,17,30,1)');
+  v.addColorStop(0.44, 'rgba(18,9,17,1)');
+  v.addColorStop(1, 'rgba(5,3,8,1)');
+  g.globalCompositeOperation = 'source-over';
+  g.fillStyle = v; g.fillRect(0, 0, W, H);
+  /* warm bleed from where the hat sits — kept low so the hat's own silhouette
+     stays crisp instead of sitting inside a bright halo */
+  const wr = Math.min(W, H) * 0.62;
+  const wgrad = g.createRadialGradient(CX, CY * 0.96, 0, CX, CY * 0.96, wr);
+  wgrad.addColorStop(0, 'rgba(84,17,10,0.30)');
+  wgrad.addColorStop(0.42, 'rgba(52,10,10,0.13)');
+  wgrad.addColorStop(1, 'rgba(28,4,9,0)');
+  g.globalCompositeOperation = 'lighter';
+  g.fillStyle = wgrad; g.fillRect(0, 0, W, H);
+  /* a quiet scrim under the caption: keeps body copy legible on short
+     viewports where the warm bleed would otherwise reach the text */
+  g.globalCompositeOperation = 'source-over';
+  const s0 = Math.max(0, SH - Math.min(90, H * 0.10));
+  const sc = g.createLinearGradient(0, s0, 0, H);
+  sc.addColorStop(0, 'rgba(6,4,10,0)');
+  sc.addColorStop(1, 'rgba(6,4,10,0.72)');
+  g.fillStyle = sc; g.fillRect(0, s0, W, H - s0);
+
+  glowGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+  glowGrad.addColorStop(0, 'rgba(255,92,50,0.20)');
+  glowGrad.addColorStop(0.38, 'rgba(196,40,24,0.065)');
+  glowGrad.addColorStop(1, 'rgba(110,14,18,0)');
+
+  shadowGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+  shadowGrad.addColorStop(0, 'rgba(0,0,0,0.88)');
+  shadowGrad.addColorStop(0.36, 'rgba(2,0,4,0.62)');
+  shadowGrad.addColorStop(0.68, 'rgba(3,0,5,0.24)');
+  shadowGrad.addColorStop(1, 'rgba(4,0,6,0)');
+}
+
+/* --- ember sprites ------------------------------------------------------ */
+const HUES = [[255, 66, 26], [255, 30, 18], [255, 142, 74], [255, 208, 172]];
+const SPRITE = [];
+function buildSprites() {
+  SPRITE.length = 0;
+  for (let s = 0; s < 2; s++) {
+    const px = (s === 0 ? 26 : 54) * Math.min(2, DPR);
+    for (let h = 0; h < HUES.length; h++) {
+      const c = document.createElement('canvas');
+      c.width = c.height = px;
+      const g = c.getContext('2d');
+      const gr = g.createRadialGradient(px / 2, px / 2, 0, px / 2, px / 2, px / 2);
+      const col = HUES[h];
+      gr.addColorStop(0.00, 'rgba(' + col[0] + ',' + col[1] + ',' + col[2] + ',1)');
+      gr.addColorStop(0.16, 'rgba(' + col[0] + ',' + col[1] + ',' + col[2] + ',0.72)');
+      gr.addColorStop(0.42, 'rgba(' + Math.round(col[0] * 0.85) + ',' + Math.round(col[1] * 0.5) + ',' + Math.round(col[2] * 0.4) + ',0.20)');
+      gr.addColorStop(1.00, 'rgba(120,10,6,0)');
+      g.fillStyle = gr;
+      g.fillRect(0, 0, px, px);
+      SPRITE.push(c);
+    }
+  }
+}
+
+/* ==========================================================================
+   6.  particles
+   ========================================================================== */
+/* NPa is how many embers we simulate and draw. Because sampleSurface emits
+   them in random order, any prefix of the arrays is itself a uniform sample of
+   the surface — so the governor can thin the cloud simply by lowering NPa, with
+   no rebuild and no bias. npScale carries that cut across rebuilds. */
+let NPa = 0, npScale = 1;
+let pHome = null, pNor = null, pStg = null;
+let pPos = null, pVel = null, pRnd = null, pCap = null, pStart = null;
+let pSX = null, pSY = null, pSize = null, pBkt = null;
+let order = null, bktCount = null, bktOfs = null;
+const NAL = 8, NBKT = NAL * 8;
+
+function particleBudget() {
+  const area = W * H;
+  const cores = navigator.hardwareConcurrency || 4;
+  let n = 5000 * Math.sqrt(area / (1280 * 800));
+  n *= clamp(cores / 8, 0.62, 1.22);
+  if (DPR > 1.25) n *= 0.72;            // twice the pixels per ember
+  /* the ceiling is set by drawImage call count, which is what costs the frame */
+  return Math.round(clamp(n, 1600, 5600));
+}
+
+function buildParticles(M, n) {
+  const rng = mulberry(90210);
+  const S = sampleSurface(M, n, rng);
+  NPa = Math.max(1, Math.min(n, Math.round(n * npScale)));
+  particlesStale = false;
+  pHome = S.pos; pNor = S.nor; pStg = S.stg;
+  pPos = new Float32Array(n * 3);
+  pVel = new Float32Array(n * 3);
+  pStart = new Float32Array(n * 3);
+  pCap = new Uint8Array(n);
+  pRnd = new Float32Array(n * 5);
+  const r2 = mulberry(1337);
+  for (let i = 0; i < n * 5; i++) pRnd[i] = r2();
+  pPos.set(pHome);
+  pSX = new Float32Array(n); pSY = new Float32Array(n);
+  pSize = new Float32Array(n); pBkt = new Int16Array(n);
+  order = new Int32Array(n);
+  bktCount = new Int32Array(NBKT); bktOfs = new Int32Array(NBKT + 1);
+}
+
+/* ==========================================================================
+   7.  orbiters (afterglow)
+   ========================================================================== */
+/* The trail is a position history sampled on a FIXED clock, not per frame:
+   18 samples 40 ms apart is 0.72 s of travel, which is long enough to read as a
+   tapering comet. Sampling per frame gave a 0.2 s stub that looked like a dot. */
+const NORB = 12, TRAIL = 16, TRAIL_DT = 0.042;
+const orb = [];
+function buildOrbiters() {
+  orb.length = 0;
+  const r = mulberry(7788);
+  for (let i = 0; i < NORB; i++) {
+    const o = {
+      a: 1.22 + r() * 0.56,
+      tilt: (r() - 0.5) * 0.92,
+      roll: r() * TAU,
+      phase: r() * TAU,
+      spd: (0.46 + r() * 0.50) * (r() < 0.5 ? -1 : 1),
+      yoff: (r() - 0.5) * 0.30,
+      bob: 0.05 + r() * 0.11,
+      bobf: 0.5 + r() * 0.9,
+      hue: (r() < 0.34 ? 2 : (r() < 0.72 ? 0 : 3)),
+      fade: 0,
+      hx: new Float32Array(TRAIL), hy: new Float32Array(TRAIL), hz: new Float32Array(TRAIL),
+      hn: 0, filled: 0,
+    };
+    orb.push(o);
+  }
+}
+function orbPos(o, t, out) {
+  const a = o.phase + t * o.spd;
+  let x = Math.cos(a) * o.a;
+  let z = Math.sin(a) * o.a;
+  let y = o.yoff + Math.sin(t * o.bobf + o.roll) * o.bob;
+  /* tilt the orbit plane about the X axis */
+  const ct = Math.cos(o.tilt), st = Math.sin(o.tilt);
+  const y2 = y * ct - z * st, z2 = y * st + z * ct;
+  /* then roll about Y */
+  const cr = Math.cos(o.roll), sr = Math.sin(o.roll);
+  out[0] = x * cr + z2 * sr;
+  out[1] = y2 + P.Y_CENTRE + 0.12;
+  out[2] = -x * sr + z2 * cr;
+}
+
+/* ==========================================================================
+   8.  animation state
+   ========================================================================== */
+const SPIN0 = 0.455;
+let yaw = 0.02;
+const YAW_STILL = 0.68;         // the pose used when motion is reduced
+let spin = SPIN0;
+let running = false, rafId = 0, lastT = 0;
+let clock = 0, frameDt = 1 / 60;
+let burstT = -1;              // <0 = inactive
+let orbLife = 0;              // 0..1 afterglow presence
+let orbHold = 0, orbAcc = 0;  // linger timer + fixed-rate trail sampler
+const ORB_HOLD = 7.5;         // seconds the sparks keep orbiting after reforming
+let pulse = 0, pulseActive = false;   // reduced-motion crossfade
+
+/* timeline (seconds) */
+const T_REL0 = 0.16, T_RELS = 0.78;      // dissolve stagger window
+const T_RET0 = 2.72, T_RETS = 0.34, T_RETD = 1.05;
+const T_SOLID = T_RETD * 0.80;           // the felt is back a beat before the
+                                         // last embers wink out on top of it
+const T_END = T_RET0 + T_RETS + T_RETD + 0.70;   // ~4.8s round trip
+
+/* embers light up as the quad *starts* to crumble, not when it finishes, so the
+   granulating band never shows a hole */
+function relTime(s) { return T_REL0 + T_RELS * (s - 0.15); }
+function retTime(s) { return T_RET0 + T_RETS * (1 - s); }
+
+function trigger() {
+  if (reduced) {
+    /* re-activating restarts the pulse (rewinding only once it is past its
+       peak, so an impatient double-tap never reads as a dead control) */
+    if (!pulseActive || pulse > 0.45) { pulse = 0; }
+    pulseActive = true;
+    ensureRunning();
+    return;
+  }
+  if (burstT >= 0) return;             // already running: never stack
+  burstT = 0;
+  pPos.set(pHome);
+  pVel.fill(0);
+  pCap.fill(0);
+  ensureRunning();
+}
+
+/* ==========================================================================
+   9.  the frame
+   ========================================================================== */
+const tmp3 = [0, 0, 0];
+const RSH_A = wallRF(0.20), RSH_B = wallRF(0.52);
+
+function shadeQuad(f, M) {
+  const nx = M.qnx[f], ny = M.qny[f], nz = M.qnz[f];
+  let nk = nx * mKey[0] + ny * mKey[1] + nz * mKey[2];
+  if (nk < 0) nk = 0;
+  let nf = nx * mFill[0] + ny * mFill[1] + nz * mFill[2];
+  if (nf < 0) nf = 0;
+  let nr = nx * mRim[0] + ny * mRim[1] + nz * mRim[2];
+  if (nr < 0) nr = 0;
+  let ao = M.qao[f];
+  const reg = M.qreg[f];
+  if (reg === REG.brimTop || reg === REG.brimEdge) ao *= castShadow(M.qcx[f], M.qcy[f], M.qcz[f]);
+  /* deliberately little ambient: the shadow side has to fall away, otherwise the
+     whole crown clips into one flat red and the crease stops reading */
+  let s = (0.026 + 0.855 * nk + 0.128 * nf) * ao;
+  /* view vector in model space (toward the camera) */
+  let vx = mCam[0] - M.qcx[f], vy = mCam[1] - M.qcy[f], vz = mCam[2] - M.qcz[f];
+  const vl = Math.sqrt(vx * vx + vy * vy + vz * vz) || 1; vx /= vl; vy /= vl; vz /= vl;
+  const nh = nx * mHalf[0] + ny * mHalf[1] + nz * mHalf[2];
+  if (nh > 0) {                     /* pow(nh,16) by repeated squaring */
+    let h2 = nh * nh; h2 *= h2; h2 *= h2; h2 *= h2;
+    s += h2 * 0.115 * (0.35 + 0.65 * ao);
+  }
+  const fres = 1 - Math.max(0, nx * vx + ny * vy + nz * vz);
+  const f2 = fres * fres;           /* ~pow(fres,3) */
+  s += f2 * fres * nr * 0.26;
+  return s;
+}
+
+function castShadow(cx, cy, cz) {
+  let occ = 0;
+  for (let k = 0; k < 2; k++) {
+    const hRel = k === 0 ? 0.20 : 0.52;
+    const rf = k === 0 ? RSH_A : RSH_B;
+    const h = P.Y_CENTRE + P.CROWN_H * hRel;
+    const t = (h - cy) / (mKey[1] || 1e-6);
+    if (t <= 0) continue;
+    const sx = cx + t * mKey[0], sz = cz + t * mKey[2];
+    const ax = P.CROWN_RX * rf, az = P.CROWN_RZ * rf;
+    const d = Math.sqrt((sx / ax) * (sx / ax) + (sz / az) * (sz / az));
+    const o = 1 - smoothstep(0.86, 1.22, d);
+    if (o > occ) occ = o;
+  }
+  return 1 - 0.70 * occ;
+}
+
+function projectVerts(M) {
+  const n = M.nv;
+  if (!VSX || VSX.length !== n) { VSX = new Float32Array(n); VSY = new Float32Array(n); VSZ = new Float32Array(n); }
+  const r0 = R[0], r1 = R[1], r2 = R[2], r3 = R[3], r4 = R[4], r5 = R[5], r6 = R[6], r7 = R[7], r8 = R[8];
+  const fS = FOCAL * SCALE;
+  for (let i = 0; i < n; i++) {
+    const x = M.px[i], y = M.py[i], z = M.pz[i];
+    const vx = r0 * x + r1 * y + r2 * z;
+    const vy = r3 * x + r4 * y + r5 * z;
+    const vz = r6 * x + r7 * y + r8 * z + CAM_D;
+    const iw = fS / vz;
+    VSX[i] = CX + vx * iw;
+    VSY[i] = CY - vy * iw;
+    VSZ[i] = vz;
+  }
+}
+
+/* depth bucket sort */
+const NDB = 1400;
+let dbCount = new Int32Array(NDB), dbOfs = new Int32Array(NDB + 1);
+let visIdx = null, visKey = null, visZ = null, visLev = null, visOrder = null, visSc = null;
+const CHIP = 0.15;               // stagger window over which a quad crumbles
+
+function drawMesh(M, dissolveW, reformW, phase) {
+  projectVerts(M);
+  const nq = M.nq;
+  if (!visIdx || visIdx.length < nq) {
+    visIdx = new Int32Array(nq); visKey = new Int32Array(nq); visZ = new Float32Array(nq);
+    visLev = new Int16Array(nq); visOrder = new Int32Array(nq);
+    visSc = new Float32Array(nq);
+  }
+  let nvis = 0, qScale = 1;
+  let zmin = Infinity, zmax = -Infinity;
+  const qi = M.qi;
+  for (let f = 0; f < nq; f++) {
+    /* granulation wipe: hidden once released, back once its embers have landed */
+    if (phase) {
+      /* the sealing disc is interior geometry — never let it show through the
+         crown's hole while the hat is embers */
+      if (M.qreg[f] === REG.underCap) continue;
+      const s = M.qstg[f];
+      if (s < dissolveW && s < reformW) continue;
+      /* crumble: a quad shrinks toward its centre as the wipe front reaches it,
+         and grows back out of nothing as its embers land */
+      const d2 = (s >= dissolveW) ? s - dissolveW : s - reformW;
+      qScale = d2 < CHIP ? 0.16 + 0.84 * (d2 / CHIP) : 1;
+    } else qScale = 1;
+    const nx = M.qnx[f], ny = M.qny[f], nz = M.qnz[f];
+    const dx = M.qcx[f] - mCam[0], dy = M.qcy[f] - mCam[1], dz = M.qcz[f] - mCam[2];
+    if (nx * dx + ny * dy + nz * dz > 0) continue;      // back-facing
+    const a = qi[f * 4], b = qi[f * 4 + 1], c = qi[f * 4 + 2], d = qi[f * 4 + 3];
+    const z = (VSZ[a] + VSZ[b] + VSZ[c] + VSZ[d]) * 0.25;
+    if (z < zmin) zmin = z;
+    if (z > zmax) zmax = z;
+    visIdx[nvis] = f; visZ[nvis] = z;
+    const reg = M.qreg[f];
+    let t = RBIAS[reg] + RGAIN[reg] * shadeQuad(f, M) + M.qex[f] + M.qdit[f] + shadeLift;
+    /* shoulder: roll the highlights off instead of clipping them flat */
+    if (t > 0.70) t = 0.70 + 0.30 * (1 - Math.exp((0.70 - t) * 3.4));
+    let lev = (t * (NLEV - 1)) | 0;
+    if (lev < 0) lev = 0; else if (lev > NLEV - 1) lev = NLEV - 1;
+    visLev[nvis] = lev; visSc[nvis] = qScale;
+    nvis++;
+  }
+  if (!nvis) return;
+  const span = (zmax - zmin) || 1;
+  dbCount.fill(0);
+  for (let i = 0; i < nvis; i++) {
+    let k = (((visZ[i] - zmin) / span) * (NDB - 1)) | 0;
+    if (k < 0) k = 0; else if (k > NDB - 1) k = NDB - 1;
+    k = NDB - 1 - k;                                     // far first
+    visKey[i] = k;
+    dbCount[k]++;
+  }
+  let acc = 0;
+  for (let i = 0; i < NDB; i++) { dbOfs[i] = acc; acc += dbCount[i]; }
+  for (let i = 0; i < nvis; i++) visOrder[dbOfs[visKey[i]]++] = i;
+
+  /* Draw far-to-near. Each quad is dilated by exactly SEAM pixels in every
+     direction — each corner is pushed out along its own unit vector from the
+     centroid, NOT by a uniform scale. A uniform scale is what produced the
+     brim's interference rings: on a sliver quad it either leaves hairline gaps
+     across the short axis or balloons wildly along the long one, and the two
+     failure modes alternate row by row. A constant dilation does neither. */
+  const SEAM = 0.52 / DPR + 0.20;
+  let curCol = null;
+  let open = false;
+  for (let o = 0; o < nvis; o++) {
+    const i = visOrder[o];
+    const f = visIdx[i];
+    const col = COLSTR[visLev[i]];
+    if (col !== curCol) {
+      if (open) ctx.fill();
+      ctx.beginPath();
+      ctx.fillStyle = col;
+      curCol = col; open = true;
+    }
+    const a = qi[f * 4], b = qi[f * 4 + 1], c = qi[f * 4 + 2], d = qi[f * 4 + 3];
+    const ax = VSX[a], ay = VSY[a], bx = VSX[b], by = VSY[b];
+    const cx2 = VSX[c], cy2 = VSY[c], dx2 = VSX[d], dy2 = VSY[d];
+    const mx = (ax + bx + cx2 + dx2) * 0.25;
+    const my = (ay + by + cy2 + dy2) * 0.25;
+    const sc = visSc[i];
+    let ux = ax - mx, uy = ay - my;
+    let l = Math.sqrt(ux * ux + uy * uy); if (l < 0.28) l = 0.28;
+    let k2 = sc * (1 + SEAM / l);
+    ctx.moveTo(mx + ux * k2, my + uy * k2);
+    ux = bx - mx; uy = by - my;
+    l = Math.sqrt(ux * ux + uy * uy); if (l < 0.28) l = 0.28;
+    k2 = sc * (1 + SEAM / l);
+    ctx.lineTo(mx + ux * k2, my + uy * k2);
+    ux = cx2 - mx; uy = cy2 - my;
+    l = Math.sqrt(ux * ux + uy * uy); if (l < 0.28) l = 0.28;
+    k2 = sc * (1 + SEAM / l);
+    ctx.lineTo(mx + ux * k2, my + uy * k2);
+    ux = dx2 - mx; uy = dy2 - my;
+    l = Math.sqrt(ux * ux + uy * uy); if (l < 0.28) l = 0.28;
+    k2 = sc * (1 + SEAM / l);
+    ctx.lineTo(mx + ux * k2, my + uy * k2);
+    ctx.closePath();
+  }
+  if (open) ctx.fill();
+}
+
+/* --- contact shadow ------------------------------------------------------
+   A soft ellipse on a notional ground plane. Its footprint is the brim's plan
+   ellipse rotated by the current yaw, so it breathes with the spin. */
+function drawContactShadow(alpha) {
+  if (alpha <= 0.004) return;
+  const cy2 = Math.cos(yaw), sy2 = Math.sin(yaw);
+  const ax = Math.sqrt(P.BRIM_RX * P.BRIM_RX * cy2 * cy2 + P.BRIM_RZ * P.BRIM_RZ * sy2 * sy2);
+  const az = Math.sqrt(P.BRIM_RX * P.BRIM_RX * sy2 * sy2 + P.BRIM_RZ * P.BRIM_RZ * cy2 * cy2);
+  const GY = -1.02;                       // the notional ground plane
+  const cp = Math.cos(PITCH), sp = Math.sin(PITCH);
+  const vzc = -GY * sp + CAM_D;
+  const k = FOCAL * SCALE / vzc;
+  const rx = ax * k * 1.06;
+  const ry = az * k * sp * 1.70 + rx * 0.06;
+  const gy = CY - (GY * cp) * k;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(CX, gy);
+  ctx.scale(rx, Math.max(6, ry));
+  ctx.fillStyle = shadowGrad;
+  ctx.beginPath(); ctx.arc(0, 0, 1, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+/* --- warm glow behind the hat ------------------------------------------- */
+function drawGlow(alpha) {
+  if (alpha <= 0.002) return;
+  const r = SCALE * 0.80;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = alpha;
+  ctx.translate(CX, CY - r * 0.04);
+  ctx.scale(r * 1.32, r * 0.94);
+  ctx.fillStyle = glowGrad;
+  ctx.beginPath(); ctx.arc(0, 0, 1, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+/* ==========================================================================
+   10.  particle update + draw
+   ========================================================================== */
+function updateParticles(t, dt) {
+  const swirlPeak = smoothstep(0.55, 1.40, t) * (1 - smoothstep(2.35, 3.05, t));
+  for (let i = 0; i < NPa; i++) {
+    const s = pStg[i];
+    const tr = relTime(s);
+    const ts = retTime(s);
+    const i3 = i * 3, i5 = i * 5;
+    if (t < tr) {                                  // still part of the solid
+      pPos[i3] = pHome[i3]; pPos[i3 + 1] = pHome[i3 + 1]; pPos[i3 + 2] = pHome[i3 + 2];
+      continue;
+    }
+    if (t >= ts) {                                  // reforming
+      if (!pCap[i]) {
+        pCap[i] = 1;
+        pStart[i3] = pPos[i3]; pStart[i3 + 1] = pPos[i3 + 1]; pStart[i3 + 2] = pPos[i3 + 2];
+      }
+      const u = clamp((t - ts) / T_RETD, 0, 1);
+      /* ease-out-back: a whisper of overshoot so they settle rather than snap */
+      const p1 = u - 1;
+      const e = 1 + 1.62 * p1 * p1 * p1 + 0.62 * p1 * p1;
+      const arc = Math.sin(Math.PI * u) * (0.10 + 0.16 * pRnd[i5 + 3]);
+      const ax = (pRnd[i5] - 0.5), az = (pRnd[i5 + 1] - 0.5);
+      pPos[i3] = mix(pStart[i3], pHome[i3], e) + ax * arc;
+      pPos[i3 + 1] = mix(pStart[i3 + 1], pHome[i3 + 1], e) + (pRnd[i5 + 2] - 0.35) * arc * 0.55;
+      pPos[i3 + 2] = mix(pStart[i3 + 2], pHome[i3 + 2], e) + az * arc;
+      continue;
+    }
+    /* free flight */
+    if (pVel[i3] === 0 && pVel[i3 + 1] === 0 && pVel[i3 + 2] === 0) {
+      const k = 0.20 + 0.44 * pRnd[i5];
+      pVel[i3] = pNor[i3] * k + (pRnd[i5 + 1] - 0.5) * 0.30;
+      pVel[i3 + 1] = pNor[i3 + 1] * k * 0.65 + 0.16 + pRnd[i5 + 2] * 0.24;
+      pVel[i3 + 2] = pNor[i3 + 2] * k + (pRnd[i5 + 3] - 0.5) * 0.30;
+    }
+    const x = pPos[i3], y = pPos[i3 + 1], z = pPos[i3 + 2];
+    /* buoyancy + turbulence */
+    const tw = t * 1.6 + pRnd[i5] * 9.0;
+    let axx = Math.sin(tw + y * 3.1) * 0.42;
+    let azz = Math.cos(tw * 0.87 + x * 2.7) * 0.42;
+    let ayy = 0.22 - y * 0.62 + Math.sin(tw * 1.3 + z * 2.2) * 0.30;
+    /* soft containment: an ellipsoid the shape of the hat, so the cloud stays
+       wide and flat and keeps suggesting the silhouette instead of balling up */
+    const yc = (y - P.Y_CENTRE * 0.45) / 0.72;
+    const xc = x / 1.34, zc = z / 1.46;
+    const d = Math.sqrt(xc * xc + yc * yc + zc * zc);
+    if (d > 1) {
+      const f = (d - 1) * 5.4;
+      axx -= (xc / d) * f * 1.34; ayy -= (yc / d) * f * 0.72; azz -= (zc / d) * f * 1.46;
+    }
+    const drag = Math.exp(-dt * 1.30);
+    pVel[i3] = (pVel[i3] + axx * dt) * drag;
+    pVel[i3 + 1] = (pVel[i3 + 1] + ayy * dt) * drag;
+    pVel[i3 + 2] = (pVel[i3 + 2] + azz * dt) * drag;
+    /* the vortex: blend horizontal velocity toward a soft rotation field so the
+       whole cloud visibly turns about the hat's axis instead of just hanging */
+    if (swirlPeak > 0.001) {
+      const om = 1.55 * swirlPeak * (0.65 + 0.70 * pRnd[i5 + 4]);
+      const kk = 1 - Math.exp(-dt * 2.4);
+      pVel[i3] += (-z * om - pVel[i3]) * kk;
+      pVel[i3 + 2] += (x * om - pVel[i3 + 2]) * kk;
+    }
+    pPos[i3] += pVel[i3] * dt;
+    pPos[i3 + 1] += pVel[i3 + 1] * dt;
+    pPos[i3 + 2] += pVel[i3 + 2] * dt;
+  }
+}
+
+function drawParticles(t) {
+  const r0 = R[0], r1 = R[1], r2 = R[2], r3 = R[3], r4 = R[4], r5 = R[5], r6 = R[6], r7 = R[7], r8 = R[8];
+  const fS = FOCAL * SCALE;
+  const baseSize = clamp(SCALE * 0.0088, 1.5, 4.4);
+  bktCount.fill(0);
+  let nact = 0;
+  for (let i = 0; i < NPa; i++) {
+    const s = pStg[i];
+    const tr = relTime(s), ts = retTime(s), te = ts + T_RETD;
+    if (t < tr || t > te + 0.10) continue;
+    const a = smoothstep(tr, tr + 0.09, t) * (1 - smoothstep(te - 0.22, te + 0.06, t));
+    if (a <= 0.004) continue;
+    const i3 = i * 3, i5 = i * 5;
+    const x = pPos[i3], y = pPos[i3 + 1], z = pPos[i3 + 2];
+    const vz = r6 * x + r7 * y + r8 * z + CAM_D;
+    if (vz < 0.6) continue;
+    const iw = fS / vz;
+    const sx = CX + (r0 * x + r1 * y + r2 * z) * iw;
+    const sy = CY - (r3 * x + r4 * y + r5 * z) * iw;
+    if (sx < -40 || sx > W + 40 || sy < -40 || sy > H + 40) continue;
+    /* shade from the seeded normal + a twinkle */
+    const nx = pNor[i3], ny = pNor[i3 + 1], nz = pNor[i3 + 2];
+    let nk = nx * mKey[0] + ny * mKey[1] + nz * mKey[2];
+    if (nk < 0) nk = 0;
+    const tw = 0.66 + 0.34 * Math.sin(t * (3.1 + pRnd[i5 + 4] * 4.4) + pRnd[i5] * 11.0);
+    let lum = (0.30 + 0.70 * nk) * tw;
+    lum *= (0.72 + 0.44 * pRnd[i5 + 2]);
+    let hue;
+    if (lum > 0.92) hue = 3; else if (lum > 0.66) hue = 2; else if (lum > 0.38) hue = 0; else hue = 1;
+    let al = (clamp(lum * a * 1.06, 0, 1) * NAL) | 0;
+    if (al >= NAL) al = NAL - 1;
+    if (al <= 0) continue;
+    const size = baseSize * (0.62 + 1.05 * pRnd[i5 + 3]) * (0.8 + 0.5 * lum) * (7.4 / vz);
+    const big = size > baseSize * 1.45 ? 1 : 0;
+    const b = (big * 4 + hue) * NAL + al;
+    pSX[nact] = sx; pSY[nact] = sy; pSize[nact] = size; pBkt[nact] = b;
+    bktCount[b]++;
+    nact++;
+  }
+  if (!nact) return 0;
+  let acc = 0;
+  for (let i = 0; i < NBKT; i++) { bktOfs[i] = acc; acc += bktCount[i]; }
+  for (let i = 0; i < nact; i++) order[bktOfs[pBkt[i]]++] = i;
+  ctx.globalCompositeOperation = 'lighter';
+  let p = 0;
+  for (let b = 0; b < NBKT; b++) {
+    const c = bktCount[b];
+    if (!c) continue;
+    const spr = SPRITE[b / NAL | 0];
+    ctx.globalAlpha = ((b % NAL) + 1) / NAL * 0.44;
+    for (let k = 0; k < c; k++) {
+      const i = order[p++];
+      const s = pSize[i] * 2.25;
+      ctx.drawImage(spr, pSX[i] - s * 0.5, pSY[i] - s * 0.5, s, s);
+    }
+  }
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+  return nact;
+}
+
+/* --- orbiters ----------------------------------------------------------- */
+function drawOrbiters() {
+  if (orbLife <= 0.002) return;
+  /* the orbiters live in world space: only the camera pitch applies */
+  const cp = Math.cos(PITCH), sp = Math.sin(PITCH);
+  const fS = FOCAL * SCALE;
+  const silRx = P.BRIM_RZ * (fS / CAM_D) * 0.98;
+  const silRy = silRx * 0.54;
+  const lw = SCALE / 430;
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  for (let i = 0; i < orb.length; i++) {
+    const o = orb[i];
+    const base = orbLife * o.fade;
+    if (base <= 0.005 || o.filled < 2) continue;
+    const col = HUES[o.hue];
+    /* one colour string per orbiter per frame; the per-segment taper rides on
+       globalAlpha so no rgba() is parsed inside the loop */
+    ctx.strokeStyle = 'rgb(' + col[0] + ',' + col[1] + ',' + col[2] + ')';
+    let prevx = 0, prevy = 0, have = false;
+    for (let k = 0; k < o.filled; k++) {
+      const idx = (o.hn - 1 - k + TRAIL * 2) % TRAIL;
+      const wx = o.hx[idx], wy = o.hy[idx], wz = o.hz[idx];
+      const vy = wy * cp - wz * sp;
+      const vz = -wy * sp - wz * cp + CAM_D;
+      if (vz < 0.6) { have = false; continue; }
+      const iw = fS / vz;
+      const sx = CX + wx * iw;
+      const sy = CY - vy * iw;
+      /* occlusion: dim when the spark passes behind the hat's silhouette */
+      let dim = 1;
+      if (vz > CAM_D) {
+        const ex = (sx - CX) / silRx, ey = (sy - CY) / silRy;
+        dim = 1 - 0.80 * (1 - smoothstep(0.70, 1.10, Math.sqrt(ex * ex + ey * ey)));
+      }
+      if (have) {
+        const w = 1 - k / TRAIL;
+        const a = 0.24 * w * w * base * dim;
+        if (a > 0.004) {
+          ctx.globalAlpha = a > 1 ? 1 : a;
+          ctx.lineWidth = 0.45 + 1.7 * w * w * lw;
+          ctx.beginPath(); ctx.moveTo(prevx, prevy); ctx.lineTo(sx, sy); ctx.stroke();
+        }
+      }
+      if (k === 0) {
+        const spr = SPRITE[4 + o.hue];
+        const sz = clamp(SCALE * 0.015, 4, 10);
+        ctx.globalAlpha = clamp(0.52 * base * dim, 0, 1);
+        ctx.drawImage(spr, sx - sz, sy - sz, sz * 2, sz * 2);
+      }
+      prevx = sx; prevy = sy; have = true;
+    }
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  ctx.lineCap = 'butt';
+  ctx.lineJoin = 'miter';
+}
+
+/* ==========================================================================
+   11.  main loop
+   ========================================================================== */
+function frame(now) {
+  rafId = 0;
+  if (!lastT) lastT = now;
+  let dt = (now - lastT) / 1000;
+  lastT = now;
+  if (dt > 0.05) dt = 0.05;              // never teleport after a tab switch
+  if (dt < 0) dt = 0;
+  advance(dt);
+  render();
+  governor(dt);
+  /* keep the loop alive only while something is moving */
+  const busy = (!reduced) || pulseActive;
+  if (busy) ensureRunning(); else running = false;
+}
+
+/* If the device cannot hold the frame, shed work. The ember count is what
+   actually costs the frame (one drawImage per spark), so that is the first
+   thing to go; the backing store follows only if it is above 1x. The cut is
+   measured during the burst but applied between bursts, so the cloud never
+   loses a third of itself mid-flight. */
+let perfN = 0, perfAcc = 0, perfSteps = 0, perfWarm = 0, pendingNP = 0;
+function governor(dt) {
+  if (pendingNP) {
+    if (burstT < 0) { NPa = pendingNP; pendingNP = 0; }
+  }
+  if (perfSteps >= 2 || reduced) return;
+  if (perfWarm < 40) { perfWarm++; return; }
+  if (dt <= 0 || dt > 0.4) return;
+  perfAcc += dt; perfN++;
+  if (perfN < 80) return;
+  const avg = perfAcc / perfN;
+  perfAcc = 0; perfN = 0;
+  if (avg > 0.0215) {
+    perfSteps++;
+    npScale *= 0.62;
+    pendingNP = Math.max(1400, Math.round(NPa * 0.62));
+    DPRMIN = 0.82; PIXBUDGET *= 0.68;
+    resize(); buildSprites();
+  }
+}
+
+function advance(dt) {
+  frameDt = dt;
+  clock += dt;
+
+  let slow = 0;
+  if (!reduced && burstT >= 0) {
+    burstT += dt;
+    slow = smoothstep(0.0, 0.55, burstT) * (1 - smoothstep(3.55, T_END, burstT));
+    if (burstT > T_END) { burstT = -1; slow = 0; }
+  }
+  if (!reduced) {
+    const target = SPIN0 * (1 - 0.80 * slow);
+    const k = 1 - Math.exp(-dt * (target < spin ? 3.0 : 1.5));
+    spin += (target - spin) * k;
+    yaw += spin * dt;
+    if (yaw > TAU) yaw -= TAU;
+  } else {
+    spin = 0;
+  }
+
+  if (pulseActive) {
+    pulse += dt / 1.55;
+    if (pulse >= 1) { pulse = 0; pulseActive = false; }
+  }
+
+  /* Afterglow presence. It lights up as the hat reforms, lingers, then fades
+     out so the page really does return to its resting state. */
+  if (reduced) {
+    orbLife = Math.max(0, orbLife - dt * 1.2);
+    orbHold = 0;
+  } else if (burstT >= 2.55) {
+    orbLife = Math.min(1, orbLife + dt * 0.62);
+    orbHold = ORB_HOLD;
+  } else if (burstT < 0) {
+    if (orbHold > 0) orbHold -= dt;
+    else orbLife = Math.max(0, orbLife - dt * 0.16);
+  }
+  const alive = orbLife > 0.002;
+  if (alive) {
+    orbAcc += dt;
+    while (orbAcc >= TRAIL_DT) {
+      orbAcc -= TRAIL_DT;
+      const st = clock - orbAcc;
+      for (let i = 0; i < orb.length; i++) {
+        const o = orb[i];
+        orbPos(o, st, tmp3);
+        o.hx[o.hn] = tmp3[0]; o.hy[o.hn] = tmp3[1]; o.hz[o.hn] = tmp3[2];
+        o.hn = (o.hn + 1) % TRAIL;
+        if (o.filled < TRAIL) o.filled++;
+      }
+    }
+  } else if (orbAcc !== 0) { orbAcc = 0; }
+  for (let i = 0; i < orb.length; i++) {
+    const o = orb[i];
+    const tgt = orbLife > 0.002 ? 1 : 0;
+    o.fade += (tgt - o.fade) * (1 - Math.exp(-dt * (0.7 + i * 0.05)));
+  }
+}
+
+function render() {
+  setView(yaw);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(bgCanvas, 0, 0);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  const t = burstT;
+  const active = t >= 0;
+  /* wipe fronts: quads with stagger below dissolveW have already granulated */
+  let dW = -1, rW = 2, phase = false;
+  if (active) {
+    phase = true;
+    dW = (t - T_REL0) / T_RELS;                        // released once stagger < dW
+    rW = 1 - (t - (T_RET0 + T_SOLID)) / T_RETS;        // re-solid once stagger >= rW
+  }
+
+  /* glow sits behind everything; the contact shadow is painted over it so the
+     hat reads as resting on something rather than floating in a wash */
+  const scatter = active ? smoothstep(0.15, 0.9, t) * (1 - smoothstep(3.3, 4.2, t)) : 0;
+  drawGlow(0.26 + 0.30 * scatter + 0.26 * (pulseActive ? Math.sin(Math.PI * pulse) : 0));
+  drawContactShadow(clamp(0.92 - 0.72 * scatter, 0, 1));
+
+  if (reduced) {
+    /* the only interaction response: a slow, gentle warm crossfade.
+       nothing moves, nothing scatters. */
+    shadeLift = pulseActive ? Math.sin(Math.PI * pulse) * 0.055 : 0;
+    drawMesh(MESH, -1, 2, false);
+    shadeLift = 0;
+    return;
+  }
+
+  if (active) updateParticles(t, frameDt);
+
+  drawMesh(MESH, dW, rW, phase);
+  if (active) drawParticles(t);
+  drawOrbiters();
+}
+
+function ensureRunning() {
+  if (rafId || document.hidden) { running = true; return; }
+  running = true;
+  rafId = requestAnimationFrame(frame);
+}
+
+/* ==========================================================================
+   12.  boot / events
+   ========================================================================== */
+function pickMeshQ() {
+  const cores = navigator.hardwareConcurrency || 4;
+  let q = Math.pow(clamp(SCALE / 520, 0.35, 1.5), 0.5);
+  q *= clamp(cores / 8, 0.78, 1.10);
+  if (DPR > 1.3) q *= 0.88;
+  return clamp(q, 0.52, 1.12);
+}
+
+function rebuild(force) {
+  const q = pickMeshQ();
+  if (force || !MESH || Math.abs(q - meshQ) / meshQ >= 0.16) {
+    meshQ = q;
+    MESH = buildMesh(q);
+    particlesStale = true;             // the cloud is sampled off the mesh
+    VSX = null;
+    visIdx = null;
+  }
+  /* A reduced-motion session can never draw an ember, so don't spend the boot
+     time and ~1 MB of typed arrays sampling a cloud it will never show. */
+  if (!reduced) buildDeferred();
+}
+function buildDeferred() {
+  if (!particlesStale || !MESH) return;
+  buildParticles(MESH, particleBudget());
+}
+
+let resizeTimer = 0, resizeRaf = 0;
+/* window.resize and visualViewport.resize both fire for the same gesture, so
+   coalesce the (synchronous, allocating) canvas work into one rAF. */
+function onResize() {
+  if (!resizeRaf) resizeRaf = requestAnimationFrame(doResize);
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(tryRebuild, 220);
+}
+function doResize() {
+  resizeRaf = 0;
+  resize();
+  buildSprites();
+  draw1();
+}
+/* A rebuild that lands mid-burst must be DEFERRED, not dropped: dropping it
+   strands the mesh and ember budget at the pre-resize density for the rest of
+   the session. */
+function tryRebuild() {
+  if (resizeRaf) { doResize(); cancelAnimationFrame(resizeRaf); resizeRaf = 0; }
+  if (burstT >= 0) { resizeTimer = setTimeout(tryRebuild, 260); return; }
+  rebuild(false);
+  draw1();
+}
+function draw1() { if (!running) { setView(yaw); render(); } }
+
+resize();
+buildSprites();
+if (reduced) yaw = YAW_STILL;
+rebuild(true);
+buildOrbiters();
+setView(yaw);
+applyMotionCopy();
+render();
+if (!reduced) ensureRunning();
+
+window.addEventListener('resize', onResize, { passive: true });
+if (window.visualViewport) window.visualViewport.addEventListener('resize', onResize, { passive: true });
+
+/* --- interaction -------------------------------------------------------- */
+/* A page that loads with the cursor already inside the stage receives a
+   synthetic pointerenter ~80 ms after commit. Firing the scatter on that would
+   spend the whole hero before the visitor has seen the hat at rest, so the
+   hover trigger is armed a beat after load. For the same reason the FIRST
+   deliberate mouse movement counts as a hover-in: someone whose cursor was
+   already parked over the stage never gets a pointerenter at all. */
+let armed = false, firstMoveUsed = false;
+setTimeout(() => { armed = true; }, 700);
+stage.addEventListener('pointerenter', (e) => {
+  if (e.pointerType === 'mouse' && armed) trigger();
+});
+stage.addEventListener('pointermove', (e) => {
+  if (e.pointerType !== 'mouse' || !armed || firstMoveUsed) return;
+  firstMoveUsed = true;
+  trigger();
+}, { passive: true });
+stage.addEventListener('pointerdown', (e) => {
+  if (e.pointerType !== 'mouse') trigger();
+});
+stage.addEventListener('click', (e) => {
+  if (e.detail === 0) return;             // keyboard-synthesised click
+  trigger();
+});
+stage.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+    e.preventDefault();
+    trigger();
+  }
+});
+
+/* --- reduced motion at RUNTIME ------------------------------------------ */
+/* The advertised affordance has to match the real one in BOTH directions of a
+   mid-session toggle: reduced motion never spins and never scatters, so it must
+   not be described that way to a screen reader or in the caption. */
+function applyMotionCopy() {
+  if (reduced) {
+    stage.setAttribute('aria-label', 'A red fedora, held still. Activate to warm it.');
+    hintEl.innerHTML = 'Hover, tap or press <b>Enter</b> to stoke it';
+  } else {
+    stage.setAttribute('aria-label',
+      'A spinning red fedora. Activate to scatter it into embers and let it reform.');
+    hintEl.innerHTML = 'Hover, tap or press <b>Enter</b> to scatter it';
+  }
+}
+function onRM() {
+  reduced = rmq.matches;
+  applyMotionCopy();
+  if (reduced) {
+    burstT = -1;
+    pulseActive = false; pulse = 0;
+    spin = 0;
+    yaw = YAW_STILL;
+    if (pPos && pHome) pPos.set(pHome);
+    running = false;
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+    setView(yaw); render();
+  } else {
+    buildDeferred();
+    lastT = 0;
+    ensureRunning();
+  }
+}
+if (rmq.addEventListener) rmq.addEventListener('change', onRM);
+else if (rmq.addListener) rmq.addListener(onRM);
+
+/* --- visibility --------------------------------------------------------- */
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+  } else {
+    lastT = 0;                            // no dt spike
+    if (!reduced || pulseActive) ensureRunning();
+    else { setView(yaw); render(); }
+  }
+});
+
+/* Offline QA hooks — opt-in only (append ?qa to the URL), so a shipped page
+   emits nothing to the console and leaves no globals behind. */
+if (/(^|[?&])qa($|[=&])/.test(location.search)) {
+  window.__hat = {
+    quads: () => MESH.nq, verts: () => MESH.nv, particles: () => NPa, q: () => meshQ,
+    pose(y, p) {
+      if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+      running = false; burstT = -1; orbLife = 0;
+      yaw = y; if (p !== undefined) PITCH = p;
+      setView(yaw); render();
+    },
+    /* deterministic filming: freeze rAF, then step the sim at a fixed dt */
+    freeze() {
+      if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+      running = false;
+    },
+    fire() { this.freeze(); burstT = -1; trigger(); this.freeze(); },
+    step(n) { for (let i = 0; i < n; i++) advance(1 / 60); render(); },
+  };
+}
+
+})();
+</script>
+</body>
+</html>
