@@ -353,8 +353,20 @@
     pointer-events: none;
     text-transform: uppercase;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 10px;
+  }
+
+  .frame .gen-stats {
+    width: 100%;
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    opacity: 0.75;
+    text-transform: none;
+    padding-top: 2px;
   }
 
   .frame .hover-hint {
@@ -820,7 +832,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
   const MODELS = [
     { id: "fable-5-ultracode", name: "Fable 5 Ultracode", group: "Anthropic", dateAdded: "2026-07-01" },
     { id: "fable-5",     name: "Fable 5",            group: "Anthropic", openrouterId: "anthropic/claude-fable-5", dateAdded: "2026-07-01" },
-    { id: "opus-5",      name: "Opus 5",             group: "Anthropic", openrouterId: "anthropic/claude-opus-5", dateAdded: "2026-07-24" },
+    { id: "opus-5",      name: "Opus 5",             group: "Anthropic", openrouterId: "anthropic/claude-opus-5", dateAdded: "2026-07-24", stats: { cost: "$8.14", apiDuration: "26m 20s", wallDuration: "32m 25s", linesAdded: 996, linesRemoved: 49 } },
     { id: "opus-4-8",    name: "Opus 4.8",           group: "Anthropic", openrouterId: "anthropic/claude-opus-4.8", dateAdded: "1970-01-01" },
     { id: "opus-4-7",    name: "Opus 4.7",           group: "Anthropic", openrouterId: "anthropic/claude-opus-4.7", dateAdded: "1970-01-01" },
     { id: "opus-4-6",    name: "Opus 4.6",           group: "Anthropic", openrouterId: "anthropic/claude-opus-4.6", dateAdded: "1970-01-01" },
@@ -1004,6 +1016,18 @@ And respect reduced motion. Return only the finished HTML file.</div>
       voteInfo.dataset.model = m.id;
       starDiv.appendChild(voteInfo);
       label.appendChild(starDiv);
+
+      if (m.stats) {
+        const statsDiv = document.createElement("div");
+        statsDiv.className = "gen-stats";
+        const parts = [m.stats.cost, m.stats.apiDuration + " API", m.stats.wallDuration + " wall"];
+        if (m.stats.linesAdded || m.stats.linesRemoved) {
+          parts.push("+" + m.stats.linesAdded + " −" + m.stats.linesRemoved);
+        }
+        statsDiv.textContent = parts.join(" · ");
+        label.appendChild(statsDiv);
+      }
+
       frame.appendChild(label);
 
       const hint = document.createElement("div");
