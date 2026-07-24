@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Fedora Showdown</title>
+<title>FedoraBench</title>
 <style>
   :root {
     --bg: #0b0d14;
@@ -740,14 +740,12 @@
 .sidebar .model-list button .btn-name {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
+  row-gap: 3px;
+  white-space: normal;
 }
 .sidebar .model-list button .btn-name .variant-name-base {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .sidebar .model-list button .btn-name .variant-badge {
@@ -775,7 +773,7 @@
 <button class="mobile-toggle" id="mobile-toggle" aria-label="Menu">☰</button>
 <div class="sidebar-overlay" id="sidebar-overlay"></div>
 <aside class="sidebar" id="sidebar">
-  <div class="logo" id="logo" style="cursor:pointer">Fedora Showdown</div>
+  <div class="logo" id="logo" style="cursor:pointer">FedoraBench</div>
   <div class="bottom-actions">
     <button id="btn-about">💡 About</button>
     <button id="btn-prompt">✨ Prompt</button>
@@ -833,7 +831,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
     </div>
     <div class="prompt-content">
       <div class="prompt-field" style="font-family: inherit; line-height: 1.8;">
-        <strong>Fedora Showdown</strong> gives every major AI model the same creative prompt and lets you compare the results side by side. The prompt asks each model to build a single-file HTML page with a spinning 3D Red Hat fedora that dissolves into particles on hover.
+        <strong>FedoraBench</strong> gives every major AI model the same creative prompt and lets you compare the results side by side. The prompt asks each model to build a single-file HTML page with a spinning 3D Red Hat fedora that dissolves into particles on hover.
         <br><br>
         <strong>Harness / coding tool used per provider:</strong>
         <br>

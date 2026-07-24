@@ -1,4 +1,4 @@
-# Fedora Showdown
+# FedoraBench
 
 A vibe bench for AI coding models. Every model gets the same prompt — generate a single-file HTML page with a 3D spinning Red Hat-style fedora that dissolves into particles on hover — and the results are collected so you can see how each one vibes.
 
