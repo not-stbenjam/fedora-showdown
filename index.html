@@ -731,6 +731,7 @@
   background: #f8e9ff;
   box-shadow: 0 0 5px #d8a6ff, 0 0 9px rgba(168, 85, 247, 0.8);
 }
+.variant-badge-ultra::before { display: none; }
 .sidebar .model-list button .btn-label {
   display: flex;
   flex-direction: column;
@@ -844,7 +845,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
         <br><br>
         Entries marked <span class="variant-badge">Ultracode</span> were run using Claude Code's multi-agent mode (parallel implementations → judge → best result). This applies even when the model isn't from Anthropic — Claude Code supports <a href="https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration" target="_blank" rel="noopener">overriding the Anthropic base URL to OpenRouter</a>, so it orchestrates the workflow while the underlying model can be swapped to any provider.
         <br><br>
-        Entries marked <span class="variant-badge">Ultra</span> were run in Codex at the model's Ultra reasoning effort.
+        Entries marked <span class="variant-badge variant-badge-ultra">Ultra</span> were run in Codex at the model's Ultra reasoning effort.
       </div>
     </div>
   </div>
@@ -968,7 +969,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
     const badge = m.badge || (m.name.endsWith(" Ultracode") ? "Ultracode" : "");
     if (!badge) return m.name;
     return '<span class="variant-name-base">' + m.name.slice(0, -badge.length).trimEnd() + '</span>'
-      + ' <span class="variant-badge">' + badge + '</span>';
+      + ' <span class="variant-badge' + (badge === "Ultra" ? ' variant-badge-ultra' : '') + '">' + badge + '</span>';
   }
 
   function init() {
