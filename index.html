@@ -369,6 +369,18 @@
     padding-top: 2px;
   }
 
+  @media (min-width: 641px) {
+    .frame .label {
+      display: grid;
+      grid-template-columns: max-content max-content;
+    }
+
+    .frame .gen-stats {
+      grid-column: 1 / -1;
+      width: auto;
+    }
+  }
+
   .frame .hover-hint {
     position: absolute;
     top: 16px;
