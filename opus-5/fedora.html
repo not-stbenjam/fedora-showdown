@@ -1,0 +1,946 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ember Fedora</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html, body { height: 100%; }
+
+  body {
+    margin: 0;
+    min-height: 100svh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    color: #ece8f0;
+    background:
+      radial-gradient(130% 100% at 50% 26%, #191521 0%, #0d0b12 46%, #060508 100%),
+      #060508;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .hero {
+    margin: 0;
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(14px, 3vh, 34px);
+    padding: clamp(14px, 3vw, 40px);
+  }
+
+  .stage {
+    position: relative;
+    flex: 1 1 auto;
+    width: min(100%, 860px);
+    min-height: 220px;
+    border-radius: 28px;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .stage canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 28px;
+  }
+
+  .stage:focus-visible {
+    outline: 1px solid rgba(255, 138, 96, 0.7);
+    outline-offset: 8px;
+  }
+
+  .caption {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    text-align: center;
+    padding-bottom: clamp(4px, 2vh, 20px);
+  }
+
+  .caption .title {
+    font-size: clamp(12px, 1.4vw, 15px);
+    font-weight: 500;
+    letter-spacing: 0.44em;
+    text-indent: 0.44em;
+    text-transform: uppercase;
+    color: #f4f0f4;
+  }
+
+  .caption .rule {
+    width: 46px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255, 120, 90, 0.55), transparent);
+  }
+
+  .caption .hint {
+    font-size: clamp(10px, 1.1vw, 12px);
+    letter-spacing: 0.2em;
+    text-indent: 0.2em;
+    text-transform: uppercase;
+    color: #857d90;
+    transition: color 420ms ease;
+  }
+
+  .stage:hover ~ .caption .hint,
+  .stage:focus-visible ~ .caption .hint { color: #c8a99e; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .caption .hint { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<figure class="hero">
+  <div class="stage" id="stage" tabindex="0" role="button"
+       aria-label="A slowly spinning fedora. Activate to scatter it into embers and let it reform.">
+    <canvas id="scene"></canvas>
+  </div>
+  <figcaption class="caption">
+    <span class="title">Ember Fedora</span>
+    <span class="rule" aria-hidden="true"></span>
+    <span class="hint" id="hint">Hover to scatter it into embers</span>
+  </figcaption>
+</figure>
+
+<script>
+(function () {
+  'use strict';
+
+  var TAU = Math.PI * 2;
+  var stage = document.getElementById('stage');
+  var hint = document.getElementById('hint');
+  var canvas = document.getElementById('scene');
+  var ctx = canvas.getContext('2d', { alpha: false });
+
+  var mqReduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+  var mqCoarse = window.matchMedia('(hover: none)');
+  var reduced = mqReduce.matches;
+  var coarse = mqCoarse.matches;
+
+  /* ------------------------------------------------------------------ *
+   * small helpers
+   * ------------------------------------------------------------------ */
+
+  function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
+  function smoothstep(a, b, x) { var t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); }
+  function smoother(t) { t = clamp(t, 0, 1); return t * t * t * (t * (t * 6 - 15) + 10); }
+
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  var rand = mulberry32(0x5eed1a);
+
+  /* ------------------------------------------------------------------ *
+   * fedora geometry — a lathed profile with a crown dent and a swept brim
+   * ------------------------------------------------------------------ */
+
+  var SEG = coarse ? 48 : 64;          // segments around the axis
+  var DENT = 0.20;                     // depth of the centre crease
+  var DENT_S2 = 0.045;                 // crease width (sigma squared)
+  var BRIM_SWEEP = 0.22;               // one side of the brim lifts, the other dips
+  var BRIM_TH = 0.030;                 // uniform brim thickness — keeps the two
+                                       // faces exactly antiparallel so no view
+                                       // angle can cull both and punch a hole
+  var CULL_EPS = 0.05;                 // bias: keep near-silhouette faces
+  var CAMD = 3.85;                     // camera distance
+  var TILT = 0.38;                     // look down onto the hat
+
+  function brimY(t) { return -0.075 * t * t + 0.055 * Math.pow(t, 6); }
+
+  function buildProfile() {
+    var P = [];
+    function add(r, y, mat, dw, bt) {
+      P.push({ r: r, y: y, mat: mat, dw: dw || 0, bt: (bt === undefined ? -1 : bt) });
+    }
+
+    var TOP_Y = 1.00, TOP_R = 0.50, DOME = 0.22;
+
+    // crown dome
+    var N1 = 7, i, t, a;
+    for (i = 0; i <= N1; i++) {
+      t = i / N1; a = t * Math.PI * 0.5;
+      add(TOP_R * Math.sin(a), TOP_Y - DOME * (1 - Math.cos(a)), 0, 1);
+    }
+    // crown wall, flaring gently outward
+    var N2 = 8, wy0 = TOP_Y - DOME, wy1 = 0.17;
+    for (i = 1; i <= N2; i++) {
+      t = i / N2;
+      add(TOP_R + 0.12 * Math.pow(t, 1.35), wy0 + (wy1 - wy0) * t, 0, Math.max(0, 1 - t * 2.1));
+    }
+    // hat band
+    add(0.648, 0.166, 1);
+    add(0.653, 0.100, 1);
+    add(0.648, 0.036, 1);
+    add(0.623, 0.012, 1);
+
+    // brim, upper face
+    var N3 = 8, RI = 0.62, RO = 1.22;
+    for (i = 0; i <= N3; i++) {
+      t = i / N3;
+      add(RI + (RO - RI) * Math.pow(t, 0.88), brimY(t), 2, 0, t);
+    }
+    // rolled edge
+    var N4 = 3;
+    for (i = 1; i <= N4; i++) {
+      a = (i / N4) * Math.PI;
+      add(RO + 0.013 * Math.sin(a), brimY(1) - (BRIM_TH * 0.5) * (1 - Math.cos(a)), 2, 0, 1);
+    }
+    // brim, under face — an exact translate of the upper face
+    for (i = N3 - 1; i >= 0; i--) {
+      t = i / N3;
+      add(RI + (RO - RI) * Math.pow(t, 0.88), brimY(t) - BRIM_TH, 2, 0, t);
+    }
+    // inner cap, closing the solid
+    add(0.42, -0.062, 3);
+    add(0.16, -0.072, 3);
+    add(0.00, -0.076, 3);
+
+    return P;
+  }
+
+  var profile = buildProfile();
+  var RINGS = profile.length;
+  var VN = RINGS * SEG;
+  var FN = (RINGS - 1) * SEG;
+
+  // model-space vertices
+  var mvx = new Float32Array(VN), mvy = new Float32Array(VN), mvz = new Float32Array(VN);
+  // view-space vertices + screen projection
+  var wvx = new Float32Array(VN), wvy = new Float32Array(VN), wvz = new Float32Array(VN);
+  var scx = new Float32Array(VN), scy = new Float32Array(VN);
+  // faces
+  var fA = new Int32Array(FN), fB = new Int32Array(FN), fC = new Int32Array(FN), fD = new Int32Array(FN);
+  var fMat = new Uint8Array(FN);
+
+  (function buildMesh() {
+    var i, j, k = 0, p, th, ct, st, r, x, y, z;
+    for (i = 0; i < RINGS; i++) {
+      p = profile[i];
+      for (j = 0; j < SEG; j++) {
+        th = j * TAU / SEG; ct = Math.cos(th); st = Math.sin(th);
+        r = p.r; y = p.y; x = r * ct; z = r * st;
+        if (p.dw > 0) y -= DENT * Math.exp(-(x * x) / DENT_S2) * p.dw;
+        if (p.bt >= 0) y += BRIM_SWEEP * Math.pow(p.bt, 1.7) * st;
+        mvx[k] = x; mvy[k] = y; mvz[k] = z; k++;
+      }
+    }
+    // centre the model vertically
+    var minY = Infinity, maxY = -Infinity;
+    for (i = 0; i < VN; i++) { if (mvy[i] < minY) minY = mvy[i]; if (mvy[i] > maxY) maxY = mvy[i]; }
+    var mid = (minY + maxY) * 0.5;
+    for (i = 0; i < VN; i++) mvy[i] -= mid;
+
+    k = 0;
+    for (i = 0; i < RINGS - 1; i++) {
+      for (j = 0; j < SEG; j++) {
+        var j2 = (j + 1) % SEG;
+        fA[k] = i * SEG + j;
+        fB[k] = i * SEG + j2;
+        fC[k] = (i + 1) * SEG + j2;
+        fD[k] = (i + 1) * SEG + j;
+        fMat[k] = Math.max(profile[i].mat, profile[i + 1].mat);
+        k++;
+      }
+    }
+  })();
+
+  // Widest projected extent over a whole revolution, in normalised units.
+  // Fitting to this means the hat never crops, at any angle or aspect ratio.
+  var FITX = 0, FITY = 0;
+  (function measureFit() {
+    var ct = Math.cos(TILT), st = Math.sin(TILT), s, i;
+    for (s = 0; s < 24; s++) {
+      var sp = s / 24 * TAU, cs = Math.cos(sp), sn = Math.sin(sp);
+      for (i = 0; i < VN; i++) {
+        var x = mvx[i], y = mvy[i], z = mvz[i];
+        var x1 = x * cs + z * sn, z1 = -x * sn + z * cs;
+        var y2 = y * ct - z1 * st, z2 = y * st + z1 * ct;
+        var zc = z2 + CAMD;
+        var ax = Math.abs(x1 / zc), ay = Math.abs(y2 / zc);
+        if (ax > FITX) FITX = ax;
+        if (ay > FITY) FITY = ay;
+      }
+    }
+    FITY *= 1.04; // headroom for the idle float
+  })();
+
+  var MODEL_TOP = (function () {
+    var m = -Infinity; for (var i = 0; i < VN; i++) if (mvy[i] > m) m = mvy[i]; return m;
+  })();
+  var MODEL_BOT = (function () {
+    var m = Infinity; for (var i = 0; i < VN; i++) if (mvy[i] < m) m = mvy[i]; return m;
+  })();
+
+  // winding sign, resolved once from a known outward-facing face on the crown wall
+  var FLIP = (function () {
+    var f = 10 * SEG; // somewhere on the crown wall, at theta = 0
+    var ax = mvx[fC[f]] - mvx[fA[f]], ay = mvy[fC[f]] - mvy[fA[f]], az = mvz[fC[f]] - mvz[fA[f]];
+    var bx = mvx[fD[f]] - mvx[fB[f]], by = mvy[fD[f]] - mvy[fB[f]], bz = mvz[fD[f]] - mvz[fB[f]];
+    var nx = ay * bz - az * by;
+    return nx < 0 ? -1 : 1;
+  })();
+
+  /* ------------------------------------------------------------------ *
+   * materials + lighting (view space: camera at origin, +z away)
+   * ------------------------------------------------------------------ */
+
+  var MAT = [
+    { c: [206, 30, 36], spec: 0.34, sh: 30, rim: 0.40 }, // crown
+    { c: [52, 17, 21], spec: 0.60, sh: 54, rim: 0.26 },  // band
+    { c: [182, 24, 30], spec: 0.30, sh: 24, rim: 0.38 }, // brim
+    { c: [74, 20, 22], spec: 0.12, sh: 12, rim: 0.14 }   // inner
+  ];
+
+  function norm3(v) {
+    var l = Math.hypot(v[0], v[1], v[2]) || 1;
+    return [v[0] / l, v[1] / l, v[2] / l];
+  }
+  var L_KEY = norm3([-0.50, 0.78, -0.62]);
+  var L_FILL = norm3([0.72, 0.20, -0.50]);
+  var L_RIM = norm3([0.34, 0.44, 0.86]);
+  var L_BOUNCE = norm3([0.10, -1.00, -0.35]); // floor bounce, lifts the underside
+  var H_KEY = norm3([L_KEY[0], L_KEY[1], L_KEY[2] - 1]);
+
+  var AMB = [0.185, 0.135, 0.175];
+  var KEY = [0.72, 0.66, 0.60];
+  var FILL = [0.20, 0.25, 0.42];
+  var BOUNCE = 0.50;
+  var SPEC_C = [255, 236, 218];
+  var RIM_C = [255, 108, 66];
+
+  /* ------------------------------------------------------------------ *
+   * particles, sampled over the mesh surface by area
+   * ------------------------------------------------------------------ */
+
+  var PN = (function () {
+    var n = 4400;
+    if (coarse || (navigator.hardwareConcurrency || 8) <= 4) n = 1800;
+    return n;
+  })();
+  var ORB_N = 30, TRAIL = 15;
+
+  var phx = new Float32Array(PN), phy = new Float32Array(PN), phz = new Float32Array(PN);
+  var pnx = new Float32Array(PN), pny = new Float32Array(PN), pnz = new Float32Array(PN);
+  var ppx = new Float32Array(PN), ppy = new Float32Array(PN), ppz = new Float32Array(PN);
+  var pvx = new Float32Array(PN), pvy = new Float32Array(PN), pvz = new Float32Array(PN);
+  var prx = new Float32Array(PN), pry = new Float32Array(PN), prz = new Float32Array(PN);
+  var pax = new Float32Array(PN), pay = new Float32Array(PN), paz = new Float32Array(PN);
+  var pArc = new Float32Array(PN);
+  var pAlp = new Float32Array(PN), pSiz = new Float32Array(PN), pSeed = new Float32Array(PN);
+  var pCol = new Uint8Array(PN), pState = new Uint8Array(PN), pOrb = new Uint8Array(PN);
+  var pDOut = new Float32Array(PN), pDIn = new Float32Array(PN);
+  var oR = new Float32Array(PN), oInc = new Float32Array(PN), oYaw = new Float32Array(PN);
+  var oPh = new Float32Array(PN), oSpd = new Float32Array(PN), oBob = new Float32Array(PN);
+  var sX = new Float32Array(PN), sY = new Float32Array(PN), sR = new Float32Array(PN);
+  var sVis = new Uint8Array(PN), sFront = new Uint8Array(PN);
+
+  var orbIdx = new Int32Array(ORB_N);
+  var trail = new Float32Array(ORB_N * TRAIL * 3);
+  var trailFill = 0, trailHead = 0, trailTick = 0;
+
+  (function sampleSurface() {
+    // area-weighted cumulative distribution over the outward faces
+    var cdf = new Float64Array(FN), fnx = new Float32Array(FN), fny = new Float32Array(FN), fnz = new Float32Array(FN);
+    var total = 0, f;
+    for (f = 0; f < FN; f++) {
+      var a = fA[f], b = fB[f], c = fC[f], d = fD[f];
+      var ux = mvx[c] - mvx[a], uy = mvy[c] - mvy[a], uz = mvz[c] - mvz[a];
+      var wx = mvx[d] - mvx[b], wy = mvy[d] - mvy[b], wz = mvz[d] - mvz[b];
+      var nx = (uy * wz - uz * wy) * FLIP, ny = (uz * wx - ux * wz) * FLIP, nz = (ux * wy - uy * wx) * FLIP;
+      var len = Math.hypot(nx, ny, nz) || 1e-6;
+      fnx[f] = nx / len; fny[f] = ny / len; fnz[f] = nz / len;
+      var area = len * 0.5;
+      if (fMat[f] === 3) area = 0;               // hidden inner cap: never sampled
+      else if (fny[f] < -0.35) area *= 0.35;     // undersides: sparser
+      total += area;
+      cdf[f] = total;
+    }
+
+    var i, lo, hi, mid;
+    for (i = 0; i < PN; i++) {
+      var target = rand() * total;
+      lo = 0; hi = FN - 1;
+      while (lo < hi) { mid = (lo + hi) >> 1; if (cdf[mid] < target) lo = mid + 1; else hi = mid; }
+      f = lo;
+      var A = fA[f], B = fB[f], C = fC[f], D = fD[f];
+      var u = rand(), v = rand();
+      var x1 = mvx[A] + (mvx[B] - mvx[A]) * u, y1 = mvy[A] + (mvy[B] - mvy[A]) * u, z1 = mvz[A] + (mvz[B] - mvz[A]) * u;
+      var x2 = mvx[D] + (mvx[C] - mvx[D]) * u, y2 = mvy[D] + (mvy[C] - mvy[D]) * u, z2 = mvz[D] + (mvz[C] - mvz[D]) * u;
+      phx[i] = x1 + (x2 - x1) * v;
+      phy[i] = y1 + (y2 - y1) * v;
+      phz[i] = z1 + (z2 - z1) * v;
+      pnx[i] = fnx[f]; pny[i] = fny[f]; pnz[i] = fnz[f];
+      pSiz[i] = 0.0052 + 0.0050 * rand() * rand();
+      pSeed[i] = rand() * TAU;
+      var r = rand();
+      pCol[i] = r < 0.06 ? 3 : (r < 0.40 ? 0 : (r < 0.78 ? 1 : 2));
+      ppx[i] = phx[i]; ppy[i] = phy[i]; ppz[i] = phz[i];
+    }
+
+    // pick orbiters from particles that sit high on the hat, so they leave cleanly
+    var picked = 0, guard = 0;
+    while (picked < ORB_N && guard++ < PN * 4) {
+      var k = (rand() * PN) | 0;
+      if (pOrb[k] || phy[k] < 0) continue;
+      pOrb[k] = 1;
+      orbIdx[picked++] = k;
+      oR[k] = 1.30 + rand() * 0.62;
+      oInc[k] = (rand() - 0.5) * 0.95;
+      oYaw[k] = rand() * TAU;
+      oPh[k] = rand() * TAU;
+      oSpd[k] = (0.34 + rand() * 0.40) * (rand() < 0.25 ? -1 : 1);
+      oBob[k] = 0.5 + rand() * 0.9;
+    }
+  })();
+
+  var EMBER = [
+    [255, 176, 104],
+    [255, 122, 58],
+    [255, 66, 46],
+    [255, 232, 206]
+  ];
+  var sprites = EMBER.map(function (c) {
+    var s = document.createElement('canvas');
+    s.width = s.height = 64;
+    var g = s.getContext('2d');
+    var grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grad.addColorStop(0.00, 'rgba(255,255,255,0.80)');
+    grad.addColorStop(0.14, 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',0.70)');
+    grad.addColorStop(0.30, 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',0.32)');
+    grad.addColorStop(0.60, 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',0.08)');
+    grad.addColorStop(1.00, 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 64, 64);
+    return s;
+  });
+
+  /* ------------------------------------------------------------------ *
+   * viewport
+   * ------------------------------------------------------------------ */
+
+  var W = 1, H = 1, DPR = 1, CX = 0, CY = 0, SCALE = 1, HALFW = 1, HALFH = 1, bgGrad = null;
+
+  function resize() {
+    var rect = stage.getBoundingClientRect();
+    W = Math.max(1, Math.round(rect.width));
+    H = Math.max(1, Math.round(rect.height));
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(W * DPR);
+    canvas.height = Math.round(H * DPR);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.lineJoin = 'round';
+
+    CX = W * 0.5;
+    CY = H * 0.445;
+    // leave room around the hat for the ember cloud to breathe
+    SCALE = Math.min(W * 0.64 / (2 * FITX), H * 0.60 / (2 * FITY));
+    HALFW = SCALE * FITX;
+    HALFH = SCALE * FITY;
+
+    bgGrad = ctx.createRadialGradient(CX, H * 0.30, 0, CX, H * 0.30, Math.max(W, H) * 0.92);
+    bgGrad.addColorStop(0.00, '#191521');
+    bgGrad.addColorStop(0.46, '#0d0b12');
+    bgGrad.addColorStop(1.00, '#060508');
+
+    if (reduced) renderStill();
+  }
+
+  /* ------------------------------------------------------------------ *
+   * animation state
+   * ------------------------------------------------------------------ */
+
+  var T_RELEASE = 0.52;    // stagger window for the dissolve
+  var T_SWIRL_END = 2.60;  // free flight ends
+  var T_IN_STAG = 0.50;    // stagger window for the reform
+  var T_IN_DUR = 1.28;     // per-particle reform duration
+  var T_TOTAL = T_SWIRL_END + T_IN_STAG + T_IN_DUR + 0.30;
+
+  var spin = 0.55, spinRate = 0.40, spinMul = 1, spinMulTarget = 1;
+  var clock = 0, effectT = 1e9, effectOn = false, hasOrbiters = false;
+  var meshAlpha = 1, heat = 0, bob = 0;
+  var last = 0, raf = 0;
+
+  var cosSpin = 1, sinSpin = 0, cosTilt = Math.cos(TILT), sinTilt = Math.sin(TILT);
+
+  function trigger() {
+    if (reduced || (effectOn && effectT < T_TOTAL)) return;
+    effectT = 0;
+    effectOn = true;
+    var span = MODEL_TOP - MODEL_BOT;
+    for (var i = 0; i < PN; i++) {
+      var hN = clamp((phy[i] - MODEL_BOT) / span, 0, 1);
+      pDOut[i] = T_RELEASE * hN + 0.10 * rand();
+      pDIn[i] = T_IN_STAG * hN + 0.06 * rand();
+      if (pOrb[i] && pState[i] === 3) {
+        // orbiters fold back into the swarm from wherever they are
+        pState[i] = 1;
+        pAlp[i] = 0.62;
+        pvx[i] = (rand() - 0.5) * 0.5; pvy[i] = 0.2 + rand() * 0.3; pvz[i] = (rand() - 0.5) * 0.5;
+      } else {
+        pState[i] = 0;
+        pAlp[i] = 0;
+        ppx[i] = phx[i]; ppy[i] = phy[i]; ppz[i] = phz[i];
+      }
+    }
+    trailFill = 0; trailHead = 0;
+  }
+
+  // Embers wander, but the cloud stays a cloud. Flattened, because the canvas
+  // is wider than it is tall — the swarm spreads sideways rather than clipping.
+  var DRIFT_R = 1.72, DRIFT_Y = 1.55;
+
+  function release(i) {
+    var imp = 0.30 + 0.30 * rand();
+    var tx = -phz[i], tz = phx[i];
+    var tl = Math.hypot(tx, tz) || 1;
+    tx /= tl; tz /= tl;
+    var tang = 0.18 + 0.22 * rand();
+    pvx[i] = pnx[i] * imp + tx * tang + (rand() - 0.5) * 0.12;
+    pvy[i] = pny[i] * imp * 0.85 + 0.10 + rand() * 0.16;
+    pvz[i] = pnz[i] * imp + tz * tang + (rand() - 0.5) * 0.12;
+    pState[i] = 1;
+  }
+
+  function beginReform(i) {
+    prx[i] = ppx[i]; pry[i] = ppy[i]; prz[i] = ppz[i];
+    // a perpendicular offset so particles curve home instead of sliding straight in
+    var dx = phx[i] - prx[i], dy = phy[i] - pry[i], dz = phz[i] - prz[i];
+    var ax = dy * 0.9 - dz * 0.2, ay = dz * 0.4 - dx * 0.9, az = dx * 0.2 - dy * 0.4;
+    var al = Math.hypot(ax, ay, az) || 1;
+    pax[i] = ax / al; pay[i] = ay / al; paz[i] = az / al;
+    pArc[i] = Math.hypot(dx, dy, dz) * (0.10 + 0.16 * rand());
+    pState[i] = 2;
+  }
+
+  function orbitPos(i, t, out) {
+    var ang = oPh[i] + oSpd[i] * t;
+    var ox = Math.cos(ang) * oR[i];
+    var oz = Math.sin(ang) * oR[i];
+    var y = oz * Math.sin(oInc[i]) + 0.14 * Math.sin(t * oBob[i] + oPh[i]);
+    var zz = oz * Math.cos(oInc[i]);
+    var cy = Math.cos(oYaw[i]), sy = Math.sin(oYaw[i]);
+    out[0] = ox * cy + zz * sy;
+    out[1] = y;
+    out[2] = -ox * sy + zz * cy;
+  }
+
+  var tmp3 = [0, 0, 0];
+
+  function updateParticles(dt) {
+    var t = effectT;
+    var i;
+    for (i = 0; i < PN; i++) {
+      var st = pState[i];
+
+      if (!effectOn && st !== 3) { pAlp[i] = 0; continue; }
+
+      if (st === 0) {
+        if (t >= pDOut[i]) { release(i); st = 1; }
+        else {
+          pAlp[i] = clamp((t - (pDOut[i] - 0.30)) / 0.30, 0, 1) * 0.55;
+          continue;
+        }
+      }
+
+      if (st === 1) {
+        var reformAt = T_SWIRL_END + pDIn[i];
+        if (t >= reformAt) { beginReform(i); st = 2; }
+        else {
+          var x = ppx[i], y = ppy[i], z = ppz[i];
+          var rr = Math.hypot(x, z) || 1e-3;
+          // gentle vortex around the axis, plus buoyancy and a little turbulence
+          var sw = 0.85 / (0.55 + rr);
+          var ax = (-z / rr) * sw, az = (x / rr) * sw;
+          var sd = pSeed[i];
+          ax += 0.28 * Math.sin(y * 2.6 + sd + clock * 1.1);
+          var ay = 0.18 + 0.16 * Math.sin(x * 2.2 + sd * 1.7 + clock * 0.9);
+          az += 0.28 * Math.cos(x * 2.4 + sd * 1.3 + clock * 1.05);
+          // soft containment so the swarm never sprays off the canvas
+          var yw = y * DRIFT_Y;
+          var dist = Math.hypot(x, yw, z);
+          if (dist > DRIFT_R) {
+            var pull = (dist - DRIFT_R) * 3.0 / dist;
+            ax -= x * pull; ay -= yw * pull * DRIFT_Y; az -= z * pull;
+          }
+          var drag = Math.exp(-1.5 * dt);
+          pvx[i] = (pvx[i] + ax * dt) * drag;
+          pvy[i] = (pvy[i] + ay * dt) * drag;
+          pvz[i] = (pvz[i] + az * dt) * drag;
+          ppx[i] = x + pvx[i] * dt;
+          ppy[i] = y + pvy[i] * dt;
+          ppz[i] = z + pvz[i] * dt;
+          pAlp[i] = 0.52 + 0.20 * Math.sin(clock * 5.2 + sd);
+          continue;
+        }
+      }
+
+      if (st === 2) {
+        var u = clamp((t - (T_SWIRL_END + pDIn[i])) / T_IN_DUR, 0, 1);
+        var e = smoother(u);
+        var tx, ty, tz;
+        if (pOrb[i]) {
+          orbitPos(i, clock, tmp3);
+          tx = tmp3[0]; ty = tmp3[1]; tz = tmp3[2];
+        } else {
+          tx = phx[i]; ty = phy[i]; tz = phz[i];
+        }
+        var arc = Math.sin(Math.PI * e) * pArc[i];
+        ppx[i] = prx[i] + (tx - prx[i]) * e + pax[i] * arc;
+        ppy[i] = pry[i] + (ty - pry[i]) * e + pay[i] * arc;
+        ppz[i] = prz[i] + (tz - prz[i]) * e + paz[i] * arc;
+        if (pOrb[i]) {
+          pAlp[i] = 0.62;
+          if (u >= 1) { pState[i] = 3; hasOrbiters = true; }
+        } else {
+          pAlp[i] = 0.62 * (1 - smoothstep(0.58, 1.0, u));
+          if (u >= 1) { pState[i] = 0; pAlp[i] = 0; }
+        }
+        continue;
+      }
+
+      if (st === 3) {
+        orbitPos(i, clock, tmp3);
+        ppx[i] = tmp3[0]; ppy[i] = tmp3[1]; ppz[i] = tmp3[2];
+        pAlp[i] = 0.52 + 0.26 * Math.sin(clock * 2.1 + pSeed[i]);
+      }
+    }
+  }
+
+  function pushTrail() {
+    for (var k = 0; k < ORB_N; k++) {
+      var i = orbIdx[k];
+      var base = (k * TRAIL + trailHead) * 3;
+      if (pState[i] === 3) {
+        trail[base] = ppx[i]; trail[base + 1] = ppy[i]; trail[base + 2] = ppz[i];
+      } else {
+        trail[base] = NaN;
+      }
+    }
+    trailHead = (trailHead + 1) % TRAIL;
+    if (trailFill < TRAIL) trailFill++;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * rendering
+   * ------------------------------------------------------------------ */
+
+  var order = [];
+  var faceR = new Uint8ClampedArray(FN), faceG = new Uint8ClampedArray(FN), faceB = new Uint8ClampedArray(FN);
+  var faceZ = new Float32Array(FN);
+  function zsort(a, b) { return faceZ[b] - faceZ[a]; }
+
+  function projectVerts() {
+    var yOff = bob;
+    for (var i = 0; i < VN; i++) {
+      var x = mvx[i], y = mvy[i] + yOff, z = mvz[i];
+      var x1 = x * cosSpin + z * sinSpin;
+      var z1 = -x * sinSpin + z * cosSpin;
+      var y2 = y * cosTilt - z1 * sinTilt;
+      var z2 = y * sinTilt + z1 * cosTilt;
+      wvx[i] = x1; wvy[i] = y2; wvz[i] = z2;
+      var zc = z2 + CAMD;
+      var k = SCALE / zc;
+      scx[i] = CX + x1 * k;
+      scy[i] = CY - y2 * k;
+    }
+  }
+
+  function shadeMesh() {
+    order.length = 0;
+    for (var f = 0; f < FN; f++) {
+      var a = fA[f], b = fB[f], c = fC[f], d = fD[f];
+      var cx = (wvx[a] + wvx[b] + wvx[c] + wvx[d]) * 0.25;
+      var cy = (wvy[a] + wvy[b] + wvy[c] + wvy[d]) * 0.25;
+      var cz = (wvz[a] + wvz[b] + wvz[c] + wvz[d]) * 0.25;
+
+      var ux = wvx[c] - wvx[a], uy = wvy[c] - wvy[a], uz = wvz[c] - wvz[a];
+      var wx = wvx[d] - wvx[b], wy = wvy[d] - wvy[b], wz = wvz[d] - wvz[b];
+      var nx = (uy * wz - uz * wy) * FLIP;
+      var ny = (uz * wx - ux * wz) * FLIP;
+      var nz = (ux * wy - uy * wx) * FLIP;
+      var len = Math.hypot(nx, ny, nz);
+      if (len < 1e-9) continue;
+      nx /= len; ny /= len; nz /= len;
+
+      var vz = cz + CAMD;
+      if (nx * cx + ny * cy + nz * vz >= CULL_EPS) continue; // backface
+
+      var m = MAT[fMat[f]];
+      var d1 = nx * L_KEY[0] + ny * L_KEY[1] + nz * L_KEY[2]; if (d1 < 0) d1 = 0;
+      var d2 = nx * L_FILL[0] + ny * L_FILL[1] + nz * L_FILL[2]; if (d2 < 0) d2 = 0;
+      var db = nx * L_BOUNCE[0] + ny * L_BOUNCE[1] + nz * L_BOUNCE[2]; if (db < 0) db = 0;
+      db = Math.pow(db, 1.4) * BOUNCE;
+      var dr = nx * L_RIM[0] + ny * L_RIM[1] + nz * L_RIM[2]; if (dr < 0) dr = 0;
+      var rim = Math.pow(dr, 2.6) * m.rim * (1 - 0.75 * d1); // don't stack on lit faces
+      var hs = nx * H_KEY[0] + ny * H_KEY[1] + nz * H_KEY[2]; if (hs < 0) hs = 0;
+      var sp = Math.pow(hs, m.sh) * m.spec;
+
+      var base = m.c;
+      var glow = heat * 0.26;
+      faceR[f] = base[0] * (AMB[0] + KEY[0] * d1 + FILL[0] * d2 + db) + SPEC_C[0] * sp + RIM_C[0] * (rim + glow);
+      faceG[f] = base[1] * (AMB[1] + KEY[1] * d1 + FILL[1] * d2 + db) + SPEC_C[1] * sp + RIM_C[1] * (rim + glow);
+      faceB[f] = base[2] * (AMB[2] + KEY[2] * d1 + FILL[2] * d2 + db) + SPEC_C[2] * sp + RIM_C[2] * (rim + glow);
+      faceZ[f] = cz;
+      order.push(f);
+    }
+    order.sort(zsort);
+  }
+
+  function drawMesh(alpha) {
+    ctx.globalAlpha = alpha;
+    for (var i = 0, n = order.length; i < n; i++) {
+      var f = order[i];
+      var a = fA[f], b = fB[f], c = fC[f], d = fD[f];
+      var col = 'rgb(' + faceR[f] + ',' + faceG[f] + ',' + faceB[f] + ')';
+      ctx.fillStyle = col;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 0.7;
+      ctx.beginPath();
+      ctx.moveTo(scx[a], scy[a]);
+      ctx.lineTo(scx[b], scy[b]);
+      ctx.lineTo(scx[c], scy[c]);
+      ctx.lineTo(scx[d], scy[d]);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function projectParticles() {
+    var yOff = bob;
+    for (var i = 0; i < PN; i++) {
+      if (pAlp[i] <= 0.004) { sVis[i] = 0; continue; }
+      var x = ppx[i], y = ppy[i] + yOff, z = ppz[i];
+      var x1 = x * cosSpin + z * sinSpin;
+      var z1 = -x * sinSpin + z * cosSpin;
+      var y2 = y * cosTilt - z1 * sinTilt;
+      var z2 = y * sinTilt + z1 * cosTilt;
+      var zc = z2 + CAMD;
+      if (zc < 0.35) { sVis[i] = 0; continue; }
+      var k = SCALE / zc;
+      sX[i] = CX + x1 * k;
+      sY[i] = CY - y2 * k;
+      sR[i] = pSiz[i] * k;
+      sFront[i] = z2 < 0 ? 1 : 0;
+      sVis[i] = 1;
+    }
+  }
+
+  function drawParticles(front, scale) {
+    if (scale <= 0.004) return;
+    for (var i = 0; i < PN; i++) {
+      if (!sVis[i] || sFront[i] !== front) continue;
+      var d = sR[i] * 3.0;
+      ctx.globalAlpha = clamp(pAlp[i] * scale, 0, 1);
+      ctx.drawImage(sprites[pCol[i]], sX[i] - d, sY[i] - d, d + d, d + d);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawTrails() {
+    if (!trailFill) return;
+    var yOff = bob;
+    for (var k = 0; k < ORB_N; k++) {
+      var i = orbIdx[k];
+      if (pState[i] !== 3) continue;
+      for (var s = 1; s < trailFill; s++) {
+        var idx = (trailHead - 1 - s + TRAIL * 2) % TRAIL;
+        var base = (k * TRAIL + idx) * 3;
+        var tx = trail[base];
+        if (tx !== tx) continue; // NaN gap
+        var ty = trail[base + 1] + yOff, tz = trail[base + 2];
+        var x1 = tx * cosSpin + tz * sinSpin;
+        var z1 = -tx * sinSpin + tz * cosSpin;
+        var y2 = ty * cosTilt - z1 * sinTilt;
+        var z2 = ty * sinTilt + z1 * cosTilt;
+        var zc = z2 + CAMD;
+        if (zc < 0.35) continue;
+        var kk = SCALE / zc;
+        var fade = 1 - s / trailFill;
+        var d = pSiz[i] * kk * 3.0 * (0.30 + 0.62 * fade);
+        ctx.globalAlpha = 0.26 * fade * fade * pAlp[i];
+        ctx.drawImage(sprites[pCol[i]], CX + x1 * kk - d, CY - y2 * kk - d, d + d, d + d);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawBackdrop() {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // soft warm bloom sitting behind the hat
+    var g = ctx.createRadialGradient(CX, CY, 0, CX, CY, HALFW * 1.75);
+    var a0 = 0.055 + 0.16 * heat;
+    g.addColorStop(0.00, 'rgba(255,96,62,' + (a0 * 0.9).toFixed(4) + ')');
+    g.addColorStop(0.38, 'rgba(196,52,60,' + (a0 * 0.42).toFixed(4) + ')');
+    g.addColorStop(1.00, 'rgba(40,10,30,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  function drawShadow(alpha) {
+    if (alpha <= 0.01) return;
+    var r = HALFW * 0.98;
+    ctx.save();
+    ctx.translate(CX, CY + HALFH * 1.06);
+    ctx.scale(1, 0.22);
+    var g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+    g.addColorStop(0.00, 'rgba(0,0,0,0.80)');
+    g.addColorStop(0.48, 'rgba(0,0,0,0.42)');
+    g.addColorStop(1.00, 'rgba(0,0,0,0)');
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  function render() {
+    cosSpin = Math.cos(spin); sinSpin = Math.sin(spin);
+    projectVerts();
+    shadeMesh();
+    projectParticles();
+
+    drawBackdrop();
+    drawShadow(meshAlpha * 0.85 + 0.1);
+
+    var pScale = effectOn || hasOrbiters ? 1 : 0;
+    ctx.globalCompositeOperation = 'lighter';
+    drawParticles(0, pScale);
+    ctx.globalCompositeOperation = 'source-over';
+    if (meshAlpha > 0.004) drawMesh(meshAlpha);
+    ctx.globalCompositeOperation = 'lighter';
+    drawParticles(1, pScale);
+    drawTrails();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function renderStill() {
+    // reduced motion: one composed frame, nothing moving
+    spin = 0.62; bob = 0; heat = 0; meshAlpha = 1;
+    for (var i = 0; i < PN; i++) pAlp[i] = 0;
+    render();
+  }
+
+  /* ------------------------------------------------------------------ *
+   * loop
+   * ------------------------------------------------------------------ */
+
+  function step(now) {
+    raf = requestAnimationFrame(step);
+    var dt = clamp((now - last) / 1000, 0, 1 / 30);
+    last = now;
+    clock += dt;
+
+    if (effectOn) {
+      effectT += dt;
+      spinMulTarget = effectT < T_TOTAL - 0.9 ? 0.22 : 1;
+      var fadeOut = smoothstep(0.10, 0.72, effectT);
+      var fadeIn = smoothstep(T_SWIRL_END + T_IN_STAG + T_IN_DUR * 0.52,
+                              T_SWIRL_END + T_IN_STAG + T_IN_DUR + 0.14, effectT);
+      meshAlpha = clamp(1 - fadeOut + fadeIn, 0, 1);
+      if (effectT > T_TOTAL) { effectOn = false; effectT = 1e9; meshAlpha = 1; }
+    } else {
+      spinMulTarget = 1;
+      meshAlpha = 1;
+    }
+
+    heat += ((1 - meshAlpha) * 0.9 + (effectOn ? 0.1 : 0) - heat) * Math.min(1, dt * 3.2);
+    spinMul += (spinMulTarget - spinMul) * Math.min(1, dt * 1.9);
+    spin = (spin + spinRate * spinMul * dt) % TAU;
+    bob = 0.014 * Math.sin(clock * 0.85);
+
+    updateParticles(dt);
+    if ((trailTick++ & 1) === 0) pushTrail();
+
+    render();
+  }
+
+  function start() {
+    if (raf || reduced) return;
+    last = performance.now();
+    raf = requestAnimationFrame(step);
+  }
+  function stop() {
+    if (raf) { cancelAnimationFrame(raf); raf = 0; }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * wiring
+   * ------------------------------------------------------------------ */
+
+  function applyMotionPreference() {
+    reduced = mqReduce.matches;
+    if (reduced) {
+      stop();
+      hint.textContent = 'Reduced motion — a still scene';
+      renderStill();
+    } else {
+      hint.textContent = coarse ? 'Tap to scatter it into embers'
+                                : 'Hover to scatter it into embers';
+      start();
+    }
+  }
+
+  stage.addEventListener('pointerenter', function (e) {
+    if (e.pointerType === 'mouse') trigger();
+  });
+  stage.addEventListener('pointerdown', function (e) {
+    if (e.pointerType !== 'mouse') trigger();
+  });
+  stage.addEventListener('click', trigger);
+  stage.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+      e.preventDefault();
+      trigger();
+    }
+  });
+
+  if (typeof ResizeObserver === 'function') {
+    new ResizeObserver(resize).observe(stage);
+  }
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', resize);
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) stop();
+    else if (!reduced) start();
+  });
+
+  var mqListen = function (mq, fn) {
+    if (mq.addEventListener) mq.addEventListener('change', fn);
+    else if (mq.addListener) mq.addListener(fn);
+  };
+  mqListen(mqReduce, applyMotionPreference);
+  mqListen(mqCoarse, function () { coarse = mqCoarse.matches; applyMotionPreference(); });
+
+  resize();
+  applyMotionPreference();
+})();
+</script>
+
+</body>
+</html>
