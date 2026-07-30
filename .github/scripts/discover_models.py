@@ -79,7 +79,7 @@ def should_include(model, cost_ceiling):
     mid = model["id"]
     provider = mid.split("/")[0]
 
-    if mid.endswith(":free") or mid.endswith(":thinking") or mid.endswith("-fast"):
+    if mid.endswith(":free") or mid.endswith(":thinking") or mid.endswith(":batch") or mid.endswith("-fast"):
         return False
     if mid.startswith("~"):
         return False
