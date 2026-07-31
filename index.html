@@ -735,6 +735,62 @@
   vertical-align: middle;
   transform: translateY(-0.5px);
 }
+.variant-badge[data-badge="Max"] {
+  background:
+    linear-gradient(135deg, rgba(153, 27, 27, 0.78), rgba(127, 29, 29, 0.64)) padding-box,
+    linear-gradient(135deg, #fecaca, #ef4444 52%, #dc2626) border-box;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 0 12px rgba(239, 68, 68, 0.28);
+  color: #fff1f2;
+  text-shadow: 0 0 7px rgba(254, 202, 202, 0.58);
+}
+.variant-badge[data-badge="XHigh"] {
+  background:
+    linear-gradient(135deg, rgba(154, 52, 18, 0.78), rgba(124, 45, 18, 0.64)) padding-box,
+    linear-gradient(135deg, #fed7aa, #f97316 52%, #ea580c) border-box;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 0 12px rgba(249, 115, 22, 0.28);
+  color: #fff7ed;
+  text-shadow: 0 0 7px rgba(254, 215, 170, 0.58);
+}
+.variant-badge[data-badge="High"] {
+  background:
+    linear-gradient(135deg, rgba(133, 77, 14, 0.78), rgba(120, 53, 15, 0.64)) padding-box,
+    linear-gradient(135deg, #fde68a, #f59e0b 52%, #d97706) border-box;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 0 12px rgba(245, 158, 11, 0.28);
+  color: #fffbeb;
+  text-shadow: 0 0 7px rgba(253, 230, 138, 0.58);
+}
+.variant-badge[data-badge="Medium"] {
+  background:
+    linear-gradient(135deg, rgba(21, 128, 61, 0.78), rgba(22, 101, 52, 0.64)) padding-box,
+    linear-gradient(135deg, #bbf7d0, #22c55e 52%, #16a34a) border-box;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 0 12px rgba(34, 197, 94, 0.28);
+  color: #f0fdf4;
+  text-shadow: 0 0 7px rgba(187, 247, 208, 0.58);
+}
+.variant-badge[data-badge="Low"] {
+  background:
+    linear-gradient(135deg, rgba(14, 116, 144, 0.78), rgba(21, 94, 117, 0.64)) padding-box,
+    linear-gradient(135deg, #a5f3fc, #06b6d4 52%, #0891b2) border-box;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 0 12px rgba(6, 182, 212, 0.28);
+  color: #ecfeff;
+  text-shadow: 0 0 7px rgba(165, 243, 252, 0.58);
+}
+.variant-badge[data-badge="None"] {
+  background:
+    linear-gradient(135deg, rgba(51, 65, 85, 0.78), rgba(30, 41, 59, 0.64)) padding-box,
+    linear-gradient(135deg, #cbd5e1, #64748b 52%, #475569) border-box;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 0 12px rgba(100, 116, 139, 0.28);
+  color: #f1f5f9;
+  text-shadow: 0 0 7px rgba(203, 213, 225, 0.58);
+}
+.variant-badge[data-badge="Default"] {
+  background:
+    linear-gradient(135deg, rgba(29, 78, 216, 0.78), rgba(30, 64, 175, 0.64)) padding-box,
+    linear-gradient(135deg, #bfdbfe, #3b82f6 52%, #2563eb) border-box;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 0 12px rgba(59, 130, 246, 0.28);
+  color: #eff6ff;
+  text-shadow: 0 0 7px rgba(191, 219, 254, 0.58);
+}
 .sidebar .model-list button .btn-label {
   display: flex;
   flex-direction: column;
@@ -924,11 +980,11 @@ And respect reduced motion. Return only the finished HTML file.</div>
         <br><br>
         All models were run at the default effort level for their respective harness and model, unless otherwise noted. No cherry-picking, no retries, no manual edits. What you see is what each model produced on its first attempt.
         <br><br>
-        Entries marked <span class="variant-badge">Ultracode</span> were run using Claude Code's multi-agent mode (parallel implementations → judge → best result). This applies even when the model isn't from Anthropic — Claude Code supports <a href="https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration" target="_blank" rel="noopener">overriding the Anthropic base URL to OpenRouter</a>, so it orchestrates the workflow while the underlying model can be swapped to any provider.
+        Entries marked <span class="variant-badge" data-badge="Ultracode">Ultracode</span> were run using Claude Code's multi-agent mode (parallel implementations → judge → best result). This applies even when the model isn't from Anthropic — Claude Code supports <a href="https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration" target="_blank" rel="noopener">overriding the Anthropic base URL to OpenRouter</a>, so it orchestrates the workflow while the underlying model can be swapped to any provider.
         <br><br>
-        GPT-5.6 Sol, Terra, and Luna entries marked <span class="variant-badge">None</span>, <span class="variant-badge">Low</span>, <span class="variant-badge">Medium</span>, <span class="variant-badge">High</span>, <span class="variant-badge">XHigh</span>, or <span class="variant-badge">Max</span> were run in Codex at that explicit reasoning effort.
+        GPT-5.6 Sol, Terra, and Luna entries marked <span class="variant-badge" data-badge="None">None</span>, <span class="variant-badge" data-badge="Low">Low</span>, <span class="variant-badge" data-badge="Medium">Medium</span>, <span class="variant-badge" data-badge="High">High</span>, <span class="variant-badge" data-badge="XHigh">XHigh</span>, or <span class="variant-badge" data-badge="Max">Max</span> were run in Codex at that explicit reasoning effort.
         <br><br>
-        <span class="variant-badge">Ultra</span> is a separate Codex multi-agent mode, not a reasoning effort — currently shown for Sol only. <span class="variant-badge">Default</span> identifies the original unlabelled run for each family, which used the harness default before effort-specific comparisons were added.
+        <span class="variant-badge" data-badge="Ultra">Ultra</span> is a separate Codex multi-agent mode, not a reasoning effort — currently shown for Sol only. <span class="variant-badge" data-badge="Default">Default</span> identifies the original unlabelled run for each family, which used the harness default before effort-specific comparisons were added.
       </div>
     </div>
   </div>
@@ -948,10 +1004,10 @@ And respect reduced motion. Return only the finished HTML file.</div>
 
   // dateAdded: existing entries use 1970-01-01 as a placeholder (pre-dates tracking)
   const MODELS = [
-    { id: "fable-5-ultracode", name: "Fable 5 Ultracode", group: "Anthropic", dateAdded: "2026-07-01" },
-    { id: "fable-5",     name: "Fable 5",            group: "Anthropic", openrouterId: "anthropic/claude-fable-5", dateAdded: "2026-07-01" },
-    { id: "opus-5-ultracode", name: "Opus 5 Ultracode", group: "Anthropic", dateAdded: "2026-07-24", stats: { cost: "$146.49", apiDuration: "6h 40m 6s", wallDuration: "2h 32m 14s", linesAdded: 11777, linesRemoved: 1245 } },
-    { id: "opus-5",      name: "Opus 5",             group: "Anthropic", openrouterId: "anthropic/claude-opus-5", dateAdded: "2026-07-24", stats: { cost: "$8.14", apiDuration: "26m 20s", wallDuration: "32m 25s", linesAdded: 996, linesRemoved: 49 } },
+    { id: "fable-5-ultracode", name: "Fable 5", family: "fable-5", group: "Anthropic", badge: "Ultracode", dateAdded: "2026-07-01" },
+    { id: "fable-5",     name: "Fable 5", family: "fable-5", group: "Anthropic", badge: "Default", openrouterId: "anthropic/claude-fable-5", dateAdded: "2026-07-01" },
+    { id: "opus-5-ultracode", name: "Opus 5", family: "opus-5", group: "Anthropic", badge: "Ultracode", dateAdded: "2026-07-24", stats: { cost: "$146.49", apiDuration: "6h 40m 6s", wallDuration: "2h 32m 14s", linesAdded: 11777, linesRemoved: 1245 } },
+    { id: "opus-5",      name: "Opus 5", family: "opus-5", group: "Anthropic", badge: "Default", openrouterId: "anthropic/claude-opus-5", dateAdded: "2026-07-24", stats: { cost: "$8.14", apiDuration: "26m 20s", wallDuration: "32m 25s", linesAdded: 996, linesRemoved: 49 } },
     { id: "opus-4-8",    name: "Opus 4.8",           group: "Anthropic", openrouterId: "anthropic/claude-opus-4.8", dateAdded: "1970-01-01" },
     { id: "opus-4-7",    name: "Opus 4.7",           group: "Anthropic", openrouterId: "anthropic/claude-opus-4.7", dateAdded: "1970-01-01" },
     { id: "opus-4-6",    name: "Opus 4.6",           group: "Anthropic", openrouterId: "anthropic/claude-opus-4.6", dateAdded: "1970-01-01" },
@@ -1036,8 +1092,8 @@ And respect reduced motion. Return only the finished HTML file.</div>
     { id: "grok-4.20",   name: "Grok 4.20",           group: "xAI", openrouterId: "x-ai/grok-4.20", dateAdded: "1970-01-01" },
     { id: "grok-4",      name: "Grok 4",              group: "xAI", dateAdded: "1970-01-01" },
     { id: "fugu-ultra",   name: "Fugu Ultra",           group: "Sakana", openrouterId: "sakana/fugu-ultra", dateAdded: "1970-01-01" },
-    { id: "glm-5.2-ultracode", name: "GLM-5.2 Ultracode", group: "Z.ai", dateAdded: "2026-07-01" },
-    { id: "glm-5.2",     name: "GLM-5.2",             group: "Z.ai", openrouterId: "z-ai/glm-5.2", dateAdded: "2026-07-01" },
+    { id: "glm-5.2-ultracode", name: "GLM-5.2", family: "glm-5.2", group: "Z.ai", badge: "Ultracode", dateAdded: "2026-07-01" },
+    { id: "glm-5.2",     name: "GLM-5.2", family: "glm-5.2", group: "Z.ai", badge: "Default", openrouterId: "z-ai/glm-5.2", dateAdded: "2026-07-01" },
     { id: "glm-5.1",     name: "GLM-5.1",             group: "Z.ai", openrouterId: "z-ai/glm-5.1", dateAdded: "1970-01-01" },
     { id: "glm-5-turbo", name: "GLM-5 Turbo",         group: "Z.ai", openrouterId: "z-ai/glm-5-turbo", dateAdded: "1970-01-01" },
     { id: "glm-5",       name: "GLM-5",               group: "Z.ai", openrouterId: "z-ai/glm-5", dateAdded: "1970-01-01" },
@@ -1076,7 +1132,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
     const suffix = " " + badge;
     const baseName = m.name.endsWith(suffix) ? m.name.slice(0, -suffix.length) : m.name;
     return '<span class="variant-name-base">' + baseName + '</span>'
-      + ' <span class="variant-badge">' + badge + '</span>';
+      + ' <span class="variant-badge" data-badge="' + badge + '">' + badge + '</span>';
   }
 
   function getFamilyId(m) {
