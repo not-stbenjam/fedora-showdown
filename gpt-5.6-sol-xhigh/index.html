@@ -1,0 +1,1013 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07090d">
+  <title>Fedora in Motion</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #07090d;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+    }
+
+    body {
+      background:
+        radial-gradient(circle at 50% 39%, rgba(118, 24, 38, 0.13), transparent 29rem),
+        radial-gradient(circle at 50% 72%, rgba(88, 22, 31, 0.08), transparent 25rem),
+        linear-gradient(145deg, #0b0e13 0%, #07090d 54%, #040609 100%);
+    }
+
+    body::before {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      content: "";
+      background:
+        linear-gradient(115deg, transparent 24%, rgba(255, 255, 255, 0.018) 42%, transparent 60%),
+        radial-gradient(ellipse at center, transparent 38%, rgba(0, 0, 0, 0.52) 100%);
+    }
+
+    main {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      isolation: isolate;
+    }
+
+    canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .hat-control {
+      position: absolute;
+      z-index: 2;
+      top: 45%;
+      left: 50%;
+      width: min(86vw, 760px);
+      height: min(48vh, 460px);
+      padding: 0;
+      border: 0;
+      border-radius: 50%;
+      appearance: none;
+      background: transparent;
+      cursor: pointer;
+      transform: translate(-50%, -50%);
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+
+    .hat-control:focus-visible {
+      outline: 1px solid rgba(255, 91, 105, 0.72);
+      outline-offset: 10px;
+      box-shadow: 0 0 0 7px rgba(219, 31, 53, 0.08);
+    }
+
+    .caption {
+      position: absolute;
+      z-index: 3;
+      top: calc(45% + clamp(105px, 17vw, 205px));
+      left: 50%;
+      width: max-content;
+      max-width: 86vw;
+      margin: 0;
+      color: rgba(236, 227, 229, 0.62);
+      font-size: clamp(0.68rem, 1.7vw, 0.78rem);
+      font-weight: 500;
+      letter-spacing: 0.2em;
+      line-height: 1.6;
+      text-align: center;
+      text-transform: uppercase;
+      transform: translateX(-50%);
+      user-select: none;
+    }
+
+    .caption::before {
+      display: inline-block;
+      width: 0.38rem;
+      height: 0.38rem;
+      margin: 0 0.72rem 0.08rem 0;
+      border-radius: 50%;
+      background: #e22a42;
+      box-shadow: 0 0 12px rgba(238, 44, 68, 0.48);
+      content: "";
+      animation: breathe 2.8s ease-in-out infinite;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    @keyframes breathe {
+      0%,
+      100% {
+        opacity: 0.45;
+        transform: scale(0.78);
+      }
+      50% {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .caption::before {
+        animation: none;
+      }
+
+      .hat-control {
+        cursor: default;
+      }
+    }
+
+    @media (max-height: 520px) {
+      .caption {
+        top: auto;
+        bottom: 7vh;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 class="sr-only">A red fedora rendered in light and particles</h1>
+    <canvas id="scene" aria-hidden="true"></canvas>
+    <button
+      id="hatControl"
+      class="hat-control"
+      type="button"
+      aria-label="Scatter and reform the fedora"
+      aria-describedby="caption"
+    ></button>
+    <p id="caption" class="caption">Hover or tap to let it breathe</p>
+  </main>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const canvas = document.getElementById("scene");
+      const context = canvas.getContext("2d", { alpha: true });
+      const control = document.getElementById("hatControl");
+      const motionPreference = matchMedia("(prefers-reduced-motion: reduce)");
+
+      const vertices = [];
+      const faces = [];
+      const particles = [];
+      const orbiters = [];
+      const dust = [];
+
+      const palette = {
+        brim: [190, 20, 42],
+        crown: [224, 31, 55],
+        top: [201, 23, 46],
+        rim: [111, 11, 28],
+        band: [45, 12, 18]
+      };
+
+      const SLOW_END = 0.7;
+      const DISSOLVE_END = 2.15;
+      const SWIRL_END = 4.35;
+      const REFORM_END = 6.15;
+      const TOTAL_TIME = 6.7;
+      const TILT = -0.17;
+      const CAMERA = 8.5;
+
+      let width = 0;
+      let height = 0;
+      let scale = 1;
+      let centerX = 0;
+      let centerY = 0;
+      let deviceScale = 1;
+      let angle = 0.38;
+      let previousTime = performance.now();
+      let sequenceStart = 0;
+      let animationFrame = 0;
+      let active = false;
+      let completed = false;
+      let armed = true;
+      let reducedMotion = motionPreference.matches;
+
+      function seededRandom(seed) {
+        return function () {
+          seed |= 0;
+          seed = seed + 0x6D2B79F5 | 0;
+          let value = Math.imul(seed ^ seed >>> 15, 1 | seed);
+          value = value + Math.imul(value ^ value >>> 7, 61 | value) ^ value;
+          return ((value ^ value >>> 14) >>> 0) / 4294967296;
+        };
+      }
+
+      const random = seededRandom(0xFEDA2026);
+
+      function smoothstep(value) {
+        value = Math.max(0, Math.min(1, value));
+        return value * value * (3 - 2 * value);
+      }
+
+      function smootherstep(value) {
+        value = Math.max(0, Math.min(1, value));
+        return value * value * value * (value * (value * 6 - 15) + 10);
+      }
+
+      function addVertex(point) {
+        vertices.push(point);
+        return vertices.length - 1;
+      }
+
+      function addFace(a, b, c, material) {
+        faces.push({ a, b, c, material, depth: 0 });
+      }
+
+      function addQuad(a, b, c, d, material) {
+        addFace(a, b, c, material);
+        addFace(a, c, d, material);
+      }
+
+      function addReverseQuad(a, b, c, d, material) {
+        addFace(a, d, c, material);
+        addFace(a, c, b, material);
+      }
+
+      function brimPoint(radius, theta, lower = false) {
+        const x = 2.72 * radius * Math.cos(theta);
+        const z = 1.39 * radius * Math.sin(theta);
+        const wave =
+          0.075 * Math.cos(theta * 2) * radius * radius +
+          0.035 * Math.sin(theta) * radius * radius * radius;
+
+        return {
+          x,
+          y: -0.52 + wave - (lower ? 0.105 : 0),
+          z
+        };
+      }
+
+      function crownPoint(theta, vertical, offset = 0) {
+        const front = Math.max(0, Math.sin(theta));
+        const radiusX = 1.43 - 0.26 * vertical;
+        const radiusZ = 0.76 - 0.17 * vertical;
+        const pinchX = 1 - 0.17 * vertical * vertical * Math.pow(front, 4);
+        const pinchZ = 1 - 0.11 * vertical * vertical * Math.pow(front, 3);
+
+        return {
+          x: radiusX * Math.cos(theta) * pinchX * (1 + offset),
+          y: -0.45 + 1.72 * vertical +
+            0.05 * vertical * vertical * Math.cos(theta * 2),
+          z: radiusZ * Math.sin(theta) * pinchZ * (1 + offset)
+        };
+      }
+
+      function topPoint(radius, theta) {
+        const front = Math.max(0, Math.sin(theta));
+        const x =
+          1.17 * radius * Math.cos(theta) *
+          (1 - 0.17 * Math.pow(front, 4) * radius);
+        const z =
+          0.59 * radius * Math.sin(theta) *
+          (1 - 0.11 * Math.pow(front, 3) * radius);
+        const groove = 0.26 * Math.pow(1 - radius, 1.28);
+        const crease = 0.05 * Math.cos(theta * 2) * radius;
+
+        return {
+          x,
+          y: 1.27 - groove + crease,
+          z
+        };
+      }
+
+      function buildMesh() {
+        const segments = 52;
+        const brimRings = 7;
+        const crownRings = 11;
+        const topRings = 6;
+
+        const brim = [];
+
+        for (let ring = 0; ring <= brimRings; ring++) {
+          const row = [];
+          const radius = ring / brimRings;
+
+          for (let segment = 0; segment < segments; segment++) {
+            row.push(addVertex(brimPoint(
+              radius,
+              segment / segments * Math.PI * 2
+            )));
+          }
+
+          brim.push(row);
+        }
+
+        for (let ring = 0; ring < brimRings; ring++) {
+          for (let segment = 0; segment < segments; segment++) {
+            const next = (segment + 1) % segments;
+            addQuad(
+              brim[ring][segment],
+              brim[ring][next],
+              brim[ring + 1][next],
+              brim[ring + 1][segment],
+              "brim"
+            );
+          }
+        }
+
+        for (let segment = 0; segment < segments; segment++) {
+          const next = (segment + 1) % segments;
+          const theta = segment / segments * Math.PI * 2;
+          const nextTheta = next / segments * Math.PI * 2;
+          const topA = brim[brimRings][segment];
+          const topB = brim[brimRings][next];
+          const lowerB = addVertex(brimPoint(1, nextTheta, true));
+          const lowerA = addVertex(brimPoint(1, theta, true));
+
+          addQuad(topA, topB, lowerB, lowerA, "rim");
+        }
+
+        const crown = [];
+
+        for (let ring = 0; ring <= crownRings; ring++) {
+          const row = [];
+          const vertical = ring / crownRings;
+
+          for (let segment = 0; segment < segments; segment++) {
+            row.push(addVertex(crownPoint(
+              segment / segments * Math.PI * 2,
+              vertical
+            )));
+          }
+
+          crown.push(row);
+        }
+
+        for (let ring = 0; ring < crownRings; ring++) {
+          for (let segment = 0; segment < segments; segment++) {
+            const next = (segment + 1) % segments;
+            addReverseQuad(
+              crown[ring][segment],
+              crown[ring][next],
+              crown[ring + 1][next],
+              crown[ring + 1][segment],
+              "crown"
+            );
+          }
+        }
+
+        const top = [];
+
+        for (let ring = 0; ring <= topRings; ring++) {
+          const row = [];
+          const radius = ring / topRings;
+
+          for (let segment = 0; segment < segments; segment++) {
+            row.push(addVertex(topPoint(
+              radius,
+              segment / segments * Math.PI * 2
+            )));
+          }
+
+          top.push(row);
+        }
+
+        for (let ring = 0; ring < topRings; ring++) {
+          for (let segment = 0; segment < segments; segment++) {
+            const next = (segment + 1) % segments;
+            addQuad(
+              top[ring][segment],
+              top[ring][next],
+              top[ring + 1][next],
+              top[ring + 1][segment],
+              "top"
+            );
+          }
+        }
+
+        const bandBottom = [];
+        const bandTop = [];
+
+        for (let segment = 0; segment < segments; segment++) {
+          const theta = segment / segments * Math.PI * 2;
+          bandBottom.push(addVertex(crownPoint(theta, 0.16, 0.006)));
+          bandTop.push(addVertex(crownPoint(theta, 0.31, 0.006)));
+        }
+
+        for (let segment = 0; segment < segments; segment++) {
+          const next = (segment + 1) % segments;
+          addReverseQuad(
+            bandBottom[segment],
+            bandBottom[next],
+            bandTop[next],
+            bandTop[segment],
+            "band"
+          );
+        }
+      }
+
+      function sampleHatPoint() {
+        const choice = random();
+        let point;
+        let material;
+
+        if (choice < 0.53) {
+          const radius = Math.sqrt(random());
+          const theta = random() * Math.PI * 2;
+          point = brimPoint(radius, theta);
+          material = radius > 0.96 && random() < 0.28 ? "rim" : "brim";
+        } else if (choice < 0.9) {
+          const theta = random() * Math.PI * 2;
+          const vertical = random();
+          point = crownPoint(theta, vertical);
+          material = vertical > 0.16 && vertical < 0.31 ? "band" : "crown";
+        } else {
+          const radius = Math.sqrt(random());
+          const theta = random() * Math.PI * 2;
+          point = topPoint(radius, theta);
+          material = "top";
+        }
+
+        return { point, material };
+      }
+
+      function buildParticles() {
+        for (let index = 0; index < 3000; index++) {
+          const sample = sampleHatPoint();
+          const azimuth = random() * Math.PI * 2;
+          const elevation = (random() - 0.36) * Math.PI;
+          const distance = 0.85 + Math.pow(random(), 0.6) * 2.45;
+          const horizontal = Math.cos(elevation) * distance;
+
+          particles.push({
+            x: sample.point.x,
+            y: sample.point.y,
+            z: sample.point.z,
+            dx: Math.cos(azimuth) * horizontal,
+            dy: Math.sin(elevation) * distance + 0.28 + random() * 0.58,
+            dz: Math.sin(azimuth) * horizontal,
+            size: 0.55 + random() * 1.25,
+            phase: random() * Math.PI * 2,
+            spin: 0.18 + random() * 0.72,
+            flicker: 0.72 + random() * 0.28,
+            material: sample.material,
+            glow: random() < 0.065
+          });
+        }
+
+        for (let index = 0; index < 32; index++) {
+          orbiters.push({
+            radius: 1.9 + random() * 1.34,
+            flatten: 0.48 + random() * 0.26,
+            height: -0.15 + random() * 1.18,
+            speed: 0.28 + random() * 0.36,
+            phase: random() * Math.PI * 2,
+            size: 0.7 + random() * 1.25,
+            lift: 0.08 + random() * 0.2
+          });
+        }
+
+        for (let index = 0; index < 80; index++) {
+          dust.push({
+            x: random(),
+            y: random(),
+            size: 0.25 + random() * 0.75,
+            alpha: 0.025 + random() * 0.07
+          });
+        }
+      }
+
+      function resize() {
+        width = innerWidth;
+        height = innerHeight;
+        deviceScale = Math.min(devicePixelRatio || 1, 2);
+        canvas.width = Math.round(width * deviceScale);
+        canvas.height = Math.round(height * deviceScale);
+        canvas.style.width = width + "px";
+        canvas.style.height = height + "px";
+        context.setTransform(deviceScale, 0, 0, deviceScale, 0, 0);
+
+        centerX = width * 0.5;
+        centerY = height * 0.45;
+        scale = Math.min(width / 7.15, height / 5.05);
+
+        if (reducedMotion) {
+          draw(performance.now());
+        }
+      }
+
+      function transformPoint(point, rotation = angle) {
+        const cosineY = Math.cos(rotation);
+        const sineY = Math.sin(rotation);
+        const x1 = point.x * cosineY + point.z * sineY;
+        const z1 = -point.x * sineY + point.z * cosineY;
+
+        const cosineX = Math.cos(TILT);
+        const sineX = Math.sin(TILT);
+        const y2 = point.y * cosineX - z1 * sineX;
+        const z2 = point.y * sineX + z1 * cosineX;
+        const perspective = CAMERA / (CAMERA - z2);
+
+        return {
+          x: x1,
+          y: y2,
+          z: z2,
+          sx: centerX + x1 * scale * perspective,
+          sy: centerY - y2 * scale * perspective,
+          perspective
+        };
+      }
+
+      function particlePosition(particle, elapsed) {
+        if (elapsed <= SLOW_END) {
+          return { x: particle.x, y: particle.y, z: particle.z };
+        }
+
+        if (elapsed < DISSOLVE_END) {
+          const progress = smootherstep(
+            (elapsed - SLOW_END) / (DISSOLVE_END - SLOW_END)
+          );
+
+          return {
+            x: particle.x + particle.dx * progress,
+            y: particle.y + particle.dy * progress,
+            z: particle.z + particle.dz * progress
+          };
+        }
+
+        function swirlAt(time) {
+          const rotation = time * particle.spin;
+          const cosine = Math.cos(rotation);
+          const sine = Math.sin(rotation);
+          const baseX = particle.x + particle.dx;
+          const baseY = particle.y + particle.dy;
+          const baseZ = particle.z + particle.dz;
+          const rise = smoothstep(Math.min(1, time / 0.5));
+
+          return {
+            x: baseX * cosine + baseZ * sine +
+              Math.sin(time * 1.9 + particle.phase) * 0.16 * rise,
+            y: baseY +
+              Math.sin(time * 2.15 + particle.phase) * 0.24 * rise +
+              time * 0.055 * particle.lift,
+            z: -baseX * sine + baseZ * cosine +
+              Math.cos(time * 1.45 + particle.phase) * 0.13 * rise
+          };
+        }
+
+        if (elapsed < SWIRL_END) {
+          return swirlAt(elapsed - DISSOLVE_END);
+        }
+
+        const source = swirlAt(SWIRL_END - DISSOLVE_END);
+
+        if (elapsed < REFORM_END) {
+          const progress = smootherstep(
+            (elapsed - SWIRL_END) / (REFORM_END - SWIRL_END)
+          );
+
+          return {
+            x: source.x + (particle.x - source.x) * progress,
+            y: source.y + (particle.y - source.y) * progress,
+            z: source.z + (particle.z - source.z) * progress
+          };
+        }
+
+        return { x: particle.x, y: particle.y, z: particle.z };
+      }
+
+      function sequenceOpacity(elapsed) {
+        if (!active) {
+          return { solid: 1, particles: 0 };
+        }
+
+        if (elapsed <= SLOW_END) {
+          return { solid: 1, particles: 0 };
+        }
+
+        if (elapsed < DISSOLVE_END) {
+          const progress = smoothstep(
+            (elapsed - SLOW_END) / (DISSOLVE_END - SLOW_END)
+          );
+
+          return {
+            solid: 1 - smoothstep((progress - 0.08) / 0.74),
+            particles: smoothstep(progress / 0.42)
+          };
+        }
+
+        if (elapsed < SWIRL_END) {
+          return { solid: 0, particles: 1 };
+        }
+
+        if (elapsed < REFORM_END) {
+          const progress = (elapsed - SWIRL_END) /
+            (REFORM_END - SWIRL_END);
+
+          return {
+            solid: smoothstep((progress - 0.58) / 0.42),
+            particles: 1 - 0.18 * smoothstep((progress - 0.72) / 0.28)
+          };
+        }
+
+        const fade = smoothstep(
+          (elapsed - REFORM_END) / (TOTAL_TIME - REFORM_END)
+        );
+
+        return { solid: 1, particles: 1 - fade };
+      }
+
+      function drawBackground() {
+        context.save();
+
+        for (const mote of dust) {
+          context.globalAlpha = mote.alpha;
+          context.fillStyle = "#d9c7ca";
+          context.fillRect(
+            mote.x * width,
+            mote.y * height,
+            mote.size,
+            mote.size
+          );
+        }
+
+        const halo = context.createRadialGradient(
+          centerX,
+          centerY - scale * 0.15,
+          0,
+          centerX,
+          centerY,
+          scale * 3.2
+        );
+
+        halo.addColorStop(0, "rgba(168, 30, 49, 0.065)");
+        halo.addColorStop(0.46, "rgba(92, 20, 31, 0.025)");
+        halo.addColorStop(1, "rgba(0, 0, 0, 0)");
+
+        context.globalAlpha = 1;
+        context.fillStyle = halo;
+        context.fillRect(0, 0, width, height);
+        context.restore();
+      }
+
+      function drawShadow(solidOpacity) {
+        const projectedWidth = Math.sqrt(
+          Math.pow(2.72 * Math.cos(angle), 2) +
+          Math.pow(1.39 * Math.sin(angle), 2)
+        ) * scale;
+
+        context.save();
+        context.translate(centerX, centerY + scale * 0.78);
+        context.scale(1, 0.23);
+        context.filter = `blur(${Math.max(8, scale * 0.1)}px)`;
+
+        const shadow = context.createRadialGradient(
+          0, 0, projectedWidth * 0.04,
+          0, 0, projectedWidth
+        );
+
+        shadow.addColorStop(0, `rgba(0, 0, 0, ${0.48 * solidOpacity})`);
+        shadow.addColorStop(0.52, `rgba(0, 0, 0, ${0.24 * solidOpacity})`);
+        shadow.addColorStop(1, "rgba(0, 0, 0, 0)");
+
+        context.fillStyle = shadow;
+        context.beginPath();
+        context.arc(0, 0, projectedWidth, 0, Math.PI * 2);
+        context.fill();
+        context.restore();
+      }
+
+      function drawSolid(opacity) {
+        if (opacity <= 0.002) return;
+
+        const transformed = new Array(vertices.length);
+
+        for (let index = 0; index < vertices.length; index++) {
+          transformed[index] = transformPoint(vertices[index]);
+        }
+
+        for (const face of faces) {
+          face.depth = (
+            transformed[face.a].z +
+            transformed[face.b].z +
+            transformed[face.c].z
+          ) / 3;
+        }
+
+        faces.sort((left, right) => left.depth - right.depth);
+
+        context.save();
+        context.globalAlpha = opacity;
+        context.lineJoin = "round";
+
+        for (const face of faces) {
+          const a = transformed[face.a];
+          const b = transformed[face.b];
+          const c = transformed[face.c];
+
+          const ux = b.x - a.x;
+          const uy = b.y - a.y;
+          const uz = b.z - a.z;
+          const vx = c.x - a.x;
+          const vy = c.y - a.y;
+          const vz = c.z - a.z;
+
+          let nx = uy * vz - uz * vy;
+          let ny = uz * vx - ux * vz;
+          let nz = ux * vy - uy * vx;
+          const length = Math.hypot(nx, ny, nz) || 1;
+
+          nx /= length;
+          ny /= length;
+          nz /= length;
+
+          const light = Math.max(
+            0,
+            nx * -0.43 + ny * 0.72 + nz * 0.54
+          );
+          const edgeLight = Math.max(0, nz) * 0.08;
+          const shade = 0.54 + light * 0.48 + edgeLight;
+          const base = palette[face.material];
+
+          const red = Math.min(255, Math.round(base[0] * shade));
+          const green = Math.min(255, Math.round(base[1] * shade));
+          const blue = Math.min(255, Math.round(base[2] * shade));
+
+          context.fillStyle = `rgb(${red}, ${green}, ${blue})`;
+          context.beginPath();
+          context.moveTo(a.sx, a.sy);
+          context.lineTo(b.sx, b.sy);
+          context.lineTo(c.sx, c.sy);
+          context.closePath();
+          context.fill();
+        }
+
+        context.globalCompositeOperation = "screen";
+        context.globalAlpha = opacity * 0.16;
+
+        const sheen = context.createLinearGradient(
+          centerX - scale * 1.4,
+          centerY - scale * 1.2,
+          centerX + scale * 0.8,
+          centerY + scale * 0.6
+        );
+
+        sheen.addColorStop(0, "rgba(255, 224, 225, 0)");
+        sheen.addColorStop(0.46, "rgba(255, 218, 221, 0.32)");
+        sheen.addColorStop(0.68, "rgba(255, 218, 221, 0)");
+        context.fillStyle = sheen;
+        context.beginPath();
+        context.ellipse(
+          centerX - scale * 0.17,
+          centerY - scale * 0.24,
+          scale * 1.05,
+          scale * 1.08,
+          -0.22,
+          0,
+          Math.PI * 2
+        );
+        context.fill();
+        context.restore();
+      }
+
+      function drawParticles(elapsed, opacity) {
+        if (opacity <= 0.002) return;
+
+        context.save();
+        context.globalCompositeOperation = "lighter";
+        context.fillStyle = "#ff344f";
+
+        for (let index = 0; index < particles.length; index++) {
+          const particle = particles[index];
+          const point = particlePosition(particle, elapsed);
+          const projected = transformPoint(point);
+          const twinkle = 0.82 + 0.18 *
+            Math.sin(elapsed * 5.4 + particle.phase);
+          const depth = Math.max(0.42, Math.min(1.2, projected.perspective));
+          const alpha = opacity * particle.flicker * twinkle *
+            (particle.material === "band" ? 0.48 : 0.82);
+          const size = particle.size * depth;
+
+          if (
+            projected.sx < -12 ||
+            projected.sx > width + 12 ||
+            projected.sy < -12 ||
+            projected.sy > height + 12
+          ) {
+            continue;
+          }
+
+          context.globalAlpha = alpha;
+          context.fillRect(
+            projected.sx - size * 0.5,
+            projected.sy - size * 0.5,
+            size,
+            size
+          );
+
+          if (particle.glow) {
+            context.globalAlpha = alpha * 0.2;
+            context.shadowColor = "#ff314d";
+            context.shadowBlur = 10;
+            context.beginPath();
+            context.arc(projected.sx, projected.sy, size * 1.2, 0, Math.PI * 2);
+            context.fill();
+            context.shadowBlur = 0;
+          }
+        }
+
+        context.restore();
+      }
+
+      function drawOrbiters(time, opacity = 1) {
+        if (!completed || reducedMotion || opacity <= 0) return;
+
+        context.save();
+        context.globalCompositeOperation = "lighter";
+        context.lineCap = "round";
+
+        for (const orbiter of orbiters) {
+          const orbitAngle = time * 0.001 * orbiter.speed + orbiter.phase;
+          const previousAngle = orbitAngle - 0.13;
+          const bob = Math.sin(orbitAngle * 1.7 + orbiter.phase) * orbiter.lift;
+
+          const point = {
+            x: Math.cos(orbitAngle) * orbiter.radius,
+            y: orbiter.height + bob,
+            z: Math.sin(orbitAngle) * orbiter.radius * orbiter.flatten
+          };
+
+          const previousPoint = {
+            x: Math.cos(previousAngle) * orbiter.radius,
+            y: orbiter.height +
+              Math.sin(previousAngle * 1.7 + orbiter.phase) * orbiter.lift,
+            z: Math.sin(previousAngle) * orbiter.radius * orbiter.flatten
+          };
+
+          const current = transformPoint(point);
+          const previous = transformPoint(previousPoint);
+
+          const trail = context.createLinearGradient(
+            previous.sx,
+            previous.sy,
+            current.sx,
+            current.sy
+          );
+
+          trail.addColorStop(0, "rgba(255, 40, 65, 0)");
+          trail.addColorStop(1, `rgba(255, 53, 75, ${0.28 * opacity})`);
+
+          context.strokeStyle = trail;
+          context.lineWidth = Math.max(0.4, orbiter.size * 0.65);
+          context.beginPath();
+          context.moveTo(previous.sx, previous.sy);
+          context.lineTo(current.sx, current.sy);
+          context.stroke();
+
+          context.globalAlpha = 0.74 * opacity;
+          context.fillStyle = "#ff4960";
+          context.shadowColor = "#ff304e";
+          context.shadowBlur = 7;
+          context.beginPath();
+          context.arc(
+            current.sx,
+            current.sy,
+            orbiter.size * current.perspective,
+            0,
+            Math.PI * 2
+          );
+          context.fill();
+          context.shadowBlur = 0;
+        }
+
+        context.restore();
+      }
+
+      function draw(time) {
+        const elapsed = active ? (time - sequenceStart) / 1000 : 0;
+        const opacity = sequenceOpacity(elapsed);
+
+        context.setTransform(deviceScale, 0, 0, deviceScale, 0, 0);
+        context.clearRect(0, 0, width, height);
+
+        drawBackground();
+        drawShadow(opacity.solid);
+        drawSolid(opacity.solid);
+        drawParticles(elapsed, opacity.particles);
+        drawOrbiters(time);
+
+        if (active && elapsed >= TOTAL_TIME) {
+          active = false;
+          completed = true;
+        }
+      }
+
+      function frame(time) {
+        const delta = Math.min(0.05, Math.max(0, (time - previousTime) / 1000));
+        previousTime = time;
+
+        let speed = 0.34;
+
+        if (active) {
+          const elapsed = (time - sequenceStart) / 1000;
+
+          if (elapsed < SLOW_END) {
+            speed = 0.34 + (0.055 - 0.34) *
+              smoothstep(elapsed / SLOW_END);
+          } else if (elapsed < SWIRL_END) {
+            speed = 0.055;
+          } else if (elapsed < TOTAL_TIME) {
+            speed = 0.055 + (0.34 - 0.055) *
+              smoothstep((elapsed - SWIRL_END) /
+                (TOTAL_TIME - SWIRL_END));
+          }
+        }
+
+        angle += speed * delta;
+        draw(time);
+
+        if (!reducedMotion) {
+          animationFrame = requestAnimationFrame(frame);
+        }
+      }
+
+      function trigger() {
+        if (reducedMotion || active) return;
+        completed = false;
+        active = true;
+        sequenceStart = performance.now();
+      }
+
+      function updateMotionPreference(event) {
+        reducedMotion = event.matches;
+        cancelAnimationFrame(animationFrame);
+        active = false;
+        completed = false;
+        angle = 0.42;
+        previousTime = performance.now();
+
+        if (reducedMotion) {
+          draw(previousTime);
+        } else {
+          animationFrame = requestAnimationFrame(frame);
+        }
+      }
+
+      control.addEventListener("pointerenter", event => {
+        if ((event.pointerType === "mouse" || event.pointerType === "pen") && armed) {
+          armed = false;
+          trigger();
+        }
+      });
+
+      control.addEventListener("pointerleave", () => {
+        armed = true;
+      });
+
+      control.addEventListener("pointerdown", event => {
+        if (event.pointerType === "touch" || event.pointerType === "pen") {
+          trigger();
+        }
+      });
+
+      control.addEventListener("click", event => {
+        if (event.detail === 0) {
+          trigger();
+        }
+      });
+
+      addEventListener("resize", resize, { passive: true });
+      motionPreference.addEventListener("change", updateMotionPreference);
+
+      buildMesh();
+      buildParticles();
+      resize();
+
+      if (!reducedMotion) {
+        animationFrame = requestAnimationFrame(frame);
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#090b10">
+  <title>Fedora in Motion</title>
+  <style>
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #090b10;
+    }
+
+    body {
+      display: grid;
+      place-items: center;
+      color: #d9dde6;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background:
+        radial-gradient(circle at 50% 42%, rgba(78, 91, 121, .15), transparent 31%),
+        radial-gradient(circle at 50% 115%, rgba(190, 35, 53, .09), transparent 44%),
+        linear-gradient(145deg, #0c0f16 0%, #07090d 62%, #0b0d13 100%);
+    }
+
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: .34;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.08'/%3E%3C/svg%3E");
+      mix-blend-mode: soft-light;
+    }
+
+    main {
+      position: relative;
+      width: min(94vw, 850px);
+      height: min(86vh, 760px);
+      min-height: 420px;
+      display: grid;
+      place-items: center;
+      isolation: isolate;
+    }
+
+    .scene {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      touch-action: manipulation;
+      outline: none;
+    }
+
+    .scene::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 62%;
+      width: min(58vw, 470px);
+      height: min(8vw, 62px);
+      border-radius: 50%;
+      background: rgba(0, 0, 0, .72);
+      filter: blur(22px);
+      transform: translate(-50%, -50%);
+      opacity: .82;
+    }
+
+    canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      filter: drop-shadow(0 24px 30px rgba(0, 0, 0, .4));
+    }
+
+    .caption {
+      position: absolute;
+      top: calc(50% + clamp(145px, 22vw, 190px));
+      margin: 0;
+      color: rgba(227, 230, 238, .66);
+      font-size: clamp(.66rem, 1.6vw, .78rem);
+      font-weight: 500;
+      letter-spacing: .24em;
+      text-transform: uppercase;
+      text-align: center;
+      transition: color .35s ease, letter-spacing .35s ease;
+      user-select: none;
+    }
+
+    .scene:is(:hover, :focus-visible) .caption {
+      color: rgba(244, 225, 227, .86);
+      letter-spacing: .29em;
+    }
+
+    .scene:focus-visible {
+      border-radius: 24px;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.16);
+    }
+
+    .hint {
+      position: absolute;
+      bottom: 3%;
+      color: rgba(213, 219, 230, .28);
+      font-size: .64rem;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      transition: opacity .5s ease;
+      user-select: none;
+    }
+
+    .active .hint { opacity: 0; }
+
+    @media (max-height: 540px) {
+      .caption { top: calc(50% + 125px); }
+      .hint { display: none; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .hint { display: none; }
+      .caption { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="scene" role="button" tabindex="0" aria-label="Animate the fedora particles">
+      <canvas aria-hidden="true"></canvas>
+      <p class="caption">Crafted in open source</p>
+      <span class="hint">Hover or tap</span>
+    </div>
+  </main>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const canvas = document.querySelector("canvas");
+      const scene = document.querySelector(".scene");
+      const ctx = canvas.getContext("2d", { alpha: true });
+      const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+      const TAU = Math.PI * 2;
+
+      let W = 0, H = 0, dpr = 1, scale = 1;
+      let particles = [], orbiters = [];
+      let angle = -.42, last = performance.now();
+      let phase = "idle", phaseStart = 0, hovered = false;
+      let triggerLocked = false;
+
+      const ease = t => t < .5
+        ? 4 * t * t * t
+        : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+      function hatPath(g, s) {
+        g.beginPath();
+        g.moveTo(-145*s, 44*s);
+        g.bezierCurveTo(-130*s, 15*s, -96*s, 2*s, -67*s, -7*s);
+        g.bezierCurveTo(-70*s, -52*s, -50*s, -103*s, -18*s, -119*s);
+        g.bezierCurveTo(8*s, -132*s, 45*s, -119*s, 61*s, -92*s);
+        g.bezierCurveTo(76*s, -66*s, 75*s, -30*s, 67*s, -8*s);
+        g.bezierCurveTo(100*s, 1*s, 135*s, 18*s, 148*s, 43*s);
+        g.bezierCurveTo(162*s, 71*s, 117*s, 95*s, 50*s, 102*s);
+        g.bezierCurveTo(-22*s, 110*s, -116*s, 93*s, -145*s, 62*s);
+        g.bezierCurveTo(-151*s, 56*s, -151*s, 49*s, -145*s, 44*s);
+        g.closePath();
+      }
+
+      function drawHat(g, cx, cy, s, alpha = 1) {
+        g.save();
+        g.translate(cx, cy);
+        g.globalAlpha = alpha;
+
+        const body = g.createLinearGradient(-80*s, -120*s, 110*s, 100*s);
+        body.addColorStop(0, "#f04752");
+        body.addColorStop(.34, "#c82135");
+        body.addColorStop(.72, "#8f1023");
+        body.addColorStop(1, "#4e0711");
+        hatPath(g, s);
+        g.fillStyle = body;
+        g.fill();
+
+        g.save();
+        hatPath(g, s);
+        g.clip();
+
+        const shine = g.createRadialGradient(-45*s, -72*s, 4*s, -28*s, -60*s, 150*s);
+        shine.addColorStop(0, "rgba(255,184,181,.48)");
+        shine.addColorStop(.33, "rgba(255,88,96,.14)");
+        shine.addColorStop(1, "rgba(0,0,0,.42)");
+        g.fillStyle = shine;
+        g.fillRect(-170*s, -150*s, 340*s, 290*s);
+
+        g.beginPath();
+        g.moveTo(-67*s, -5*s);
+        g.bezierCurveTo(-31*s, 7*s, 28*s, 10*s, 68*s, -7*s);
+        g.lineTo(65*s, 23*s);
+        g.bezierCurveTo(26*s, 41*s, -35*s, 38*s, -70*s, 22*s);
+        g.closePath();
+        g.fillStyle = "#18070b";
+        g.fill();
+
+        g.beginPath();
+        g.ellipse(0, 52*s, 117*s, 31*s, 0, 0, TAU);
+        const brim = g.createLinearGradient(0, 15*s, 0, 85*s);
+        brim.addColorStop(0, "rgba(255,67,77,.78)");
+        brim.addColorStop(.48, "rgba(151,14,31,.9)");
+        brim.addColorStop(1, "rgba(57,3,13,.98)");
+        g.fillStyle = brim;
+        g.fill();
+
+        g.beginPath();
+        g.moveTo(-48*s, -96*s);
+        g.bezierCurveTo(-18*s, -114*s, 22*s, -107*s, 43*s, -81*s);
+        g.bezierCurveTo(19*s, -67*s, -14*s, -64*s, -42*s, -78*s);
+        g.closePath();
+        g.fillStyle = "rgba(71,4,14,.64)";
+        g.fill();
+
+        g.restore();
+
+        g.beginPath();
+        g.ellipse(-15*s, 61*s, 132*s, 35*s, -.02, .08, Math.PI - .06);
+        g.strokeStyle = "rgba(255,116,121,.38)";
+        g.lineWidth = 2*s;
+        g.stroke();
+        g.restore();
+      }
+
+      function buildParticles() {
+        const off = document.createElement("canvas");
+        const size = 380;
+        off.width = off.height = size;
+        const og = off.getContext("2d", { willReadFrequently: true });
+        drawHat(og, size/2, size/2 + 12, .96);
+        const data = og.getImageData(0, 0, size, size).data;
+        particles = [];
+
+        const target = innerWidth < 600 ? 1900 : 3000;
+        let attempts = 0;
+        while (particles.length < target && attempts++ < target * 18) {
+          const x = Math.random() * size | 0;
+          const y = Math.random() * size | 0;
+          const i = (y * size + x) * 4;
+          if (data[i + 3] > 70) {
+            const nx = x - size/2;
+            const ny = y - size/2 - 12;
+            const edge = Math.abs(nx) / 150;
+            const z = (1 - edge * edge) * 22 + (Math.random() - .5) * 9;
+            const a = Math.random() * TAU;
+            const power = 82 + Math.random() * 175;
+            particles.push({
+              x: nx, y: ny, z,
+              r: data[i], g: data[i+1], b: data[i+2],
+              size: .55 + Math.random() * 1.15,
+              dx: Math.cos(a) * power + (Math.random()-.5)*55,
+              dy: Math.sin(a) * power - 25 - Math.random()*60,
+              dz: (Math.random()-.5)*210,
+              swirl: (Math.random()-.5)*4,
+              seed: Math.random()*TAU
+            });
+          }
+        }
+
+        orbiters = Array.from({ length: 18 }, (_, i) => ({
+          a: i / 18 * TAU,
+          speed: .18 + Math.random() * .28,
+          radius: 155 + Math.random() * 65,
+          lift: (Math.random()-.5) * 85,
+          size: .65 + Math.random() * 1.15,
+          trail: []
+        }));
+      }
+
+      function resize() {
+        const rect = canvas.getBoundingClientRect();
+        dpr = Math.min(devicePixelRatio || 1, 2);
+        W = rect.width;
+        H = rect.height;
+        canvas.width = Math.round(W * dpr);
+        canvas.height = Math.round(H * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        scale = Math.min(W / 680, H / 580, 1.22);
+        buildParticles();
+      }
+
+      function startEffect() {
+        if (reduced.matches || triggerLocked) return;
+        triggerLocked = true;
+        phase = "dissolve";
+        phaseStart = performance.now();
+        scene.classList.add("active");
+      }
+
+      function phaseAmount(now) {
+        const elapsed = now - phaseStart;
+        if (phase === "dissolve") {
+          if (elapsed >= 1450) {
+            phase = "swirl"; phaseStart = now;
+            return 1;
+          }
+          return ease(elapsed / 1450);
+        }
+        if (phase === "swirl") {
+          if (elapsed >= 1150) {
+            phase = "reform"; phaseStart = now;
+          }
+          return 1;
+        }
+        if (phase === "reform") {
+          if (elapsed >= 1750) {
+            phase = "idle"; phaseStart = now;
+            triggerLocked = false;
+            scene.classList.remove("active");
+            return 0;
+          }
+          return 1 - ease(elapsed / 1750);
+        }
+        return 0;
+      }
+
+      function transform(p, spread, now) {
+        let px = p.x, py = p.y, pz = p.z;
+        if (spread > 0) {
+          const t = now * .001;
+          const pulse = phase === "swirl" ? 1 : Math.sin(spread * Math.PI);
+          const ca = Math.cos(p.swirl * t + p.seed);
+          const sa = Math.sin(p.swirl * t + p.seed);
+          const sx = p.dx * spread + ca * 30 * pulse;
+          const sy = p.dy * spread + sa * 24 * pulse + Math.sin(t * 2 + p.seed) * 12 * spread;
+          px += sx;
+          py += sy;
+          pz += p.dz * spread;
+        }
+
+        const c = Math.cos(angle), s = Math.sin(angle);
+        const rx = px*c + pz*s;
+        const rz = -px*s + pz*c;
+        const perspective = 470 / (470 - rz);
+        return {
+          x: W/2 + rx * scale * perspective,
+          y: H/2 - 12*scale + py * scale * perspective,
+          z: rz,
+          k: perspective
+        };
+      }
+
+      function drawParticles(now, spread) {
+        const ordered = particles.map(p => ({ p, q: transform(p, spread, now) }))
+          .sort((a, b) => a.q.z - b.q.z);
+
+        ctx.globalCompositeOperation = "source-over";
+        for (const { p, q } of ordered) {
+          const depth = clamp(.64 + q.z / 250, .35, 1.18);
+          const flicker = spread > .08 ? .72 + .28*Math.sin(now*.008+p.seed) : 1;
+          const alpha = clamp((.76 + depth*.2) * flicker, .28, 1);
+          const radius = p.size * scale * q.k * (spread > .1 ? 1.14 : 1);
+
+          if (spread > .05 && p.size > 1.25) {
+            ctx.fillStyle = `rgba(230,35,57,${alpha*.12})`;
+            ctx.beginPath();
+            ctx.arc(q.x, q.y, radius*4, 0, TAU);
+            ctx.fill();
+          }
+
+          ctx.fillStyle = `rgba(${p.r},${p.g},${p.b},${alpha})`;
+          ctx.beginPath();
+          ctx.arc(q.x, q.y, Math.max(.42, radius), 0, TAU);
+          ctx.fill();
+        }
+      }
+
+      function drawOrbiters(now, visible) {
+        if (!visible) return;
+        ctx.globalCompositeOperation = "lighter";
+        const t = now * .001;
+        for (const o of orbiters) {
+          const a = o.a + t * o.speed;
+          const x = W/2 + Math.cos(a) * o.radius * scale;
+          const y = H/2 + 8*scale + Math.sin(a) * 31*scale + o.lift*scale;
+          o.trail.unshift({x,y});
+          if (o.trail.length > 9) o.trail.pop();
+
+          for (let i = o.trail.length-1; i >= 0; i--) {
+            const pt = o.trail[i];
+            const alpha = (1-i/o.trail.length) * .1;
+            ctx.fillStyle = `rgba(255,58,76,${alpha})`;
+            ctx.beginPath();
+            ctx.arc(pt.x, pt.y, o.size*scale*(1-i/o.trail.length), 0, TAU);
+            ctx.fill();
+          }
+
+          ctx.shadowBlur = 8;
+          ctx.shadowColor = "#ff324d";
+          ctx.fillStyle = "rgba(255,91,105,.72)";
+          ctx.beginPath();
+          ctx.arc(x, y, o.size*scale, 0, TAU);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        }
+        ctx.globalCompositeOperation = "source-over";
+      }
+
+      function frame(now) {
+        const dt = Math.min((now - last) / 1000, .04);
+        last = now;
+        ctx.clearRect(0, 0, W, H);
+
+        if (reduced.matches) {
+          drawHat(ctx, W/2, H/2 - 12*scale, scale);
+          requestAnimationFrame(frame);
+          return;
+        }
+
+        const targetSpeed = hovered || phase !== "idle" ? .12 : .48;
+        angle += targetSpeed * dt;
+        const spread = phaseAmount(now);
+
+        ctx.save();
+        ctx.shadowBlur = spread > .06 ? 5 : 2;
+        ctx.shadowColor = "rgba(231,35,56,.28)";
+        drawParticles(now, spread);
+        ctx.restore();
+
+        drawOrbiters(now, phase === "idle" && phaseStart > 0);
+        requestAnimationFrame(frame);
+      }
+
+      scene.addEventListener("pointerenter", e => {
+        if (e.pointerType === "mouse") {
+          hovered = true;
+          startEffect();
+        }
+      });
+      scene.addEventListener("pointerleave", () => { hovered = false; });
+      scene.addEventListener("pointerup", e => {
+        if (e.pointerType !== "mouse") startEffect();
+      });
+      scene.addEventListener("click", e => {
+        if (e.detail === 0) startEffect();
+      });
+      scene.addEventListener("keydown", e => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          startEffect();
+        }
+      });
+
+      reduced.addEventListener?.("change", () => {
+        phase = "idle";
+        triggerLocked = false;
+        scene.classList.remove("active");
+      });
+
+      addEventListener("resize", resize, { passive: true });
+      resize();
+      requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>

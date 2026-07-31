@@ -847,7 +847,9 @@ And respect reduced motion. Return only the finished HTML file.</div>
         <br><br>
         Entries marked <span class="variant-badge">Ultracode</span> were run using Claude Code's multi-agent mode (parallel implementations → judge → best result). This applies even when the model isn't from Anthropic — Claude Code supports <a href="https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration" target="_blank" rel="noopener">overriding the Anthropic base URL to OpenRouter</a>, so it orchestrates the workflow while the underlying model can be swapped to any provider.
         <br><br>
-        Entries marked <span class="variant-badge">Ultra</span> were run in Codex at the model's Ultra reasoning effort.
+        GPT-5.6 Sol entries marked <span class="variant-badge">None</span>, <span class="variant-badge">Low</span>, <span class="variant-badge">Medium</span>, <span class="variant-badge">High</span>, <span class="variant-badge">XHigh</span>, or <span class="variant-badge">Max</span> were run in Codex at that explicit reasoning effort.
+        <br><br>
+        <span class="variant-badge">Ultra</span> is a separate Codex multi-agent mode, not a reasoning effort. <span class="variant-badge">Default</span> identifies the original Sol run, which used the harness default before effort-specific comparisons were added.
       </div>
     </div>
   </div>
@@ -880,8 +882,14 @@ And respect reduced motion. Return only the finished HTML file.</div>
     { id: "sonnet-4-6",  name: "Sonnet 4.6",          group: "Anthropic", openrouterId: "anthropic/claude-sonnet-4.6", dateAdded: "1970-01-01" },
     { id: "sonnet-4-5",  name: "Sonnet 4.5",          group: "Anthropic", openrouterId: "anthropic/claude-sonnet-4.5", dateAdded: "1970-01-01" },
     { id: "haiku-4-5",   name: "Haiku 4.5",           group: "Anthropic", openrouterId: "anthropic/claude-haiku-4.5", dateAdded: "1970-01-01" },
-    { id: "gpt-5.6-sol-ultra", name: "GPT-5.6 Sol Ultra", group: "OpenAI", badge: "Ultra", dateAdded: "2026-07-24", stats: { cost: "~$25.65 API-equivalent", tokens: "25.04M tokens" } },
-    { id: "gpt-5.6-sol",  name: "GPT-5.6 Sol",         group: "OpenAI", openrouterId: "openai/gpt-5.6-sol", dateAdded: "2026-07-09" },
+    { id: "gpt-5.6-sol-ultra", name: "GPT-5.6 Sol", group: "OpenAI", badge: "Ultra", dateAdded: "2026-07-24", stats: { cost: "~$25.65 API-equivalent", tokens: "25.04M tokens" } },
+    { id: "gpt-5.6-sol-max", name: "GPT-5.6 Sol", group: "OpenAI", badge: "Max", dateAdded: "2026-07-31" },
+    { id: "gpt-5.6-sol-xhigh", name: "GPT-5.6 Sol", group: "OpenAI", badge: "XHigh", dateAdded: "2026-07-31" },
+    { id: "gpt-5.6-sol-high", name: "GPT-5.6 Sol", group: "OpenAI", badge: "High", dateAdded: "2026-07-31" },
+    { id: "gpt-5.6-sol-medium", name: "GPT-5.6 Sol", group: "OpenAI", badge: "Medium", dateAdded: "2026-07-31" },
+    { id: "gpt-5.6-sol-low", name: "GPT-5.6 Sol", group: "OpenAI", badge: "Low", dateAdded: "2026-07-31" },
+    { id: "gpt-5.6-sol-none", name: "GPT-5.6 Sol", group: "OpenAI", badge: "None", dateAdded: "2026-07-31" },
+    { id: "gpt-5.6-sol",  name: "GPT-5.6 Sol",         group: "OpenAI", badge: "Default", openrouterId: "openai/gpt-5.6-sol", dateAdded: "2026-07-09" },
     { id: "gpt-5.6-terra", name: "GPT-5.6 Terra",     group: "OpenAI", openrouterId: "openai/gpt-5.6-terra", dateAdded: "2026-07-09" },
     { id: "gpt-5.6-luna", name: "GPT-5.6 Luna",        group: "OpenAI", openrouterId: "openai/gpt-5.6-luna", dateAdded: "2026-07-09" },
     { id: "gpt-5.5-pro", name: "GPT-5.5 Pro",         group: "OpenAI", openrouterId: "openai/gpt-5.5-pro", dateAdded: "1970-01-01" },
@@ -973,7 +981,9 @@ And respect reduced motion. Return only the finished HTML file.</div>
   function formatModelName(m) {
     const badge = m.badge || (m.name.endsWith(" Ultracode") ? "Ultracode" : "");
     if (!badge) return m.name;
-    return '<span class="variant-name-base">' + m.name.slice(0, -badge.length).trimEnd() + '</span>'
+    const suffix = " " + badge;
+    const baseName = m.name.endsWith(suffix) ? m.name.slice(0, -suffix.length) : m.name;
+    return '<span class="variant-name-base">' + baseName + '</span>'
       + ' <span class="variant-badge">' + badge + '</span>';
   }
 
@@ -1281,7 +1291,8 @@ And respect reduced motion. Return only the finished HTML file.</div>
     const q = e.target.value.toLowerCase();
     navButtons.forEach((btn, pos) => {
       const m = MODELS[navOrder[pos]];
-      const match = !q || m.name.toLowerCase().includes(q) || m.group.toLowerCase().includes(q);
+      const searchText = [m.name, m.group, m.badge, m.id].filter(Boolean).join(" ").toLowerCase();
+      const match = !q || searchText.includes(q);
       btn.style.display = match ? "" : "none";
     });
     sections.forEach(s => {
