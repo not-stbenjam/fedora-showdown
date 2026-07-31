@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fedora</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100svh; overflow: hidden;
+    display: grid; place-items: center;
+    background:
+      radial-gradient(ellipse at 50% 44%, #272c35 0%, #15181e 38%, #090a0d 78%),
+      #090a0d;
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  main { width: min(94vw, 920px); text-align: center; }
+  canvas { display: block; width: 100%; height: min(68svh, 590px); touch-action: manipulation; cursor: pointer; }
+  p {
+    margin: -8px 0 0; color: #afb4bd; font-size: 11px; letter-spacing: .2em;
+    text-transform: uppercase; opacity: .8;
+  }
+  p span { color: #ef4147; }
+  @media (prefers-reduced-motion: reduce) { p::after { content: " · reduced motion"; } }
+</style>
+</head>
+<body>
+<main>
+  <canvas id="hat" aria-label="Interactive red fedora mark"></canvas>
+  <p><span>●</span> A little motion, thoughtfully made</p>
+</main>
+<script>
+(() => {
+  const c = document.querySelector("#hat"), x = c.getContext("2d");
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let W, H, dpr, particles = [], t0 = performance.now(), active = false, phase = 0, lastTap = 0;
+
+  const rand = (a,b) => a + Math.random() * (b-a);
+  const ease = q => q < .5 ? 4*q*q*q : 1-Math.pow(-2*q+2,3)/2;
+
+  function resize() {
+    dpr = Math.min(devicePixelRatio || 1, 2);
+    W = c.clientWidth; H = c.clientHeight;
+    c.width = W*dpr; c.height = H*dpr; x.setTransform(dpr,0,0,dpr,0,0);
+  }
+
+  function makeHat() {
+    particles = [];
+    const n = Math.min(3600, Math.max(1800, Math.round(W * 4)));
+    for (let i=0; i<n; i++) {
+      const u = Math.random(), a = rand(0, Math.PI*2);
+      let r, y, kind;
+      if (u < .56) { // brim
+        r = Math.sqrt(rand(.16, 1)); y = rand(-.035,.035); kind = 0;
+      } else if (u < .87) { // crown
+        r = .42 + rand(-.025,.025); y = rand(.01,.68); kind = 1;
+      } else { // top
+        r = Math.sqrt(Math.random())*.42; y = .68 + rand(-.018,.018); kind = 2;
+      }
+      const band = kind === 1 && y > .19 && y < .29;
+      particles.push({
+        a, r, y, kind, band,
+        sx: rand(-1,1), sy: rand(-.8,.8), sz: rand(-1,1),
+        seed: Math.random()*100, orbit: Math.random() < .025
+      });
+    }
+  }
+
+  function project(px,py,pz,spin) {
+    const cs=Math.cos(spin), sn=Math.sin(spin);
+    const X=px*cs-pz*sn, Z=px*sn+pz*cs;
+    const perspective = 1/(2.8-Z*.45);
+    return [W*.5 + X*W*.255*perspective, H*.52 - py*W*.255*perspective, Z, perspective];
+  }
+
+  function draw(now) {
+    const time = (now-t0)/1000;
+    const speed = reduce ? 0 : active ? .12 : .52;
+    const spin = time*speed + .35;
+    x.clearRect(0,0,W,H);
+
+    const ground = x.createRadialGradient(W*.5,H*.72,0,W*.5,H*.72,W*.34);
+    ground.addColorStop(0,"rgba(0,0,0,.52)"); ground.addColorStop(1,"rgba(0,0,0,0)");
+    x.fillStyle=ground; x.beginPath(); x.ellipse(W*.5,H*.70,W*.29,W*.055,0,0,Math.PI*2); x.fill();
+
+    const trans = active ? ease(Math.min(phase/.95,1)) : 0;
+    const reform = active && phase > 2.0 ? ease(Math.min((phase-2.0)/1.15,1)) : 0;
+    const amount = trans * (1-reform);
+
+    const drawList=[];
+    for (const p of particles) {
+      const px=p.r*Math.cos(p.a), pz=p.r*Math.sin(p.a), py=p.y-.28;
+      const swirl = time*1.7+p.seed;
+      let dx = p.sx*(.65+Math.sin(swirl)*.18), dy=p.sy*.85+Math.sin(swirl*1.37)*.18, dz=p.sz*(.65+Math.cos(swirl)*.18);
+      if (p.orbit && !amount && active) {
+        dx=Math.cos(time*2+p.seed)*.8; dz=Math.sin(time*2+p.seed)*.8; dy=Math.sin(time*3+p.seed)*.25;
+      }
+      const qx=px*(1-amount)+dx*amount, qy=py*(1-amount)+dy*amount, qz=pz*(1-amount)+dz*amount;
+      const v=project(qx,qy,qz,spin);
+      drawList.push([v,p,amount]);
+    }
+    drawList.sort((a,b)=>a[0][2]-b[0][2]);
+
+    for (const [v,p,amt] of drawList) {
+      const [X,Y,Z,sc]=v;
+      const lit = Math.max(.25, Math.min(1, .6 + Z*.22 + (p.kind===2?.16:0)));
+      const size = (amt ? 1.15 : 1.55) * sc;
+      const red = p.band ? [64,12,18] : [211,35,43];
+      const glow = amt ? .45 : .88;
+      x.fillStyle=`rgba(${red[0]},${red[1]},${red[2]},${glow*lit})`;
+      if (amt && p.orbit) {
+        x.shadowBlur=9; x.shadowColor="rgba(255,74,69,.7)";
+      }
+      x.fillRect(X-size/2,Y-size/2,size,size);
+      x.shadowBlur=0;
+    }
+
+    if (active) {
+      phase += 1/60;
+      if (phase > 3.35) { active=false; phase=0; }
+    }
+    requestAnimationFrame(draw);
+  }
+
+  function trigger() {
+    if (reduce || active) return;
+    active=true; phase=0;
+  }
+  c.addEventListener("pointerenter", trigger);
+  c.addEventListener("pointerdown", e => { e.preventDefault(); trigger(); });
+  addEventListener("resize", () => { resize(); makeHat(); });
+  resize(); makeHat(); requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

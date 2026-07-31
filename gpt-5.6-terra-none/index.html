@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fedora</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; min-height: 100%; margin: 0; }
+    body {
+      overflow: hidden;
+      display: grid;
+      place-items: center;
+      background: radial-gradient(ellipse at 50% 42%, #1e222a 0%, #111319 42%, #08090c 100%);
+      color: #f2ede8;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: .5;
+      background: radial-gradient(circle at 50% 42%, transparent 0 18%, rgba(0,0,0,.36) 74%);
+    }
+    main {
+      position: relative;
+      width: min(94vw, 780px);
+      height: min(88vh, 690px);
+      display: grid;
+      place-items: center;
+      isolation: isolate;
+    }
+    .scene {
+      position: relative;
+      width: min(78vw, 570px);
+      aspect-ratio: 1 / .82;
+      display: grid;
+      place-items: center;
+      perspective: 950px;
+      cursor: pointer;
+      touch-action: manipulation;
+      outline: none;
+    }
+    .scene:focus-visible {
+      outline: 1px solid rgba(255, 96, 82, .8);
+      outline-offset: 14px;
+      border-radius: 50%;
+    }
+    .halo {
+      position: absolute;
+      width: 82%;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(210,56,45,.16), transparent 63%);
+      filter: blur(15px);
+      transform: translateY(-4%);
+    }
+    .floor {
+      position: absolute;
+      width: 72%;
+      height: 14%;
+      border-radius: 50%;
+      background: rgba(0,0,0,.78);
+      filter: blur(20px);
+      transform: translateY(137%) scaleX(1.22);
+    }
+    .hat {
+      position: relative;
+      width: 74%;
+      height: 62%;
+      transform-style: preserve-3d;
+      animation: turn 8s linear infinite;
+      will-change: transform, opacity;
+    }
+    .scene.active .hat { animation-duration: 18s; }
+    .brim, .crown, .band, .crease {
+      position: absolute;
+      left: 50%;
+      transform-style: preserve-3d;
+    }
+    .brim {
+      width: 100%;
+      height: 30%;
+      bottom: 2%;
+      transform: translateX(-50%) rotateX(67deg);
+      border-radius: 50%;
+      background: radial-gradient(ellipse at 44% 30%, #e45143 0 5%, #bd251f 29%, #751612 71%, #330b0a 100%);
+      box-shadow: 0 18px 24px rgba(0,0,0,.62), inset 0 5px 8px rgba(255,180,158,.16), inset 0 -12px 12px rgba(53,0,0,.48);
+    }
+    .brim::after {
+      content: "";
+      position: absolute;
+      inset: 14% 20%;
+      border-radius: 50%;
+      background: radial-gradient(ellipse, rgba(20,0,0,.66), transparent 66%);
+      transform: translateZ(4px);
+    }
+    .crown {
+      width: 57%;
+      height: 70%;
+      bottom: 16%;
+      transform: translateX(-50%) rotateX(-3deg);
+      border-radius: 46% 46% 22% 22% / 34% 34% 16% 16%;
+      background: linear-gradient(105deg, #6f1713 0%, #d33b31 19%, #f35a4b 42%, #be2a24 61%, #6a1210 100%);
+      box-shadow: inset 21px 0 25px rgba(255,178,155,.18), inset -26px 0 32px rgba(47,0,0,.54), 0 14px 20px rgba(0,0,0,.35);
+    }
+    .crown::before {
+      content: "";
+      position: absolute;
+      width: 48%;
+      height: 16%;
+      left: 26%;
+      top: 7%;
+      border-radius: 50%;
+      background: radial-gradient(ellipse, #e25044 0%, #941e1a 70%, transparent 72%);
+      filter: blur(1px);
+    }
+    .crown::after {
+      content: "";
+      position: absolute;
+      inset: 7% 8% auto;
+      height: 64%;
+      border-radius: 48% 48% 35% 35%;
+      border-left: 10px solid rgba(255,128,112,.12);
+      border-right: 10px solid rgba(62,0,0,.14);
+    }
+    .band {
+      width: 60%;
+      height: 15%;
+      bottom: 26%;
+      transform: translateX(-50%) translateZ(8px);
+      border-radius: 5px 5px 17px 17px;
+      background: linear-gradient(90deg, #180f10, #302426 42%, #070607 68%, #231416);
+      box-shadow: 0 3px 5px rgba(0,0,0,.5);
+    }
+    .crease {
+      width: 16%;
+      height: 43%;
+      top: 5%;
+      transform: translateX(-50%) translateZ(6px) rotate(7deg);
+      border-radius: 50%;
+      border-left: 5px solid rgba(78,0,0,.21);
+      filter: blur(1px);
+    }
+    canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      mix-blend-mode: screen;
+    }
+    .caption {
+      position: absolute;
+      bottom: clamp(10px, 5vh, 42px);
+      text-align: center;
+      letter-spacing: .22em;
+      text-transform: uppercase;
+      font-size: clamp(10px, 1.6vw, 12px);
+      color: rgba(242,237,232,.56);
+    }
+    .caption span {
+      display: block;
+      margin-top: 8px;
+      letter-spacing: .08em;
+      text-transform: none;
+      font-size: .82em;
+      color: rgba(242,237,232,.34);
+    }
+    @keyframes turn {
+      from { transform: rotateY(0deg) rotateX(-7deg); }
+      to { transform: rotateY(360deg) rotateX(-7deg); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .hat, .scene.active .hat { animation: none; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="scene" tabindex="0" role="button" aria-label="Animate fedora particles">
+      <div class="halo"></div>
+      <div class="floor"></div>
+      <div class="hat">
+        <div class="crown"></div>
+        <div class="crease"></div>
+        <div class="band"></div>
+        <div class="brim"></div>
+      </div>
+      <canvas aria-hidden="true"></canvas>
+    </div>
+    <div class="caption">
+      A familiar silhouette
+      <span>Touch or hover to unravel it</span>
+    </div>
+  </main>
+
+  <script>
+    (() => {
+      const scene = document.querySelector(".scene");
+      const hat = document.querySelector(".hat");
+      const canvas = document.querySelector("canvas");
+      const ctx = canvas.getContext("2d");
+      const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+      let particles = [];
+      let phase = "idle";
+      let start = 0;
+      let raf;
+      let orbitStart = 0;
+
+      function resize() {
+        const rect = canvas.getBoundingClientRect();
+        const dpr = devicePixelRatio || 1;
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+
+      function makeParticles() {
+        const rect = canvas.getBoundingClientRect();
+        const cx = rect.width / 2;
+        const cy = rect.height * .51;
+        const count = 1800;
+
+        particles = [];
+
+        for (let i = 0; i < count; i++) {
+          const brim = Math.random() < .45;
+          const angle = Math.random() * Math.PI * 2;
+          const radius = brim ? (.18 + Math.random() * .33) : Math.sqrt(Math.random()) * .19;
+
+          const x = cx + Math.cos(angle) * radius * rect.width;
+          const y = brim
+            ? cy + 45 + Math.sin(angle) * radius * rect.width * .18
+            : cy - 30 - Math.random() * rect.height * .25 + Math.sin(angle) * radius * rect.width * .35;
+
+          particles.push({
+            x, y, tx: x, ty: y,
+            s: .3 + Math.random() * 1.4,
+            h: 5 + Math.random() * 16
+          });
+        }
+      }
+
+      function draw(particle, alpha = 1) {
+        ctx.beginPath();
+        ctx.fillStyle = `hsla(${particle.h}, 92%, 64%, ${alpha * .5})`;
+        ctx.shadowBlur = 7;
+        ctx.shadowColor = "#ff493a";
+        ctx.arc(particle.x, particle.y, particle.s, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+
+      function animate(time) {
+        const rect = canvas.getBoundingClientRect();
+        const cx = rect.width / 2;
+        const cy = rect.height * .51;
+        const elapsed = (time - start) / 1000;
+
+        ctx.clearRect(0, 0, rect.width, rect.height);
+
+        if (phase === "out") {
+          const p = Math.min(elapsed / 1.45, 1);
+          const eased = 1 - Math.pow(1 - p, 3);
+          hat.style.opacity = String(1 - eased);
+
+          particles.forEach((particle, i) => {
+            const angle = Math.atan2(particle.ty - cy, particle.tx - cx) + Math.sin(i * .91) * .55;
+            const distance = 58 + (i % 29) * 3;
+            particle.x = particle.tx + Math.cos(angle) * distance * eased + Math.sin(time * .002 + i) * 8 * eased;
+            particle.y = particle.ty + Math.sin(angle) * distance * .62 * eased - Math.sin(i * .37) * 18 * eased;
+            draw(particle);
+          });
+
+          if (p === 1) {
+            phase = "swirl";
+            start = time;
+          }
+        } else if (phase === "swirl") {
+          const p = Math.min(elapsed / 1.55, 1);
+
+          particles.forEach((particle, i) => {
+            const angle = Math.atan2(particle.ty - cy, particle.tx - cx) + time * .0014 * (i % 2 ? 1 : -1);
+            const distance = 75 + Math.sin(i * 3.2 + time * .003) * 25;
+            particle.x = cx + Math.cos(angle) * distance * 1.2;
+            particle.y = cy + Math.sin(angle) * distance * .53 + Math.cos(i + time * .004) * 18;
+            draw(particle);
+          });
+
+          if (p === 1) {
+            phase = "in";
+            start = time;
+          }
+        } else if (phase === "in") {
+          const p = Math.min(elapsed / 1.35, 1);
+          const eased = p * p * (3 - 2 * p);
+
+          particles.forEach(particle => {
+            particle.x += (particle.tx - particle.x) * (.07 + .12 * eased);
+            particle.y += (particle.ty - particle.y) * (.07 + .12 * eased);
+            draw(particle);
+          });
+
+          if (p === 1) {
+            hat.style.opacity = "1";
+            phase = "orbit";
+            orbitStart = time;
+          }
+        } else if (phase === "orbit") {
+          const elapsedOrbit = (time - orbitStart) / 1000;
+
+          particles.slice(0, 38).forEach((particle, i) => {
+            const angle = elapsedOrbit * (.65 + i % 3 * .12) + i * .61;
+            const distance = 120 + (i % 7) * 8;
+            particle.x = cx + Math.cos(angle) * distance;
+            particle.y = cy + Math.sin(angle) * distance * .42;
+            draw(particle, .36);
+          });
+
+          if (elapsedOrbit > 4) {
+            phase = "idle";
+            ctx.clearRect(0, 0, rect.width, rect.height);
+            return;
+          }
+        }
+
+        if (phase !== "idle") raf = requestAnimationFrame(animate);
+      }
+
+      function trigger() {
+        if (reduced || phase !== "idle") return;
+
+        makeParticles();
+        phase = "out";
+        start = performance.now();
+        scene.classList.add("active");
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(animate);
+
+        setTimeout(() => scene.classList.remove("active"), 4600);
+      }
+
+      addEventListener("resize", resize);
+      resize();
+
+      scene.addEventListener("pointerenter", trigger, { passive: true });
+      scene.addEventListener("click", trigger);
+      scene.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          trigger();
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

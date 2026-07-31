@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fedora</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --red: #e51f31;
+      --ink: #07090d;
+      --muted: #9ca4b4;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { min-height: 100%; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 50% 42%, #202530 0%, #10131a 29%, var(--ink) 70%),
+        var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: -30%;
+      pointer-events: none;
+      opacity: .45;
+      background:
+        radial-gradient(ellipse at 25% 22%, rgba(255,255,255,.06), transparent 28%),
+        radial-gradient(ellipse at 75% 75%, rgba(229,31,49,.08), transparent 25%);
+      filter: blur(30px);
+    }
+
+    .scene {
+      width: min(88vw, 620px);
+      min-height: min(76vh, 600px);
+      display: grid;
+      place-items: center;
+      text-align: center;
+      perspective: 1000px;
+      isolation: isolate;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      outline: none;
+    }
+
+    .scene::after {
+      content: "";
+      position: absolute;
+      z-index: -1;
+      width: min(78vw, 420px);
+      height: 58px;
+      top: calc(50% + 108px);
+      border-radius: 50%;
+      background: rgba(0, 0, 0, .72);
+      filter: blur(21px);
+      transform: scaleX(.9);
+      transition: opacity .8s ease, transform .8s ease;
+    }
+
+    .scene.active::after {
+      opacity: .3;
+      transform: scaleX(1.25);
+    }
+
+    .logo-wrap {
+      position: relative;
+      width: clamp(230px, 52vw, 360px);
+      aspect-ratio: 1.15;
+      transform-style: preserve-3d;
+    }
+
+    .hat {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+      transform-style: preserve-3d;
+      filter: drop-shadow(0 26px 16px rgba(0,0,0,.38));
+      animation: rotate 7s cubic-bezier(.45, .05, .55, .95) infinite;
+      transition: opacity .32s ease, filter .5s ease;
+    }
+
+    .scene:hover .hat,
+    .scene:focus-visible .hat,
+    .scene.active .hat {
+      animation-duration: 20s;
+    }
+
+    .scene.active .hat { opacity: 0; }
+
+    @keyframes rotate {
+      0%, 100% { transform: rotateX(-8deg) rotateY(-25deg) rotateZ(-1deg); }
+      50% { transform: rotateX(7deg) rotateY(335deg) rotateZ(1deg); }
+    }
+
+    canvas {
+      position: absolute;
+      inset: -30%;
+      width: 160%;
+      height: 160%;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity .2s ease;
+    }
+
+    .scene.active canvas { opacity: 1; }
+
+    .caption {
+      margin: 30px 0 0;
+      color: var(--muted);
+      font-size: clamp(.72rem, 1.7vw, .86rem);
+      letter-spacing: .18em;
+      text-transform: uppercase;
+      font-weight: 600;
+      transition: color .35s ease;
+    }
+
+    .scene:hover .caption,
+    .scene:focus-visible .caption { color: #d6dbe5; }
+
+    .hint {
+      display: block;
+      margin-top: .65rem;
+      color: #687080;
+      font-size: .7rem;
+      letter-spacing: .08em;
+      text-transform: none;
+      font-weight: 400;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .hat { animation: none; }
+      .hint { display: none; }
+      .scene { cursor: default; }
+    }
+  </style>
+</head>
+<body>
+  <main class="scene" tabindex="0" aria-label="Animated red fedora mark. Hover or tap to see it dissolve and reform.">
+    <div class="logo-wrap">
+      <svg class="hat" viewBox="0 0 420 360" aria-hidden="true">
+        <defs>
+          <linearGradient id="crown" x1="90" y1="42" x2="310" y2="292" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#ff5361"/>
+            <stop offset=".32" stop-color="#ed2739"/>
+            <stop offset=".78" stop-color="#bd0c22"/>
+            <stop offset="1" stop-color="#800819"/>
+          </linearGradient>
+          <linearGradient id="brim" x1="44" y1="218" x2="374" y2="294" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#a30a1d"/>
+            <stop offset=".28" stop-color="#ed2739"/>
+            <stop offset=".66" stop-color="#d5162b"/>
+            <stop offset="1" stop-color="#780616"/>
+          </linearGradient>
+          <radialGradient id="shine" cx=".35" cy=".2" r=".82">
+            <stop stop-color="#fff" stop-opacity=".32"/>
+            <stop offset=".42" stop-color="#fff" stop-opacity="0"/>
+          </radialGradient>
+        </defs>
+        <path d="M123 206c5-63 22-119 59-149 27-22 64-19 87 7 26 29 42 82 50 142Z" fill="url(#crown)"/>
+        <path d="M116 211c8-13 25-21 48-21h132c20 0 36 7 45 20l17 24-302 3Z" fill="#8c091a"/>
+        <path d="M113 219c-43 11-72 32-72 51 0 26 58 47 169 47 109 0 169-21 169-47 0-20-29-40-73-51-45 20-148 21-193 0Z" fill="url(#brim)"/>
+        <path d="M58 268c24 19 79 31 152 31 70 0 125-11 151-29-9 28-69 47-151 47-84 0-145-20-152-49Z" fill="#870819" opacity=".58"/>
+        <path d="M123 206c5-63 22-119 59-149 27-22 64-19 87 7 26 29 42 82 50 142Z" fill="url(#shine)"/>
+        <path d="M125 207c50 15 143 15 192 0" fill="none" stroke="#ff7b85" stroke-opacity=".25" stroke-width="3"/>
+      </svg>
+      <canvas aria-hidden="true"></canvas>
+    </div>
+    <p class="caption">Open horizons <span class="hint">Hover or tap to scatter the mark</span></p>
+  </main>
+
+  <script>
+    (() => {
+      const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+      if (reduced.matches) return;
+
+      const scene = document.querySelector(".scene");
+      const wrap = document.querySelector(".logo-wrap");
+      const canvas = wrap.querySelector("canvas");
+      const ctx = canvas.getContext("2d");
+      const source = document.createElement("canvas");
+      const sctx = source.getContext("2d", { willReadFrequently: true });
+      let particles = [], phase = "idle", started = 0, raf = 0;
+
+      function drawHat(c, scale) {
+        const x = c.width / 2, y = c.height / 2;
+        c.clearRect(0, 0, c.width, c.height);
+        c.save();
+        c.translate(x, y);
+        c.scale(scale, scale);
+        c.translate(-210, -180);
+        c.beginPath();
+        c.moveTo(123, 206); c.bezierCurveTo(128, 143, 145, 87, 182, 57);
+        c.bezierCurveTo(209, 35, 246, 38, 269, 64);
+        c.bezierCurveTo(295, 93, 311, 146, 319, 206); c.closePath();
+        c.fillStyle = "#e51f31"; c.fill();
+        c.beginPath();
+        c.moveTo(113,219); c.bezierCurveTo(70,230,41,250,41,270);
+        c.bezierCurveTo(41,296,99,317,210,317);
+        c.bezierCurveTo(319,317,379,296,379,270);
+        c.bezierCurveTo(379,250,350,230,306,219);
+        c.bezierCurveTo(265,236,154,236,113,219); c.closePath();
+        c.fillStyle = "#d8192d"; c.fill();
+        c.restore();
+      }
+
+      function prepare() {
+        const box = canvas.getBoundingClientRect();
+        const ratio = Math.min(devicePixelRatio || 1, 2);
+        canvas.width = Math.round(box.width * ratio);
+        canvas.height = Math.round(box.height * ratio);
+        source.width = canvas.width;
+        source.height = canvas.height;
+        drawHat(sctx, canvas.width / 420 * .625);
+        const data = sctx.getImageData(0, 0, source.width, source.height).data;
+        particles = [];
+        const step = Math.max(4, Math.round(7 * ratio));
+        for (let y = 0; y < source.height; y += step) {
+          for (let x = 0; x < source.width; x += step) {
+            const i = (y * source.width + x) * 4;
+            if (data[i + 3] > 80 && Math.random() > .25) {
+              const angle = Math.random() * Math.PI * 2;
+              const distance = (45 + Math.random() * 170) * ratio;
+              particles.push({
+                x, y, tx: x, ty: y, ox: Math.cos(angle) * distance,
+                oy: Math.sin(angle) * distance, a: angle,
+                size: (Math.random() * 1.4 + .55) * ratio,
+                hue: Math.random() > .78 ? 23 : 352
+              });
+            }
+          }
+        }
+      }
+
+      function render(now) {
+        const elapsed = now - started;
+        const explode = Math.min(elapsed / 850, 1);
+        const reform = Math.max(0, Math.min((elapsed - 1900) / 1150, 1));
+        const settle = reform * reform * (3 - 2 * reform);
+        const spread = explode * (1 - settle);
+        const box = canvas.getBoundingClientRect();
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        particles.forEach((p, i) => {
+          const orbit = elapsed > 850 && elapsed < 2150 ? Math.sin(elapsed / 230 + p.a * 4) * 14 : 0;
+          let x = p.tx + p.ox * spread + Math.cos(p.a + elapsed / 900) * orbit;
+          let y = p.ty + p.oy * spread + Math.sin(p.a + elapsed / 760) * orbit;
+          const alpha = .26 + Math.min(explode, 1) * .64;
+          ctx.beginPath();
+          ctx.arc(x, y, p.size, 0, Math.PI * 2);
+          ctx.fillStyle = `hsla(${p.hue}, 90%, 62%, ${alpha})`;
+          ctx.shadowBlur = 9 * (devicePixelRatio || 1);
+          ctx.shadowColor = p.hue === 23 ? "#ff9f63" : "#ff3146";
+          ctx.fill();
+        });
+
+        if (elapsed < 3300) {
+          raf = requestAnimationFrame(render);
+        } else {
+          scene.classList.remove("active");
+          phase = "idle";
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+      }
+
+      function erupt() {
+        if (phase !== "idle") return;
+        prepare();
+        phase = "active";
+        scene.classList.add("active");
+        started = performance.now();
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(render);
+      }
+
+      scene.addEventListener("pointerenter", erupt);
+      scene.addEventListener("click", erupt);
+      scene.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          erupt();
+        }
+      });
+      addEventListener("resize", () => { if (phase === "idle") prepare(); });
+    })();
+  </script>
+</body>
+</html>
