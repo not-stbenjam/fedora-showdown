@@ -5,6 +5,8 @@ on:
     paths:
       - '*/index.html'
       - 'index.html'
+      - '.github/scripts/model_families.py'
+      - '.github/scripts/test_model_families.py'
       - '.github/scripts/performance_guardrails.py'
       - '.github/scripts/test_performance_guardrails.py'
       - '.github/workflows/performance-guardrails.yml'
@@ -28,6 +30,9 @@ jobs:
 
       - name: Run guardrail tests
         run: python3 .github/scripts/test_performance_guardrails.py
+
+      - name: Run model family tests
+        run: python3 .github/scripts/test_model_families.py
 
       - name: Require warnings for high-risk pages
         run: python3 .github/scripts/performance_guardrails.py --index index.html */index.html

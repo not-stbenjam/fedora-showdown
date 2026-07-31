@@ -17,17 +17,24 @@ class PerformanceGuardrailsTest(unittest.TestCase):
         return (REPO_ROOT / slug / "index.html").read_text()
 
     def test_flags_per_particle_canvas_shadows(self):
-        for slug in ("gpt-5.6-sol-none", "qwen3.7-flash", "gemini-3.1-pro"):
+        for slug in (
+            "gpt-5.6-sol-none",
+            "gpt-5.6-luna-none",
+            "gpt-5.6-luna-low",
+            "qwen3.7-flash",
+            "gemini-3.1-pro",
+        ):
             with self.subTest(slug=slug):
                 result = audit_html(self.read_model(slug))
                 self.assertTrue(result.requires_warning)
                 self.assertIn("per-particle canvas shadows", result.reasons)
 
     def test_does_not_flag_lower_cost_particle_rendering(self):
-        result = audit_html(self.read_model("gpt-5.6-sol-low"))
-
-        self.assertFalse(result.requires_warning)
-        self.assertEqual((), result.reasons)
+        for slug in ("gpt-5.6-sol-low", "grok-4", "grok-4.3", "haiku-4-5"):
+            with self.subTest(slug=slug):
+                result = audit_html(self.read_model(slug))
+                self.assertFalse(result.requires_warning)
+                self.assertEqual((), result.reasons)
 
     def test_flags_large_sorted_shadow_animation_after_identifier_changes(self):
         content = self.read_model("gpt-5.6-sol-none")
@@ -53,6 +60,8 @@ class PerformanceGuardrailsTest(unittest.TestCase):
     def test_all_risky_models_have_preload_warnings(self):
         model_paths = [
             REPO_ROOT / "gpt-5.6-sol-none" / "index.html",
+            REPO_ROOT / "gpt-5.6-luna-none" / "index.html",
+            REPO_ROOT / "gpt-5.6-luna-low" / "index.html",
             REPO_ROOT / "qwen3.7-flash" / "index.html",
             REPO_ROOT / "gemini-3.1-pro" / "index.html",
         ]

@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>Fedora</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body {
+      background:
+        radial-gradient(circle at 50% 42%, #172536 0%, #0b111a 37%, #05080d 76%);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      min-height: 100%;
+      display: grid;
+      place-items: center;
+      position: relative;
+      isolation: isolate;
+    }
+    main::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: .5;
+      background-image:
+        linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.012) 1px, transparent 1px);
+      background-size: 54px 54px;
+      mask-image: radial-gradient(circle at center, black, transparent 72%);
+    }
+    .scene {
+      width: min(92vw, 760px);
+      aspect-ratio: 1.35;
+      min-height: 390px;
+      display: grid;
+      place-items: center;
+      position: relative;
+      cursor: pointer;
+      touch-action: manipulation;
+      outline: none;
+    }
+    .scene:focus-visible {
+      border-radius: 24px;
+      outline: 1px solid rgba(255, 255, 255, .45);
+      outline-offset: 8px;
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .caption {
+      position: absolute;
+      bottom: clamp(18px, 4vh, 36px);
+      left: 50%;
+      transform: translateX(-50%);
+      color: rgba(232, 239, 247, .62);
+      text-align: center;
+      font-size: clamp(.68rem, 1.7vw, .8rem);
+      letter-spacing: .21em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+    .caption span {
+      color: #ee4b56;
+      text-shadow: 0 0 16px rgba(238, 75, 86, .35);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .caption::after { content: " — still"; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="scene" id="scene" tabindex="0" role="button" aria-label="Animate the fedora">
+      <canvas id="art" aria-hidden="true"></canvas>
+      <div class="caption"><span>●</span> Fedora / hover to scatter</div>
+    </div>
+  </main>
+
+  <script>
+    (() => {
+      const canvas = document.getElementById("art");
+      const scene = document.getElementById("scene");
+      const ctx = canvas.getContext("2d");
+      const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+      let w, h, dpr, t0 = performance.now(), active = false, triggered = false;
+      let particles = [], orbiters = [], phase = "hat", phaseStart = 0;
+
+      function resize() {
+        const rect = scene.getBoundingClientRect();
+        dpr = Math.min(devicePixelRatio || 1, 2);
+        w = rect.width; h = rect.height;
+        canvas.width = w * dpr; canvas.height = h * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+      addEventListener("resize", resize, { passive: true });
+      resize();
+
+      const rnd = (a, b) => a + Math.random() * (b - a);
+      const ease = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+      const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+
+      function hatPoint() {
+        const r = Math.random(), cx = w * .5, cy = h * .48;
+        let x, y, inside = false;
+        while (!inside) {
+          x = rnd(-1, 1); y = rnd(-1, 1);
+          const brim = ((x / 1.05) ** 2 + ((y - .38) / .25) ** 2) < 1;
+          const crown = Math.abs(x) < .48 - y * .11 && y > -.66 && y < .35 &&
+            y > -.7 + Math.abs(x) * .35;
+          inside = brim || crown;
+        }
+        return { x: cx + x * w * .25, y: cy + y * h * .25, crown: y < .27 };
+      }
+
+      function buildParticles() {
+        particles = Array.from({ length: Math.min(2600, Math.floor(w * h / 180)) }, () => {
+          const p = hatPoint();
+          return {
+            x: p.x, y: p.y, homeX: p.x, homeY: p.y,
+            a: rnd(0, Math.PI * 2), radius: rnd(35, Math.min(w, h) * .52),
+            speed: rnd(.45, 1.6), size: rnd(.35, 1.45),
+            shade: p.crown ? rnd(185, 255) : rnd(115, 205),
+            red: Math.random() < .13
+          };
+        });
+        orbiters = Array.from({ length: 18 }, (_, i) => ({
+          angle: i / 18 * Math.PI * 2,
+          speed: rnd(.2, .58), radius: rnd(w * .19, w * .29),
+          size: rnd(.7, 1.7), trail: []
+        }));
+      }
+
+      function ellipse(x, y, rx, ry, color, alpha = 1) {
+        ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+        ctx.fillStyle = color; ctx.globalAlpha = alpha; ctx.fill(); ctx.globalAlpha = 1;
+      }
+
+      function drawHat(time, spin) {
+        const cx = w / 2, cy = h * .48;
+        const angle = Math.sin(time * spin) * .18;
+        const bob = Math.sin(time * spin * 1.9) * 4;
+        ctx.save();
+        ctx.translate(cx, cy + bob);
+        ctx.transform(1, 0, angle * .16, 1, 0, 0);
+
+        ctx.save();
+        ctx.filter = "blur(18px)";
+        ellipse(0, h * .15, w * .2, h * .027, "#000", .7);
+        ctx.restore();
+
+        const brim = ctx.createLinearGradient(-w*.28, 0, w*.28, 0);
+        brim.addColorStop(0, "#5c0712"); brim.addColorStop(.28, "#cf2637");
+        brim.addColorStop(.53, "#f04553"); brim.addColorStop(.8, "#9e1524"); brim.addColorStop(1, "#3d050d");
+        ctx.beginPath();
+        ctx.ellipse(0, h * .055, w * .265, h * .105, 0, 0, Math.PI * 2);
+        ctx.fillStyle = brim; ctx.fill();
+
+        ctx.beginPath();
+        ctx.ellipse(0, h * .049, w * .185, h * .058, 0, 0, Math.PI * 2);
+        ctx.fillStyle = "#6f0d1a"; ctx.fill();
+
+        const crown = ctx.createLinearGradient(-w*.12, -h*.2, w*.15, h*.12);
+        crown.addColorStop(0, "#fa5963"); crown.addColorStop(.28, "#d92838");
+        crown.addColorStop(.68, "#8f0e1e"); crown.addColorStop(1, "#4f0711");
+        ctx.beginPath();
+        ctx.moveTo(-w * .135, h * .048);
+        ctx.bezierCurveTo(-w * .12, -h * .08, -w * .095, -h * .24, -w * .035, -h * .275);
+        ctx.bezierCurveTo(w * .035, -h * .305, w * .105, -h * .22, w * .14, -h * .05);
+        ctx.lineTo(w * .17, h * .05);
+        ctx.bezierCurveTo(w * .1, h * .09, -w * .1, h * .09, -w * .135, h * .048);
+        ctx.fillStyle = crown; ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(-w*.13, h*.005);
+        ctx.bezierCurveTo(-w*.05, h*.036, w*.09, h*.035, w*.153, -.002*h);
+        ctx.lineTo(w*.163, h*.05);
+        ctx.bezierCurveTo(w*.08, h*.093, -w*.09, h*.09, -w*.143, h*.05);
+        ctx.closePath();
+        ctx.fillStyle = "#610a16"; ctx.fill();
+
+        ctx.save();
+        ctx.globalCompositeOperation = "screen";
+        const shine = ctx.createRadialGradient(-w*.08, -h*.15, 0, -w*.08, -h*.15, w*.2);
+        shine.addColorStop(0, "rgba(255,255,255,.30)"); shine.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.fillStyle = shine;
+        ctx.beginPath(); ctx.ellipse(-w*.06, -h*.1, w*.13, h*.2, -.45, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+        ctx.restore();
+      }
+
+      function drawParticles(time, progress) {
+        const cx = w / 2, cy = h * .48;
+        for (const p of particles) {
+          const scatter = ease(progress);
+          const swirl = time * p.speed + p.a;
+          const targetX = cx + Math.cos(swirl) * p.radius + Math.sin(time * 2 + p.a) * 24;
+          const targetY = cy + Math.sin(swirl * 1.37) * p.radius * .57 + Math.cos(time * 2.4 + p.a) * 19;
+          const returning = phase === "return";
+          const mix = returning ? 1 - scatter : scatter;
+          p.x = p.homeX * (1 - mix) + targetX * mix;
+          p.y = p.homeY * (1 - mix) + targetY * mix;
+          const a = .22 + (p.size / 2) * .55;
+          ctx.fillStyle = p.red ? `rgba(255,83,95,${a})` : `rgba(${p.shade},${p.shade + 15},${p.shade + 25},${a})`;
+          ctx.fillRect(p.x, p.y, p.size, p.size);
+        }
+      }
+
+      function drawOrbiters(time, opacity) {
+        const cx = w / 2, cy = h * .48;
+        for (const o of orbiters) {
+          const a = o.angle + time * o.speed;
+          const x = cx + Math.cos(a) * o.radius;
+          const y = cy + Math.sin(a * 1.25) * o.radius * .45;
+          o.trail.push({ x, y }); if (o.trail.length > 10) o.trail.shift();
+          ctx.beginPath();
+          o.trail.forEach((q, i) => i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y));
+          ctx.strokeStyle = `rgba(249,75,88,${opacity * .16})`;
+          ctx.lineWidth = o.size; ctx.stroke();
+          ctx.beginPath(); ctx.arc(x, y, o.size, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,120,126,${opacity * .8})`; ctx.fill();
+        }
+      }
+
+      function frame(now) {
+        const time = (now - t0) / 1000;
+        ctx.clearRect(0, 0, w, h);
+
+        const halo = ctx.createRadialGradient(w/2, h*.47, 0, w/2, h*.47, w*.37);
+        halo.addColorStop(0, "rgba(231,44,58,.12)");
+        halo.addColorStop(.42, "rgba(171,29,48,.035)");
+        halo.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = halo; ctx.fillRect(0, 0, w, h);
+
+        if (phase === "hat") drawHat(time, reduce ? 0 : active ? .27 : .95);
+        else {
+          const elapsed = (now - phaseStart) / 1000;
+          if (phase === "scatter") {
+            const p = clamp(elapsed / 1.05);
+            drawParticles(time, p);
+            drawOrbiters(time, p);
+            if (elapsed > 1.75) { phase = "return"; phaseStart = now; }
+          } else {
+            const p = clamp(1 - elapsed / 1.2);
+            drawParticles(time, p);
+            drawOrbiters(time, p);
+            if (elapsed > 1.2) { phase = "hat"; triggered = false; }
+          }
+        }
+        requestAnimationFrame(frame);
+      }
+
+      function trigger() {
+        if (reduce || triggered) return;
+        triggered = true; phase = "scatter"; phaseStart = performance.now();
+      }
+      scene.addEventListener("pointerenter", () => { active = true; trigger(); });
+      scene.addEventListener("pointerleave", () => active = false);
+      scene.addEventListener("click", trigger);
+      scene.addEventListener("keydown", e => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); trigger(); }
+      });
+
+      buildParticles();
+      requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>

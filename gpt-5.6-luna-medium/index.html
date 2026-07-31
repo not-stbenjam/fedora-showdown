@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ember Fedora</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --red: #e51b23;
+    --ink: #06080d;
+    --text: #f3f5f7;
+    --muted: #8d96a5;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    min-height: 100%;
+    background: var(--ink);
+  }
+
+  body {
+    overflow: hidden;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: var(--text);
+  }
+
+  .stage {
+    position: relative;
+    display: grid;
+    place-items: center;
+    min-height: 100svh;
+    overflow: hidden;
+    isolation: isolate;
+    cursor: pointer;
+    background:
+      radial-gradient(circle at 50% 42%, rgba(60, 70, 91, .22), transparent 37rem),
+      linear-gradient(145deg, #090b11 0%, #030407 100%);
+  }
+
+  .stage::before,
+  .stage::after {
+    content: "";
+    position: absolute;
+    pointer-events: none;
+    border-radius: 50%;
+    filter: blur(1px);
+  }
+
+  .stage::before {
+    width: 38rem;
+    height: 18rem;
+    top: 18%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: radial-gradient(ellipse, rgba(133, 150, 180, .1), transparent 68%);
+  }
+
+  .stage::after {
+    width: 30rem;
+    height: 8rem;
+    bottom: 21%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: radial-gradient(ellipse, rgba(0, 0, 0, .8), transparent 68%);
+  }
+
+  .hat-wrap {
+    position: relative;
+    z-index: 2;
+    width: min(76vw, 35rem);
+    aspect-ratio: 600 / 430;
+    transform-style: preserve-3d;
+    animation: spin 13s linear infinite;
+    transition: animation-duration .8s ease, opacity .7s ease;
+    filter: drop-shadow(0 2.6rem 2rem rgba(0, 0, 0, .62));
+  }
+
+  .stage:hover .hat-wrap,
+  .stage.slow .hat-wrap {
+    animation-duration: 30s;
+  }
+
+  .stage.dissolving .hat-wrap {
+    opacity: 0;
+    animation-play-state: paused;
+  }
+
+  .hat {
+    width: 100%;
+    height: 100%;
+    display: block;
+    overflow: visible;
+  }
+
+  #particles {
+    position: absolute;
+    z-index: 3;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+
+  .caption {
+    position: absolute;
+    z-index: 4;
+    bottom: clamp(2.5rem, 9vh, 6rem);
+    text-align: center;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    font-size: clamp(.62rem, 1.3vw, .78rem);
+    color: var(--muted);
+    user-select: none;
+  }
+
+  .caption span {
+    display: block;
+    margin-top: .7rem;
+    color: rgba(229, 27, 35, .82);
+    font-size: .58rem;
+    letter-spacing: .24em;
+  }
+
+  @keyframes spin {
+    from { transform: perspective(900px) rotateY(0deg) rotateX(1deg); }
+    to { transform: perspective(900px) rotateY(360deg) rotateX(1deg); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hat-wrap { animation: none; }
+    .stage:hover .hat-wrap,
+    .stage.slow .hat-wrap { animation: none; }
+    .stage.dissolving .hat-wrap { opacity: 1; }
+  }
+</style>
+</head>
+<body>
+<main class="stage" id="stage" aria-label="Interactive ember fedora">
+  <div class="hat-wrap" id="hatWrap" aria-hidden="true">
+    <svg class="hat" viewBox="0 0 600 430" role="img">
+      <defs>
+        <linearGradient id="crown" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#ff4b4c"/>
+          <stop offset=".4" stop-color="#d71920"/>
+          <stop offset="1" stop-color="#760b13"/>
+        </linearGradient>
+        <linearGradient id="brim" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#f33239"/>
+          <stop offset=".45" stop-color="#ba1018"/>
+          <stop offset="1" stop-color="#5f080e"/>
+        </linearGradient>
+        <linearGradient id="band" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#4a050b"/>
+          <stop offset=".45" stop-color="#170308"/>
+          <stop offset="1" stop-color="#810a12"/>
+        </linearGradient>
+        <radialGradient id="highlight" cx=".3" cy=".16" r=".72">
+          <stop offset="0" stop-color="#ff8581" stop-opacity=".72"/>
+          <stop offset=".45" stop-color="#ff454a" stop-opacity=".12"/>
+          <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+        </radialGradient>
+        <filter id="soft">
+          <feGaussianBlur stdDeviation="8"/>
+        </filter>
+      </defs>
+
+      <ellipse cx="300" cy="344" rx="251" ry="48" fill="#050307" opacity=".72" filter="url(#soft)"/>
+      <path d="M57 319 C87 280 177 270 300 273 C423 270 513 280 543 319 C556 337 538 354 507 365 C443 388 358 391 300 390 C242 391 157 388 93 365 C62 354 44 337 57 319Z" fill="url(#brim)"/>
+      <path d="M58 320 C133 349 222 360 300 360 C378 360 467 349 542 320 C523 300 430 283 300 283 C170 283 77 300 58 320Z" fill="#ff3138" opacity=".28"/>
+      <path d="M144 306 C149 270 158 218 167 160 C174 112 210 78 263 66 C287 60 313 60 337 66 C390 78 426 112 433 160 C442 218 451 270 456 306 C407 325 354 333 300 333 C246 333 193 325 144 306Z" fill="url(#crown)"/>
+      <path d="M146 306 C195 322 246 329 300 329 C354 329 405 322 454 306 C436 327 370 348 300 348 C230 348 164 327 146 306Z" fill="url(#band)"/>
+      <path d="M154 187 C178 159 220 148 300 148 C380 148 422 159 446 187 L450 219 C399 199 351 192 300 192 C249 192 201 199 150 219Z" fill="#190309" opacity=".8"/>
+      <path d="M167 160 C174 112 210 78 263 66 C287 60 313 60 337 66 C390 78 426 112 433 160 C383 143 347 136 300 136 C253 136 217 143 167 160Z" fill="url(#highlight)"/>
+      <path d="M191 112 C220 82 258 70 300 70 C342 70 380 82 409 112" fill="none" stroke="#ff9b96" stroke-opacity=".32" stroke-width="5" stroke-linecap="round"/>
+      <path d="M82 333 C160 370 234 377 300 377 C366 377 440 370 518 333" fill="none" stroke="#ff5d5f" stroke-opacity=".28" stroke-width="5"/>
+    </svg>
+  </div>
+
+  <canvas id="particles"></canvas>
+
+  <div class="caption">
+    A little light in the dark
+    <span>hover or tap</span>
+  </div>
+</main>
+
+<script>
+(() => {
+  const stage = document.getElementById("stage");
+  const canvas = document.getElementById("particles");
+  const ctx = canvas.getContext("2d");
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const TAU = Math.PI * 2;
+  let particles = [];
+  let active = false;
+  let startedAt = 0;
+  let width = 0;
+  let height = 0;
+  let dpr = 1;
+
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const ease = t => t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+
+  function resize() {
+    dpr = Math.min(devicePixelRatio || 1, 2);
+    width = innerWidth;
+    height = innerHeight;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = width + "px";
+    canvas.style.height = height + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function insideHat(x, y) {
+    const brim = ((x - 300) / 250) ** 2 + ((y - 340) / 55) ** 2 < 1;
+    if (brim) return true;
+    if (y < 72 || y > 320) return false;
+    const spread = y < 145 ? 68 + (y - 72) * .9 : 134 + (y - 145) * .12;
+    const center = 300 + (y - 180) * .035;
+    return Math.abs(x - center) < spread;
+  }
+
+  function makeParticles() {
+    const points = [];
+    while (points.length < 2100) {
+      const x = rand(45, 555);
+      const y = rand(62, 390);
+      if (insideHat(x, y)) points.push({ x, y });
+    }
+
+    particles = points.map((p, i) => {
+      const dx = p.x - 300;
+      const dy = p.y - 230;
+      const length = Math.hypot(dx, dy) || 1;
+      const force = rand(45, 170) + (i % 7 === 0 ? rand(80, 180) : 0);
+      return {
+        x: p.x, y: p.y, homeX: p.x, homeY: p.y,
+        sx: p.x + dx / length * force + rand(-80, 80),
+        sy: p.y + dy / length * force + rand(-70, 70),
+        size: rand(.45, 1.55),
+        alpha: rand(.4, .95),
+        hue: rand(0, 18),
+        phase: rand(0, TAU),
+        speed: rand(.7, 1.5),
+        orbit: i < 135
+      };
+    });
+  }
+
+  function project(x, y) {
+    const scale = Math.min(width / 600, height / 520) * .88;
+    return {
+      x: width / 2 + (x - 300) * scale,
+      y: height / 2 - 25 + (y - 220) * scale
+    };
+  }
+
+  function trigger() {
+    if (reduceMotion || active) return;
+    active = true;
+    startedAt = performance.now();
+    makeParticles();
+    stage.classList.add("dissolving");
+  }
+
+  function render(now) {
+    ctx.clearRect(0, 0, width, height);
+
+    if (active) {
+      const elapsed = now - startedAt;
+      const scatterEnd = 1000;
+      const swirlEnd = 2900;
+      const reformEnd = 4550;
+      const center = project(300, 220);
+
+      if (elapsed >= reformEnd + 900) {
+        active = false;
+        stage.classList.remove("dissolving");
+        particles = particles.filter(p => p.orbit);
+      }
+
+      for (const p of particles) {
+        let x, y, alpha;
+
+        if (elapsed < scatterEnd) {
+          const t = ease(clamp(elapsed / scatterEnd, 0, 1));
+          x = p.homeX + (p.sx - p.homeX) * t;
+          y = p.homeY + (p.sy - p.homeY) * t;
+          alpha = .95;
+        } else if (elapsed < swirlEnd) {
+          const t = (elapsed - scatterEnd) / (swirlEnd - scatterEnd);
+          const angle = p.phase + t * TAU * p.speed;
+          const radius = Math.hypot(p.sx - 300, p.sy - 220);
+          x = 300 + Math.cos(angle) * (radius + 22 * Math.sin(t * TAU + p.phase));
+          y = 220 + Math.sin(angle) * (radius * .66 + 18 * Math.cos(t * TAU + p.phase));
+          alpha = .9;
+        } else if (elapsed < reformEnd) {
+          const t = ease((elapsed - swirlEnd) / (reformEnd - swirlEnd));
+          const angle = p.phase + t * TAU * p.speed;
+          const swirlX = 300 + Math.cos(angle) * Math.hypot(p.sx - 300, p.sy - 220);
+          const swirlY = 220 + Math.sin(angle) * Math.hypot(p.sx - 300, p.sy - 220) * .66;
+          x = swirlX + (p.homeX - swirlX) * t;
+          y = swirlY + (p.homeY - swirlY) * t;
+          alpha = 1 - t * .92;
+        } else {
+          if (!p.orbit) continue;
+          const t = (elapsed - reformEnd) / 900;
+          const angle = p.phase + t * TAU * p.speed;
+          const orbitRadius = 205 + 35 * Math.sin(p.phase);
+          x = 300 + Math.cos(angle) * orbitRadius;
+          y = 220 + Math.sin(angle) * orbitRadius * .52;
+          alpha = .45 * (1 - clamp(t, 0, 1));
+        }
+
+        const point = project(x, y);
+        const depth = .7 + .3 * Math.sin(p.phase + now * .001 * p.speed);
+        const radius = Math.max(.35, p.size * depth * Math.min(width / 600, height / 520));
+        const glow = ctx.createRadialGradient(point.x, point.y, 0, point.x, point.y, radius * 5);
+        glow.addColorStop(0, `hsla(${p.hue}, 100%, 72%, ${alpha})`);
+        glow.addColorStop(.35, `hsla(${p.hue}, 100%, 55%, ${alpha * .32})`);
+        glow.addColorStop(1, `hsla(${p.hue}, 100%, 50%, 0)`);
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, radius * 5, 0, TAU);
+        ctx.fill();
+
+        ctx.fillStyle = `hsla(${p.hue}, 100%, ${72 + depth * 20}%, ${alpha})`;
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, radius, 0, TAU);
+        ctx.fill();
+      }
+    }
+
+    requestAnimationFrame(render);
+  }
+
+  addEventListener("resize", resize, { passive: true });
+  stage.addEventListener("pointerenter", () => stage.classList.add("slow"));
+  stage.addEventListener("pointerleave", () => stage.classList.remove("slow"));
+  stage.addEventListener("click", trigger);
+  resize();
+  requestAnimationFrame(render);
+})();
+</script>
+</body>
+</html>

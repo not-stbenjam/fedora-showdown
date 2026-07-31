@@ -770,6 +770,84 @@
   margin-left: 6px;
   vertical-align: middle;
 }
+
+.sidebar .model-list .family-group {
+  margin: 0;
+}
+.sidebar .model-list .family-toggle {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 16px;
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.15s, background 0.15s;
+  user-select: none;
+  gap: 8px;
+}
+.sidebar .model-list .family-toggle:hover {
+  color: var(--text);
+  background: var(--accent-dim);
+}
+.sidebar .model-list .family-toggle[aria-expanded="true"] {
+  color: var(--text);
+}
+.sidebar .model-list .family-toggle .family-chevron {
+  width: 12px;
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 1;
+  transition: transform 0.15s ease;
+}
+.sidebar .model-list .family-toggle[aria-expanded="true"] .family-chevron {
+  transform: rotate(90deg);
+}
+.sidebar .model-list .family-toggle .family-label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.sidebar .model-list .family-toggle .family-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.sidebar .model-list .family-toggle .family-count {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  opacity: 0.75;
+  letter-spacing: 0.04em;
+}
+.sidebar .model-list .family-toggle .family-provider {
+  font-size: 10px;
+  color: var(--muted);
+  opacity: 0.8;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+.sidebar .model-list .family-variants {
+  display: flex;
+  flex-direction: column;
+}
+.sidebar .model-list .family-variants[hidden] {
+  display: none;
+}
+.sidebar .model-list .family-variants button {
+  padding-left: 28px;
+}
+.sidebar .model-list .family-variants button .btn-name .variant-name-base {
+  display: none;
+}
 </style>
 </head>
 <body>
@@ -848,9 +926,9 @@ And respect reduced motion. Return only the finished HTML file.</div>
         <br><br>
         Entries marked <span class="variant-badge">Ultracode</span> were run using Claude Code's multi-agent mode (parallel implementations → judge → best result). This applies even when the model isn't from Anthropic — Claude Code supports <a href="https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration" target="_blank" rel="noopener">overriding the Anthropic base URL to OpenRouter</a>, so it orchestrates the workflow while the underlying model can be swapped to any provider.
         <br><br>
-        GPT-5.6 Sol entries marked <span class="variant-badge">None</span>, <span class="variant-badge">Low</span>, <span class="variant-badge">Medium</span>, <span class="variant-badge">High</span>, <span class="variant-badge">XHigh</span>, or <span class="variant-badge">Max</span> were run in Codex at that explicit reasoning effort.
+        GPT-5.6 Sol, Terra, and Luna entries marked <span class="variant-badge">None</span>, <span class="variant-badge">Low</span>, <span class="variant-badge">Medium</span>, <span class="variant-badge">High</span>, <span class="variant-badge">XHigh</span>, or <span class="variant-badge">Max</span> were run in Codex at that explicit reasoning effort.
         <br><br>
-        <span class="variant-badge">Ultra</span> is a separate Codex multi-agent mode, not a reasoning effort. <span class="variant-badge">Default</span> identifies the original Sol run, which used the harness default before effort-specific comparisons were added.
+        <span class="variant-badge">Ultra</span> is a separate Codex multi-agent mode, not a reasoning effort — currently shown for Sol only. <span class="variant-badge">Default</span> identifies the original unlabelled run for each family, which used the harness default before effort-specific comparisons were added.
       </div>
     </div>
   </div>
@@ -883,16 +961,28 @@ And respect reduced motion. Return only the finished HTML file.</div>
     { id: "sonnet-4-6",  name: "Sonnet 4.6",          group: "Anthropic", openrouterId: "anthropic/claude-sonnet-4.6", dateAdded: "1970-01-01" },
     { id: "sonnet-4-5",  name: "Sonnet 4.5",          group: "Anthropic", openrouterId: "anthropic/claude-sonnet-4.5", dateAdded: "1970-01-01" },
     { id: "haiku-4-5",   name: "Haiku 4.5",           group: "Anthropic", openrouterId: "anthropic/claude-haiku-4.5", dateAdded: "1970-01-01" },
-    { id: "gpt-5.6-sol-ultra", name: "GPT-5.6 Sol", group: "OpenAI", badge: "Ultra", dateAdded: "2026-07-24", stats: { cost: "~$25.65 API-equivalent", tokens: "25.04M tokens" } },
-    { id: "gpt-5.6-sol-max", name: "GPT-5.6 Sol", group: "OpenAI", badge: "Max", dateAdded: "2026-07-31" },
-    { id: "gpt-5.6-sol-xhigh", name: "GPT-5.6 Sol", group: "OpenAI", badge: "XHigh", dateAdded: "2026-07-31" },
-    { id: "gpt-5.6-sol-high", name: "GPT-5.6 Sol", group: "OpenAI", badge: "High", dateAdded: "2026-07-31" },
-    { id: "gpt-5.6-sol-medium", name: "GPT-5.6 Sol", group: "OpenAI", badge: "Medium", dateAdded: "2026-07-31" },
-    { id: "gpt-5.6-sol-low", name: "GPT-5.6 Sol", group: "OpenAI", badge: "Low", dateAdded: "2026-07-31" },
-    { id: "gpt-5.6-sol-none", name: "GPT-5.6 Sol", group: "OpenAI", badge: "None", dateAdded: "2026-07-31", perfWarning: "This output depth-sorts about 5,100 particles and applies canvas shadows inside the per-particle animation loop. It may freeze or crash the browser tab." },
-    { id: "gpt-5.6-sol",  name: "GPT-5.6 Sol",         group: "OpenAI", badge: "Default", openrouterId: "openai/gpt-5.6-sol", dateAdded: "2026-07-09" },
-    { id: "gpt-5.6-terra", name: "GPT-5.6 Terra",     group: "OpenAI", openrouterId: "openai/gpt-5.6-terra", dateAdded: "2026-07-09" },
-    { id: "gpt-5.6-luna", name: "GPT-5.6 Luna",        group: "OpenAI", openrouterId: "openai/gpt-5.6-luna", dateAdded: "2026-07-09" },
+    { id: "gpt-5.6-sol-ultra", name: "GPT-5.6 Sol", family: "gpt-5.6-sol", group: "OpenAI", badge: "Ultra", dateAdded: "2026-07-24", stats: { cost: "~$25.65 API-equivalent", tokens: "25.04M tokens" } },
+    { id: "gpt-5.6-sol-max", name: "GPT-5.6 Sol", family: "gpt-5.6-sol", group: "OpenAI", badge: "Max", dateAdded: "2026-07-31" },
+    { id: "gpt-5.6-sol-xhigh", name: "GPT-5.6 Sol", family: "gpt-5.6-sol", group: "OpenAI", badge: "XHigh", dateAdded: "2026-07-31" },
+    { id: "gpt-5.6-sol-high", name: "GPT-5.6 Sol", family: "gpt-5.6-sol", group: "OpenAI", badge: "High", dateAdded: "2026-07-31" },
+    { id: "gpt-5.6-sol-medium", name: "GPT-5.6 Sol", family: "gpt-5.6-sol", group: "OpenAI", badge: "Medium", dateAdded: "2026-07-31" },
+    { id: "gpt-5.6-sol-low", name: "GPT-5.6 Sol", family: "gpt-5.6-sol", group: "OpenAI", badge: "Low", dateAdded: "2026-07-31" },
+    { id: "gpt-5.6-sol-none", name: "GPT-5.6 Sol", family: "gpt-5.6-sol", group: "OpenAI", badge: "None", dateAdded: "2026-07-31", perfWarning: "This output depth-sorts about 5,100 particles and applies canvas shadows inside the per-particle animation loop. It may freeze or crash the browser tab." },
+    { id: "gpt-5.6-sol",  name: "GPT-5.6 Sol", family: "gpt-5.6-sol", group: "OpenAI", badge: "Default", openrouterId: "openai/gpt-5.6-sol", dateAdded: "2026-07-09" },
+    { id: "gpt-5.6-terra-max", name: "GPT-5.6 Terra", family: "gpt-5.6-terra", group: "OpenAI", badge: "Max", dateAdded: "2026-07-31" },
+    { id: "gpt-5.6-terra-xhigh", name: "GPT-5.6 Terra", family: "gpt-5.6-terra", group: "OpenAI", badge: "XHigh", dateAdded: "2026-07-31" },
+    { id: "gpt-5.6-terra-high", name: "GPT-5.6 Terra", family: "gpt-5.6-terra", group: "OpenAI", badge: "High", dateAdded: "2026-07-31" },
+    { id: "gpt-5.6-terra-medium", name: "GPT-5.6 Terra", family: "gpt-5.6-terra", group: "OpenAI", badge: "Medium", dateAdded: "2026-07-31" },
+    { id: "gpt-5.6-terra-low", name: "GPT-5.6 Terra", family: "gpt-5.6-terra", group: "OpenAI", badge: "Low", dateAdded: "2026-07-31" },
+    { id: "gpt-5.6-terra-none", name: "GPT-5.6 Terra", family: "gpt-5.6-terra", group: "OpenAI", badge: "None", dateAdded: "2026-07-31" },
+    { id: "gpt-5.6-terra", name: "GPT-5.6 Terra", family: "gpt-5.6-terra", group: "OpenAI", badge: "Default", openrouterId: "openai/gpt-5.6-terra", dateAdded: "2026-07-09" },
+    { id: "gpt-5.6-luna-max", name: "GPT-5.6 Luna", family: "gpt-5.6-luna", group: "OpenAI", badge: "Max", dateAdded: "2026-07-31" },
+    { id: "gpt-5.6-luna-xhigh", name: "GPT-5.6 Luna", family: "gpt-5.6-luna", group: "OpenAI", badge: "XHigh", dateAdded: "2026-07-31" },
+    { id: "gpt-5.6-luna-high", name: "GPT-5.6 Luna", family: "gpt-5.6-luna", group: "OpenAI", badge: "High", dateAdded: "2026-07-31" },
+    { id: "gpt-5.6-luna-medium", name: "GPT-5.6 Luna", family: "gpt-5.6-luna", group: "OpenAI", badge: "Medium", dateAdded: "2026-07-31" },
+    { id: "gpt-5.6-luna-low", name: "GPT-5.6 Luna", family: "gpt-5.6-luna", group: "OpenAI", badge: "Low", dateAdded: "2026-07-31", perfWarning: "This output samples the rendered hat into a dense particle field and applies canvas shadows inside its per-particle animation loop. It may freeze or crash the browser tab." },
+    { id: "gpt-5.6-luna-none", name: "GPT-5.6 Luna", family: "gpt-5.6-luna", group: "OpenAI", badge: "None", dateAdded: "2026-07-31", perfWarning: "This output animates 2,600 particles with canvas shadows inside the per-particle animation loop. It may freeze or crash the browser tab." },
+    { id: "gpt-5.6-luna", name: "GPT-5.6 Luna", family: "gpt-5.6-luna", group: "OpenAI", badge: "Default", openrouterId: "openai/gpt-5.6-luna", dateAdded: "2026-07-09" },
     { id: "gpt-5.5-pro", name: "GPT-5.5 Pro",         group: "OpenAI", openrouterId: "openai/gpt-5.5-pro", dateAdded: "1970-01-01" },
     { id: "gpt-5.5",     name: "GPT-5.5",             group: "OpenAI", openrouterId: "openai/gpt-5.5", dateAdded: "1970-01-01" },
     { id: "gpt-5.4",     name: "GPT-5.4",             group: "OpenAI", openrouterId: "openai/gpt-5.4", dateAdded: "1970-01-01" },
@@ -974,7 +1064,8 @@ And respect reduced motion. Return only the finished HTML file.</div>
   const navOrder = [];    // position -> model index
   const navButtons = [];  // position -> button element
   const headerAt = [];    // position -> group header element, if first under one
-  const sections = [];    // { header, positions } per sidebar group, for search filtering
+  const sections = [];    // { header, positions, familyGroups } per sidebar group
+  const familyGroups = []; // disclosure controls for multi-variant families
   const gridVisible = new Set();
   let voteData = {};
   let gridCustomized = false;
@@ -988,38 +1079,163 @@ And respect reduced motion. Return only the finished HTML file.</div>
       + ' <span class="variant-badge">' + badge + '</span>';
   }
 
+  function getFamilyId(m) {
+    return m.family || null;
+  }
+
+  function familyMemberIndices(family) {
+    const indices = [];
+    for (let i = 0; i < MODELS.length; i++) {
+      if (getFamilyId(MODELS[i]) === family) indices.push(i);
+    }
+    return indices;
+  }
+
+  function modelSearchText(m) {
+    return [m.name, m.group, m.badge, m.id, m.family].filter(Boolean).join(" ").toLowerCase();
+  }
+
+  function setFamilyExpanded(group, expanded) {
+    group.toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+    if (expanded) group.panel.removeAttribute("hidden");
+    else group.panel.setAttribute("hidden", "");
+    group.chevron.textContent = "›";
+  }
+
+  function ensureFamilyExpandedForModel(idx) {
+    familyGroups.forEach(group => {
+      if (group.positions.some(pos => navOrder[pos] === idx)) {
+        setFamilyExpanded(group, true);
+      }
+    });
+  }
+
   function init() {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const isNew = MODELS.map(m => m.dateAdded > sevenDaysAgo);
+    let familyPanelSeq = 0;
 
     function addHeader(label) {
       const header = document.createElement("div");
       header.className = "group-header";
       header.textContent = label;
       modelList.appendChild(header);
-      sections.push({ header, positions: [] });
+      sections.push({ header, positions: [], familyGroups: [] });
       headerAt[navOrder.length] = header;
     }
 
-    function addButton(i, inNewSection) {
+    function createModelButton(i, inNewSection, mount) {
       const m = MODELS[i];
       const pos = navOrder.length;
       navOrder.push(i);
       const nameHtml = formatModelName(m)
         + (!inNewSection && isNew[i] ? '<span class="new-dot" title="Recently added"></span>' : '');
       const btn = document.createElement("button");
+      btn.type = "button";
       btn.innerHTML = '<span class="check"></span><span class="btn-label"><span class="btn-name">' + nameHtml + '</span>'
         + (inNewSection ? '<span class="btn-provider">' + m.group + '</span>' : '')
         + '</span>';
       btn.dataset.idx = i;
+      btn.setAttribute("aria-label", [m.name, m.badge].filter(Boolean).join(" "));
       btn.addEventListener("click", () => handleTabClick(pos));
       const avgBadge = document.createElement("span");
       avgBadge.className = "avg-badge";
       avgBadge.dataset.model = m.id;
       btn.appendChild(avgBadge);
-      modelList.appendChild(btn);
+      mount.appendChild(btn);
       navButtons[pos] = btn;
       sections[sections.length - 1].positions.push(pos);
+      return pos;
+    }
+
+    function addGroupedEntries(indices, inNewSection) {
+      const emitted = new Set();
+      const section = sections[sections.length - 1];
+      for (const i of indices) {
+        if (emitted.has(i)) continue;
+        const m = MODELS[i];
+        const family = getFamilyId(m);
+        const members = indices.filter(idx => getFamilyId(MODELS[idx]) === family && !emitted.has(idx));
+        if (family && members.length >= 2) {
+          const wrap = document.createElement("div");
+          wrap.className = "family-group";
+          wrap.dataset.family = family;
+
+          const panelId = "family-panel-" + (++familyPanelSeq);
+          const toggle = document.createElement("button");
+          toggle.type = "button";
+          toggle.className = "family-toggle";
+          toggle.setAttribute("aria-expanded", "false");
+          toggle.setAttribute("aria-controls", panelId);
+          toggle.setAttribute("aria-label", m.name + ", " + members.length + " variants");
+
+          const chevron = document.createElement("span");
+          chevron.className = "family-chevron";
+          chevron.setAttribute("aria-hidden", "true");
+          chevron.textContent = "›";
+
+          const label = document.createElement("span");
+          label.className = "family-label";
+          const nameRow = document.createElement("span");
+          nameRow.className = "family-name-row";
+          const name = document.createElement("span");
+          name.className = "family-name";
+          name.textContent = m.name;
+          const count = document.createElement("span");
+          count.className = "family-count";
+          count.textContent = String(members.length);
+          nameRow.append(name, count);
+          label.appendChild(nameRow);
+          if (inNewSection) {
+            const provider = document.createElement("span");
+            provider.className = "family-provider";
+            provider.textContent = m.group;
+            label.appendChild(provider);
+          }
+
+          const hasNew = !inNewSection && members.some(idx => isNew[idx]);
+          toggle.append(chevron, label);
+          if (hasNew) {
+            const dot = document.createElement("span");
+            dot.className = "new-dot";
+            dot.title = "Recently added";
+            toggle.appendChild(dot);
+          }
+
+          const panel = document.createElement("div");
+          panel.className = "family-variants";
+          panel.id = panelId;
+          panel.hidden = true;
+
+          wrap.append(toggle, panel);
+          modelList.appendChild(wrap);
+
+          const positions = [];
+          for (const member of members) {
+            emitted.add(member);
+            positions.push(createModelButton(member, inNewSection, panel));
+          }
+
+          const group = {
+            family,
+            wrap,
+            toggle,
+            panel,
+            chevron,
+            positions,
+            section,
+          };
+          toggle.addEventListener("click", () => {
+            const open = toggle.getAttribute("aria-expanded") === "true";
+            setFamilyExpanded(group, !open);
+          });
+          familyGroups.push(group);
+          section.familyGroups.push(group);
+        } else {
+          emitted.add(i);
+          createModelButton(i, inNewSection, modelList);
+        }
+      }
     }
 
     // New models get their own section at the top and still appear in their
@@ -1027,19 +1243,30 @@ And respect reduced motion. Return only the finished HTML file.</div>
     // keep working after a model ages out of "New".
     if (isNew.some(Boolean)) {
       addHeader("New");
-      for (let i = 0; i < MODELS.length; i++) if (isNew[i]) addButton(i, true);
+      const newIndices = [];
+      for (let i = 0; i < MODELS.length; i++) if (isNew[i]) newIndices.push(i);
+      addGroupedEntries(newIndices, true);
     }
 
     let lastGroup = null;
+    const providerBuckets = [];
+    for (let i = 0; i < MODELS.length; i++) {
+      const m = MODELS[i];
+      if (m.group !== lastGroup) {
+        providerBuckets.push({ group: m.group, indices: [] });
+        lastGroup = m.group;
+      }
+      providerBuckets[providerBuckets.length - 1].indices.push(i);
+    }
+
+    for (const bucket of providerBuckets) {
+      addHeader(bucket.group);
+      addGroupedEntries(bucket.indices, false);
+    }
+
     for (let i = 0; i < MODELS.length; i++) {
       const m = MODELS[i];
       const url = m.id + "/index.html";
-
-      if (m.group !== lastGroup) {
-        addHeader(m.group);
-        lastGroup = m.group;
-      }
-      addButton(i, false);
 
       const frame = document.createElement("div");
       frame.className = "frame";
@@ -1161,6 +1388,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
       } else if (gridVisible.size < 4) {
         gridVisible.add(idx);
       }
+      ensureFamilyExpandedForModel(idx);
       updateTabStyles();
       applyVisibility();
       updateHint();
@@ -1174,6 +1402,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
     activePos = pos;
     activeIdx = navOrder[pos];
     history.replaceState(null, "", "#" + MODELS[activeIdx].id);
+    ensureFamilyExpandedForModel(activeIdx);
     updateTabStyles();
     applyVisibility();
     const btn = navButtons[pos];
@@ -1301,16 +1530,37 @@ And respect reduced motion. Return only the finished HTML file.</div>
   });
 
   document.getElementById("model-search").addEventListener("input", (e) => {
-    const q = e.target.value.toLowerCase();
+    const q = e.target.value.toLowerCase().trim();
     navButtons.forEach((btn, pos) => {
       const m = MODELS[navOrder[pos]];
-      const searchText = [m.name, m.group, m.badge, m.id].filter(Boolean).join(" ").toLowerCase();
-      const match = !q || searchText.includes(q);
+      const match = !q || modelSearchText(m).includes(q);
       btn.style.display = match ? "" : "none";
     });
+    familyGroups.forEach(group => {
+      const visiblePositions = group.positions.filter(pos => navButtons[pos].style.display !== "none");
+      const familyNameMatch = !q || group.family.toLowerCase().includes(q)
+        || (MODELS[navOrder[group.positions[0]]] && modelSearchText(MODELS[navOrder[group.positions[0]]]).includes(q));
+      if (!q) {
+        group.wrap.style.display = "";
+        // Leave expansion state alone when clearing search.
+        return;
+      }
+      if (visiblePositions.length) {
+        group.wrap.style.display = "";
+        setFamilyExpanded(group, true);
+      } else if (familyNameMatch) {
+        // Family name matched but no variant text did — still reveal members.
+        group.positions.forEach(pos => { navButtons[pos].style.display = ""; });
+        group.wrap.style.display = "";
+        setFamilyExpanded(group, true);
+      } else {
+        group.wrap.style.display = "none";
+      }
+    });
     sections.forEach(s => {
-      const hasVisible = s.positions.some(p => navButtons[p].style.display !== "none");
-      s.header.style.display = hasVisible ? "" : "none";
+      const hasVisibleButton = s.positions.some(p => navButtons[p].style.display !== "none");
+      const hasVisibleFamily = s.familyGroups.some(g => g.wrap.style.display !== "none");
+      s.header.style.display = (hasVisibleButton || hasVisibleFamily) ? "" : "none";
     });
   });
 

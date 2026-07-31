@@ -2,3 +2,4 @@ api/.wrangler/
 .work/
 artifacts/
 __pycache__/
+.generation-logs/

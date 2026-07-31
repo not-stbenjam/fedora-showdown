@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ember Fedora</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #080a0f;
+    --fg: #f1f3f7;
+    --muted: #8991a3;
+    --red: #e52935;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+  }
+
+  body {
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    background:
+      radial-gradient(circle at 50% 42%, rgba(43, 53, 77, .23), transparent 34%),
+      radial-gradient(circle at 50% 110%, rgba(90, 22, 24, .16), transparent 42%),
+      var(--bg);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  main {
+    position: relative;
+    width: min(100vw, 980px);
+    height: 100vh;
+    min-height: 520px;
+    display: grid;
+    place-items: center;
+    isolation: isolate;
+  }
+
+  canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+
+  .caption {
+    position: absolute;
+    left: 1rem;
+    right: 1rem;
+    bottom: clamp(2rem, 9vh, 5rem);
+    text-align: center;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .caption h1 {
+    margin: 0 0 .55rem;
+    color: var(--fg);
+    font-size: clamp(1rem, 2vw, 1.25rem);
+    font-weight: 500;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+  }
+
+  .caption p {
+    margin: 0;
+    color: var(--muted);
+    font-size: clamp(.72rem, 1.5vw, .86rem);
+    letter-spacing: .12em;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .caption p::after {
+      content: " · motion reduced";
+      color: #b3bac8;
+    }
+  }
+</style>
+</head>
+<body>
+<main aria-label="A softly glowing spinning fedora that dissolves into embers when interacted with">
+  <canvas id="scene"></canvas>
+  <div class="caption">
+    <h1>Open Horizons</h1>
+    <p>Hover or tap the hat</p>
+  </div>
+</main>
+
+<script>
+(() => {
+  const canvas = document.getElementById("scene");
+  const ctx = canvas.getContext("2d", { alpha: true });
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const TAU = Math.PI * 2;
+  const pointer = { x: 0, y: 0, active: false };
+  let W = 0, H = 0, dpr = 1;
+  let particles = [];
+  let burst = 0;
+  let cycle = 0;
+  let last = performance.now();
+
+  const hat = document.createElement("canvas");
+  const hatCtx = hat.getContext("2d");
+
+  function resize() {
+    const rect = canvas.getBoundingClientRect();
+    dpr = Math.min(devicePixelRatio || 1, 2);
+    W = Math.max(1, rect.width);
+    H = Math.max(1, rect.height);
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    hat.width = Math.round(W);
+    hat.height = Math.round(H);
+    makeParticles();
+  }
+
+  function roundedPath(c, x, y, w, h, r) {
+    c.beginPath();
+    c.moveTo(x + r, y);
+    c.lineTo(x + w - r, y);
+    c.quadraticCurveTo(x + w, y, x + w, y + r);
+    c.lineTo(x + w, y + h - r);
+    c.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    c.lineTo(x + r, y + h);
+    c.quadraticCurveTo(x, y + h, x, y + h - r);
+    c.lineTo(x, y + r);
+    c.quadraticCurveTo(x, y, x + r, y);
+    c.closePath();
+  }
+
+  function drawHat(c, cx, cy, scale, rotation = 0, alpha = 1) {
+    c.save();
+    c.translate(cx, cy);
+    c.rotate(rotation);
+    c.globalAlpha = alpha;
+    c.scale(scale, scale);
+
+    const width = 270;
+    const height = 172;
+
+    c.save();
+    c.filter = "blur(22px)";
+    c.fillStyle = "rgba(0,0,0,.72)";
+    c.beginPath();
+    c.ellipse(0, 66, 154, 25, 0, 0, TAU);
+    c.fill();
+    c.restore();
+
+    const brim = c.createRadialGradient(0, 36, 15, 0, 38, 170);
+    brim.addColorStop(0, "#252b37");
+    brim.addColorStop(.52, "#11151d");
+    brim.addColorStop(1, "#05070b");
+    c.fillStyle = brim;
+    c.beginPath();
+    c.ellipse(0, 45, 158, 39, 0, 0, TAU);
+    c.fill();
+
+    c.save();
+    c.shadowColor = "rgba(229,41,53,.34)";
+    c.shadowBlur = 20;
+    c.fillStyle = "#121721";
+    c.beginPath();
+    c.moveTo(-112, 39);
+    c.bezierCurveTo(-106, 0, -92, -48, -58, -76);
+    c.bezierCurveTo(-25, -102, 31, -100, 69, -72);
+    c.bezierCurveTo(102, -48, 111, -5, 113, 40);
+    c.bezierCurveTo(61, 58, -58, 59, -112, 39);
+    c.closePath();
+    c.fill();
+    c.restore();
+
+    const crown = c.createLinearGradient(0, -98, 0, 47);
+    crown.addColorStop(0, "#333b49");
+    crown.addColorStop(.3, "#202733");
+    crown.addColorStop(.77, "#111721");
+    crown.addColorStop(1, "#080b11");
+    c.fillStyle = crown;
+    c.beginPath();
+    c.moveTo(-108, 40);
+    c.bezierCurveTo(-102, -5, -91, -48, -57, -75);
+    c.bezierCurveTo(-24, -101, 31, -100, 68, -72);
+    c.bezierCurveTo(98, -49, 108, -4, 112, 40);
+    c.bezierCurveTo(62, 56, -58, 57, -108, 40);
+    c.closePath();
+    c.fill();
+
+    c.strokeStyle = "rgba(255,255,255,.1)";
+    c.lineWidth = 2;
+    c.beginPath();
+    c.moveTo(-72, -72);
+    c.bezierCurveTo(-32, -91, 27, -89, 65, -67);
+    c.stroke();
+
+    const band = c.createLinearGradient(-110, 0, 110, 0);
+    band.addColorStop(0, "#541921");
+    band.addColorStop(.35, "#b6202d");
+    band.addColorStop(.55, "#ed3440");
+    band.addColorStop(1, "#661923");
+    c.fillStyle = band;
+    c.beginPath();
+    c.moveTo(-107, 8);
+    c.bezierCurveTo(-51, 20, 50, 20, 109, 7);
+    c.lineTo(111, 30);
+    c.bezierCurveTo(50, 43, -51, 43, -109, 29);
+    c.closePath();
+    c.fill();
+
+    c.strokeStyle = "rgba(255,125,127,.38)";
+    c.lineWidth = 1;
+    c.beginPath();
+    c.moveTo(-105, 9);
+    c.bezierCurveTo(-44, 21, 48, 21, 108, 8);
+    c.stroke();
+
+    c.globalAlpha = .5;
+    c.fillStyle = "#f25d61";
+    c.beginPath();
+    c.ellipse(-35, -28, 34, 9, -.18, 0, TAU);
+    c.fill();
+
+    c.restore();
+  }
+
+  function makeParticles() {
+    const size = Math.min(W, H);
+    const scale = Math.max(.72, Math.min(1.15, size / 650));
+    hatCtx.clearRect(0, 0, W, H);
+    drawHat(hatCtx, W / 2, H / 2 - 18, scale, 0, 1);
+
+    const image = hatCtx.getImageData(0, 0, W, H).data;
+    particles = [];
+    const step = Math.max(3, Math.round(size / 210));
+
+    for (let y = 0; y < H; y += step) {
+      for (let x = 0; x < W; x += step) {
+        const i = (y * W + x) * 4;
+        if (image[i + 3] > 80 && Math.random() < .74) {
+          const dx = (x - W / 2) / Math.max(W, H);
+          const dy = (y - (H / 2 - 18)) / Math.max(W, H);
+          const angle = Math.atan2(dy, dx);
+          const distance = Math.hypot(dx, dy);
+          particles.push({
+            x, y, ox: x, oy: y,
+            vx: Math.cos(angle) * (.3 + distance * 2) + (Math.random() - .5) * .45,
+            vy: Math.sin(angle) * (.3 + distance * 2) + (Math.random() - .5) * .45,
+            size: .45 + Math.random() * 1.35,
+            hue: Math.random() < .7 ? 350 + Math.random() * 16 : 18 + Math.random() * 22,
+            phase: Math.random() * TAU,
+            orbit: Math.random() < .018
+          });
+        }
+      }
+    }
+  }
+
+  function interact() {
+    if (reduceMotion) {
+      burst = burst > .5 ? 0 : 1;
+      return;
+    }
+    if (burst < .05) cycle = 0;
+    burst = 1;
+  }
+
+  canvas.addEventListener("pointerenter", () => {
+    pointer.active = true;
+    interact();
+  });
+  canvas.addEventListener("pointerleave", () => pointer.active = false);
+  canvas.addEventListener("pointerdown", interact);
+
+  function draw(now) {
+    const dt = Math.min(32, now - last) / 16.67;
+    last = now;
+    const t = now * .001;
+
+    if (!reduceMotion && burst > 0) {
+      cycle += .011 * dt;
+      if (cycle > 1) burst = 0;
+    }
+
+    if (burst > 0) {
+      const phase = Math.min(1, cycle);
+      const dissolve = Math.sin(phase * Math.PI);
+      const scatter = Math.sin(phase * Math.PI) * (90 + Math.min(W, H) * .08);
+
+      ctx.clearRect(0, 0, W, H);
+      for (const p of particles) {
+        const swirl = phase * 3.8 + p.phase;
+        const tx = p.ox + Math.cos(swirl) * scatter * (.35 + Math.abs(p.oy - H / 2) / H);
+        const ty = p.oy + Math.sin(swirl) * scatter * .55;
+        p.x += (tx - p.x) * .075 * dt;
+        p.y += (ty - p.y) * .075 * dt;
+
+        const glow = .45 + Math.sin(t * 4 + p.phase) * .2;
+        ctx.fillStyle = `hsla(${p.hue}, 92%, 67%, ${glow})`;
+        ctx.shadowColor = `hsla(${p.hue}, 100%, 60%, .65)`;
+        ctx.shadowBlur = p.size * 5;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * (1 + dissolve * .35), 0, TAU);
+        ctx.fill();
+      }
+
+      if (phase > .82) {
+        const reform = (phase - .82) / .18;
+        drawHat(ctx, W / 2, H / 2 - 18, Math.max(.72, Math.min(1.15, Math.min(W, H) / 650)), t * .48, reform);
+      }
+    } else {
+      ctx.clearRect(0, 0, W, H);
+      const speed = pointer.active ? .012 : .027;
+      const angle = reduceMotion ? 0 : t * speed;
+      drawHat(ctx, W / 2, H / 2 - 18, Math.max(.72, Math.min(1.15, Math.min(W, H) / 650)), angle, 1);
+
+      for (const p of particles.filter(q => q.orbit)) {
+        const r = 105 + Math.sin(t * .8 + p.phase) * 15;
+        const x = W / 2 + Math.cos(t * .55 + p.phase) * r;
+        const y = H / 2 - 18 + Math.sin(t * .7 + p.phase) * r * .34;
+        ctx.fillStyle = "rgba(245,112,83,.65)";
+        ctx.shadowColor = "rgba(244,71,60,.7)";
+        ctx.shadowBlur = 7;
+        ctx.beginPath();
+        ctx.arc(x, y, p.size * .75, 0, TAU);
+        ctx.fill();
+      }
+    }
+
+    requestAnimationFrame(draw);
+  }
+
+  addEventListener("resize", resize);
+  resize();
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

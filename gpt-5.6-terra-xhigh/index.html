@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ember Fedora</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      background: #07090d;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      min-height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 50% 42%, rgba(76, 17, 21, .20), transparent 28rem),
+        radial-gradient(circle at 18% 88%, rgba(28, 35, 48, .22), transparent 35rem),
+        #07090d;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .scene {
+      position: relative;
+      display: grid;
+      width: 100%;
+      min-height: 100svh;
+      place-items: center;
+      isolation: isolate;
+      cursor: pointer;
+      outline: none;
+    }
+
+    .scene::before {
+      position: absolute;
+      z-index: -1;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(255,255,255,.012) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.01) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(circle at center, black, transparent 72%);
+      content: "";
+      pointer-events: none;
+    }
+
+    canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .caption {
+      position: absolute;
+      bottom: clamp(2rem, 7vh, 4.5rem);
+      left: 50%;
+      margin: 0;
+      transform: translateX(-50%);
+      color: rgba(235, 238, 244, .58);
+      font-size: clamp(.64rem, 1.3vw, .76rem);
+      font-weight: 500;
+      letter-spacing: .2em;
+      text-align: center;
+      text-transform: uppercase;
+      white-space: nowrap;
+      user-select: none;
+      pointer-events: none;
+    }
+
+    .caption span {
+      color: rgba(244, 70, 75, .82);
+    }
+
+    @media (max-width: 460px) {
+      .caption {
+        letter-spacing: .14em;
+        white-space: normal;
+        width: 90%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="scene" tabindex="0" role="button" aria-label="A spinning red fedora. Hover, tap, or press Enter to scatter it into embers.">
+    <canvas id="art" aria-hidden="true"></canvas>
+    <p class="caption"><span>Ember Fedora</span> · hover or tap</p>
+  </main>
+
+  <script>
+    (() => {
+      const canvas = document.getElementById("art");
+      const scene = document.querySelector(".scene");
+      const caption = document.querySelector(".caption");
+      const ctx = canvas.getContext("2d", { alpha: true });
+
+      const motionQuery = matchMedia("(prefers-reduced-motion: reduce)");
+      let reducedMotion = motionQuery.matches;
+      let width = 0, height = 0, dpr = 1;
+      let centerX = 0, centerY = 0, scale = 1;
+      let angle = -0.38;
+      let spin = 0.00053;
+      let lastTime = performance.now();
+      let frameRequest = 0;
+
+      const particles = [];
+      const orbiters = [];
+      let state = "idle";
+      let stateStarted = 0;
+      let swirlStarted = 0;
+
+      const timings = {
+        dissolve: 1250,
+        swirl: 1550,
+        reform: 1450
+      };
+
+      const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, value));
+      const ease = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      const random = (min, max) => min + Math.random() * (max - min);
+
+      function hatPoint(x, y) {
+        const brim = (x * x) / (175 * 175) + ((y - 32) * (y - 32)) / (42 * 42) <= 1;
+        const crownProgress = clamp((y + 112) / 142);
+        const crownHalfWidth = 105 * Math.pow(crownProgress, .23);
+        const crown = y >= -112 && y <= 30 && Math.abs(x) <= crownHalfWidth;
+        return crown || brim;
+      }
+
+      function buildParticles() {
+        particles.length = 0;
+        orbiters.length = 0;
+
+        while (particles.length < 2800) {
+          const x = random(-178, 178);
+          const y = random(-114, 76);
+          if (!hatPoint(x, y)) continue;
+
+          const isBand = y > 2 && y < 29 && Math.abs(x) < 103;
+          const isBrim = y > 27;
+          const tone = isBand ? 2 : isBrim ? (x < -40 ? 1 : 0) : (x > 35 ? 1 : 0);
+
+          particles.push({
+            x, y,
+            z: isBrim ? (y - 32) * .25 : Math.sin(x * .07) * 5,
+            tone,
+            outX: 0,
+            outY: 0,
+            drift: random(0, Math.PI * 2),
+            rate: random(.0008, .0023),
+            swirlX: 0,
+            swirlY: 0,
+            reformX: 0,
+            reformY: 0,
+            orbit: false
+          });
+        }
+
+        for (let i = 0; i < 26; i++) {
+          const particle = particles[(i * 103 + 41) % particles.length];
+          particle.orbit = true;
+          particle.orbitPhase = i / 26 * Math.PI * 2 + random(-.12, .12);
+          particle.orbitRate = random(.00030, .00056) * (i % 2 ? 1 : -1);
+          particle.orbitRadius = random(132, 195);
+          particle.orbitLift = random(64, 112);
+          particle.lastX = null;
+          particle.lastY = null;
+          orbiters.push(particle);
+        }
+      }
+
+      function resize() {
+        const rect = scene.getBoundingClientRect();
+        width = rect.width;
+        height = rect.height;
+        dpr = Math.min(devicePixelRatio || 1, 2);
+        canvas.width = Math.round(width * dpr);
+        canvas.height = Math.round(height * dpr);
+        canvas.style.width = width + "px";
+        canvas.style.height = height + "px";
+        centerX = width * .5;
+        centerY = height * .445;
+        scale = clamp(Math.min(width / 620, height / 505), .55, 1.28);
+        draw(performance.now());
+      }
+
+      function projection(p) {
+        const facing = Math.cos(angle);
+        const apparentWidth = .38 + .62 * Math.abs(facing);
+        return {
+          x: centerX + (p.x * apparentWidth + p.z * Math.sin(angle)) * scale,
+          y: centerY + (p.y - p.x * Math.sin(angle) * .065) * scale
+        };
+      }
+
+      function drawHat(alpha) {
+        if (alpha <= .001) return;
+
+        const facing = Math.cos(angle);
+        const narrow = .38 + .62 * Math.abs(facing);
+        const darkSide = facing < 0;
+        const w = scale * narrow;
+
+        ctx.save();
+        ctx.translate(centerX, centerY);
+        ctx.globalAlpha = alpha;
+
+        ctx.save();
+        ctx.filter = "blur(9px)";
+        const halo = ctx.createRadialGradient(0, 18 * scale, 5, 0, 18 * scale, 195 * scale);
+        halo.addColorStop(0, "rgba(238, 38, 46, .18)");
+        halo.addColorStop(1, "rgba(238, 38, 46, 0)");
+        ctx.fillStyle = halo;
+        ctx.beginPath();
+        ctx.ellipse(0, 20 * scale, 190 * scale, 82 * scale, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        ctx.save();
+        ctx.globalAlpha *= .7;
+        ctx.filter = "blur(14px)";
+        ctx.fillStyle = "rgba(0, 0, 0, .72)";
+        ctx.beginPath();
+        ctx.ellipse(0, 114 * scale, 136 * scale * narrow, 18 * scale, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        const brim = ctx.createLinearGradient(-178 * w, 0, 178 * w, 0);
+        brim.addColorStop(0, darkSide ? "#75151b" : "#b6151c");
+        brim.addColorStop(.32, "#ec222b");
+        brim.addColorStop(.67, "#de1721");
+        brim.addColorStop(1, darkSide ? "#a2141a" : "#f13a40");
+
+        ctx.save();
+        ctx.shadowColor = "rgba(255, 34, 42, .25)";
+        ctx.shadowBlur = 18 * scale;
+        ctx.fillStyle = brim;
+        ctx.beginPath();
+        ctx.ellipse(0, 32 * scale, 175 * w, 42 * scale, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        const crown = ctx.createLinearGradient(-105 * w, -35 * scale, 108 * w, -8 * scale);
+        crown.addColorStop(0, darkSide ? "#79141b" : "#b9171e");
+        crown.addColorStop(.42, "#ed232d");
+        crown.addColorStop(.7, "#d81721");
+        crown.addColorStop(1, darkSide ? "#a4141b" : "#ef3139");
+
+        ctx.fillStyle = crown;
+        ctx.beginPath();
+        ctx.moveTo(-101 * w, 29 * scale);
+        ctx.bezierCurveTo(-99 * w, -13 * scale, -76 * w, -87 * scale, -33 * w, -103 * scale);
+        ctx.bezierCurveTo(-11 * w, -112 * scale, 27 * w, -111 * scale, 50 * w, -96 * scale);
+        ctx.bezierCurveTo(83 * w, -74 * scale, 98 * w, -6 * scale, 99 * w, 29 * scale);
+        ctx.closePath();
+        ctx.fill();
+
+        const band = ctx.createLinearGradient(-100 * w, 0, 104 * w, 0);
+        band.addColorStop(0, "#72151a");
+        band.addColorStop(.3, "#9a171c");
+        band.addColorStop(.55, "#651318");
+        band.addColorStop(.8, "#8d151b");
+        band.addColorStop(1, "#4e1115");
+        ctx.fillStyle = band;
+        ctx.beginPath();
+        ctx.moveTo(-99 * w, 3 * scale);
+        ctx.bezierCurveTo(-74 * w, 9 * scale, 63 * w, 8 * scale, 99 * w, 2 * scale);
+        ctx.lineTo(99 * w, 28 * scale);
+        ctx.bezierCurveTo(48 * w, 34 * scale, -58 * w, 34 * scale, -101 * w, 28 * scale);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.save();
+        ctx.globalAlpha *= darkSide ? .06 : .16;
+        const sheen = ctx.createLinearGradient(-66 * w, -82 * scale, 25 * w, 20 * scale);
+        sheen.addColorStop(0, "rgba(255,255,255,.55)");
+        sheen.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.fillStyle = sheen;
+        ctx.beginPath();
+        ctx.ellipse(-20 * w, -49 * scale, 48 * w, 68 * scale, -.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        ctx.save();
+        ctx.globalAlpha *= .17;
+        ctx.strokeStyle = "#ff9a9c";
+        ctx.lineWidth = Math.max(1, scale);
+        ctx.beginPath();
+        ctx.ellipse(0, 31 * scale, 172 * w, 40 * scale, 0, Math.PI * .11, Math.PI * .89);
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.restore();
+      }
+
+      function setSwirlPositions(now) {
+        for (const p of particles) {
+          const base = projection(p);
+          p.swirlX = base.x + p.outX + Math.sin(now * p.rate + p.drift) * 8 * scale;
+          p.swirlY = base.y + p.outY + Math.cos(now * p.rate * .8 + p.drift) * 7 * scale;
+        }
+        swirlStarted = now;
+      }
+
+      function swirlPosition(p, now) {
+        const elapsed = now - swirlStarted;
+        const rotation = elapsed * (.00054 + p.rate * .13);
+        const dx = p.swirlX - centerX;
+        const dy = p.swirlY - centerY;
+        const c = Math.cos(rotation);
+        const s = Math.sin(rotation);
+        return {
+          x: centerX + dx * c - dy * s * .46 + Math.sin(elapsed * p.rate + p.drift) * 12 * scale,
+          y: centerY + dy * c + dx * s * .16 + Math.cos(elapsed * p.rate * .8 + p.drift) * 9 * scale
+        };
+      }
+
+      function setReformPositions(now) {
+        for (const p of particles) {
+          const current = swirlPosition(p, now);
+          p.reformX = current.x;
+          p.reformY = current.y;
+        }
+      }
+
+      function trigger() {
+        if (reducedMotion || state === "dissolve" || state === "swirl" || state === "reform") return;
+
+        const now = performance.now();
+        state = "dissolve";
+        stateStarted = now;
+
+        for (const p of particles) {
+          const theta = Math.atan2(p.y + random(-18, 18), p.x + random(-18, 18));
+          const force = random(70, 215) * scale;
+          p.outX = Math.cos(theta) * force + random(-30, 30) * scale;
+          p.outY = Math.sin(theta) * force * .68 + random(-24, 24) * scale;
+          p.lastX = null;
+          p.lastY = null;
+        }
+
+        caption.innerHTML = "<span>Ember Fedora</span> · reforming";
+      }
+
+      function drawParticleCloud(now) {
+        let hatAlpha = 1;
+        let particleAlpha = 0;
+        let stage = 0;
+
+        if (state === "dissolve") {
+          stage = clamp((now - stateStarted) / timings.dissolve);
+          const burst = ease(stage);
+          hatAlpha = 1 - burst;
+          particleAlpha = burst * .94;
+
+          if (stage >= 1) {
+            setSwirlPositions(now);
+            state = "swirl";
+            stateStarted = now;
+            stage = 0;
+          }
+        } else if (state === "swirl") {
+          hatAlpha = 0;
+          particleAlpha = .9;
+          stage = clamp((now - stateStarted) / timings.swirl);
+
+          if (stage >= 1) {
+            setReformPositions(now);
+            state = "reform";
+            stateStarted = now;
+            stage = 0;
+          }
+        } else if (state === "reform") {
+          stage = clamp((now - stateStarted) / timings.reform);
+          const returnAmount = ease(stage);
+          hatAlpha = Math.pow(returnAmount, 1.5);
+          particleAlpha = .92 * (1 - returnAmount * .72);
+
+          if (stage >= 1) {
+            state = "afterglow";
+            stateStarted = now;
+            caption.innerHTML = "<span>Ember Fedora</span> · hover or tap";
+          }
+        } else if (state === "afterglow") {
+          hatAlpha = 1;
+        }
+
+        drawHat(hatAlpha);
+
+        if (particleAlpha > .002) {
+          const groups = [
+            { color: "#f33b43", items: [] },
+            { color: "#ca2028", items: [] },
+            { color: "#70151a", items: [] }
+          ];
+
+          for (const p of particles) {
+            let x, y;
+
+            if (state === "dissolve") {
+              const base = projection(p);
+              const amount = ease(stage);
+              x = base.x + p.outX * amount + Math.sin(now * p.rate + p.drift) * amount * 9 * scale;
+              y = base.y + p.outY * amount + Math.cos(now * p.rate * .8 + p.drift) * amount * 7 * scale;
+            } else if (state === "swirl") {
+              const point = swirlPosition(p, now);
+              x = point.x;
+              y = point.y;
+            } else {
+              const base = projection(p);
+              const amount = ease(stage);
+              x = p.reformX + (base.x - p.reformX) * amount;
+              y = p.reformY + (base.y - p.reformY) * amount;
+            }
+
+            groups[p.tone].items.push([x, y, p]);
+          }
+
+          ctx.save();
+          ctx.globalCompositeOperation = "lighter";
+
+          for (const group of groups) {
+            ctx.beginPath();
+            for (const [x, y, p] of group.items) {
+              const shimmer = .65 + .35 * Math.sin(now * .006 + p.drift);
+              const radius = (p.orbit ? 1.15 : .72) * scale * shimmer;
+              ctx.moveTo(x + radius, y);
+              ctx.arc(x, y, radius, 0, Math.PI * 2);
+            }
+            ctx.globalAlpha = particleAlpha * .86;
+            ctx.fillStyle = group.color;
+            ctx.shadowColor = group.color;
+            ctx.shadowBlur = 7 * scale;
+            ctx.fill();
+          }
+
+          ctx.restore();
+        }
+
+        if (state === "afterglow") drawOrbiters(now);
+      }
+
+      function drawOrbiters(now) {
+        const elapsed = now - stateStarted;
+        const visible = clamp(elapsed / 900);
+        const facing = .54 + .46 * Math.abs(Math.cos(angle));
+
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.lineWidth = Math.max(.55, scale * .7);
+        ctx.lineCap = "round";
+
+        for (const p of orbiters) {
+          const theta = p.orbitPhase + elapsed * p.orbitRate;
+          const x = centerX + Math.cos(theta) * p.orbitRadius * scale * facing;
+          const y = centerY + Math.sin(theta) * p.orbitLift * scale - 10 * scale;
+
+          if (p.lastX !== null) {
+            const trail = ctx.createLinearGradient(p.lastX, p.lastY, x, y);
+            trail.addColorStop(0, "rgba(255, 52, 58, 0)");
+            trail.addColorStop(1, `rgba(255, 69, 75, ${.26 * visible})`);
+            ctx.strokeStyle = trail;
+            ctx.beginPath();
+            ctx.moveTo(p.lastX, p.lastY);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+          }
+
+          ctx.globalAlpha = .82 * visible;
+          ctx.fillStyle = "#ff6267";
+          ctx.shadowColor = "#f43c45";
+          ctx.shadowBlur = 11 * scale;
+          ctx.beginPath();
+          ctx.arc(x, y, 1.16 * scale, 0, Math.PI * 2);
+          ctx.fill();
+
+          p.lastX = x;
+          p.lastY = y;
+        }
+
+        ctx.restore();
+      }
+
+      function draw(now) {
+        if (!width || !height) return;
+
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, width, height);
+
+        const ambience = ctx.createRadialGradient(centerX, centerY - 10 * scale, 0, centerX, centerY, 360 * scale);
+        ambience.addColorStop(0, "rgba(178, 27, 35, .11)");
+        ambience.addColorStop(.42, "rgba(44, 13, 18, .055)");
+        ambience.addColorStop(1, "rgba(0, 0, 0, 0)");
+        ctx.fillStyle = ambience;
+        ctx.fillRect(0, 0, width, height);
+
+        if (reducedMotion) {
+          drawHat(1);
+          return;
+        }
+
+        drawParticleCloud(now);
+        if (state === "idle") drawHat(1);
+      }
+
+      function animate(now) {
+        const elapsed = Math.min(34, now - lastTime);
+        lastTime = now;
+
+        const desiredSpin =
+          state === "idle" ? .00053 :
+          state === "afterglow" ? .00040 :
+          .000105;
+
+        spin += (desiredSpin - spin) * Math.min(1, elapsed * .0034);
+        angle += spin * elapsed;
+
+        draw(now);
+        frameRequest = requestAnimationFrame(animate);
+      }
+
+      function resetForReducedMotion() {
+        cancelAnimationFrame(frameRequest);
+        state = "idle";
+        angle = -.38;
+        spin = .00053;
+        caption.innerHTML = "<span>Ember Fedora</span> · still light";
+        draw(performance.now());
+      }
+
+      motionQuery.addEventListener("change", event => {
+        reducedMotion = event.matches;
+        if (reducedMotion) {
+          resetForReducedMotion();
+        } else {
+          caption.innerHTML = "<span>Ember Fedora</span> · hover or tap";
+          lastTime = performance.now();
+          frameRequest = requestAnimationFrame(animate);
+        }
+      });
+
+      scene.addEventListener("pointerenter", event => {
+        if (event.pointerType === "mouse") trigger();
+      });
+
+      scene.addEventListener("pointerdown", trigger);
+
+      scene.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          trigger();
+        }
+      });
+
+      buildParticles();
+      resize();
+      addEventListener("resize", resize, { passive: true });
+
+      if (!reducedMotion) {
+        frameRequest = requestAnimationFrame(animate);
+      }
+    })();
+  </script>
+</body>
+</html>
