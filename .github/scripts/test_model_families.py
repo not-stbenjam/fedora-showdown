@@ -168,6 +168,14 @@ class ModelFamiliesTest(unittest.TestCase):
         ]
         self.assertIn("gpt-5.5", flat_ids)
 
+    def test_family_summary_rows_omit_variant_badges(self):
+        """Collapsed family toggles stay compact; badges belong on child variants."""
+        self.assertNotIn("family-active-badge", self.index_html)
+        self.assertNotIn("updateFamilyActiveBadge", self.index_html)
+        self.assertIn("family-toggle", self.index_html)
+        self.assertIn("family-variants", self.index_html)
+        self.assertIn("variant-badge", self.index_html)
+
 
 if __name__ == "__main__":
     unittest.main()

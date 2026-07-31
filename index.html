@@ -828,10 +828,6 @@
   opacity: 0.75;
   letter-spacing: 0.04em;
 }
-.sidebar .model-list .family-toggle .family-active-badge {
-  margin-left: auto;
-  flex-shrink: 0;
-}
 .sidebar .model-list .family-toggle .family-provider {
   font-size: 10px;
   color: var(--muted);
@@ -1108,22 +1104,6 @@ And respect reduced motion. Return only the finished HTML file.</div>
     if (expanded) group.panel.removeAttribute("hidden");
     else group.panel.setAttribute("hidden", "");
     group.chevron.textContent = "›";
-    updateFamilyActiveBadge(group);
-  }
-
-  function updateFamilyActiveBadge(group) {
-    const activeMember = group.positions.find(pos => navOrder[pos] === activeIdx);
-    const badge = group.activeBadge;
-    if (!badge) return;
-    if (group.toggle.getAttribute("aria-expanded") === "true" || activeMember == null) {
-      badge.hidden = true;
-      badge.textContent = "";
-      return;
-    }
-    const model = MODELS[navOrder[activeMember]];
-    badge.hidden = false;
-    badge.className = "variant-badge family-active-badge";
-    badge.textContent = model.badge || "Active";
   }
 
   function ensureFamilyExpandedForPos(pos) {
@@ -1213,12 +1193,8 @@ And respect reduced motion. Return only the finished HTML file.</div>
             label.appendChild(provider);
           }
 
-          const activeBadge = document.createElement("span");
-          activeBadge.className = "variant-badge family-active-badge";
-          activeBadge.hidden = true;
-
           const hasNew = !inNewSection && members.some(idx => isNew[idx]);
-          toggle.append(chevron, label, activeBadge);
+          toggle.append(chevron, label);
           if (hasNew) {
             const dot = document.createElement("span");
             dot.className = "new-dot";
@@ -1246,7 +1222,6 @@ And respect reduced motion. Return only the finished HTML file.</div>
             toggle,
             panel,
             chevron,
-            activeBadge,
             positions,
             section,
           };
@@ -1256,7 +1231,6 @@ And respect reduced motion. Return only the finished HTML file.</div>
           });
           familyGroups.push(group);
           section.familyGroups.push(group);
-          updateFamilyActiveBadge(group);
         } else {
           emitted.add(i);
           createModelButton(i, inNewSection, modelList);
@@ -1457,7 +1431,6 @@ And respect reduced motion. Return only the finished HTML file.</div>
         b.querySelector(".check").textContent = "";
       }
     });
-    familyGroups.forEach(updateFamilyActiveBadge);
   }
 
   function applyVisibility() {
