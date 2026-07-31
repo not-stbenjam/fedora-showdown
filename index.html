@@ -1004,10 +1004,10 @@ And respect reduced motion. Return only the finished HTML file.</div>
 
   // dateAdded: existing entries use 1970-01-01 as a placeholder (pre-dates tracking)
   const MODELS = [
-    { id: "fable-5-ultracode", name: "Fable 5 Ultracode", group: "Anthropic", dateAdded: "2026-07-01" },
-    { id: "fable-5",     name: "Fable 5",            group: "Anthropic", openrouterId: "anthropic/claude-fable-5", dateAdded: "2026-07-01" },
-    { id: "opus-5-ultracode", name: "Opus 5 Ultracode", group: "Anthropic", dateAdded: "2026-07-24", stats: { cost: "$146.49", apiDuration: "6h 40m 6s", wallDuration: "2h 32m 14s", linesAdded: 11777, linesRemoved: 1245 } },
-    { id: "opus-5",      name: "Opus 5",             group: "Anthropic", openrouterId: "anthropic/claude-opus-5", dateAdded: "2026-07-24", stats: { cost: "$8.14", apiDuration: "26m 20s", wallDuration: "32m 25s", linesAdded: 996, linesRemoved: 49 } },
+    { id: "fable-5-ultracode", name: "Fable 5", family: "fable-5", group: "Anthropic", badge: "Ultracode", dateAdded: "2026-07-01" },
+    { id: "fable-5",     name: "Fable 5", family: "fable-5", group: "Anthropic", badge: "Default", openrouterId: "anthropic/claude-fable-5", dateAdded: "2026-07-01" },
+    { id: "opus-5-ultracode", name: "Opus 5", family: "opus-5", group: "Anthropic", badge: "Ultracode", dateAdded: "2026-07-24", stats: { cost: "$146.49", apiDuration: "6h 40m 6s", wallDuration: "2h 32m 14s", linesAdded: 11777, linesRemoved: 1245 } },
+    { id: "opus-5",      name: "Opus 5", family: "opus-5", group: "Anthropic", badge: "Default", openrouterId: "anthropic/claude-opus-5", dateAdded: "2026-07-24", stats: { cost: "$8.14", apiDuration: "26m 20s", wallDuration: "32m 25s", linesAdded: 996, linesRemoved: 49 } },
     { id: "opus-4-8",    name: "Opus 4.8",           group: "Anthropic", openrouterId: "anthropic/claude-opus-4.8", dateAdded: "1970-01-01" },
     { id: "opus-4-7",    name: "Opus 4.7",           group: "Anthropic", openrouterId: "anthropic/claude-opus-4.7", dateAdded: "1970-01-01" },
     { id: "opus-4-6",    name: "Opus 4.6",           group: "Anthropic", openrouterId: "anthropic/claude-opus-4.6", dateAdded: "1970-01-01" },
@@ -1092,8 +1092,8 @@ And respect reduced motion. Return only the finished HTML file.</div>
     { id: "grok-4.20",   name: "Grok 4.20",           group: "xAI", openrouterId: "x-ai/grok-4.20", dateAdded: "1970-01-01" },
     { id: "grok-4",      name: "Grok 4",              group: "xAI", dateAdded: "1970-01-01" },
     { id: "fugu-ultra",   name: "Fugu Ultra",           group: "Sakana", openrouterId: "sakana/fugu-ultra", dateAdded: "1970-01-01" },
-    { id: "glm-5.2-ultracode", name: "GLM-5.2 Ultracode", group: "Z.ai", dateAdded: "2026-07-01" },
-    { id: "glm-5.2",     name: "GLM-5.2",             group: "Z.ai", openrouterId: "z-ai/glm-5.2", dateAdded: "2026-07-01" },
+    { id: "glm-5.2-ultracode", name: "GLM-5.2", family: "glm-5.2", group: "Z.ai", badge: "Ultracode", dateAdded: "2026-07-01" },
+    { id: "glm-5.2",     name: "GLM-5.2", family: "glm-5.2", group: "Z.ai", badge: "Default", openrouterId: "z-ai/glm-5.2", dateAdded: "2026-07-01" },
     { id: "glm-5.1",     name: "GLM-5.1",             group: "Z.ai", openrouterId: "z-ai/glm-5.1", dateAdded: "1970-01-01" },
     { id: "glm-5-turbo", name: "GLM-5 Turbo",         group: "Z.ai", openrouterId: "z-ai/glm-5-turbo", dateAdded: "1970-01-01" },
     { id: "glm-5",       name: "GLM-5",               group: "Z.ai", openrouterId: "z-ai/glm-5", dateAdded: "1970-01-01" },
