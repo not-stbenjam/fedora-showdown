@@ -1,0 +1,671 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#08090c">
+  <title>Fedora in Motion</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --red: #e5484d;
+      --muted: rgba(236, 239, 244, 0.55);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      min-height: 100%;
+      margin: 0;
+    }
+
+    body {
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 50% 42%, rgba(108, 27, 35, 0.15), transparent 25rem),
+        radial-gradient(circle at 50% 110%, rgba(79, 91, 122, 0.12), transparent 38rem),
+        linear-gradient(145deg, #0d0f14 0%, #06070a 58%, #0a0b0f 100%);
+      color: white;
+      font-family:
+        Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+    }
+
+    body::before {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      content: "";
+      opacity: 0.2;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.014) 1px, transparent 1px);
+      background-size: 42px 42px;
+      mask-image: radial-gradient(circle at center, black, transparent 72%);
+    }
+
+    main {
+      display: grid;
+      width: 100%;
+      min-height: 100svh;
+      place-items: center;
+      padding: clamp(1rem, 4vw, 3rem);
+    }
+
+    .hero {
+      position: relative;
+      width: min(94vw, 58rem);
+      text-align: center;
+      isolation: isolate;
+    }
+
+    .halo {
+      position: absolute;
+      z-index: -1;
+      top: 25%;
+      left: 50%;
+      width: min(74vw, 38rem);
+      height: min(43vw, 18rem);
+      border-radius: 50%;
+      background: radial-gradient(
+        ellipse,
+        rgba(220, 54, 61, 0.12) 0%,
+        rgba(144, 34, 43, 0.045) 42%,
+        transparent 72%
+      );
+      filter: blur(22px);
+      transform: translateX(-50%);
+      transition: opacity 700ms ease;
+    }
+
+    .stage {
+      position: relative;
+      width: 100%;
+      height: clamp(19rem, 62vh, 35rem);
+      min-height: 19rem;
+      cursor: pointer;
+      outline: none;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .stage::after {
+      position: absolute;
+      z-index: -1;
+      left: 50%;
+      bottom: 13%;
+      width: min(58%, 27rem);
+      height: clamp(1.2rem, 5vw, 3rem);
+      border-radius: 50%;
+      content: "";
+      background: rgba(0, 0, 0, 0.72);
+      filter: blur(18px);
+      transform: translateX(-50%);
+    }
+
+    .stage:focus-visible {
+      border-radius: 1.5rem;
+      box-shadow: 0 0 0 1px rgba(229, 72, 77, 0.56);
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .caption {
+      margin-top: clamp(-1.4rem, -2vh, -0.5rem);
+      color: var(--muted);
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.3em;
+      line-height: 1.5;
+      text-transform: uppercase;
+      user-select: none;
+    }
+
+    .caption span {
+      color: rgba(229, 72, 77, 0.92);
+    }
+
+    @media (max-height: 520px) {
+      .stage {
+        height: 78vh;
+        min-height: 15rem;
+      }
+
+      .caption {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        left: 0;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .stage {
+        cursor: default;
+      }
+
+      .caption .instruction {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="hero" aria-label="A rotating particle sculpture of a red fedora">
+      <div class="halo" aria-hidden="true"></div>
+      <div
+        class="stage"
+        role="button"
+        tabindex="0"
+        aria-label="Red fedora. Hover, tap, or press Enter to scatter and reform it."
+      >
+        <canvas aria-hidden="true"></canvas>
+      </div>
+      <p class="caption">
+        Fedora <span>·</span> <span class="instruction">Hover or tap</span>
+      </p>
+    </section>
+  </main>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const canvas = document.querySelector("canvas");
+      const stage = document.querySelector(".stage");
+      const ctx = canvas.getContext("2d", { alpha: true });
+      const reduceQuery = matchMedia("(prefers-reduced-motion: reduce)");
+
+      const TAU = Math.PI * 2;
+      const particles = [];
+      const orbiters = [];
+      const drawList = [];
+
+      let width = 0;
+      let height = 0;
+      let dpr = 1;
+      let unit = 1;
+      let angle = -0.48;
+      let previousTime = 0;
+      let state = "idle";
+      let sequenceStart = 0;
+      let orbitStart = 0;
+      let lastTrigger = -Infinity;
+      let animationFrame = 0;
+      let reducedMotion = reduceQuery.matches;
+
+      const random = mulberry32(0xF3D0A);
+      const easeOut = t => 1 - Math.pow(1 - t, 3);
+      const easeInOut = t =>
+        t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      const mix = (a, b, t) => a + (b - a) * t;
+      const clamp = (n, low, high) => Math.max(low, Math.min(high, n));
+
+      function mulberry32(seed) {
+        return function () {
+          let n = seed += 0x6D2B79F5;
+          n = Math.imul(n ^ n >>> 15, n | 1);
+          n ^= n + Math.imul(n ^ n >>> 7, n | 61);
+          return ((n ^ n >>> 14) >>> 0) / 4294967296;
+        };
+      }
+
+      function addParticle(x, y, z, type, size = 1) {
+        const theta = random() * TAU;
+        const vertical = random() * 2 - 0.65;
+        const horizontal = Math.sqrt(Math.max(0.02, 1 - vertical * vertical));
+        const force = 1.75 + random() * 3.65;
+
+        particles.push({
+          x, y, z, type, size,
+          phase: random() * TAU,
+          flicker: 0.72 + random() * 0.28,
+          spin: 0.72 + random() * 0.76,
+          ex: Math.cos(theta) * horizontal * force,
+          ey: vertical * force + 0.35,
+          ez: Math.sin(theta) * horizontal * force,
+          cx: 0,
+          cy: 0,
+          cz: 0,
+          sx: 0,
+          sy: 0,
+          sz: 0,
+          px: 0,
+          py: 0,
+          depth: 0,
+          alpha: 1
+        });
+      }
+
+      function buildHat() {
+        particles.length = 0;
+
+        // Broad, gently curved brim.
+        for (let i = 0; i < 1900; i++) {
+          const a = random() * TAU;
+          const r = Math.sqrt(random());
+          const x = Math.cos(a) * 3.28 * r;
+          const z = Math.sin(a) * 1.67 * r;
+          const edge = Math.pow(r, 3);
+          const y = -1.18 - 0.16 * edge + 0.09 * Math.sin(a) * r;
+          addParticle(x, y, z, "red", 0.9 + random() * 0.55);
+        }
+
+        // A fine highlight around the brim edge.
+        for (let i = 0; i < 360; i++) {
+          const a = random() * TAU;
+          const r = 0.93 + random() * 0.07;
+          addParticle(
+            Math.cos(a) * 3.28 * r,
+            -1.18 - 0.16 * Math.pow(r, 3) + 0.09 * Math.sin(a) * r,
+            Math.sin(a) * 1.67 * r,
+            "highlight",
+            0.75 + random() * 0.45
+          );
+        }
+
+        // Tapered crown.
+        for (let i = 0; i < 1750; i++) {
+          const a = random() * TAU;
+          const u = random();
+          const pinch = Math.max(0, Math.sin(a)) * Math.pow(u, 2) * 0.18;
+          const rx = mix(1.86, 1.43, u) - pinch;
+          const rz = mix(1.25, 0.86, u);
+          const top =
+            1.24 -
+            0.09 * Math.cos(a * 2) -
+            0.12 * Math.max(0, Math.sin(a));
+          const y = mix(-1.1, top, u);
+          addParticle(
+            Math.cos(a) * rx,
+            y,
+            Math.sin(a) * rz,
+            "red",
+            0.95 + random() * 0.55
+          );
+        }
+
+        // Dark ribbon around the crown.
+        for (let i = 0; i < 620; i++) {
+          const a = random() * TAU;
+          const u = random();
+          const y = mix(-0.78, -0.43, u);
+          const taper = (y + 1.1) / 2.3;
+          addParticle(
+            Math.cos(a) * mix(1.86, 1.43, taper) * 1.014,
+            y,
+            Math.sin(a) * mix(1.25, 0.86, taper) * 1.014,
+            "band",
+            1 + random() * 0.48
+          );
+        }
+
+        // Dented top, with the long central crease of a fedora.
+        for (let i = 0; i < 1100; i++) {
+          const a = random() * TAU;
+          const r = Math.sqrt(random());
+          const x = Math.cos(a) * 1.44 * r;
+          const z = Math.sin(a) * 0.88 * r;
+          const crease = 0.43 * Math.exp(-(x * x) / 0.19);
+          const sideLift = 0.1 * Math.pow(Math.abs(x) / 1.44, 1.6);
+          const frontPinch = 0.11 * Math.max(0, z / 0.88);
+          const y = 1.18 - crease + sideLift - 0.08 * r - frontPinch;
+          addParticle(x, y, z, "red", 0.9 + random() * 0.5);
+        }
+
+        // Warm glints, sparse enough to keep the glow restrained.
+        for (let i = 0; i < particles.length; i += 113) {
+          if (particles[i].type !== "band") particles[i].type = "glow";
+        }
+      }
+
+      function rotatePoint(x, y, z, rotation) {
+        const cosY = Math.cos(rotation);
+        const sinY = Math.sin(rotation);
+        let rx = x * cosY + z * sinY;
+        let rz = -x * sinY + z * cosY;
+
+        const tilt = -0.18;
+        const cosX = Math.cos(tilt);
+        const sinX = Math.sin(tilt);
+        const ry = y * cosX - rz * sinX;
+        rz = y * sinX + rz * cosX;
+
+        return { x: rx, y: ry, z: rz };
+      }
+
+      function captureFormation() {
+        for (const p of particles) {
+          const q = rotatePoint(p.x, p.y, p.z, angle);
+          p.cx = q.x;
+          p.cy = q.y;
+          p.cz = q.z;
+        }
+      }
+
+      function scatteredPosition(p, progress) {
+        const drift = Math.min(progress, 1);
+        const after = Math.max(0, progress - 1);
+        const turn = (0.32 + after * 1.58) * p.spin;
+        const cos = Math.cos(turn);
+        const sin = Math.sin(turn);
+        const spread = easeOut(drift) * (1 + after * 0.12);
+
+        let ox = p.ex * spread;
+        let oz = p.ez * spread;
+        const rotatedX = ox * cos + oz * sin;
+        const rotatedZ = -ox * sin + oz * cos;
+
+        return {
+          x: p.cx + rotatedX,
+          y:
+            p.cy +
+            p.ey * spread +
+            after * (0.3 + p.flicker * 0.35) +
+            Math.sin(p.phase + after * 5) * 0.18 * spread,
+          z: p.cz + rotatedZ
+        };
+      }
+
+      function project(p, x, y, z, alpha, sizeScale) {
+        const perspective = 8.8 / (8.8 - z);
+        p.px = width * 0.5 + x * unit * perspective;
+        p.py = height * 0.47 - y * unit * perspective;
+        p.depth = z;
+        p.alpha = alpha;
+        p.renderSize = p.size * perspective * sizeScale;
+      }
+
+      function placeParticles(now) {
+        const elapsed = now - sequenceStart;
+
+        if (state === "scattering" && elapsed >= 4050) {
+          state = "idle";
+          orbitStart = now;
+        }
+
+        for (const p of particles) {
+          let q;
+          let alpha = 1;
+          let sizeScale = 1;
+
+          if (state === "idle") {
+            q = rotatePoint(p.x, p.y, p.z, angle);
+          } else if (elapsed < 900) {
+            const t = clamp(elapsed / 900, 0, 1);
+            q = scatteredPosition(p, easeOut(t));
+            alpha = mix(1, 0.82, t);
+            sizeScale = mix(1, 0.66, t);
+          } else if (elapsed < 2450) {
+            const t = (elapsed - 900) / 1550;
+            q = scatteredPosition(p, 1 + t);
+            alpha = 0.78 + Math.sin(p.phase + now * 0.007) * 0.14;
+            sizeScale = 0.64 + p.flicker * 0.12;
+          } else {
+            const t = clamp((elapsed - 2450) / 1600, 0, 1);
+            const eased = easeInOut(t);
+            const scattered = scatteredPosition(p, 2);
+            const target = rotatePoint(p.x, p.y, p.z, angle);
+            const contractionTurn = (1 - eased) * Math.sin(t * Math.PI) * 0.55;
+            const cos = Math.cos(contractionTurn);
+            const sin = Math.sin(contractionTurn);
+            const sx = scattered.x * cos + scattered.z * sin;
+            const sz = -scattered.x * sin + scattered.z * cos;
+
+            q = {
+              x: mix(sx, target.x, eased),
+              y:
+                mix(scattered.y, target.y, eased) +
+                Math.sin(p.phase + t * 9) * (1 - eased) * 0.08,
+              z: mix(sz, target.z, eased)
+            };
+            alpha = mix(0.82, 1, eased);
+            sizeScale = mix(0.7, 1, eased);
+          }
+
+          project(p, q.x, q.y, q.z, alpha, sizeScale);
+        }
+      }
+
+      function particleColor(p, depthLight) {
+        if (p.type === "band") {
+          return `rgba(${Math.round(30 + depthLight * 18)}, ${Math.round(18 + depthLight * 8)}, ${Math.round(22 + depthLight * 10)}, ${p.alpha})`;
+        }
+
+        if (p.type === "highlight") {
+          return `rgba(245, ${Math.round(93 + depthLight * 30)}, ${Math.round(99 + depthLight * 25)}, ${p.alpha * 0.84})`;
+        }
+
+        if (p.type === "glow") {
+          return `rgba(255, ${Math.round(91 + depthLight * 25)}, ${Math.round(93 + depthLight * 18)}, ${p.alpha})`;
+        }
+
+        return `rgba(${Math.round(177 + depthLight * 57)}, ${Math.round(34 + depthLight * 34)}, ${Math.round(43 + depthLight * 31)}, ${p.alpha})`;
+      }
+
+      function drawParticles(now) {
+        drawList.length = 0;
+        drawList.push(...particles);
+        drawList.sort((a, b) => a.depth - b.depth);
+
+        ctx.globalCompositeOperation = "source-over";
+
+        for (const p of drawList) {
+          if (
+            p.px < -10 ||
+            p.px > width + 10 ||
+            p.py < -10 ||
+            p.py > height + 10
+          ) continue;
+
+          const depthLight = clamp((p.depth + 3.2) / 6.4, 0, 1);
+          let radius = Math.max(0.42, p.renderSize * unit * 0.011);
+
+          if (state !== "idle") {
+            radius *= 0.92 + Math.sin(p.phase + now * 0.009) * 0.13;
+          }
+
+          ctx.beginPath();
+          ctx.arc(p.px, p.py, radius, 0, TAU);
+          ctx.fillStyle = particleColor(p, depthLight);
+          ctx.fill();
+        }
+
+        ctx.globalCompositeOperation = "lighter";
+        ctx.shadowColor = "rgba(255, 74, 78, 0.34)";
+        ctx.shadowBlur = Math.max(3, unit * 0.075);
+
+        for (let i = 0; i < particles.length; i += 113) {
+          const p = particles[i];
+          const pulse = 0.6 + Math.sin(p.phase + now * 0.004) * 0.22;
+          ctx.beginPath();
+          ctx.arc(
+            p.px,
+            p.py,
+            Math.max(0.6, p.renderSize * unit * 0.009),
+            0,
+            TAU
+          );
+          ctx.fillStyle = `rgba(255, 92, 90, ${pulse * p.alpha})`;
+          ctx.fill();
+        }
+
+        ctx.shadowBlur = 0;
+        ctx.globalCompositeOperation = "source-over";
+      }
+
+      function buildOrbiters() {
+        orbiters.length = 0;
+        for (let i = 0; i < 18; i++) {
+          orbiters.push({
+            phase: random() * TAU,
+            radius: 2.25 + random() * 1.45,
+            height: -0.7 + random() * 2.3,
+            speed: 0.00016 + random() * 0.00013,
+            tilt: 0.42 + random() * 0.42,
+            size: 0.75 + random() * 0.7,
+            alpha: 0.2 + random() * 0.27
+          });
+        }
+      }
+
+      function drawOrbiters(now) {
+        if (!orbitStart || state !== "idle" || reducedMotion) return;
+
+        const age = now - orbitStart;
+        const fade = clamp(age / 900, 0, 1);
+
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.lineCap = "round";
+
+        for (const o of orbiters) {
+          const a = o.phase + age * o.speed;
+          const previous = a - 0.2;
+          const x = Math.cos(a) * o.radius;
+          const z = Math.sin(a) * o.radius;
+          const y = o.height + Math.sin(a * 1.7 + o.phase) * o.tilt;
+          const x0 = Math.cos(previous) * o.radius;
+          const z0 = Math.sin(previous) * o.radius;
+          const y0 =
+            o.height + Math.sin(previous * 1.7 + o.phase) * o.tilt;
+
+          const p = rotatePoint(x, y, z, angle * 0.15);
+          const p0 = rotatePoint(x0, y0, z0, angle * 0.15);
+          const scale = 8.8 / (8.8 - p.z);
+          const scale0 = 8.8 / (8.8 - p0.z);
+          const sx = width * 0.5 + p.x * unit * scale;
+          const sy = height * 0.47 - p.y * unit * scale;
+          const sx0 = width * 0.5 + p0.x * unit * scale0;
+          const sy0 = height * 0.47 - p0.y * unit * scale0;
+
+          const gradient = ctx.createLinearGradient(sx0, sy0, sx, sy);
+          gradient.addColorStop(0, "rgba(255, 68, 72, 0)");
+          gradient.addColorStop(
+            1,
+            `rgba(255, 86, 86, ${o.alpha * fade})`
+          );
+
+          ctx.strokeStyle = gradient;
+          ctx.lineWidth = Math.max(0.45, o.size * 0.72);
+          ctx.beginPath();
+          ctx.moveTo(sx0, sy0);
+          ctx.lineTo(sx, sy);
+          ctx.stroke();
+
+          ctx.shadowColor = "rgba(255, 70, 72, 0.4)";
+          ctx.shadowBlur = 6;
+          ctx.fillStyle = `rgba(255, 111, 103, ${o.alpha * 1.45 * fade})`;
+          ctx.beginPath();
+          ctx.arc(sx, sy, o.size, 0, TAU);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        }
+
+        ctx.restore();
+      }
+
+      function draw(now = performance.now()) {
+        ctx.clearRect(0, 0, width, height);
+        placeParticles(now);
+        drawParticles(now);
+        drawOrbiters(now);
+      }
+
+      function animate(now) {
+        const dt = Math.min(40, now - (previousTime || now));
+        previousTime = now;
+
+        if (state === "idle") {
+          angle += dt * 0.00034;
+        } else {
+          const elapsed = now - sequenceStart;
+          const slowdown = clamp(elapsed / 480, 0, 1);
+          angle += dt * 0.00034 * mix(1, 0.075, slowdown);
+        }
+
+        draw(now);
+        animationFrame = requestAnimationFrame(animate);
+      }
+
+      function trigger() {
+        const now = performance.now();
+        if (
+          reducedMotion ||
+          state !== "idle" ||
+          now - lastTrigger < 800
+        ) return;
+
+        lastTrigger = now;
+        orbitStart = 0;
+        state = "scattering";
+        sequenceStart = now;
+        captureFormation();
+      }
+
+      function resize() {
+        const bounds = canvas.getBoundingClientRect();
+        width = Math.max(1, bounds.width);
+        height = Math.max(1, bounds.height);
+        dpr = Math.min(devicePixelRatio || 1, 2);
+        canvas.width = Math.round(width * dpr);
+        canvas.height = Math.round(height * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        unit = Math.min(width / 8.15, height / 5.1);
+
+        if (reducedMotion) draw(0);
+      }
+
+      function updateMotionPreference(event) {
+        reducedMotion = event.matches;
+        cancelAnimationFrame(animationFrame);
+        previousTime = 0;
+        state = "idle";
+        orbitStart = 0;
+
+        if (reducedMotion) {
+          angle = -0.58;
+          draw(0);
+        } else {
+          animationFrame = requestAnimationFrame(animate);
+        }
+      }
+
+      buildHat();
+      buildOrbiters();
+      resize();
+
+      stage.addEventListener("pointerenter", event => {
+        if (event.pointerType !== "touch") trigger();
+      });
+
+      stage.addEventListener("pointerdown", trigger);
+
+      stage.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          trigger();
+        }
+      });
+
+      addEventListener("resize", resize, { passive: true });
+      reduceQuery.addEventListener("change", updateMotionPreference);
+
+      if (reducedMotion) {
+        draw(0);
+      } else {
+        animationFrame = requestAnimationFrame(animate);
+      }
+    })();
+  </script>
+</body>
+</html>

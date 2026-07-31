@@ -1,0 +1,1204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#09090c">
+  <title>Fedora — Particle Study</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --caption-y: 72%;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      min-height: 100%;
+      margin: 0;
+      overflow: hidden;
+    }
+
+    body {
+      background:
+        radial-gradient(circle at 50% 42%, #261218 0%, #120d12 29%, #09090d 62%, #050609 100%);
+      color: #f4e9eb;
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .hero {
+      position: relative;
+      display: grid;
+      width: 100%;
+      min-height: 100vh;
+      min-height: 100svh;
+      place-items: center;
+      isolation: isolate;
+    }
+
+    .hero::before {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      background:
+        linear-gradient(115deg, rgba(255, 255, 255, 0.018), transparent 27%),
+        radial-gradient(circle at 50% 48%, transparent 23%, rgba(0, 0, 0, 0.38) 78%);
+      content: "";
+      pointer-events: none;
+    }
+
+    .hero::after {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      opacity: 0.16;
+      background-image: radial-gradient(rgba(255, 224, 228, 0.18) 0.45px, transparent 0.65px);
+      background-size: 4px 4px;
+      content: "";
+      mix-blend-mode: soft-light;
+      pointer-events: none;
+    }
+
+    #scene {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .stage {
+      position: relative;
+      z-index: 2;
+      width: min(900px, 100vw);
+      height: min(760px, 88vh);
+      height: min(760px, 88svh);
+      margin: 0;
+      padding: 0;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .stage::after {
+      position: absolute;
+      inset: 8%;
+      border: 1px solid rgba(255, 92, 112, 0);
+      border-radius: 50%;
+      content: "";
+      opacity: 0;
+      pointer-events: none;
+      transition: border-color 220ms ease, opacity 220ms ease;
+    }
+
+    .stage:focus-visible::after {
+      border-color: rgba(255, 92, 112, 0.32);
+      opacity: 1;
+    }
+
+    .caption {
+      position: fixed;
+      top: var(--caption-y);
+      left: 50%;
+      display: grid;
+      justify-items: center;
+      width: max-content;
+      max-width: calc(100vw - 40px);
+      transform: translateX(-50%);
+      pointer-events: none;
+      user-select: none;
+    }
+
+    .caption__title {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      color: rgba(255, 242, 244, 0.78);
+      font-size: clamp(0.65rem, 1.2vw, 0.75rem);
+      font-weight: 650;
+      letter-spacing: 0.19em;
+      line-height: 1;
+      text-transform: uppercase;
+      transition: color 300ms ease;
+    }
+
+    .caption__mark {
+      width: 18px;
+      height: 1px;
+      background: #df2444;
+      box-shadow: 0 0 9px rgba(239, 39, 73, 0.42);
+    }
+
+    .caption__hint {
+      min-height: 1em;
+      margin-top: 9px;
+      color: rgba(226, 207, 211, 0.43);
+      font-size: clamp(0.58rem, 1vw, 0.68rem);
+      font-weight: 450;
+      letter-spacing: 0.09em;
+      line-height: 1.3;
+      text-transform: uppercase;
+      transition: color 300ms ease;
+    }
+
+    .stage:hover .caption__title,
+    .stage:focus-visible .caption__title,
+    .stage.is-active .caption__title {
+      color: rgba(255, 247, 248, 0.96);
+    }
+
+    .stage:hover .caption__hint,
+    .stage:focus-visible .caption__hint,
+    .stage.is-active .caption__hint {
+      color: rgba(239, 215, 219, 0.65);
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .stage::after,
+      .caption__title,
+      .caption__hint {
+        transition: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="hero">
+    <canvas id="scene" aria-hidden="true"></canvas>
+
+    <button
+      class="stage"
+      id="stage"
+      type="button"
+      aria-label="Scatter and reform the rotating red fedora"
+    >
+      <span class="caption">
+        <span class="caption__title">
+          <span class="caption__mark"></span>
+          Fedora / Particle Study
+        </span>
+        <span class="caption__hint" id="hint">Hover or tap to scatter</span>
+      </span>
+      <span class="sr-only" id="live" aria-live="polite"></span>
+    </button>
+  </main>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const canvas = document.getElementById("scene");
+      const ctx = canvas.getContext("2d", { alpha: true });
+      const stage = document.getElementById("stage");
+      const hint = document.getElementById("hint");
+      const live = document.getElementById("live");
+      const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+      const TAU = Math.PI * 2;
+      const FOCAL_LENGTH = 6.2;
+      const PITCH = 0.18;
+      const BASE_SPIN = 0.37;
+      const SECTIONS = 48;
+
+      const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+      const mix = (a, b, amount) => a + (b - a) * amount;
+      const smooth = value => {
+        const t = clamp(value, 0, 1);
+        return t * t * (3 - 2 * t);
+      };
+
+      const angleBump = (angle, center, width) => {
+        const delta = Math.atan2(
+          Math.sin(angle - center),
+          Math.cos(angle - center)
+        );
+        return Math.exp(-(delta * delta) / (width * width));
+      };
+
+      function seededRandom(seed) {
+        let value = seed >>> 0;
+        return () => {
+          value += 0x6D2B79F5;
+          let result = value;
+          result = Math.imul(result ^ result >>> 15, result | 1);
+          result ^= result + Math.imul(result ^ result >>> 7, result | 61);
+          return ((result ^ result >>> 14) >>> 0) / 4294967296;
+        };
+      }
+
+      let width = 1;
+      let height = 1;
+      let dpr = 1;
+      let centerX = 0;
+      let centerY = 0;
+      let sceneScale = 100;
+
+      let cameraCosYaw = 1;
+      let cameraSinYaw = 0;
+      const cameraCosPitch = Math.cos(PITCH);
+      const cameraSinPitch = Math.sin(PITCH);
+
+      let yaw = -0.52;
+      let spinVelocity = BASE_SPIN;
+      let orbitClock = 0;
+      let lastFrame = performance.now();
+      let frameRequest = 0;
+
+      let reducedMotion = motionQuery.matches;
+      let playing = false;
+      let sequenceStart = 0;
+      let startingOrbitMix = 0;
+      let dispersion = 0;
+      let orbitMix = 0;
+      let hasAwakened = false;
+      let currentPhase = -1;
+
+      const meshVertices = [];
+      const meshTriangles = [];
+      let viewX;
+      let viewY;
+      let viewZ;
+      let screenX;
+      let screenY;
+
+      let particles = [];
+      let particleGroups = [[], [], []];
+      let glowParticles = [];
+      let particleCount = 0;
+
+      const particleColors = ["#98162f", "#ef2a4b", "#ff806b"];
+
+      const baseColors = {
+        brim: [174, 15, 42],
+        crown: [199, 21, 48],
+        top: [218, 28, 52],
+        band: [52, 7, 17],
+        edge: [108, 8, 29]
+      };
+
+      const palettes = {};
+      for (const [zone, base] of Object.entries(baseColors)) {
+        palettes[zone] = Array.from({ length: 18 }, (_, index) => {
+          const light = index / 17;
+          const factor = 0.36 + light * 0.76;
+          const warmth = light * 9;
+          const red = Math.min(255, Math.round(base[0] * factor + warmth));
+          const green = Math.min(255, Math.round(base[1] * factor + light * 3));
+          const blue = Math.min(255, Math.round(base[2] * factor + light * 4));
+          return `rgb(${red}, ${green}, ${blue})`;
+        });
+      }
+
+      function brimPoint(radius, theta) {
+        const sideLift = 0.055 * Math.pow(radius, 4) *
+          (0.4 + 0.6 * Math.pow(Math.cos(theta), 2));
+        const frontDip = -0.064 * radius * radius *
+          Math.max(0, Math.sin(theta));
+        const backDip = -0.014 * radius * radius *
+          Math.max(0, -Math.sin(theta));
+
+        return [
+          1.66 * radius * Math.cos(theta) *
+            (1 + 0.018 * Math.cos(theta * 2)),
+          -0.48 + 0.035 * radius * radius + sideLift + frontDip + backDip,
+          1.02 * radius * Math.sin(theta)
+        ];
+      }
+
+      function crownPoint(level, theta, inflate = 1) {
+        const front = angleBump(theta, Math.PI / 2, 0.58);
+        const leftPinch = angleBump(theta, Math.PI / 2 - 0.54, 0.21);
+        const rightPinch = angleBump(theta, Math.PI / 2 + 0.54, 0.21);
+        const pinch = leftPinch + rightPinch;
+        const upper = smooth((level - 0.28) / 0.72);
+
+        const radiusX = mix(0.92, 0.69, level);
+        const radiusZ = mix(0.69, 0.54, level);
+        const dent = 1 - upper * (0.025 * front + 0.105 * pinch);
+        const topEdge = 0.98 - 0.072 * front - 0.027 * pinch;
+
+        return [
+          radiusX * Math.cos(theta) * dent * inflate,
+          mix(-0.44, topEdge, level),
+          radiusZ * Math.sin(theta) *
+            (1 - upper * 0.075 * front) * inflate
+        ];
+      }
+
+      function topPoint(radius, theta) {
+        const x = 0.69 * radius * Math.cos(theta);
+        const z = 0.54 * radius * Math.sin(theta);
+        const front = angleBump(theta, Math.PI / 2, 0.58);
+        const edgeY = 0.98 - 0.072 * front;
+        const edgeBlend = Math.pow(radius, 3.5);
+
+        const crease = 0.225 *
+          Math.exp(-(x * x) / 0.036) *
+          (0.72 + 0.28 * Math.cos(z * 2.2));
+
+        const leftPinch = Math.exp(
+          -(
+            ((x - 0.29) * (x - 0.29)) / 0.026 +
+            ((z - 0.25) * (z - 0.25)) / 0.064
+          )
+        );
+
+        const rightPinch = Math.exp(
+          -(
+            ((x + 0.29) * (x + 0.29)) / 0.026 +
+            ((z - 0.25) * (z - 0.25)) / 0.064
+          )
+        );
+
+        const interiorY = 1.035 - crease - 0.125 * (leftPinch + rightPinch);
+
+        return [x, mix(interiorY, edgeY, edgeBlend), z];
+      }
+
+      function addVertex(point) {
+        meshVertices.push(point);
+        return meshVertices.length - 1;
+      }
+
+      function addTriangle(a, b, c, zone) {
+        meshTriangles.push({ a, b, c, zone, depth: 0, light: 0 });
+      }
+
+      function addSurface(rowCount, pointAt, orientation, zone) {
+        const ids = Array.from({ length: rowCount }, () => new Array(SECTIONS));
+
+        for (let row = 0; row < rowCount; row++) {
+          for (let section = 0; section < SECTIONS; section++) {
+            ids[row][section] = addVertex(pointAt(row, section));
+          }
+        }
+
+        for (let row = 0; row < rowCount - 1; row++) {
+          for (let section = 0; section < SECTIONS; section++) {
+            const next = (section + 1) % SECTIONS;
+            const a = ids[row][section];
+            let b;
+            let c;
+            let d;
+
+            if (orientation === "vertical") {
+              b = ids[row + 1][section];
+              c = ids[row + 1][next];
+              d = ids[row][next];
+            } else {
+              b = ids[row][next];
+              c = ids[row + 1][next];
+              d = ids[row + 1][section];
+            }
+
+            addTriangle(a, b, c, zone);
+            addTriangle(a, c, d, zone);
+          }
+        }
+      }
+
+      function buildMesh() {
+        addSurface(
+          8,
+          (row, section) => brimPoint(row / 7, section / SECTIONS * TAU),
+          "horizontal",
+          "brim"
+        );
+
+        addSurface(
+          10,
+          (row, section) => crownPoint(row / 9, section / SECTIONS * TAU),
+          "vertical",
+          "crown"
+        );
+
+        addSurface(
+          7,
+          (row, section) => topPoint(row / 6, section / SECTIONS * TAU),
+          "horizontal",
+          "top"
+        );
+
+        addSurface(
+          2,
+          (row, section) => crownPoint(
+            0.11 + row * 0.18,
+            section / SECTIONS * TAU,
+            1.018
+          ),
+          "vertical",
+          "band"
+        );
+
+        const topEdge = [];
+        const bottomEdge = [];
+
+        for (let section = 0; section < SECTIONS; section++) {
+          const theta = section / SECTIONS * TAU;
+          const top = brimPoint(1, theta);
+          const bottom = [top[0], top[1] - 0.055, top[2]];
+          topEdge.push(addVertex(top));
+          bottomEdge.push(addVertex(bottom));
+        }
+
+        for (let section = 0; section < SECTIONS; section++) {
+          const next = (section + 1) % SECTIONS;
+          const a = topEdge[section];
+          const b = topEdge[next];
+          const c = bottomEdge[next];
+          const d = bottomEdge[section];
+
+          addTriangle(a, b, c, "edge");
+          addTriangle(a, c, d, "edge");
+        }
+
+        viewX = new Float32Array(meshVertices.length);
+        viewY = new Float32Array(meshVertices.length);
+        viewZ = new Float32Array(meshVertices.length);
+        screenX = new Float32Array(meshVertices.length);
+        screenY = new Float32Array(meshVertices.length);
+      }
+
+      function sampleHat(random) {
+        const region = random();
+        let point;
+        let zone;
+
+        if (region < 0.43) {
+          const radius = Math.sqrt(random());
+          point = brimPoint(radius, random() * TAU);
+          zone = radius > 0.93 ? "edge" : "brim";
+        } else if (region < 0.80) {
+          const level = random();
+          point = crownPoint(level, random() * TAU, 1.004);
+          zone = level > 0.1 && level < 0.3 ? "band" : "crown";
+        } else {
+          point = topPoint(Math.sqrt(random()), random() * TAU);
+          zone = "top";
+        }
+
+        return { point, zone };
+      }
+
+      function buildParticles(count) {
+        const random = seededRandom(0xFEDA2026 + count);
+        const nextParticles = [];
+
+        for (let index = 0; index < count; index++) {
+          const sample = sampleHat(random);
+          const [x, y, z] = sample.point;
+
+          let dx = x * 0.28 + (random() - 0.5) * 1.55;
+          let dy = y * 0.14 + (random() - 0.38) * 1.25;
+          let dz = z * 0.32 + (random() - 0.5) * 1.55;
+          const length = Math.hypot(dx, dy, dz) || 1;
+
+          dx /= length;
+          dy /= length;
+          dz /= length;
+
+          let tone;
+          if (sample.zone === "band") {
+            tone = random() < 0.16 ? 1 : 0;
+          } else {
+            const choice = random();
+            tone = choice < 0.17 ? 2 : choice < 0.86 ? 1 : 0;
+          }
+
+          nextParticles.push({
+            x,
+            y,
+            z,
+            dx,
+            dy,
+            dz,
+            tone,
+            amp: 0.62 + Math.pow(random(), 0.58) * 1.72,
+            delay: random(),
+            phase: random() * TAU,
+            spinRate: (0.38 + random() * 0.72) * (random() < 0.5 ? -1 : 1),
+            size: 0.55 + random() * 0.78,
+            spark: random() < 0.047,
+            orbit: null,
+            sx: 0,
+            sy: 0,
+            vz: 0,
+            radius: 1
+          });
+        }
+
+        const orbitCount = Math.min(18, Math.max(12, Math.floor(count / 260)));
+
+        for (let index = 0; index < orbitCount; index++) {
+          const particleIndex = Math.floor((index + 0.47) * count / orbitCount) % count;
+          const particle = nextParticles[particleIndex];
+
+          particle.orbit = {
+            phase: random() * TAU,
+            radius: 1.72 + random() * 0.58,
+            depth: 0.66 + random() * 0.18,
+            speed: (0.38 + random() * 0.22) * (random() < 0.35 ? -1 : 1),
+            lift: 0.36 + random() * 0.28,
+            height: -0.02 + (random() - 0.5) * 0.52
+          };
+          particle.spark = true;
+          particle.tone = random() < 0.34 ? 2 : 1;
+        }
+
+        particles = nextParticles;
+        particleCount = count;
+        particleGroups = [[], [], []];
+        glowParticles = [];
+      }
+
+      function setCamera(angle) {
+        cameraCosYaw = Math.cos(angle);
+        cameraSinYaw = Math.sin(angle);
+      }
+
+      function projectInto(point, target) {
+        const rotatedX = point[0] * cameraCosYaw + point[2] * cameraSinYaw;
+        const rotatedZ = -point[0] * cameraSinYaw + point[2] * cameraCosYaw;
+        const cameraY = point[1] * cameraCosPitch - rotatedZ * cameraSinPitch;
+        const cameraZ = point[1] * cameraSinPitch + rotatedZ * cameraCosPitch;
+        const perspective = FOCAL_LENGTH / (FOCAL_LENGTH - cameraZ);
+
+        target.x = centerX + rotatedX * sceneScale * perspective;
+        target.y = centerY - cameraY * sceneScale * perspective;
+        target.z = cameraZ;
+        target.perspective = perspective;
+      }
+
+      function orbitPosition(particle, time) {
+        const orbit = particle.orbit;
+        const angle = orbit.phase + time * orbit.speed;
+
+        return [
+          Math.cos(angle) * orbit.radius,
+          orbit.height + Math.sin(angle * 1.72 + orbit.phase) * orbit.lift,
+          Math.sin(angle) * orbit.radius * orbit.depth
+        ];
+      }
+
+      function updateParticlePositions(scatterTime) {
+        for (const group of particleGroups) group.length = 0;
+        glowParticles.length = 0;
+
+        const showCloud = dispersion > 0.002;
+
+        for (const particle of particles) {
+          const localDispersion = dispersion <= 0
+            ? 0
+            : clamp((dispersion - particle.delay * 0.12) / 0.88, 0, 1);
+
+          let x = particle.x;
+          let y = particle.y;
+          let z = particle.z;
+
+          if (localDispersion > 0.0001) {
+            const baseX = particle.x * 0.42 + particle.dx * particle.amp;
+            const baseZ = particle.z * 0.42 + particle.dz * particle.amp;
+            const swirlAngle =
+              scatterTime * particle.spinRate +
+              Math.sin(scatterTime * 1.18 + particle.phase) * 0.18;
+
+            const cosine = Math.cos(swirlAngle);
+            const sine = Math.sin(swirlAngle);
+            const scatteredX = baseX * cosine - baseZ * sine;
+            const scatteredZ = baseX * sine + baseZ * cosine;
+            const scatteredY =
+              particle.y * 0.34 +
+              particle.dy * particle.amp +
+              0.38 +
+              Math.sin(scatterTime * 2.15 + particle.phase) * 0.19;
+
+            x = mix(particle.x, scatteredX, localDispersion);
+            y = mix(particle.y, scatteredY, localDispersion);
+            z = mix(particle.z, scatteredZ, localDispersion);
+          }
+
+          if (particle.orbit && orbitMix > 0.0001) {
+            const orbit = orbitPosition(particle, orbitClock);
+            x = mix(x, orbit[0], orbitMix);
+            y = mix(y, orbit[1], orbitMix);
+            z = mix(z, orbit[2], orbitMix);
+          }
+
+          const rotatedX = x * cameraCosYaw + z * cameraSinYaw;
+          const rotatedZ = -x * cameraSinYaw + z * cameraCosYaw;
+          const cameraY = y * cameraCosPitch - rotatedZ * cameraSinPitch;
+          const cameraZ = y * cameraSinPitch + rotatedZ * cameraCosPitch;
+          const perspective = FOCAL_LENGTH / (FOCAL_LENGTH - cameraZ);
+
+          particle.sx = centerX + rotatedX * sceneScale * perspective;
+          particle.sy = centerY - cameraY * sceneScale * perspective;
+          particle.vz = cameraZ;
+          particle.radius = particle.size * (0.86 + perspective * 0.17);
+
+          if (showCloud) {
+            particleGroups[particle.tone].push(particle);
+            if (particle.spark && localDispersion > 0.12) {
+              glowParticles.push(particle);
+            }
+          }
+        }
+      }
+
+      function updateMeshProjection() {
+        for (let index = 0; index < meshVertices.length; index++) {
+          const vertex = meshVertices[index];
+          const rotatedX = vertex[0] * cameraCosYaw + vertex[2] * cameraSinYaw;
+          const rotatedZ = -vertex[0] * cameraSinYaw + vertex[2] * cameraCosYaw;
+          const y = vertex[1] * cameraCosPitch - rotatedZ * cameraSinPitch;
+          const z = vertex[1] * cameraSinPitch + rotatedZ * cameraCosPitch;
+          const perspective = FOCAL_LENGTH / (FOCAL_LENGTH - z);
+
+          viewX[index] = rotatedX;
+          viewY[index] = y;
+          viewZ[index] = z;
+          screenX[index] = centerX + rotatedX * sceneScale * perspective;
+          screenY[index] = centerY - y * sceneScale * perspective;
+        }
+
+        for (const triangle of meshTriangles) {
+          const a = triangle.a;
+          const b = triangle.b;
+          const c = triangle.c;
+
+          const abX = viewX[b] - viewX[a];
+          const abY = viewY[b] - viewY[a];
+          const abZ = viewZ[b] - viewZ[a];
+          const acX = viewX[c] - viewX[a];
+          const acY = viewY[c] - viewY[a];
+          const acZ = viewZ[c] - viewZ[a];
+
+          let nx = abY * acZ - abZ * acY;
+          let ny = abZ * acX - abX * acZ;
+          let nz = abX * acY - abY * acX;
+          const length = Math.hypot(nx, ny, nz) || 1;
+
+          nx /= length;
+          ny /= length;
+          nz /= length;
+
+          const diffuse = Math.max(0, nx * -0.42 + ny * 0.72 + nz * 0.55);
+          const rim = Math.pow(1 - Math.abs(nz), 2) * 0.13;
+          const topLift = triangle.zone === "top" ? 0.07 : 0;
+
+          triangle.depth = (viewZ[a] + viewZ[b] + viewZ[c]) / 3;
+          triangle.light = Math.round(
+            clamp(0.17 + diffuse * 0.73 + rim + topLift, 0, 1) * 17
+          );
+        }
+
+        meshTriangles.sort((a, b) => a.depth - b.depth);
+      }
+
+      function drawAtmosphere() {
+        const haloRadius = sceneScale * (2.02 + dispersion * 0.34);
+        const halo = ctx.createRadialGradient(
+          centerX,
+          centerY - sceneScale * 0.08,
+          sceneScale * 0.12,
+          centerX,
+          centerY - sceneScale * 0.08,
+          haloRadius
+        );
+
+        halo.addColorStop(0, `rgba(145, 18, 46, ${0.115 + dispersion * 0.055})`);
+        halo.addColorStop(0.42, `rgba(87, 12, 31, ${0.065 + dispersion * 0.03})`);
+        halo.addColorStop(1, "rgba(30, 6, 16, 0)");
+
+        ctx.fillStyle = halo;
+        ctx.fillRect(0, 0, width, height);
+
+        const halfWidth = Math.hypot(
+          1.66 * Math.cos(yaw),
+          1.02 * Math.sin(yaw)
+        );
+
+        ctx.save();
+        ctx.translate(centerX, centerY + sceneScale * 0.69);
+        ctx.scale(1, 0.17);
+
+        const shadowRadius = sceneScale * halfWidth * 0.94;
+        const shadow = ctx.createRadialGradient(0, 0, 0, 0, 0, shadowRadius);
+        shadow.addColorStop(0, `rgba(0, 0, 0, ${0.43 - dispersion * 0.24})`);
+        shadow.addColorStop(0.48, `rgba(0, 0, 0, ${0.22 - dispersion * 0.11})`);
+        shadow.addColorStop(1, "rgba(0, 0, 0, 0)");
+
+        ctx.fillStyle = shadow;
+        ctx.beginPath();
+        ctx.arc(0, 0, shadowRadius, 0, TAU);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      function drawOrbitTrails() {
+        if (orbitMix < 0.015) return;
+
+        const projectedA = {};
+        const projectedB = {};
+
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.lineCap = "round";
+
+        for (const particle of particles) {
+          if (!particle.orbit) continue;
+
+          for (let segment = 10; segment > 0; segment--) {
+            const older = orbitPosition(particle, orbitClock - segment * 0.055);
+            const newer = orbitPosition(particle, orbitClock - (segment - 1) * 0.055);
+
+            const pointA = [
+              mix(particle.x, older[0], orbitMix),
+              mix(particle.y, older[1], orbitMix),
+              mix(particle.z, older[2], orbitMix)
+            ];
+
+            const pointB = [
+              mix(particle.x, newer[0], orbitMix),
+              mix(particle.y, newer[1], orbitMix),
+              mix(particle.z, newer[2], orbitMix)
+            ];
+
+            projectInto(pointA, projectedA);
+            projectInto(pointB, projectedB);
+
+            const strength = (1 - segment / 11) * orbitMix;
+            ctx.strokeStyle = `rgba(245, 38, 72, ${0.011 + strength * 0.105})`;
+            ctx.lineWidth = 0.45 + strength * 0.72;
+            ctx.beginPath();
+            ctx.moveTo(projectedA.x, projectedA.y);
+            ctx.lineTo(projectedB.x, projectedB.y);
+            ctx.stroke();
+          }
+        }
+
+        ctx.restore();
+      }
+
+      function drawParticleCloud() {
+        if (dispersion <= 0.002) return;
+
+        const particleAlpha = 0.92 * Math.pow(dispersion, 0.48);
+
+        if (glowParticles.length) {
+          ctx.save();
+          ctx.globalCompositeOperation = "lighter";
+          ctx.globalAlpha = 0.075 * smooth(dispersion);
+          ctx.fillStyle = "#ff3658";
+          ctx.beginPath();
+
+          for (const particle of glowParticles) {
+            const radius = particle.radius * 3.2;
+            ctx.moveTo(particle.sx + radius, particle.sy);
+            ctx.arc(particle.sx, particle.sy, radius, 0, TAU);
+          }
+
+          ctx.fill();
+          ctx.restore();
+        }
+
+        ctx.save();
+
+        for (let tone = 0; tone < particleGroups.length; tone++) {
+          const group = particleGroups[tone];
+          if (!group.length) continue;
+
+          ctx.globalAlpha = particleAlpha * (tone === 0 ? 0.72 : tone === 2 ? 0.92 : 0.84);
+          ctx.fillStyle = particleColors[tone];
+          ctx.beginPath();
+
+          for (const particle of group) {
+            if (
+              particle.sx < -8 ||
+              particle.sx > width + 8 ||
+              particle.sy < -8 ||
+              particle.sy > height + 8
+            ) {
+              continue;
+            }
+
+            const radius = Math.max(
+              0.42,
+              particle.radius * (0.82 + dispersion * 0.33)
+            );
+
+            ctx.moveTo(particle.sx + radius, particle.sy);
+            ctx.arc(particle.sx, particle.sy, radius, 0, TAU);
+          }
+
+          ctx.fill();
+        }
+
+        ctx.restore();
+      }
+
+      function drawMesh(alpha) {
+        if (alpha <= 0.002) return;
+
+        updateMeshProjection();
+
+        ctx.save();
+        ctx.globalAlpha = alpha;
+
+        for (const triangle of meshTriangles) {
+          ctx.fillStyle = palettes[triangle.zone][triangle.light];
+          ctx.beginPath();
+          ctx.moveTo(screenX[triangle.a], screenY[triangle.a]);
+          ctx.lineTo(screenX[triangle.b], screenY[triangle.b]);
+          ctx.lineTo(screenX[triangle.c], screenY[triangle.c]);
+          ctx.closePath();
+          ctx.fill();
+        }
+
+        ctx.restore();
+      }
+
+      function drawSurfaceGlints(time) {
+        if (dispersion >= 0.2) return;
+
+        const strength = (1 - dispersion / 0.2) * 0.27;
+
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.fillStyle = "#ff9a8c";
+        ctx.beginPath();
+
+        for (const particle of particles) {
+          if (!particle.spark || (particle.orbit && orbitMix > 0.05)) continue;
+          if (particle.vz < -0.18) continue;
+
+          const shimmer = reducedMotion
+            ? 0.68
+            : 0.58 + Math.sin(time * 0.9 + particle.phase) * 0.22;
+
+          const radius = Math.max(0.28, particle.radius * 0.38 * shimmer);
+          ctx.moveTo(particle.sx + radius, particle.sy);
+          ctx.arc(particle.sx, particle.sy, radius, 0, TAU);
+        }
+
+        ctx.globalAlpha = strength;
+        ctx.fill();
+        ctx.restore();
+      }
+
+      function drawOrbitingParticles() {
+        if (orbitMix < 0.015) return;
+
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+
+        ctx.globalAlpha = 0.12 * orbitMix;
+        ctx.fillStyle = "#ff3155";
+        ctx.beginPath();
+
+        for (const particle of particles) {
+          if (!particle.orbit) continue;
+          const radius = particle.radius * 4.2;
+          ctx.moveTo(particle.sx + radius, particle.sy);
+          ctx.arc(particle.sx, particle.sy, radius, 0, TAU);
+        }
+
+        ctx.fill();
+
+        ctx.globalAlpha = 0.84 * orbitMix;
+        ctx.fillStyle = "#ff6b70";
+        ctx.beginPath();
+
+        for (const particle of particles) {
+          if (!particle.orbit) continue;
+          const radius = Math.max(0.7, particle.radius * 0.86);
+          ctx.moveTo(particle.sx + radius, particle.sy);
+          ctx.arc(particle.sx, particle.sy, radius, 0, TAU);
+        }
+
+        ctx.fill();
+
+        ctx.globalAlpha = 0.72 * orbitMix;
+        ctx.fillStyle = "#ffe0d2";
+        ctx.beginPath();
+
+        for (const particle of particles) {
+          if (!particle.orbit) continue;
+          const radius = Math.max(0.3, particle.radius * 0.27);
+          ctx.moveTo(particle.sx + radius, particle.sy);
+          ctx.arc(particle.sx, particle.sy, radius, 0, TAU);
+        }
+
+        ctx.fill();
+        ctx.restore();
+      }
+
+      function render(time, scatterTime = 0) {
+        ctx.clearRect(0, 0, width, height);
+        setCamera(yaw);
+
+        drawAtmosphere();
+        updateParticlePositions(scatterTime);
+        drawOrbitTrails();
+        drawParticleCloud();
+
+        const meshAlpha = Math.pow(1 - dispersion, 1.78);
+        drawMesh(meshAlpha);
+        drawSurfaceGlints(time);
+        drawOrbitingParticles();
+      }
+
+      const phaseLabels = [
+        "Spin slowing",
+        "Drifting into embers",
+        "Particles in orbit",
+        "Drawing back together",
+        "Perfectly reformed",
+        "A few sparks remain"
+      ];
+
+      function setPhase(phase) {
+        if (phase === currentPhase) return;
+        currentPhase = phase;
+        if (phase >= 0) hint.textContent = phaseLabels[phase];
+      }
+
+      function sequenceState(elapsed) {
+        if (elapsed < 0.55) {
+          const progress = smooth(elapsed / 0.55);
+          return {
+            phase: 0,
+            dispersion: 0,
+            orbit: startingOrbitMix * (1 - smooth(elapsed / 0.38)),
+            spin: mix(1, 0.18, progress)
+          };
+        }
+
+        if (elapsed < 1.7) {
+          return {
+            phase: 1,
+            dispersion: smooth((elapsed - 0.55) / 1.15),
+            orbit: 0,
+            spin: 0.16
+          };
+        }
+
+        if (elapsed < 3.25) {
+          return {
+            phase: 2,
+            dispersion: 1,
+            orbit: 0,
+            spin: 0.1
+          };
+        }
+
+        if (elapsed < 4.7) {
+          return {
+            phase: 3,
+            dispersion: 1 - smooth((elapsed - 3.25) / 1.45),
+            orbit: 0,
+            spin: 0.12
+          };
+        }
+
+        if (elapsed < 5.08) {
+          return {
+            phase: 4,
+            dispersion: 0,
+            orbit: 0,
+            spin: 0.18
+          };
+        }
+
+        if (elapsed < 5.78) {
+          const progress = smooth((elapsed - 5.08) / 0.7);
+          return {
+            phase: 5,
+            dispersion: 0,
+            orbit: progress,
+            spin: mix(0.18, 0.65, progress)
+          };
+        }
+
+        return { done: true };
+      }
+
+      function finishSequence() {
+        playing = false;
+        hasAwakened = true;
+        dispersion = 0;
+        orbitMix = 1;
+        currentPhase = -1;
+        stage.classList.remove("is-active");
+        hint.textContent = "Hover or tap to scatter again";
+        live.textContent = "The fedora has reformed. A few glowing particles remain in orbit.";
+      }
+
+      function animate(now) {
+        const delta = Math.min(0.05, Math.max(0, (now - lastFrame) / 1000));
+        lastFrame = now;
+        orbitClock += delta;
+
+        let desiredSpin = BASE_SPIN;
+        let scatterTime = 0;
+
+        if (playing) {
+          scatterTime = (now - sequenceStart) / 1000;
+          const state = sequenceState(scatterTime);
+
+          if (state.done) {
+            finishSequence();
+          } else {
+            dispersion = state.dispersion;
+            orbitMix = state.orbit;
+            desiredSpin = BASE_SPIN * state.spin;
+            setPhase(state.phase);
+          }
+        } else {
+          dispersion = 0;
+          orbitMix = hasAwakened ? 1 : 0;
+        }
+
+        const response = 1 - Math.exp(-delta * 3.1);
+        spinVelocity = mix(spinVelocity, desiredSpin, response);
+        yaw = (yaw + spinVelocity * delta) % TAU;
+
+        render(now / 1000, scatterTime);
+        frameRequest = requestAnimationFrame(animate);
+      }
+
+      function triggerSequence() {
+        if (reducedMotion || playing) return;
+
+        playing = true;
+        sequenceStart = performance.now();
+        startingOrbitMix = orbitMix;
+        currentPhase = -1;
+        stage.classList.add("is-active");
+        live.textContent = "The fedora is scattering into thousands of glowing particles.";
+      }
+
+      let hoverTimer = 0;
+      let hoverConsumed = false;
+
+      stage.addEventListener("pointerenter", event => {
+        if (
+          reducedMotion ||
+          hoverConsumed ||
+          playing ||
+          (event.pointerType !== "mouse" && event.pointerType !== "pen")
+        ) {
+          return;
+        }
+
+        window.clearTimeout(hoverTimer);
+        hoverTimer = window.setTimeout(() => {
+          hoverConsumed = true;
+          triggerSequence();
+        }, 160);
+      });
+
+      stage.addEventListener("pointerleave", () => {
+        window.clearTimeout(hoverTimer);
+        hoverConsumed = false;
+      });
+
+      stage.addEventListener("click", () => {
+        hoverConsumed = true;
+        triggerSequence();
+      });
+
+      function desiredParticleCount() {
+        if (width < 520) return 2800;
+        if (width < 900) return 3600;
+        return 4800;
+      }
+
+      function resize() {
+        width = Math.max(1, window.innerWidth);
+        height = Math.max(1, window.innerHeight);
+        dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+
+        canvas.width = Math.round(width * dpr);
+        canvas.height = Math.round(height * dpr);
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        centerX = width * 0.5;
+        centerY = height * (width < 600 ? 0.445 : 0.455);
+        sceneScale = Math.min(width * 0.235, height * 0.25, 190);
+
+        const captionY = Math.min(
+          height - 64,
+          centerY + sceneScale * 0.96
+        );
+
+        document.documentElement.style.setProperty(
+          "--caption-y",
+          `${captionY}px`
+        );
+
+        const nextCount = desiredParticleCount();
+        if (nextCount !== particleCount) buildParticles(nextCount);
+
+        render(performance.now() / 1000, 0);
+      }
+
+      function updateMotionPreference() {
+        reducedMotion = motionQuery.matches;
+        cancelAnimationFrame(frameRequest);
+
+        if (reducedMotion) {
+          playing = false;
+          hasAwakened = false;
+          dispersion = 0;
+          orbitMix = 0;
+          yaw = -0.52;
+          spinVelocity = 0;
+          stage.classList.remove("is-active");
+          hint.textContent = "Motion reduced — sculpture held still";
+          render(performance.now() / 1000, 0);
+        } else {
+          hint.textContent = "Hover or tap to scatter";
+          lastFrame = performance.now();
+          spinVelocity = BASE_SPIN;
+          frameRequest = requestAnimationFrame(animate);
+        }
+      }
+
+      buildMesh();
+      resize();
+
+      window.addEventListener("resize", resize, { passive: true });
+
+      if (motionQuery.addEventListener) {
+        motionQuery.addEventListener("change", updateMotionPreference);
+      } else {
+        motionQuery.addListener(updateMotionPreference);
+      }
+
+      updateMotionPreference();
+    })();
+  </script>
+</body>
+</html>
