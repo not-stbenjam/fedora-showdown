@@ -1091,10 +1091,6 @@ And respect reduced motion. Return only the finished HTML file.</div>
     return indices;
   }
 
-  function shouldGroupFamily(family) {
-    return Boolean(family && familyMemberIndices(family).length >= 2);
-  }
-
   function modelSearchText(m) {
     return [m.name, m.group, m.badge, m.id, m.family].filter(Boolean).join(" ").toLowerCase();
   }
@@ -1106,9 +1102,12 @@ And respect reduced motion. Return only the finished HTML file.</div>
     group.chevron.textContent = "›";
   }
 
-  function ensureFamilyExpandedForPos(pos) {
-    const group = familyGroups.find(g => g.positions.includes(pos));
-    if (group) setFamilyExpanded(group, true);
+  function ensureFamilyExpandedForModel(idx) {
+    familyGroups.forEach(group => {
+      if (group.positions.some(pos => navOrder[pos] === idx)) {
+        setFamilyExpanded(group, true);
+      }
+    });
   }
 
   function init() {
@@ -1156,8 +1155,8 @@ And respect reduced motion. Return only the finished HTML file.</div>
         if (emitted.has(i)) continue;
         const m = MODELS[i];
         const family = getFamilyId(m);
-        if (shouldGroupFamily(family)) {
-          const members = indices.filter(idx => getFamilyId(MODELS[idx]) === family && !emitted.has(idx));
+        const members = indices.filter(idx => getFamilyId(MODELS[idx]) === family && !emitted.has(idx));
+        if (family && members.length >= 2) {
           const wrap = document.createElement("div");
           wrap.className = "family-group";
           wrap.dataset.family = family;
@@ -1168,6 +1167,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
           toggle.className = "family-toggle";
           toggle.setAttribute("aria-expanded", "false");
           toggle.setAttribute("aria-controls", panelId);
+          toggle.setAttribute("aria-label", m.name + ", " + members.length + " variants");
 
           const chevron = document.createElement("span");
           chevron.className = "family-chevron";
@@ -1213,7 +1213,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
           const positions = [];
           for (const member of members) {
             emitted.add(member);
-            positions.push(createModelButton(member, false, panel));
+            positions.push(createModelButton(member, inNewSection, panel));
           }
 
           const group = {
@@ -1388,6 +1388,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
       } else if (gridVisible.size < 4) {
         gridVisible.add(idx);
       }
+      ensureFamilyExpandedForModel(idx);
       updateTabStyles();
       applyVisibility();
       updateHint();
@@ -1401,7 +1402,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
     activePos = pos;
     activeIdx = navOrder[pos];
     history.replaceState(null, "", "#" + MODELS[activeIdx].id);
-    ensureFamilyExpandedForPos(pos);
+    ensureFamilyExpandedForModel(activeIdx);
     updateTabStyles();
     applyVisibility();
     const btn = navButtons[pos];

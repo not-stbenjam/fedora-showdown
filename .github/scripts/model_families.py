@@ -44,8 +44,8 @@ def group_section_indices(models: list[dict], indices: Iterable[int]) -> list[di
             continue
         model = models[index]
         family = family_id(model)
-        if should_group_family(models, family):
-            members = [member for member in ordered if family_id(models[member]) == family]
+        members = [member for member in ordered if family_id(models[member]) == family]
+        if family and len(members) >= 2:
             entries.append({"type": "family", "family": family, "indices": members})
             emitted.update(members)
         else:

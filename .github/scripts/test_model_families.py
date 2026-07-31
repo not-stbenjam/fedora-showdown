@@ -92,6 +92,17 @@ class ModelFamiliesTest(unittest.TestCase):
             [{"type": "model", "index": 0}, {"type": "model", "index": 1}],
         )
 
+    def test_does_not_group_single_family_member_in_section(self):
+        models = [
+            {"id": "a-new", "name": "Model A", "family": "model-a"},
+            {"id": "a-old", "name": "Model A", "family": "model-a"},
+        ]
+
+        self.assertEqual(
+            group_section_indices(models, [0]),
+            [{"type": "model", "index": 0}],
+        )
+
     def test_search_keeps_matching_variants_inside_family(self):
         models = [
             {"id": "a-max", "name": "Model A", "family": "model-a", "badge": "Max", "group": "OpenAI"},
@@ -175,6 +186,27 @@ class ModelFamiliesTest(unittest.TestCase):
         self.assertIn("family-toggle", self.index_html)
         self.assertIn("family-variants", self.index_html)
         self.assertIn("variant-badge", self.index_html)
+
+    def test_runtime_preserves_section_context_and_expands_duplicate_families(self):
+        self.assertIn(
+            "positions.push(createModelButton(member, inNewSection, panel));",
+            self.index_html,
+        )
+        self.assertIn("function ensureFamilyExpandedForModel(idx)", self.index_html)
+        self.assertIn(
+            "group.positions.some(pos => navOrder[pos] === idx)",
+            self.index_html,
+        )
+        self.assertGreaterEqual(
+            self.index_html.count("ensureFamilyExpandedForModel("),
+            3,
+        )
+
+    def test_family_toggle_has_descriptive_accessible_name(self):
+        self.assertIn(
+            'toggle.setAttribute("aria-label", m.name + ", " + members.length + " variants");',
+            self.index_html,
+        )
 
 
 if __name__ == "__main__":
