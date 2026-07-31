@@ -129,6 +129,21 @@ def audit_html(content):
         for name in large_budget_names
         for header, _ in loops
     )
+    has_dense_literal_particle_budget = any(
+        max(
+            (int(value) for value in re.findall(r"\b\d{3,6}\b", header)),
+            default=0,
+        )
+        >= 2500
+        and re.search(r"\b(?:particles|parts)\s*\.\s*push\s*\(", body)
+        for header, body in loops
+    )
+    has_screen_sampled_particles = (
+        bool(re.search(r"\bgetImageData\s*\(", masked))
+        and bool(re.search(r"\b(?:particles|parts)\s*\.\s*push\s*\(", masked))
+        and any(re.search(r"<\s*H\b", header) for header, _ in loops)
+        and any(re.search(r"<\s*W\b", header) for header, _ in loops)
+    )
     has_loop_shadow = any(re.search(r"\bshadowBlur\s*=", body) for _, body in loops)
     if (
         has_large_loop_budget
@@ -153,7 +168,14 @@ def audit_html(content):
 
         if has_shadow and (
             has_large_loop_budget
-            or (has_multiple_particle_draws and has_unconditional_shadow)
+            or (
+                has_unconditional_shadow
+                and (
+                    has_dense_literal_particle_budget
+                    or has_screen_sampled_particles
+                    or has_multiple_particle_draws
+                )
+            )
         ):
             reasons.append("per-particle canvas shadows")
         if has_gradient and has_large_loop_budget:
