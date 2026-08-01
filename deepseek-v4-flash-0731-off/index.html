@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fedora</title>
+<style>
+  :root{
+    --bg:#0b0d12;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    background:var(--bg);
+    overflow:hidden;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    color:#d9dde4;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }
+  #stage{
+    position:relative;
+    width:min(70vmin,560px);
+    aspect-ratio:1/1;
+    user-select:none;
+    -webkit-user-select:none;
+    touch-action:manipulation;
+  }
+  canvas{
+    width:100%;
+    height:100%;
+    display:block;
+    touch-action:none;
+  }
+  .caption{
+    position:absolute;
+    left:0;
+    right:0;
+    bottom:-2.2em;
+    text-align:center;
+    font-size:clamp(0.85rem,2.5vw,1.05rem);
+    letter-spacing:0.35em;
+    text-transform:uppercase;
+    font-weight:300;
+    color:#9aa2ae;
+    text-shadow:0 2px 12px rgba(0,0,0,0.6);
+    pointer-events:none;
+  }
+  .caption strong{
+    font-weight:600;
+    color:#e8ecf2;
+    letter-spacing:0.15em;
+  }
+  #hint{
+    position:fixed;
+    bottom:6vh;
+    left:0;right:0;
+    text-align:center;
+    font-size:0.75rem;
+    letter-spacing:0.25em;
+    text-transform:uppercase;
+    color:#5d6470;
+    pointer-events:none;
+  }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <canvas id="c"></canvas>
+    <div class="caption"><strong>FEDORA</strong>&nbsp;&nbsp;·&nbsp;&nbsp;RED HAT</div>
+  </div>
+  <div id="hint">hover or tap</div>
+
+<script>
+(function(){
+  "use strict";
+
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const USE_LO_RES = reduceMotion ||
+    !window.requestAnimationFrame ||
+    navigator.userAgent.toLowerCase().indexOf('mobi') >= 0;
+
+  // ----------------------------------------------------------------
+  // DPI handling
+  // ----------------------------------------------------------------
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  let W, H, CW, CH;
+
+  function resize(){
+    const r = canvas.getBoundingClientRect();
+    CW = Math.max(1, r.width);
+    CH = Math.max(1, r.height);
+    W = Math.round(CW * dpr);
+    H = Math.round(CH * dpr);
+    canvas.width = W;
+    canvas.height = H;
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  // ----------------------------------------------------------------
+  // Particle system
+  // ----------------------------------------------------------------
+  const BASE_PARTICLES = USE_LO_RES ? 1100 : 2400;
+
+  let hat = [];          // hat points (source), regenerated on resize
+  let withHat = true;
+  let particles = [];
+  let hover = false;
+  let hoverTarget = 0;   // 0 idle, 1 dissolving
+  let hoverBlend = 0;    // smoothed hover factor 0..1
+  let spinSpeed = 0.70;  // radians / sec idle
+  let angle = 0;
+  let time = 0;
+
+  const seeded = (function(){
+    let seed = 123456789;
+    return function(){
+      seed = (seed * 16807) % 2147483647;
+      return (seed - 1) / 2147483646;
+    };
+  })();
+
+  // Orbit straggler particles that trail after the hat reforms
+  let orbiters = [];
+  const MAX_ORBITERS = 60;
+
+  // ----------------------------------------------------------------
+  // Hat geometry -> 3D point cloud
+  // ----------------------------------------------------------------
+  function buildHat(total){
+    const pts = [];
+    // Crown: cylinder-ish with a pinch at top.
+    const crownR = 0.052 * 1.15;
+    const crownHalfH = 0.42;
+    const ringCount = 13;
+    const seg = 120;
+
+    for(let r=0; r<ringCount; r++){
+      const t = r/(ringCount-1);
+      const y = (crownHalfH*2) * t - crownHalfH;
+      const fadeTop = Math.pow(Math.max(0, 1 - (y + crownHalfH)/ (crownHalfH*2)), 0.5);
+      const rad = crownR * (1 - 0.28*fadeTop);
+      for(let s=0; s<seg; s++){
+        const a = (s/seg)*Math.PI*2;
+        pts.push([Math.cos(a)*rad, y, Math.sin(a)*rad]);
+      }
+    }
+    // Brim: wide flat disc.
+    const brimR = 0.095 * 1.15;
+    const brimY = -crownHalfH + 0.002;
+    const ringBr = 12;
+    for(let r=0; r<ringBr; r++){
+      const t = r/(ringBr-1);
+      const rad = 0.004 + t*(brimR-0.004);
+      const n = Math.floor((24 + t*140));
+      for(let s=0; s<n; s++){
+        const a=(s/n)*Math.PI*2;
+        pts.push([Math.cos(a)*rad, brimY, Math.sin(a)*rad]);
+      }
+    }
+    // Band around base of crown
+    const bandY = -crownHalfH + 0.006;
+    for(let s=0; s<seg; s++){
+      const a=(s/seg)*Math.PI*2;
+      pts.push([Math.cos(a)*(crownR*1.02), bandY, Math.sin(a)*(crownR*1.02)]);
+    }
+    // A few points on the crown top cap (pinch)
+    const topY = crownHalfH;
+    for(let i=0;i<60;i++){
+      const a = (i/60)*Math.PI*2;
+      pts.push([Math.cos(a)*crownR*0.30, topY, Math.sin(a)*crownR*0.30]);
+    }
+
+    // Downsample to target
+    if(pts.length > total){
+      const step = pts.length/total;
+      const out = [];
+      for(let i=0;i<total;i++){
+        const idx = Math.min(pts.length-1, Math.floor(i*step));
+        out.push(pts[idx]);
+      }
+      return out;
+    }
+    return pts;
+  }
+
+  let targetCount = BASE_PARTICLES;
+  function rebuildHat(){
+    targetCount = BASE_PARTICLES;
+    hat = buildHat(targetCount);
+  }
+  rebuildHat();
+
+  function baseColorAt(p){
+    // Hat body: dark charcoal-blue with subtle warm band
+    const y = p[1];
+    const rad = p[0]*p[0]+p[2]*p[2];
+    // band around y ~ -0.42
+    const band = 1 - Math.min(1, Math.abs(y - (-0.414))*10);
+    const crownTop = Math.max(0, 1-Math.abs((-0.42)*1 - y)*3);
+    const body = Math.max(0, 1 - crownTop*0.6 - band*0.05);
+    const r = 0.16 + body*0.30 + crownTop*0.12;
+    const g = 0.15 + body*0.30 + crownTop*0.12;
+    const b = 0.20 + body*0.36 + crownTop*0.16;
+    if(band>0.02){
+      // warm red band (Red Hat accent)
+      return {r:0.42+band*0.35, g:0.05+band*0.10, b:0.05+band*0.10, a:1};
+    }
+    return {r:r, g:g, b:b, a:1};
+  }
+
+  function initParticles(){
+    particles = [];
+    orbiters = [];
+    for(let i=0;i<hat.length;i++){
+      const p = hat[i];
+      const col = baseColorAt(p);
+      particles.push({
+        x:p[0], y:p[1], z:p[2],
+        hx:p[0], hy:p[1], hz:p[2],   // home position (hat space)
+        vx:0, vy:0, vz:0,
+        r: 0.0016,
+        base:{r:col.r, g:col.g, b:col.b, a:col.a},
+        col:{r:col.r, g:col.g, b:col.b, a:1},
+        state:'hat'  // 'hat' | 'scatter' | 'orbital'
+      });
+    }
+  }
+  initParticles();
+
+  // ----------------------------------------------------------------
+  // Projection: rotate around Y, then perspective
+  // ----------------------------------------------------------------
+  function project(p3, ang, worldScale){
+    const ca = Math.cos(ang), sa = Math.sin(ang);
+    const x = p3[0]*ca - p3[2]*sa;
+    const z = p3[0]*sa + p3[2]*ca;
+    const y = p3[1];
+    // Perspective
+    const fov = 2.6;
+    const scale = worldScale * fov / (fov + z + 1.0);
+    return {x: x*scale, y: y*scale, z, s: scale};
+  }
+
+  let worldScale = 1;
+  function updateWorldScale(){
+    const unit = Math.min(CW, CH);
+    worldScale = unit * 0.30;  // wraps brim ~0.1*scale*... tuned visually
+  }
+  updateWorldScale();
+  window.addEventListener('resize', updateWorldScale);
+
+  // ----------------------------------------------------------------
+  // Ember glow texture
+  // ----------------------------------------------------------------
+  function makeGlow(){
+    const s = 64;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = s;
+    const c = cv.getContext('2d');
+    const g = c.createRadialGradient(s/2,s/2,0,s/2,s/2,s/2);
+    g.addColorStop(0,'rgba(255,255,255,1)');
+    g.addColorStop(0.4,'rgba(255,255,200,0.55)');
+    g.addColorStop(1,'rgba(255,255,255,0)');
+    c.fillStyle = g;
+    c.fillRect(0,0,s,s);
+    return cv;
+  }
+  const glowTex = makeGlow();
+
+  // ----------------------------------------------------------------
+  // Render (reduced / no-particles static preview)
+  // ----------------------------------------------------------------
+  function renderReduced(){
+    ctx.clearRect(0,0,CW,CH);
+    const ang = reduceMotion ? -0.4 : angle;
+    // soft ground shadow
+    ctx.save();
+    ctx.translate(CW/2, CH*0.60);
+    ctx.scale(1, 0.30);
+    const sg = ctx.createRadialGradient(0,0,0,0,0,worldScale*0.5);
+    sg.addColorStop(0,'rgba(0,0,0,0.55)');
+    sg.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle = sg;
+    ctx.beginPath();
+    ctx.arc(0,0,worldScale*0.5,0,Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+
+    // draw hat as filled silhouette approximation: render particles as tiny squares
+    const pts = hat;
+    for(let i=0;i<pts.length;i++){
+      const pr = project(pts[i], ang, worldScale);
+      const col = baseColorAt(pts[i]);
+      ctx.fillStyle = 'rgba(' + (col.r*255|0) + ',' + (col.g*255|0) + ',' + (col.b*255|0) + ',0.85)';
+      const px = CW/2 + pr.x;
+      const py = CH/2 + pr.y;
+      const s = Math.max(1, pr.s*0.0012*55);
+      ctx.fillRect(px, py, s, s);
+    }
+  }
+
+  // ----------------------------------------------------------------
+  // Main animation loop (particles)
+  // ----------------------------------------------------------------
+  function step(){
+    time += 1/60;
+    // smooth hover blend
+    hoverBlend += (hoverTarget - hoverBlend)*0.06;
+    if(Math.abs(hoverTarget-hoverBlend)<0.001) hoverBlend=hoverTarget;
+
+    const speed = spinSpeed * (1 - hoverBlend*0.75);
+    angle += speed * (1/60);
+
+    // 0 (idle/rest) .. 1 (fully dissolved)
+    const dissolving = Math.max(0, Math.min(1, (hoverBlend-0.10)/0.55));
+    const swirling = Math.max(0, (hoverBlend-0.35)/0.65);
+    if(dissolving > 0.15) withHat = false;
+
+    let inMotion = false; // any particle away from home
+    for(let i=0;i<particles.length;i++){
+      const p = particles[i];
+      const sx = p.hx - p.x, sy = p.hy - p.y, sz = p.hz - p.z;
+      const dist = Math.sqrt(sx*sx+sy*sy+sz*sz);
+      if(dist > 0.002) inMotion = true;
+
+      if(p.state==='hat'){
+        if(dissolving > 0.02){
+          // burst outward into embers
+          p.state='scatter';
+          const a = seeded()*Math.PI*2;
+          const sp = 0.10 + seeded()*0.42;
+          p.vx = Math.cos(a)*sp;
+          p.vz = Math.sin(a)*sp;
+          p.vy = 0.15 + seeded()*0.6;
+        } else {
+          // idle subtle shimmer kept on home
+          p.x = p.hx;
+          p.y = p.hy;
+          p.z = p.hz;
+          p.vx*=0.8; p.vy*=0.8; p.vz*=0.8;
+          continue;
+        }
+      }
+
+      if(p.state==='scatter'){
+        // ember swirl around the vertical axis
+        if(swirling>0.01){
+          const sw = swirling*1.1;
+          p.vx -= p.z*sw*0.02;
+          p.vz += p.x*sw*0.02;
+        }
+        // gentle turbulence
+        p.vx += (seeded()-0.5)*0.02*swirling;
+        p.vy += (seeded()-0.5)*0.02*swirling + Math.sin(time*3 + p.x*7)*0.0006*swirling;
+        p.vz += (seeded()-0.5)*0.02*swirling;
+        // integrate
+        p.x += p.vx; p.y += p.vy; p.z += p.vz;
+      }
+
+      // Spring back to home — strongest when resting (reforming),
+      // weakest while the hover actively keeps it dissolved.
+      if(p.state==='scatter'){
+        const spring = 1 - 0.62*swirling;
+        p.vx = p.vx*0.90 + sx*0.055*spring;
+        p.vy = p.vy*0.90 + sy*0.055*spring;
+        p.vz = p.vz*0.90 + sz*0.055*spring;
+      }
+
+      // Snap to rest once close while we're not actively dissolving
+      if(dissolving < 0.05 && p.state==='scatter' && dist < 0.03){
+        p.x=p.hx; p.y=p.hy; p.z=p.hz;
+        p.vx=0; p.vy=0; p.vz=0;
+        p.state='hat';
+      }
+    }
+
+    // Bulk snap: once most of the hat is back (we're reforming) and the
+    // hover has fully eased, finish the job so it reforms perfectly.
+    if(dissolving < 0.02){
+      let homeCt=0;
+      for(let i=0;i<particles.length;i++){
+        if(particles[i].state==='hat') homeCt++;
+      }
+      if(homeCt > particles.length*0.5){
+        for(let i=0;i<particles.length;i++){
+          const p=particles[i];
+          if(p.state!=='hat'){
+            p.x=p.hx; p.y=p.hy; p.z=p.hz;
+            p.vx=0; p.vy=0; p.vz=0;
+            p.state='hat';
+          }
+        }
+      }
+    }
+
+    // When the whole hat has reformed and settled, spawn orbiters once
+    if(!inMotion && !withHat){
+      withHat = true;
+      spawnOrbiters();
+    }
+  }
+
+  function spawnOrbiters(){
+    orbiters=[];
+    const n = reduceMotion ? 0 : 24;
+    for(let i=0;i<n;i++){
+      const a = seeded()*Math.PI*2;
+      const rad = 0.12 + seeded()*0.06;
+      orbiters.push({
+        a, rad,
+        speed: 0.15 + seeded()*0.4,
+        bob: seeded()*Math.PI*2,
+        yOff: (seeded()-0.5)*0.06,
+        t: seeded()*10
+      });
+    }
+  }
+
+  function render(){
+    ctx.clearRect(0,0,CW,CH);
+    const cx = CW/2, cy = CH/2;
+
+    // ambient halo behind
+    const halo = ctx.createRadialGradient(cx, cy*0.9, 0, cx, cy*0.9, worldScale*0.9);
+    halo.addColorStop(0,'rgba(60,80,120,0.10)');
+    halo.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle = halo;
+    ctx.fillRect(0,0,CW,CH);
+
+    // ground shadow
+    ctx.save();
+    ctx.translate(cx, cy + worldScale*0.42);
+    ctx.scale(1,0.30);
+    const sg = ctx.createRadialGradient(0,0,0,0,0,worldScale*0.42);
+    const alpha = 0.5*(1-hoverBlend*0.7);
+    sg.addColorStop(0,'rgba(0,0,0,'+alpha+')');
+    sg.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle = sg;
+    ctx.beginPath();
+    ctx.arc(0,0,worldScale*0.42,0,Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+
+    // bloom glow while dissolving
+    if(hoverBlend>0.05){
+      const g = ctx.createRadialGradient(cx,cy,0,cx,cy,worldScale*0.7*hoverBlend);
+      g.addColorStop(0,'rgba(255,190,120,'+(0.10*hoverBlend)+')');
+      g.addColorStop(1,'rgba(255,190,120,0)');
+      ctx.fillStyle=g;
+      ctx.fillRect(0,0,CW,CH);
+    }
+
+    // draw particles back-to-front-ish (sorting expensive; approximate by z)
+    // We'll just render in place order, acceptable.
+
+    // Draw orbital stragglers first (they trail faintly)
+    if(withHat){
+      for(let i=0;i<orbiters.length;i++){
+        const o = orbiters[i];
+        o.a += o.speed*(1/60);
+        o.t += 1/60;
+        const x = Math.cos(o.a)*o.rad;
+        const z = Math.sin(o.a)*o.rad;
+        const y = o.yOff + Math.sin(o.a*2+o.bob)*0.02;
+        const pr = project([x,y,z], angle, worldScale);
+        const px = cx + pr.x, py = cy + pr.y;
+        const fade = 0.5 + 0.5*Math.sin(o.t*3);
+        ctx.globalAlpha = 0.20 + 0.25*fade;
+        const sz = pr.s*0.0016*28;
+        ctx.drawImage(glowTex, px-sz, py-sz, sz*2, sz*2);
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    ctx.globalCompositeOperation = 'lighter';
+    for(let i=0;i<particles.length;i++){
+      const p = particles[i];
+      // particle is in hat space; apply spin around Y
+      const pr = project([p.x,p.y,p.z], angle, worldScale);
+      const px = cx + pr.x, py = cy + pr.y;
+      const size = Math.max(0.5, pr.s*0.0016*26);
+
+      // brightness based on movement (embers glow more when moving)
+      let glowBoost = 0;
+      if(p.state==='scatter'){
+        const spd = Math.abs(p.vx)+Math.abs(p.vy)+Math.abs(p.vz);
+        glowBoost = Math.min(1, spd*2.4);
+      }
+      const col = p.col;
+      const c = (p.state==='scatter') ? glowBoost : hoverBlend;
+      const rr = col.r + 0.5*c;
+      const gg = col.g + 0.35*c;
+      const bb = col.b + 0.15*c;
+      ctx.drawImage(glowTex, px-size, py-size, size*2, size*2);
+      ctx.fillStyle = 'rgb('+(Math.min(255,rr*255*0.9+fadeTint(p)*120)|0)+','
+                          +(Math.min(255,gg*255*0.9+fadeTint(p)*80)|0)+','
+                          +(Math.min(255,bb*255*0.9+fadeTint(p)*40)|0)+')';
+      ctx.fillRect(px-0.5*size, py-0.5*size, size, size);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  function fadeTint(p){
+    // subtle warm tint for scatter particles
+    if(p.state==='scatter') return 0.25;
+    return 0;
+  }
+
+  // ----------------------------------------------------------------
+  // events
+  // ----------------------------------------------------------------
+  const stage = document.getElementById('stage');
+  function enter(e){
+    hover = true;
+    hoverTarget = 1;
+    e.preventDefault();
+  }
+  function leave(e){
+    hover = false;
+    hoverTarget = 0;
+  }
+  if(!reduceMotion){
+    stage.addEventListener('mouseenter', enter);
+    stage.addEventListener('mouseleave', leave);
+    stage.addEventListener('touchstart', enter, {passive:false});
+    stage.addEventListener('touchend', leave);
+    stage.addEventListener('touchcancel', leave);
+  }
+
+  // ----------------------------------------------------------------
+  // loop
+  // ----------------------------------------------------------------
+  function loop(){
+    if(reduceMotion){
+      renderReduced();
+      return;
+    }
+    step();
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  // Static favicon-ish / initial
+  if(reduceMotion){
+    renderReduced();
+  } else {
+    requestAnimationFrame(loop);
+    // hide hint after a bit
+    setTimeout(function(){
+      const h=document.getElementById('hint');
+      if(h) h.style.transition='opacity 1s'; h.style.opacity='0';
+      setTimeout(function(){const h2=document.getElementById('hint'); if(h2)h2.style.display='none';},1200);
+    }, 5000);
+  }
+
+  // hide hint when reduced motion too
+  if(reduceMotion){
+    const h=document.getElementById('hint');
+    if(h){h.style.display='none';}
+  }
+
+})();
+</script>
+</body>
+</html>
