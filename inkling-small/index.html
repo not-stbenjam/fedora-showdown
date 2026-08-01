@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fedora — Red Hat Style</title>
+<style>
+
+  :root {
+    --bg: #0b0c10;
+    --fg: #e8e6e3;
+    --accent: #c23b2b;
+    --glow: rgba(194,59,43,0.35);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    background: radial-gradient(1200px 800px at 50% 40%, #141619 0%, #0b0c10 70%);
+    color: var(--fg);
+    font-family: system-ui, sans-serif;
+    overflow: hidden;
+  }
+
+  main {
+    display: flex; align-items: center; justify-content: center;
+    height: 100vh; width: 100vw;
+    flex-direction: column;
+    padding: 2rem;
+  }
+
+  .scene {
+    position: relative;
+    width: min(520px, 90vw); height: min(520px, 90vw);
+    display: flex; align-items: center; justify-content: center;
+    touch-action: manipulation;
+  }
+
+  canvas {
+    width: 100%; height: 100%;
+    display: block;
+    filter: drop-shadow(0 30px 60px rgba(0,0,0,0.9)) drop-shadow(0 0 40px rgba(194,59,43,0.15));
+  }
+
+  .caption {
+    margin-top: 1.2rem;
+    text-align: center;
+    opacity: 0.85;
+    pointer-events: none;
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: clamp(1.1rem, 2vw, 1.35rem);
+    letter-spacing: 0.08em;
+    color: #d7cfc6;
+    transition: opacity 0.4s ease;
+  }
+
+  .caption em { font-style: italic; font-weight: 300; }
+
+  /* Reduced motion: static, no spin, subtle glow only */
+  @media (prefers-reduced-motion: reduce) {
+    .scene { animation: none !important; }
+    canvas { filter: drop-shadow(0 20px 40px rgba(0,0,0,0.8)); }
+  }
+</style>
+</head>
+<body>
+<main>
+  <div class="scene" id="scene" aria-label="Interactive fedora logo. Hover or tap to dissolve.">
+    <canvas id="c"></canvas>
+  </div>
+  <div class="caption" id="caption"><em>Red Hat</em> &mdash; polished, timeless.</div>
+</main>
+
+<script>
+(async () => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const scene = document.getElementById('scene');
+  const caption = document.getElementById('caption');
+
+  let W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2);
+  function resize() {
+    const rect = canvas.getBoundingClientRect();
+    W = Math.round(rect.width);
+    H = Math.round(rect.height);
+    canvas.width = W * DPR;
+    canvas.height = H * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // 3D points for hat (crown + brim) centered at origin
+  const points = [];
+  // Crown: ellipsoid-ish
+  for (let i = 0; i < 24; i++) {
+    for (let j = 0; j < 12; j++) {
+      const theta = (i / 24) * Math.PI * 2;
+      const phi = (j / 11) * Math.PI * 0.55 + 0.1;
+      const r = 1.0 + 0.35 * Math.sin(phi * 3) * Math.sin(theta * 4); // subtle texture
+      points.push({
+        x: r * Math.sin(phi) * Math.cos(theta) * 0.7,
+        y: 0.55 + r * Math.cos(phi) * 0.65,
+        z: r * Math.sin(phi) * Math.sin(theta) * 0.7,
+        color: 'rgba(210,60,40,0.9)'
+      });
+    }
+  }
+  // Brim: flat ellipse ring
+  for (let i = 0; i < 32; i++) {
+    const theta = (i / 32) * Math.PI * 2;
+    const rx = 1.3 + 0.15 * Math.sin(theta * 3);
+    points.push({
+      x: rx * Math.cos(theta) * 0.9,
+      y: 0.1 + Math.sin(theta * 2) * 0.03,
+      z: rx * Math.sin(theta) * 0.9,
+      color: 'rgba(210,60,40,0.85)'
+    });
+  }
+
+  // Particles for explosion
+  const particles = [];
+  function spawnParticles(count) {
+    for (let i = 0; i < count; i++) {
+      const p = points[Math.floor(Math.random() * points.length)];
+      // start near hat surface with slight spread
+      particles.push({
+        x: p.x + (Math.random()-0.5)*0.15,
+        y: p.y + (Math.random()-0.5)*0.15,
+        z: p.z + (Math.random()-0.5)*0.15,
+        vx: (Math.random()-0.5)*0.08,
+        vy: (Math.random()-0.5)*0.08,
+        vz: (Math.random()-0.5)*0.08,
+        alpha: 1,
+        life: 1,
+        glow: Math.random() * 0.8 + 0.2,
+        orbit: Math.random() > 0.92 // few orbit after
+      });
+    }
+  }
+  spawnParticles(1800);
+
+  let angle = 0;
+  let dissolve = 0; // 0 = full, 1 = dissolved, 2 = reforming
+  let hover = false;
+  let timer = 0;
+
+  // Orbiters after reform
+  const orbiters = [];
+  for (let i = 0; i < 12; i++) {
+    orbiters.push({
+      a: Math.random() * Math.PI * 2,
+      r: 1.4 + Math.random() * 0.4,
+      s: 0.003 + Math.random() * 0.004,
+      phase: Math.random() * Math.PI * 2
+    });
+  }
+
+  scene.addEventListener('mouseenter', () => { hover = true; if (!reduced) caption.style.opacity = '0.5'; });
+  scene.addEventListener('mouseleave', () => { hover = false; if (!reduced) caption.style.opacity = '0.85'; });
+  scene.addEventListener('touchstart', (e) => { e.preventDefault(); hover = true; }, {passive:false});
+  scene.addEventListener('touchend', () => { hover = false; });
+
+  function project(x, y, z, rotY) {
+    const cx = W/2, cy = H/2;
+    const scale = 140 + Math.min(W,H)/5;
+    // rotate around Y
+    const cos = Math.cos(rotY), sin = Math.sin(rotY);
+    const rx = x*cos - z*sin;
+    const rz = x*sin + z*cos;
+    // simple perspective
+    const fov = 350;
+    const depth = fov / (fov + rz * 120);
+    return { x: cx + rx * scale * depth, y: cy - y * scale * depth, depth: depth };
+  }
+
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min((now - last) / 16, 3); last = now;
+    ctx.clearRect(0, 0, W, H);
+
+    const cx = W/2, cy = H/2;
+    const rot = reduced ? 0.2 : (hover ? 0.003 : 0.012) * dt;
+    if (hover) {
+      // slow spin on hover, speed scales down over interaction
+      angle += 0.002 * dt;
+    } else {
+      angle += 0.012 * dt;
+    }
+
+    if (hover && dissolve < 1) dissolve += 0.012 * dt; // dissolve in
+    else if (!hover && dissolve > 0) dissolve -= 0.012 * dt; // reform
+    dissolve = Math.max(0, Math.min(1, dissolve));
+
+    const d = dissolve;
+
+    // Draw hat with points
+    // Sort by depth for simple painter's algo
+    const drawn = [];
+    for (const p of points) {
+      const proj = project(p.x, p.y, p.z, angle);
+      if (proj.depth > 0) drawn.push({ ...p, ...proj });
+    }
+    drawn.sort((a,b) => b.depth - a.depth);
+
+    for (const p of drawn) {
+      const sz = 3 * p.depth + 0.8;
+      // soft glowing dots
+      const alpha = 0.7 + 0.3 * p.depth;
+      const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, sz*3);
+      grad.addColorStop(0, 'rgba(240,90,50,0.9)');
+      grad.addColorStop(0.4, 'rgba(210,60,40,0.6)');
+      grad.addColorStop(1, 'rgba(210,60,40,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, sz*3, 0, Math.PI*2);
+      ctx.fill();
+      // core
+      ctx.fillStyle = `rgba(240,110,70,${0.8 + 0.2*p.depth})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, sz, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    // Particles overlay
+    for (const pt of particles) {
+      if (d > 0.05) {
+        pt.x += pt.vx * dt * (0.5 + d*2);
+        pt.y += pt.vy * dt * (0.5 + d*2);
+        pt.z += pt.vz * dt * (0.5 + d*2);
+        if (pt.orbit) {
+          pt.a += pt.s * dt;
+          pt.x = Math.cos(pt.a) * pt.r; pt.y = Math.sin(pt.a*0.7)*0.15; pt.z = Math.sin(pt.a)*pt.r;
+        }
+      } else {
+        // drift back toward hat surface roughly
+        pt.vx *= 0.92; pt.vy *= 0.92; pt.vz *= 0.92;
+      }
+      const proj = project(pt.x, pt.y, pt.z, angle);
+      if (proj.depth > 0 && proj.depth < 3) {
+        const a = Math.max(0, 1 - d) * pt.glow * 0.9 + (pt.orbit ? 0.35 : 0);
+        ctx.fillStyle = `rgba(255,180,140,${a})`;
+        const sz = 1.2 + pt.glow * 1.2;
+        ctx.beginPath();
+        ctx.arc(proj.x, proj.y, sz * proj.depth, 0, Math.PI*2);
+        ctx.fill();
+      }
+    }
+
+    // Orbiters always drawn softly after reform
+    if (d < 0.8) {
+      for (const o of orbiters) {
+        o.a += o.s * dt;
+        const rx = Math.cos(o.a + o.phase) * o.r;
+        const rz = Math.sin(o.a + o.phase) * o.r;
+        const proj = project(rx * 0.85, 0.15 + Math.sin(o.a*2)*0.1, rz * 0.85, angle);
+        ctx.fillStyle = `rgba(240,160,100,0.35)`;
+        ctx.beginPath();
+        ctx.arc(proj.x, proj.y, 1.5 * proj.depth, 0, Math.PI*2);
+        ctx.fill();
+      }
+    }
+
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
