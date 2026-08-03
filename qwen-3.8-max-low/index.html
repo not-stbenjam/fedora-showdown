@@ -1,0 +1,826 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0b0812">
+<title>Fedora · Embers</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: radial-gradient(130% 100% at 50% 30%, #181020 0%, #0d0a13 48%, #050308 100%);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  #scene {
+    position: fixed; inset: 0;
+    width: 100%; height: 100%;
+    display: block;
+    touch-action: manipulation;
+  }
+  .vignette {
+    position: fixed; inset: 0; pointer-events: none;
+    background: radial-gradient(115% 90% at 50% 42%, rgba(0,0,0,0) 52%, rgba(0,0,0,.55) 100%);
+  }
+  .caption {
+    position: fixed; left: 0; right: 0;
+    bottom: clamp(22px, 6.5vh, 72px);
+    margin: 0; padding: 0 24px;
+    text-align: center; pointer-events: none;
+    color: rgba(232, 220, 220, .58);
+    font-size: 11.5px; font-weight: 500;
+    letter-spacing: .26em; text-transform: uppercase; line-height: 1.9;
+  }
+  .caption::before {
+    content: ""; display: block;
+    width: 28px; height: 1px; margin: 0 auto 14px;
+    background: linear-gradient(90deg, transparent, rgba(255,186,140,.55), transparent);
+  }
+  .fallback {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%);
+    max-width: 34ch; text-align: center;
+    color: rgba(220,205,205,.6); font-size: 14px; line-height: 1.7; letter-spacing: .04em;
+  }
+</style>
+</head>
+<body>
+  <canvas id="scene" role="img"
+    aria-label="A crimson fedora hat turning slowly in soft light above a gentle shadow. When touched, it dissolves into glowing embers that swirl and then flow back together."></canvas>
+  <div class="vignette" aria-hidden="true"></div>
+  <p class="caption"><span id="capText">hover or tap — it drifts to embers, then finds its way home</span></p>
+  <div class="fallback" id="fallback" hidden>This browser can’t show the 3D scene — but picture a crimson fedora, dissolving into embers.</div>
+
+<script>
+(function () {
+'use strict';
+
+var canvas = document.getElementById('scene');
+var capText = document.getElementById('capText');
+var capEl = capText.parentElement;
+var reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+var CAPTION_LIVE = 'hover or tap — it drifts to embers, then finds its way home';
+var CAPTION_CALM = 'the fedora, at rest — reduced motion is on';
+
+function setCaption() {
+  capText.textContent = reduced.matches ? CAPTION_CALM : CAPTION_LIVE;
+}
+setCaption();
+
+var gl = null;
+try {
+  gl = canvas.getContext('webgl', { alpha: true, antialias: true, premultipliedAlpha: true, powerPreference: 'high-performance' });
+} catch (e) { gl = null; }
+
+if (!gl) {
+  document.getElementById('fallback').hidden = false;
+  return;
+}
+
+/* ---------------------------------------------------------------- math */
+
+var TAU = Math.PI * 2;
+
+function persp(fovy, aspect, near, far) {
+  var f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far);
+  return new Float32Array([
+    f / aspect, 0, 0, 0,
+    0, f, 0, 0,
+    0, 0, (far + near) * nf, -1,
+    0, 0, 2 * far * near * nf, 0
+  ]);
+}
+
+function lookAt(e, c, u) {
+  var zx = e[0] - c[0], zy = e[1] - c[1], zz = e[2] - c[2];
+  var l = Math.hypot(zx, zy, zz); zx /= l; zy /= l; zz /= l;
+  var xx = u[1] * zz - u[2] * zy, xy = u[2] * zx - u[0] * zz, xz = u[0] * zy - u[1] * zx;
+  l = Math.hypot(xx, xy, xz); xx /= l; xy /= l; xz /= l;
+  var yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+  return new Float32Array([
+    xx, yx, zx, 0,
+    xy, yy, zy, 0,
+    xz, yz, zz, 0,
+    -(xx * e[0] + xy * e[1] + xz * e[2]),
+    -(yx * e[0] + yy * e[1] + yz * e[2]),
+    -(zx * e[0] + zy * e[1] + zz * e[2]),
+    1
+  ]);
+}
+
+function mul4(a, b) {
+  var o = new Float32Array(16);
+  for (var c = 0; c < 4; c++) for (var r = 0; r < 4; r++) {
+    o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+  }
+  return o;
+}
+
+function easeIO(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
+function approach(a, b, s) { return a < b ? Math.min(b, a + s) : Math.max(b, a - s); }
+function clamp01(x) { return x < 0 ? 0 : x > 1 ? 1 : x; }
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    var t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+/* ------------------------------------------------------------ geometry */
+
+var HAT_COL = [0.80, 0.105, 0.115];
+var BAND_COL = [0.045, 0.045, 0.058];
+var NS = 100;
+
+function brimY(r, th) {
+  var t = (r - 0.55) / 1.07;
+  var fr = Math.max(Math.sin(th), 0), bk = Math.max(-Math.sin(th), 0);
+  return 0.015
+    + 0.065 * (1 - t) * (1 - t)
+    + 0.13 * Math.pow(t, 2.0) * (0.45 + 0.55 * bk)
+    - 0.11 * Math.pow(t, 2.6) * Math.pow(fr, 1.4);
+}
+
+function brimTopFn(u, v) {
+  var th = u * TAU, r = 0.55 + v * 1.07;
+  return [r * Math.cos(th), brimY(r, th), r * Math.sin(th)];
+}
+function brimBotFn(u, v) {
+  var th = u * TAU, r = 0.55 + v * 1.07;
+  return [r * Math.cos(th), brimY(r, th) - 0.05, r * Math.sin(th)];
+}
+function rimFn(u, v) {
+  var th = u * TAU, r = 1.62, yt = brimY(r, th);
+  return [r * Math.cos(th), (yt - 0.05) + v * 0.05, r * Math.sin(th)];
+}
+
+function prof(v) {
+  var K = [[0, 1.0], [0.30, 1.055], [0.62, 0.97], [0.85, 0.78], [1.0, 0.46]];
+  if (v <= 0) return K[0][1];
+  if (v >= 1) return K[4][1];
+  for (var i = 0; i < 4; i++) {
+    if (v <= K[i + 1][0]) {
+      var t = (v - K[i][0]) / (K[i + 1][0] - K[i][0]);
+      var s = t * t * (3 - 2 * t);
+      return K[i][1] + (K[i + 1][1] - K[i][1]) * s;
+    }
+  }
+  return K[4][1];
+}
+
+function crownFn(u, v) {
+  var th = u * TAU, pr = prof(v), R = 0.62;
+  var x = R * pr * 0.96 * Math.cos(th);
+  var z = R * pr * 1.07 * Math.sin(th);
+  var y = v * 1.02;
+  if (v > 0.55) {
+    var k = (v - 0.55) / 0.45;
+    y -= 0.15 * k * k * Math.exp(-(x * x) / (0.16 * 0.16));
+  }
+  return [x, y, z];
+}
+
+var TOP_RX = 0.62 * prof(1) * 0.96, TOP_RZ = 0.62 * prof(1) * 1.07, TOP_Y = 1.02;
+function capFn(u, s) {
+  var th = u * TAU, w = 1 - s;
+  var x = TOP_RX * w * Math.cos(th);
+  var z = TOP_RZ * w * Math.sin(th);
+  var y = TOP_Y - 0.13 * s - 0.09 * Math.pow(s, 1.6) * Math.exp(-(x * x) / (0.18 * 0.18));
+  return [x, y, z];
+}
+
+function bandFn(u, v) {
+  var th = u * TAU, y = 0.015 + 0.17 * v;
+  var rr = 0.62 * prof(y / 1.02) + 0.024 + 0.012 * Math.sin(Math.PI * v);
+  return [rr * 0.96 * Math.cos(th), y, rr * 1.07 * Math.sin(th)];
+}
+
+/*
+ * Parametric grid → triangles + analytic-ish normals.
+ * sign = +1 : normal = cross(Tu, Tv), CCW order (a,b,c)(b,d,c)
+ * sign = -1 : normal = cross(Tv, Tu), reversed order (a,c,b)(c,d,b)
+ */
+function buildGrid(fn, nu, nv, sign) {
+  var P = new Float32Array((nu + 1) * (nv + 1) * 3);
+  var N = new Float32Array((nu + 1) * (nv + 1) * 3);
+  var I = new Uint16Array(nu * nv * 6);
+  var e = 0.0015;
+
+  for (var j = 0; j <= nv; j++) {
+    var v = j / nv;
+    for (var i = 0; i <= nu; i++) {
+      var u = i / nu;
+      var p = fn(u, v);
+      var pa = fn(u + e, v), pb = fn(u - e, v);
+      var v1 = Math.min(1, v + e), v0 = Math.max(0, v - e);
+      var pc = fn(u, v1), pd = fn(u, v0);
+      var tux = pa[0] - pb[0], tuy = pa[1] - pb[1], tuz = pa[2] - pb[2];
+      var tvx = pc[0] - pd[0], tvy = pc[1] - pd[1], tvz = pc[2] - pd[2];
+      var nx, ny, nz;
+      if (sign > 0) { nx = tuy * tvz - tuz * tvy; ny = tuz * tvx - tux * tvz; nz = tux * tvy - tuy * tvx; }
+      else          { nx = tvy * tuz - tvz * tuy; ny = tvz * tux - tvx * tuz; nz = tvx * tuy - tvy * tux; }
+      var l = Math.hypot(nx, ny, nz);
+      if (l < 1e-8) { nx = 0; ny = 1; nz = 0; } else { nx /= l; ny /= l; nz /= l; }
+      var k = (j * (nu + 1) + i) * 3;
+      P[k] = p[0]; P[k + 1] = p[1]; P[k + 2] = p[2];
+      N[k] = nx;   N[k + 1] = ny;   N[k + 2] = nz;
+    }
+  }
+  var q = 0;
+  for (j = 0; j < nv; j++) {
+    for (i = 0; i < nu; i++) {
+      var a = j * (nu + 1) + i, b = a + 1, c = a + (nu + 1), d = c + 1;
+      if (sign > 0) { I[q++] = a; I[q++] = b; I[q++] = c; I[q++] = b; I[q++] = d; I[q++] = c; }
+      else          { I[q++] = a; I[q++] = c; I[q++] = b; I[q++] = c; I[q++] = d; I[q++] = b; }
+    }
+  }
+  return { pos: P, norm: N, idx: I };
+}
+
+var groups = [
+  { g: buildGrid(brimTopFn, NS, 9, +1), col: HAT_COL },
+  { g: buildGrid(brimBotFn, NS, 9, -1), col: HAT_COL },
+  { g: buildGrid(rimFn,     NS, 1, -1), col: HAT_COL },
+  { g: buildGrid(crownFn,   NS, 18, -1), col: HAT_COL },
+  { g: buildGrid(capFn,     NS, 6, -1), col: HAT_COL }
+];
+var hatGroupCount = groups.length;
+groups.push({ g: buildGrid(bandFn, NS, 3, -1), col: BAND_COL });
+
+var vTotal = 0, iTotal = 0;
+groups.forEach(function (gr) { vTotal += gr.g.pos.length / 3; iTotal += gr.g.idx.length; });
+
+var POS = new Float32Array(vTotal * 3);
+var NOR = new Float32Array(vTotal * 3);
+var COL = new Float32Array(vTotal * 3);
+var IDX = new Uint16Array(iTotal);
+
+(function merge() {
+  var vo = 0, io = 0;
+  groups.forEach(function (gr) {
+    POS.set(gr.g.pos, vo * 3);
+    NOR.set(gr.g.norm, vo * 3);
+    for (var k = 0; k < gr.g.pos.length / 3; k++) {
+      COL[(vo + k) * 3] = gr.col[0];
+      COL[(vo + k) * 3 + 1] = gr.col[1];
+      COL[(vo + k) * 3 + 2] = gr.col[2];
+    }
+    for (var i = 0; i < gr.g.idx.length; i++) IDX[io + i] = gr.g.idx[i] + vo;
+    vo += gr.g.pos.length / 3;
+    io += gr.g.idx.length;
+  });
+})();
+
+var hatIndexCount = 0;
+for (var gi = 0; gi < hatGroupCount; gi++) hatIndexCount += groups[gi].g.idx.length;
+var bandIndexStart = hatIndexCount;
+var bandIndexCount = iTotal - hatIndexCount;
+
+/* ---------------------------------------------------- particle sampling */
+
+var NP = Math.max(3600, Math.min(8500, Math.round(window.innerWidth * window.innerHeight / 240)));
+var HOME = new Float32Array(NP * 3);
+var RND = new Float32Array(NP * 4);
+
+(function sample() {
+  var rng = mulberry32(7);
+  var tris = [], cum = [], total = 0;
+  groups.forEach(function (gr) {
+    var P = gr.g.pos, I = gr.g.idx;
+    for (var i = 0; i < I.length; i += 3) {
+      var a = I[i] * 3, b = I[i + 1] * 3, c = I[i + 2] * 3;
+      var e1x = P[b] - P[a], e1y = P[b + 1] - P[a + 1], e1z = P[b + 2] - P[a + 2];
+      var e2x = P[c] - P[a], e2y = P[c + 1] - P[a + 1], e2z = P[c + 2] - P[a + 2];
+      var cx = e1y * e2z - e1z * e2y, cy = e1z * e2x - e1x * e2z, cz = e1x * e2y - e1y * e2x;
+      total += 0.5 * Math.hypot(cx, cy, cz);
+      tris.push({ P: P, a: a, b: b, c: c });
+      cum.push(total);
+    }
+  });
+  for (var k = 0; k < NP; k++) {
+    var r = rng() * total, lo = 0, hi = cum.length - 1;
+    while (lo < hi) { var mid = (lo + hi) >> 1; if (cum[mid] < r) lo = mid + 1; else hi = mid; }
+    var T = tris[lo];
+    var u = rng(), v = rng();
+    if (u + v > 1) { u = 1 - u; v = 1 - v; }
+    var w = 1 - u - v, P2 = T.P;
+    HOME[k * 3]     = w * P2[T.a]     + u * P2[T.b]     + v * P2[T.c];
+    HOME[k * 3 + 1] = w * P2[T.a + 1] + u * P2[T.b + 1] + v * P2[T.c + 1];
+    HOME[k * 3 + 2] = w * P2[T.a + 2] + u * P2[T.b + 2] + v * P2[T.c + 2];
+    RND[k * 4] = rng(); RND[k * 4 + 1] = rng(); RND[k * 4 + 2] = rng(); RND[k * 4 + 3] = rng();
+  }
+})();
+
+/* -------------------------------------------------------------- shaders */
+
+var MESH_VS = [
+  'attribute vec3 aPos; attribute vec3 aNorm; attribute vec3 aCol;',
+  'uniform mat4 uModel; uniform mat4 uVP; uniform mat3 uNM;',
+  'varying vec3 vN; varying vec3 vW; varying vec3 vC;',
+  'void main(){',
+  '  vec4 w = uModel * vec4(aPos, 1.0);',
+  '  vW = w.xyz; vN = uNM * aNorm; vC = aCol;',
+  '  gl_Position = uVP * w;',
+  '}'
+].join('\n');
+
+var MESH_FS = [
+  'precision mediump float;',
+  'varying vec3 vN; varying vec3 vW; varying vec3 vC;',
+  'uniform vec3 uEye; uniform float uAlpha; uniform float uSpec;',
+  'void main(){',
+  '  vec3 N = normalize(vN);',
+  '  if (!gl_FrontFacing) N = -N;',
+  '  vec3 V = normalize(uEye - vW);',
+  '  vec3 L1 = normalize(vec3(0.50, 0.85, 0.55));',
+  '  vec3 L2 = normalize(vec3(-0.65, 0.20, 0.45));',
+  '  float d1 = clamp(dot(N, L1), 0.0, 1.0); d1 = (d1 + 0.32) / 1.32;',
+  '  float d2 = clamp(dot(N, L2), 0.0, 1.0);',
+  '  vec3 H = normalize(L1 + V);',
+  '  float sp = pow(clamp(dot(N, H), 0.0, 1.0), 26.0) * uSpec;',
+  '  float rim = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 3.0);',
+  '  vec3 col = vC * vec3(0.20, 0.20, 0.22)',
+  '    + vC * d1 * vec3(1.10, 1.00, 0.94)',
+  '    + vC * d2 * vec3(0.18, 0.20, 0.28)',
+  '    + sp * vec3(1.0, 0.9, 0.85) * 0.9',
+  '    + rim * vec3(0.38, 0.16, 0.12);',
+  '  gl_FragColor = vec4(col * uAlpha, uAlpha);',
+  '}'
+].join('\n');
+
+var PART_VS = [
+  'attribute vec3 aHome; attribute vec4 aRnd;',
+  'uniform mat4 uModel; uniform mat4 uVP;',
+  'uniform float uLoose; uniform float uSwirl; uniform float uTime;',
+  'uniform float uPartAlpha; uniform float uPointScale;',
+  'varying vec3 vC; varying float vI;',
+  'float hash(float n){ return fract(sin(n) * 43758.5453123); }',
+  'vec3 rotY(vec3 p, float a){ float c = cos(a); float s = sin(a); return vec3(c*p.x + s*p.z, p.y, -s*p.x + c*p.z); }',
+  'void main(){',
+  '  float h1 = hash(aRnd.x * 127.1);',
+  '  float h2 = hash(aRnd.x * 311.7 + 7.0);',
+  '  float h3 = hash(aRnd.x * 74.7 + 3.0);',
+  '  float lp = clamp(uLoose * 1.45 - h1 * 0.45, 0.0, 1.0);',
+  '  lp = lp * lp * (3.0 - 2.0 * lp);',
+  '  vec3 ctr = vec3(0.0, 0.45, 0.0);',
+  '  vec3 away = normalize(aHome - ctr + vec3(0.0, 0.10, 0.0));',
+  '  vec3 q = aHome;',
+  '  vec3 drift = away * (0.22 + 0.85 * h2) * lp;',
+  '  drift.y += (0.30 + 0.85 * h3) * lp * 0.6;',
+  '  q += drift;',
+  '  float ang = (uSwirl * (0.5 + 0.9 * h2) + h1 * 6.28318) * lp;',
+  '  q = rotY(q - ctr, ang) + ctr;',
+  '  float t = uTime;',
+  '  vec3 turb = vec3(',
+  '    sin(t * (1.3 + h2 * 1.2) + h1 * 37.0 + aHome.y * 2.6),',
+  '    sin(t * (1.1 + h3) + h2 * 41.0 + aHome.x * 2.2) * 0.7,',
+  '    cos(t * (1.5 + h1) + h3 * 35.0 + aHome.z * 2.4));',
+  '  q += turb * (0.06 + 0.16 * h3) * lp;',
+  '  vec4 w = uModel * vec4(q, 1.0);',
+  '  gl_Position = uVP * w;',
+  '  float sz = (0.008 + 0.014 * aRnd.z) * (0.35 + 0.65 * lp);',
+  '  gl_PointSize = clamp(sz * uPointScale / max(gl_Position.w, 0.1), 1.0, 40.0);',
+  '  float flick = 0.72 + 0.28 * sin(t * (2.5 + 3.5 * h2) + h1 * 57.0);',
+  '  vI = uPartAlpha * (0.30 + 0.95 * lp) * flick;',
+  '  vC = mix(vec3(1.0, 0.34, 0.12), vec3(1.0, 0.72, 0.34), pow(h3, 1.6)) * (0.75 + 0.45 * h2);',
+  '}'
+].join('\n');
+
+var PART_FS = [
+  'precision mediump float;',
+  'varying vec3 vC; varying float vI;',
+  'void main(){',
+  '  vec2 d = gl_PointCoord * 2.0 - 1.0;',
+  '  float r2 = dot(d, d);',
+  '  if (r2 > 1.0) discard;',
+  '  float g = exp(-r2 * 3.2);',
+  '  float core = exp(-r2 * 13.0);',
+  '  vec3 col = vC * (g * 0.55) + vec3(1.0, 0.9, 0.75) * (core * 0.85);',
+  '  gl_FragColor = vec4(col * vI, 1.0);',
+  '}'
+].join('\n');
+
+var QUAD_VS = [
+  'attribute vec2 aQ;',
+  'uniform mat4 uVP; uniform float uY; uniform vec2 uScale;',
+  'varying vec2 vUv;',
+  'void main(){ vUv = aQ; gl_Position = uVP * vec4(aQ.x * uScale.x, uY, aQ.y * uScale.y, 1.0); }'
+].join('\n');
+
+var QUAD_FS = [
+  'precision mediump float;',
+  'varying vec2 vUv;',
+  'uniform vec3 uCol; uniform float uA; uniform float uFall; uniform float uAdd;',
+  'void main(){',
+  '  float d2 = dot(vUv, vUv);',
+  '  float a = exp(-d2 * uFall) * (1.0 - smoothstep(0.72, 1.0, d2)) * uA;',
+  '  if (uAdd > 0.5) gl_FragColor = vec4(uCol * a, 1.0);',
+  '  else gl_FragColor = vec4(uCol * a, a);',
+  '}'
+].join('\n');
+
+var TRAIL_VS = [
+  'attribute vec3 aPos; attribute float aA;',
+  'uniform mat4 uVP; varying float vA;',
+  'void main(){ vA = aA; gl_Position = uVP * vec4(aPos, 1.0); }'
+].join('\n');
+
+var TRAIL_FS = [
+  'precision mediump float;',
+  'varying float vA; uniform vec3 uCol; uniform float uA;',
+  'void main(){ gl_FragColor = vec4(uCol * vA * uA, 1.0); }'
+].join('\n');
+
+var HEAD_VS = [
+  'attribute vec3 aPos;',
+  'uniform mat4 uVP; uniform float uPS;',
+  'void main(){',
+  '  gl_Position = uVP * vec4(aPos, 1.0);',
+  '  gl_PointSize = clamp(0.028 * uPS / max(gl_Position.w, 0.1), 1.0, 24.0);',
+  '}'
+].join('\n');
+
+var HEAD_FS = [
+  'precision mediump float;',
+  'uniform float uA; uniform vec3 uCol;',
+  'void main(){',
+  '  vec2 d = gl_PointCoord * 2.0 - 1.0;',
+  '  float r2 = dot(d, d);',
+  '  if (r2 > 1.0) discard;',
+  '  float g = exp(-r2 * 3.5); float core = exp(-r2 * 12.0);',
+  '  gl_FragColor = vec4(uCol * (g * 0.6 + core) * uA, 1.0);',
+  '}'
+].join('\n');
+
+function makeProg(vsSrc, fsSrc) {
+  function sh(type, src) {
+    var o = gl.createShader(type);
+    gl.shaderSource(o, src);
+    gl.compileShader(o);
+    if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o));
+    return o;
+  }
+  var p = gl.createProgram();
+  gl.attachShader(p, sh(gl.VERTEX_SHADER, vsSrc));
+  gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fsSrc));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  return p;
+}
+
+function getUniforms(p, names) {
+  var o = {};
+  names.forEach(function (n) { o[n] = gl.getUniformLocation(p, n); });
+  return o;
+}
+function getAttribs(p, names) {
+  var o = {};
+  names.forEach(function (n) { o[n] = gl.getAttribLocation(p, n); });
+  return o;
+}
+
+var meshP  = makeProg(MESH_VS, MESH_FS);
+var meshU  = getUniforms(meshP, ['uModel', 'uVP', 'uNM', 'uEye', 'uAlpha', 'uSpec']);
+var meshA  = getAttribs(meshP, ['aPos', 'aNorm', 'aCol']);
+
+var partP  = makeProg(PART_VS, PART_FS);
+var partU  = getUniforms(partP, ['uModel', 'uVP', 'uLoose', 'uSwirl', 'uTime', 'uPartAlpha', 'uPointScale']);
+var partA  = getAttribs(partP, ['aHome', 'aRnd']);
+
+var quadP  = makeProg(QUAD_VS, QUAD_FS);
+var quadU  = getUniforms(quadP, ['uVP', 'uY', 'uScale', 'uCol', 'uA', 'uFall', 'uAdd']);
+var quadA  = getAttribs(quadP, ['aQ']);
+
+var trailP = makeProg(TRAIL_VS, TRAIL_FS);
+var trailU = getUniforms(trailP, ['uVP', 'uCol', 'uA']);
+var trailA = getAttribs(trailP, ['aPos', 'aA']);
+
+var headP  = makeProg(HEAD_VS, HEAD_FS);
+var headU  = getUniforms(headP, ['uVP', 'uPS', 'uA', 'uCol']);
+var headA  = getAttribs(headP, ['aPos']);
+
+/* -------------------------------------------------------------- buffers */
+
+function makeBuf(data, target, usage) {
+  var b = gl.createBuffer();
+  gl.bindBuffer(target || gl.ARRAY_BUFFER, b);
+  gl.bufferData(target || gl.ARRAY_BUFFER, data, usage || gl.STATIC_DRAW);
+  return b;
+}
+
+var posBuf  = makeBuf(POS);
+var norBuf  = makeBuf(NOR);
+var colBuf  = makeBuf(COL);
+var idxBuf  = makeBuf(IDX, gl.ELEMENT_ARRAY_BUFFER);
+var homeBuf = makeBuf(HOME);
+var rndBuf  = makeBuf(RND);
+var quadBuf = makeBuf(new Float32Array([-1, -1, 1, -1, 1, 1, -1, -1, 1, 1, -1, 1]));
+
+function bindAttr(buf, loc, size) {
+  if (loc < 0) return;
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+}
+
+/* ------------------------------------------------------------- orbiters */
+
+var NO = 44, K = 24;
+var rng2 = mulberry32(99);
+var orbs = [];
+for (var oi = 0; oi < NO; oi++) {
+  orbs.push({
+    R: 1.35 + 1.05 * Math.pow(rng2(), 1.1) * 0.76,
+    y0: 0.02 + 1.05 * rng2(),
+    w: (0.35 + 0.75 * rng2()) * (rng2() < 0.2 ? -1 : 1),
+    th: rng2() * TAU,
+    ph: rng2() * TAU,
+    al: 0.45 + 0.55 * rng2()
+  });
+}
+var tPos = new Float32Array(NO * K * 3);
+var tA   = new Float32Array(NO * K);
+var hPos = new Float32Array(NO * 3);
+var tPosBuf = gl.createBuffer();
+var tABuf   = gl.createBuffer();
+var hPosBuf = gl.createBuffer();
+var tHead = 0;
+
+(function initTrails() {
+  for (var o = 0; o < NO; o++) {
+    var orb = orbs[o];
+    var x = Math.cos(orb.th) * orb.R, y = orb.y0, z = Math.sin(orb.th) * orb.R;
+    for (var j = 0; j < K; j++) {
+      tPos[(o * K + j) * 3] = x;
+      tPos[(o * K + j) * 3 + 1] = y;
+      tPos[(o * K + j) * 3 + 2] = z;
+      tA[o * K + j] = 0;
+    }
+    hPos[o * 3] = x; hPos[o * 3 + 1] = y; hPos[o * 3 + 2] = z;
+  }
+})();
+
+function updateOrbiters(dt, tSec) {
+  tHead = (tHead + 1) % K;
+  for (var o = 0; o < NO; o++) {
+    var orb = orbs[o];
+    orb.th += dt * orb.w * (1 + 1.15 * loose);
+    var r = orb.R * (1 + 0.05 * Math.sin(tSec * 0.55 + orb.ph));
+    var y = orb.y0 + 0.13 * Math.sin(tSec * 0.8 + orb.ph * 1.7) + bob * 0.6;
+    var x = Math.cos(orb.th) * r, z = Math.sin(orb.th) * r;
+    hPos[o * 3] = x; hPos[o * 3 + 1] = y; hPos[o * 3 + 2] = z;
+    var base = (o * K + tHead) * 3;
+    tPos[base] = x; tPos[base + 1] = y; tPos[base + 2] = z;
+  }
+  for (o = 0; o < NO; o++) {
+    for (var j = 0; j < K; j++) {
+      var age = (tHead - j + K) % K;
+      var f = 1 - age / (K - 1);
+      tA[o * K + j] = f * f * orbs[o].al;
+    }
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, tPosBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, tPos, gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, tABuf);
+  gl.bufferData(gl.ARRAY_BUFFER, tA, gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, hPosBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, hPos, gl.DYNAMIC_DRAW);
+}
+
+/* ---------------------------------------------------------------- state */
+
+var vp = null, eye = [0, 0.62, 4.5], pointScale = 1000;
+var model = new Float32Array(16);
+var nm = new Float32Array(9);
+
+var angle = 0.9, rotSpeed = reduced.matches ? 0 : 0.5;
+var bobT = 2.0, bob = 0;
+var cycleActive = false, phase = 'idle', pt = 0;
+var loose = 0, swirl = 0;
+var meshAlpha = 1, partAlpha = 0;
+var oa = 0, born = false;
+var lastEnd = -1e9, insidePtr = false;
+var capT = 0, capDone = false;
+if (!reduced.matches) capEl.style.opacity = '0';
+
+var T_OUT = 1.05, T_HOLD = 1.55, T_BACK = 1.40;
+
+function tryStart() {
+  if (reduced.matches || cycleActive) return;
+  if (performance.now() - lastEnd < 600) return;
+  cycleActive = true;
+  phase = 'out';
+  pt = 0;
+}
+
+function resize() {
+  var dpr = Math.min(window.devicePixelRatio || 1, 2);
+  var w = window.innerWidth, h = window.innerHeight;
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  var aspect = w / h;
+  var fovDeg = aspect >= 1 ? 38 : Math.min(58, 38 + (1 - aspect) * 24);
+  var fov = fovDeg * Math.PI / 180;
+  var dist = Math.min(12, Math.max(4.5, 1.95 / (Math.tan(fov / 2) * aspect)));
+  eye = [0, 0.62, dist];
+  var proj = persp(fov, aspect, 0.1, 60);
+  var view = lookAt(eye, [0, 0.40, 0], [0, 1, 0]);
+  vp = mul4(proj, view);
+  pointScale = canvas.height / (2 * Math.tan(fov / 2));
+  gl.viewport(0, 0, canvas.width, canvas.height);
+}
+window.addEventListener('resize', resize);
+resize();
+
+canvas.addEventListener('pointerenter', function () { insidePtr = true; tryStart(); });
+canvas.addEventListener('pointerleave', function () { insidePtr = false; });
+canvas.addEventListener('pointerdown', function () { insidePtr = true; tryStart(); });
+window.addEventListener('blur', function () { insidePtr = false; });
+
+function snapCalm() {
+  cycleActive = false; phase = 'idle'; pt = 0;
+  loose = 0; meshAlpha = 1; partAlpha = 0;
+  oa = 0; born = false; rotSpeed = 0; bob = 0;
+  angle = 0.9;
+}
+
+function onReducedChange() {
+  setCaption();
+  if (reduced.matches) {
+    snapCalm();
+    capEl.style.opacity = '1';
+    capEl.style.transform = '';
+    capDone = true;
+  }
+}
+if (reduced.addEventListener) reduced.addEventListener('change', onReducedChange);
+else if (reduced.addListener) reduced.addListener(onReducedChange);
+
+/* --------------------------------------------------------------- render */
+
+function update(dt, tSec, nowMs) {
+  var red = reduced.matches;
+  var tgt = red ? 0 : ((insidePtr || cycleActive) ? 0.055 : 0.5);
+  rotSpeed += (tgt - rotSpeed) * Math.min(1, dt * 3.0);
+  angle += rotSpeed * dt;
+
+  if (!red) { bobT += dt; bob = 0.045 * Math.sin(bobT * 0.9); } else bob = 0;
+
+  if (!red && cycleActive) {
+    if (phase === 'out') {
+      pt += dt;
+      loose = easeIO(Math.min(1, pt / T_OUT));
+      if (pt >= T_OUT) { phase = 'hold'; pt = 0; born = true; }
+    } else if (phase === 'hold') {
+      pt += dt;
+      loose = 1;
+      if (pt >= T_HOLD) { phase = 'back'; pt = 0; }
+    } else if (phase === 'back') {
+      pt += dt;
+      var k = Math.min(1, pt / T_BACK);
+      loose = 1 - easeIO(k);
+      if (k >= 1) { phase = 'idle'; cycleActive = false; loose = 0; lastEnd = nowMs; }
+    }
+  }
+
+  var mT;
+  if (cycleActive && phase === 'back') mT = (loose < 0.10) ? 1 : 0;
+  else mT = cycleActive ? 0 : 1;
+  meshAlpha = approach(meshAlpha, mT, dt / (mT > meshAlpha ? 0.42 : 0.26));
+
+  partAlpha = clamp01(Math.max(loose * 2, 1 - meshAlpha));
+  swirl += dt * (0.9 + 2.3 * loose);
+
+  if (red) { loose = 0; partAlpha = 0; meshAlpha = 1; oa = 0; }
+  else {
+    oa += ((born ? 1 : 0) - oa) * Math.min(1, dt * 1.3);
+    if (born) updateOrbiters(dt, tSec);
+  }
+}
+
+function render(tSec) {
+  gl.clearColor(0, 0, 0, 0);
+  gl.clearDepth(1);
+  gl.depthMask(true);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.disable(gl.CULL_FACE);
+  gl.enable(gl.DEPTH_TEST);
+  gl.enable(gl.BLEND);
+
+  var cA = Math.cos(angle), sA = Math.sin(angle);
+  model.set([cA, 0, -sA, 0,  0, 1, 0, 0,  sA, 0, cA, 0,  0, bob, 0, 1]);
+  nm.set([cA, 0, -sA,  0, 1, 0,  sA, 0, cA]);
+
+  /* soft contact shadow */
+  gl.useProgram(quadP);
+  gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  gl.depthMask(false);
+  bindAttr(quadBuf, quadA.aQ, 2);
+  gl.uniformMatrix4fv(quadU.uVP, false, vp);
+  gl.uniform1f(quadU.uY, -0.62);
+  var shScale = 1 + 0.3 * loose;
+  gl.uniform2f(quadU.uScale, 2.3 * shScale, 2.05 * shScale);
+  gl.uniform3f(quadU.uCol, 0.01, 0.01, 0.02);
+  gl.uniform1f(quadU.uA, Math.max(0, 0.55 * (1 - 0.75 * loose) * (1 - bob * 1.1)));
+  gl.uniform1f(quadU.uFall, 3.0);
+  gl.uniform1f(quadU.uAdd, 0);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+  /* warm glow pooled on the ground while dissolved */
+  if (loose > 0.02) {
+    gl.blendFunc(gl.ONE, gl.ONE);
+    gl.uniform2f(quadU.uScale, 2.7 * shScale, 2.5 * shScale);
+    gl.uniform3f(quadU.uCol, 1.0, 0.42, 0.15);
+    gl.uniform1f(quadU.uA, 0.18 * loose);
+    gl.uniform1f(quadU.uFall, 2.3);
+    gl.uniform1f(quadU.uAdd, 1);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+  }
+
+  /* the hat */
+  if (meshAlpha > 0.004) {
+    gl.useProgram(meshP);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.depthMask(true);
+    bindAttr(posBuf, meshA.aPos, 3);
+    bindAttr(norBuf, meshA.aNorm, 3);
+    bindAttr(colBuf, meshA.aCol, 3);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
+    gl.uniformMatrix4fv(meshU.uModel, false, model);
+    gl.uniformMatrix4fv(meshU.uVP, false, vp);
+    gl.uniformMatrix3fv(meshU.uNM, false, nm);
+    gl.uniform3f(meshU.uEye, eye[0], eye[1], eye[2]);
+    gl.uniform1f(meshU.uAlpha, meshAlpha);
+    gl.uniform1f(meshU.uSpec, 0.16);
+    gl.drawElements(gl.TRIANGLES, hatIndexCount, gl.UNSIGNED_SHORT, 0);
+    gl.uniform1f(meshU.uSpec, 0.55);
+    gl.drawElements(gl.TRIANGLES, bandIndexCount, gl.UNSIGNED_SHORT, bandIndexStart * 2);
+  }
+
+  /* embers */
+  if (partAlpha > 0.004) {
+    gl.useProgram(partP);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    gl.depthMask(false);
+    bindAttr(homeBuf, partA.aHome, 3);
+    bindAttr(rndBuf, partA.aRnd, 4);
+    gl.uniformMatrix4fv(partU.uModel, false, model);
+    gl.uniformMatrix4fv(partU.uVP, false, vp);
+    gl.uniform1f(partU.uLoose, loose);
+    gl.uniform1f(partU.uSwirl, swirl);
+    gl.uniform1f(partU.uTime, tSec);
+    gl.uniform1f(partU.uPartAlpha, partAlpha);
+    gl.uniform1f(partU.uPointScale, pointScale);
+    gl.drawArrays(gl.POINTS, 0, NP);
+  }
+
+  /* orbiters: trails, then heads */
+  if (!reduced.matches && oa > 0.012 && born) {
+    gl.useProgram(trailP);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    gl.depthMask(false);
+    bindAttr(tPosBuf, trailA.aPos, 3);
+    bindAttr(tABuf, trailA.aA, 1);
+    gl.uniformMatrix4fv(trailU.uVP, false, vp);
+    gl.uniform3f(trailU.uCol, 1.0, 0.60, 0.30);
+    gl.uniform1f(trailU.uA, oa * 0.55);
+    for (var o = 0; o < NO; o++) gl.drawArrays(gl.LINE_STRIP, o * K, K);
+
+    gl.useProgram(headP);
+    bindAttr(hPosBuf, headA.aPos, 3);
+    gl.uniformMatrix4fv(headU.uVP, false, vp);
+    gl.uniform1f(headU.uPS, pointScale);
+    gl.uniform3f(headU.uCol, 1.0, 0.68, 0.36);
+    gl.uniform1f(headU.uA, oa * 0.9);
+    gl.drawArrays(gl.POINTS, 0, NO);
+  }
+}
+
+var last = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  var dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  if (document.hidden) return;
+  if (!capDone) {
+    capT += dt;
+    var ck = reduced.matches ? 1 : clamp01((capT - 0.35) / 1.3);
+    var ce = 1 - Math.pow(1 - ck, 3);
+    capEl.style.opacity = ce.toFixed(3);
+    capEl.style.transform = 'translateY(' + ((1 - ce) * 10).toFixed(2) + 'px)';
+    if (ck >= 1) { capDone = true; capEl.style.transform = ''; }
+  }
+  update(dt, now / 1000, now);
+  render(now / 1000);
+}
+requestAnimationFrame(frame);
+
+})();
+</script>
+</body>
+</html>

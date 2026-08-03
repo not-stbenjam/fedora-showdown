@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="A fedora made of light. Hover or tap to scatter it into embers — it always finds its way back.">
+<title>Fedora · Embers</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    overflow: hidden;
+    background: #050508;
+    background-image: radial-gradient(120vmax 90vmax at 50% 32%, #101019 0%, #0a0a11 45%, #050508 100%);
+    color: #8f8f9c;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-user-select: none; user-select: none;
+  }
+
+  #stage {
+    position: fixed; inset: 0;
+    cursor: pointer;
+    touch-action: manipulation;
+    outline: none;
+  }
+  #stage:focus-visible { box-shadow: inset 0 0 0 1px rgba(212, 69, 58, 0.35); }
+
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+  /* soft ambient light pooled behind the hat */
+  #glow {
+    position: absolute; left: 50%; top: 50%;
+    width: 115vmin; height: 115vmin;
+    transform: translate(-50%, -53%);
+    background: radial-gradient(circle,
+      rgba(216, 46, 36, 0.14) 0%,
+      rgba(216, 46, 36, 0.055) 34%,
+      rgba(216, 46, 36, 0) 68%);
+    opacity: 0.55;
+    pointer-events: none;
+  }
+
+  /* grounded contact shadow beneath the brim */
+  #shadow {
+    position: absolute; left: 50%; top: calc(50% + 14vmin);
+    width: 46vmin; height: 7.5vmin;
+    transform: translateX(-50%);
+    background: radial-gradient(50% 50% at 50% 50%,
+      rgba(0, 0, 0, 0.62) 0%,
+      rgba(0, 0, 0, 0.28) 52%,
+      rgba(0, 0, 0, 0) 100%);
+    opacity: 0.55;
+    pointer-events: none;
+  }
+
+  .caption {
+    position: absolute; left: 0; right: 0;
+    top: calc(50% + 24vmin);
+    text-align: center;
+    padding: 0 24px;
+    font-size: clamp(11px, 1.7vmin, 14px);
+    letter-spacing: 0.09em;
+    line-height: 1.7;
+    color: #878794;
+    pointer-events: none;
+  }
+  .caption .accent {
+    color: #d4453a;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    font-size: 0.92em;
+  }
+
+  #fallback {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    text-align: center; padding: 24px;
+    font-size: 14px; letter-spacing: 0.06em; color: #878794;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    /* nothing on this page should move; keep it that way */
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div id="stage" tabindex="0" role="img"
+     aria-label="A fedora hat built from glowing red particles, spinning slowly in a dark scene. On hover or tap it dissolves into drifting embers, then reforms.">
+  <div id="glow" aria-hidden="true"></div>
+  <div id="shadow" aria-hidden="true"></div>
+  <canvas id="scene" aria-hidden="true"></canvas>
+  <p class="caption">
+    <span class="accent">fedora</span> &nbsp;·&nbsp; <span id="hint">hover or tap to scatter it into embers — it always finds its way back</span>
+  </p>
+  <div id="fallback" hidden>
+    <p>This scene needs WebGL, which your browser has turned off.<br>The fedora, however, remains impeccably dressed.</p>
+  </div>
+</div>
+
+<noscript>
+  <p class="caption" style="position:fixed;top:50%;left:0;right:0;">JavaScript is required for the light show.</p>
+</noscript>
+
+<script>
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("scene");
+  var stage  = document.getElementById("stage");
+  var glowEl = document.getElementById("glow");
+  var shadowEl = document.getElementById("shadow");
+
+  var gl = canvas.getContext("webgl", {
+    alpha: true, antialias: false, depth: false, stencil: false,
+    premultipliedAlpha: true, powerPreference: "high-performance"
+  });
+  if (!gl) gl = canvas.getContext("experimental-webgl", { alpha: true });
+  if (!gl) { document.getElementById("fallback").hidden = false; return; }
+
+  /* ---------------- reduced motion ---------------- */
+  var mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+  var reduced = mq.matches;
+  var hintEl = document.getElementById("hint");
+  function syncCaption() {
+    hintEl.textContent = reduced
+      ? "hover or tap for a gentle glow"
+      : "hover or tap to scatter it into embers — it always finds its way back";
+  }
+  syncCaption();
+  if (mq.addEventListener) mq.addEventListener("change", function (e) {
+    reduced = e.matches;
+    syncCaption();
+    if (reduced) { state = "idle"; phase = 0; orbTarget = 0; spin = 0; }
+  });
+
+  /* ---------------- shaders ---------------- */
+  var VERT = [
+    "precision highp float;",
+    "attribute vec3 aPos;",
+    "attribute vec4 aRnd;",
+    "attribute vec3 aCol;",
+    "attribute float aSize;",
+    "attribute vec2 aInfo;",      // x: mode (0 hat / 1 orbiter), y: trail index
+    "uniform vec2 uRes;",
+    "uniform float uTime, uPhase, uRot, uUnit, uCam, uGlow, uOrb, uMot, uPx;",
+    "varying vec4 vCol;",
+
+    "vec3 rotY(vec3 p, float a){ float c=cos(a), s=sin(a); return vec3(c*p.x+s*p.z, p.y, c*p.z-s*p.x); }",
+    "vec3 rotX(vec3 p, float a){ float c=cos(a), s=sin(a); return vec3(p.x, c*p.y-s*p.z, s*p.y+c*p.z); }",
+
+    "void main(){",
+    "  float tilt = 0.30;",
+    "  vec3 p; vec3 col; float alpha; float size = aSize;",
+
+    "  if (aInfo.x < 0.5) {",
+    /* ---- hat particle ---- */
+    "    float ph = clamp((uPhase - aRnd.x*0.35) / 0.65, 0.0, 1.0);",
+    "    ph = ph*ph*(3.0-2.0*ph);",
+
+    "    vec3 home = aPos + uMot*0.006*vec3(",
+    "      sin(uTime*1.4 + aRnd.z*41.0),",
+    "      sin(uTime*1.9 + aRnd.y*53.0),",
+    "      cos(uTime*1.2 + aRnd.w*37.0));",
+    "    vec3 hp = rotX(rotY(home, uRot), tilt);",
+
+    /* ember swirl destination */
+    "    float ang0 = atan(aPos.z, aPos.x);",
+    "    float rad0 = length(aPos.xz);",
+    "    float rr  = 0.5 + aRnd.y*1.35 + rad0*0.4;",
+    "    float dirn = aRnd.w > 0.5 ? 1.0 : -1.0;",
+    "    float ang = ang0 + aRnd.z*6.2831853 + uTime*(0.35 + aRnd.z*0.95)*dirn;",
+    "    float yy = 0.30 + aPos.y*0.55 + aRnd.x*0.5",
+    "             + sin(uTime*(0.5 + aRnd.y*0.9) + aRnd.w*6.2831853)*0.42;",
+    "    vec3 sp = vec3(cos(ang)*rr, yy, sin(ang)*rr);",
+    "    sp += uMot*0.05*vec3(sin(uTime*2.3+aRnd.x*51.0), cos(uTime*1.9+aRnd.y*67.0), sin(uTime*2.1+aRnd.z*73.0));",
+    "    vec3 sw = rotX(sp, tilt*0.35);",
+
+    "    p = mix(hp, sw, ph);",
+
+    /* soft fake lighting */
+    "    vec3 nc = vec3(0.0, aPos.y > 0.12 ? 0.38 : 0.02, 0.0);",
+    "    vec3 n = aPos - nc;",
+    "    float nl = length(n);",
+    "    n = nl > 0.0001 ? n/nl : vec3(0.0, 1.0, 0.0);",
+    "    n = rotX(rotY(n, uRot), tilt);",
+    "    float lam = 0.34 + 0.66*max(dot(n, normalize(vec3(-0.42, 0.72, 0.56))), 0.0);",
+    "    col = aCol*lam;",
+    "    col *= mix(vec3(0.72,0.74,0.85), vec3(1.06,1.0,0.98), clamp((p.z+1.7)/3.4, 0.0, 1.0));",
+
+    /* ember look while dissolved */
+    "    float flick = 0.78 + 0.22*sin(uTime*6.3 + aRnd.x*97.0);",
+    "    vec3 ember = mix(vec3(1.0,0.36,0.13), vec3(1.0,0.74,0.38), aRnd.y)*flick;",
+    "    col = mix(col, ember*(0.85 + 0.75*uGlow), ph);",
+    "    col *= 1.0 + uGlow*0.30;",
+
+    "    alpha = mix(0.55, 0.55 + 0.30*flick, ph);",
+    "    size *= mix(1.0, 0.82, ph);",
+
+    "  } else {",
+    /* ---- orbiting ember with analytic trail ---- */
+    "    float k = aInfo.y;",
+    "    float tt = uTime*aRnd.w + aRnd.z*6.2831853 - k*0.07;",
+    "    float bob = sin(tt*1.6 + aRnd.y*9.0)*0.10;",
+    "    vec3 op = vec3(cos(tt)*aRnd.x, bob, sin(tt)*aRnd.x);",
+    "    op = rotX(op, aRnd.y);",
+    "    op = rotY(op, aRnd.z*3.1);",
+    "    p = rotX(op, tilt*0.55);",
+    "    float tk = pow(0.84, k);",
+    "    col = mix(vec3(0.72,0.22,0.10), vec3(1.0,0.78,0.45), tk)*(0.55 + 0.45*tk);",
+    "    alpha = uOrb*0.85*pow(0.80, k);",
+    "    size *= 0.55 + 0.45*tk;",
+    "  }",
+
+    /* gentle perspective */
+    "  float depth = uCam - p.z;",
+    "  vec2 s = vec2(p.x, p.y - 0.16)*(uUnit*0.97/depth);",
+    "  gl_Position = vec4(s.x*2.0/uRes.x, s.y*2.0/uRes.y, 0.0, 1.0);",
+    "  gl_PointSize = clamp(size*uPx*(uCam/depth), 0.75, 30.0);",
+    "  alpha *= mix(1.12, 0.60, clamp((depth-2.6)/3.6, 0.0, 1.0));",
+    "  vCol = vec4(col, alpha);",
+    "}"
+  ].join("\n");
+
+  var FRAG = [
+    "precision mediump float;",
+    "varying vec4 vCol;",
+    "void main(){",
+    "  vec2 d = gl_PointCoord - 0.5;",
+    "  float r2 = dot(d, d);",
+    "  if (r2 > 0.25) discard;",
+    "  float fall = smoothstep(0.25, 0.03, r2);",
+    "  float core = smoothstep(0.085, 0.0, r2);",
+    "  float a = fall*vCol.a;",
+    "  gl_FragColor = vec4(vCol.rgb*(0.62 + 0.75*core)*a, a);",
+    "}"
+  ].join("\n");
+
+  function compile(type, src) {
+    var sh = gl.createShader(type);
+    gl.shaderSource(sh, src); gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+      throw new Error(gl.getShaderInfoLog(sh));
+    }
+    return sh;
+  }
+  var prog = gl.createProgram();
+  gl.attachShader(prog, compile(gl.VERTEX_SHADER, VERT));
+  gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FRAG));
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+    document.getElementById("fallback").hidden = false; return;
+  }
+  gl.useProgram(prog);
+
+  var A = {
+    aPos:  gl.getAttribLocation(prog, "aPos"),
+    aRnd:  gl.getAttribLocation(prog, "aRnd"),
+    aCol:  gl.getAttribLocation(prog, "aCol"),
+    aSize: gl.getAttribLocation(prog, "aSize"),
+    aInfo: gl.getAttribLocation(prog, "aInfo")
+  };
+  var U = {
+    uRes:   gl.getUniformLocation(prog, "uRes"),
+    uTime:  gl.getUniformLocation(prog, "uTime"),
+    uPhase: gl.getUniformLocation(prog, "uPhase"),
+    uRot:   gl.getUniformLocation(prog, "uRot"),
+    uUnit:  gl.getUniformLocation(prog, "uUnit"),
+    uCam:   gl.getUniformLocation(prog, "uCam"),
+    uGlow:  gl.getUniformLocation(prog, "uGlow"),
+    uOrb:   gl.getUniformLocation(prog, "uOrb"),
+    uMot:   gl.getUniformLocation(prog, "uMot"),
+    uPx:    gl.getUniformLocation(prog, "uPx")
+  };
+  for (var k in A) gl.enableVertexAttribArray(A[k]);
+
+  /* additive light over the CSS background */
+  gl.disable(gl.DEPTH_TEST);
+  gl.enable(gl.BLEND);
+  gl.blendFuncSeparate(gl.ONE, gl.ONE, gl.ZERO, gl.ONE);
+  gl.clearColor(0, 0, 0, 0);
+
+  /* ---------------- build the fedora ---------------- */
+  function ss(a, b, x) { x = Math.min(1, Math.max(0, (x - a) / (b - a))); return x * x * (3 - 2 * x); }
+
+  var CROWN = 7600, BRIM = 4600, UNDER = 700, ORB = 34, TRAIL = 9;
+  var hat = [], orb = [];
+  var rnd = Math.random, PI2 = Math.PI * 2;
+
+  // crown: dome with center crease + front pinch (fedora silhouette)
+  for (var i = 0; i < CROWN; i++) {
+    var t = Math.pow(rnd(), 0.8);
+    var th = rnd() * PI2, ct = Math.cos(th), st = Math.sin(th);
+    var pinch = 1 - 0.16 * Math.max(0, ct) * ss(0.3, 0.95, t);
+    var prof = Math.pow(Math.cos(t * Math.PI / 2), 0.62);
+    var r = 0.95 * prof * pinch;
+    var x0 = r * ct, z0 = r * st;
+    var y = 0.04 + t * 0.92 - 0.16 * Math.exp(-(x0 * x0) / 0.10) * ss(0.55, 0.95, t);
+    var j = 0.018;
+    var shade = 0.8 + 0.3 * rnd() + 0.12 * t;
+    hat.push(
+      x0 + (rnd() - 0.5) * j, y + (rnd() - 0.5) * j, z0 + (rnd() - 0.5) * j,
+      rnd(), rnd(), rnd(), rnd(),
+      Math.min(1, 0.95 * shade), 0.11 * shade, 0.12 * shade,
+      1.3 + rnd() * 1.5, 0, 0
+    );
+  }
+  // brim: flat annulus with a soft up-curl at the edge, dipped slightly in front
+  for (i = 0; i < BRIM; i++) {
+    th = rnd() * PI2; ct = Math.cos(th); st = Math.sin(th);
+    r = Math.sqrt(0.7744 + (2.3104 - 0.7744) * rnd());   // 0.88 .. 1.52
+    var edge = ss(1.18, 1.52, r);
+    y = 0.02 + 0.11 * Math.pow(edge, 1.6) - 0.05 * ct * ct * ss(1.02, 1.5, r) + (rnd() - 0.5) * 0.03;
+    shade = (0.55 + 0.5 * rnd()) * (1 - 0.35 * edge);
+    hat.push(
+      r * ct + (rnd() - 0.5) * 0.02, y, r * st + (rnd() - 0.5) * 0.02,
+      rnd(), rnd(), rnd(), rnd(),
+      0.78 * shade + 0.06, 0.085 * shade + 0.01, 0.095 * shade + 0.01,
+      1.2 + rnd() * 1.5, 0, 0
+    );
+  }
+  // dark sliver under the brim, for depth
+  for (i = 0; i < UNDER; i++) {
+    th = rnd() * PI2; ct = Math.cos(th); st = Math.sin(th);
+    r = Math.sqrt(0.81 + (2.1316 - 0.81) * rnd());
+    hat.push(
+      r * ct, -0.012 - rnd() * 0.022, r * st,
+      rnd(), rnd(), rnd(), rnd(),
+      0.16 + 0.10 * rnd(), 0.02, 0.03,
+      1.1 + rnd() * 1.2, 0, 0
+    );
+  }
+  // persistent orbiters (drawn only after the first reformation)
+  for (i = 0; i < ORB; i++) {
+    var orad = 1.05 + rnd() * 0.8;
+    var inc = (rnd() - 0.5) * 1.15;
+    var ph0 = rnd();
+    var spd = (0.4 + rnd() * 0.8) * (rnd() < 0.35 ? -1 : 1);
+    var osz = 1.4 + rnd() * 0.9;
+    for (k = 0; k < TRAIL; k++) {
+      orb.push(0, 0, 0, orad, inc, ph0, spd, 1.0, 0.60, 0.33, osz, 1, k);
+    }
+  }
+
+  var STRIDE = 13 * 4;
+  function makeBuf(arr) {
+    var b = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, b);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(arr), gl.STATIC_DRAW);
+    return b;
+  }
+  var hatBuf = makeBuf(hat), orbBuf = makeBuf(orb), hatCount = hat.length / 13, orbCount = orb.length / 13;
+
+  function bind(buf) {
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.vertexAttribPointer(A.aPos,  3, gl.FLOAT, false, STRIDE, 0);
+    gl.vertexAttribPointer(A.aRnd,  4, gl.FLOAT, false, STRIDE, 12);
+    gl.vertexAttribPointer(A.aCol,  3, gl.FLOAT, false, STRIDE, 28);
+    gl.vertexAttribPointer(A.aSize, 1, gl.FLOAT, false, STRIDE, 40);
+    gl.vertexAttribPointer(A.aInfo, 2, gl.FLOAT, false, STRIDE, 44);
+  }
+
+  /* ---------------- sizing ---------------- */
+  var view = { w: 0, h: 0, unit: 0, px: 0 };
+  function resize() {
+    var dpr = Math.min(2, window.devicePixelRatio || 1);
+    view.w = canvas.width  = Math.round(window.innerWidth  * dpr);
+    view.h = canvas.height = Math.round(window.innerHeight * dpr);
+    view.unit = Math.min(view.w, view.h);
+    view.px = view.unit / 640;
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  /* ---------------- interaction & timeline ---------------- */
+  var OUT_MS = 1150, HOLD_MS = 2300, BACK_MS = 1500;
+  var state = "idle", tStage = 0, phase = 0;
+  var spin = reduced ? 0 : 1.35, rot = 0.6;
+  var orbTarget = 0, orbAlpha = 0, pulse = 0;
+  var bootTime = performance.now();
+
+  function easeIO(x) { return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; }
+
+  function trigger() {
+    if (performance.now() - bootTime < 900) return;   // let the hat settle first
+    if (reduced) { pulse = 1; return; }               // gentle brightness, no motion
+    if (state !== "idle") return;
+    state = "out";
+    tStage = performance.now();
+  }
+  stage.addEventListener("pointerenter", function (e) { if (e.pointerType !== "touch") trigger(); });
+  stage.addEventListener("pointerdown", trigger);
+  stage.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); trigger(); }
+  });
+
+  /* ---------------- frame loop ---------------- */
+  var CAM = 4.4;
+  var last = performance.now();
+
+  function frame(now) {
+    requestAnimationFrame(frame);
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now / 1000;
+
+    if (reduced) {
+      state = "idle"; phase = 0; spin = 0; orbTarget = 0;
+      pulse *= Math.exp(-dt * 1.4);
+    } else {
+      if (state === "out") {
+        var k1 = Math.min(1, (now - tStage) / OUT_MS);
+        phase = easeIO(k1);
+        if (k1 >= 1) { state = "hold"; tStage = now; }
+      } else if (state === "hold") {
+        phase = 1;
+        if (now - tStage >= HOLD_MS) { state = "back"; tStage = now; }
+      } else if (state === "back") {
+        var k2 = Math.min(1, (now - tStage) / BACK_MS);
+        phase = 1 - easeIO(k2);
+        if (k2 >= 1) { state = "idle"; phase = 0; orbTarget = 1; }
+      }
+      var target = state === "idle" ? 1.35 : (state === "back" ? 0.5 : 0.22);
+      spin += (target - spin) * Math.min(1, dt * 2.8);
+      rot += spin * dt;
+    }
+
+    orbAlpha += (orbTarget - orbAlpha) * Math.min(1, dt * 1.4);
+    var glowAmt = phase + pulse * 0.6;
+
+    /* scene furniture */
+    shadowEl.style.opacity = (0.55 * (1 - 0.85 * phase)).toFixed(3);
+    shadowEl.style.transform = "translateX(-50%) scale(" + (1 + 0.3 * phase).toFixed(3) + "," + (1 + 0.2 * phase).toFixed(3) + ")";
+    glowEl.style.opacity = Math.min(1, 0.55 + phase * 0.45 + pulse * 0.25).toFixed(3);
+
+    /* draw */
+    gl.viewport(0, 0, view.w, view.h);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform2f(U.uRes, view.w, view.h);
+    gl.uniform1f(U.uTime, t);
+    gl.uniform1f(U.uPhase, phase);
+    gl.uniform1f(U.uRot, rot);
+    gl.uniform1f(U.uUnit, view.unit);
+    gl.uniform1f(U.uCam, CAM);
+    gl.uniform1f(U.uGlow, glowAmt);
+    gl.uniform1f(U.uOrb, orbAlpha);
+    gl.uniform1f(U.uMot, reduced ? 0 : 1);
+    gl.uniform1f(U.uPx, view.px);
+
+    bind(hatBuf);
+    gl.drawArrays(gl.POINTS, 0, hatCount);
+    if (orbAlpha > 0.004) {
+      bind(orbBuf);
+      gl.drawArrays(gl.POINTS, 0, orbCount);
+    }
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
