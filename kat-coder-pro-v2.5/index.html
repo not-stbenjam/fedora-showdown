@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Red Hat Fedora — 3D Experience</title>
+    <style>
+        /* ============================================
+           CSS Variables & Design Tokens
+           ============================================ */
+        :root {
+            --redhat-red: #EE0000;
+            --redhat-dark: #CC0000;
+            --bg-primary: #0a0a0a;
+            --bg-secondary: #111111;
+            --text-primary: #ffffff;
+            --text-secondary: #a0a0a0;
+            --glow-color: rgba(238, 0, 0, 0.6);
+            --shadow-color: rgba(0, 0, 0, 0.5);
+            --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            --transition-smooth: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+        }
+
+        /* ============================================
+           Reset & Base
+           ============================================ */
+        *, *::before, *::after {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: var(--font-family);
+            background: radial-gradient(ellipse at 50% 50%, var(--bg-secondary) 0%, var(--bg-primary) 100%);
+            color: var(--text-primary);
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* ============================================
+           Canvas Container
+           ============================================ */
+        #canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            outline: none;
+        }
+
+        /* ============================================
+           Overlay UI Layer
+           ============================================ */
+        .ui-layer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none; /* Let clicks pass through to canvas */
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 2rem;
+        }
+
+        /* Header / Brand */
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            pointer-events: auto;
+            opacity: 0;
+            animation: fadeInDown 1s var(--transition-smooth) 0.5s forwards;
+        }
+
+        .brand-logo {
+            width: 32px;
+            height: 32px;
+            fill: var(--redhat-red);
+        }
+
+        .brand-text {
+            font-size: 1.125rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            color: var(--text-primary);
+        }
+
+        /* Footer / Caption */
+        .footer {
+            text-align: center;
+            margin-bottom: 2rem;
+            pointer-events: auto;
+            opacity: 0;
+            animation: fadeInUp 1s var(--transition-smooth) 0.8s forwards;
+        }
+
+        .caption {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            margin-bottom: 0.5rem;
+        }
+
+        .hint {
+            font-size: 0.75rem;
+            color: #555;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        /* ============================================
+           Loading Screen
+           ============================================ */
+        #loader {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--bg-primary);
+            z-index: 100;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            transition: opacity 0.6s ease;
+        }
+
+        .loader-spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(238, 0, 0, 0.1);
+            border-top-color: var(--redhat-red);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        .loader-text {
+            margin-top: 1rem;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            letter-spacing: 0.1em;
+        }
+
+        /* ============================================
+           Animations
+           ============================================ */
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes fadeInDown {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ============================================
+           Responsive Adjustments
+           ============================================ */
+        @media (max-width: 768px) {
+            .ui-layer {
+                padding: 1.5rem;
+            }
+            .caption {
+                font-size: 0.75rem;
+            }
+        }
+
+        /* Reduced Motion */
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+    </style>
+
+    <!-- Import Maps for Three.js -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <!-- Loading Screen -->
+    <div id="loader">
+        <div class="loader-spinner"></div>
+        <div class="loader-text">INITIALIZING</div>
+    </div>
+
+    <!-- UI Overlay -->
+    <div class="ui-layer">
+        <header class="header">
+            <!-- Inline SVG Logo representing Red Hat style -->
+            <svg class="brand-logo" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2L2 22h20L12 2zm0 4l6 14H6l6-14z"/>
+                <path d="M12 10l-2 5h4l-2-5z" fill="#fff"/>
+            </svg>
+            <span class="brand-text">RED HAT</span>
+        </header>
+
+        <footer class="footer">
+            <div class="caption">The Fedora Project</div>
+            <div class="hint">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>
+                Click to interact
+            </div>
+        </footer>
+    </div>
+
+    <!-- 3D Canvas -->
+    <div id="canvas-container"></div>
+
+    <!-- Main Application Script -->
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // ============================================
+        // Configuration & State
+        // ============================================
+        const CONFIG = {
+            colors: {
+                red: 0xEE0000,
+                darkRed: 0x990000,
+                black: 0x111111,
+                white: 0xffffff,
+                glow: 0xff3333
+            },
+            particleCount: 2000,
+            autoRotateSpeed: 1.0,
+            activeRotateSpeed: 3.0,
+            damping: 0.05
+        };
+
+        const state = {
+            isHovering: false,
+            isClicked: false,
+            time: 0,
+            targetRotationSpeed: CONFIG.autoRotateSpeed,
+            currentRotationSpeed: CONFIG.autoRotateSpeed,
+            isDissolving: false,
+            dissolveProgress: 0, // 0 to 1
+            reformDelay: 0
+        };
+
+        // ============================================
+        // Scene Setup
+        // ============================================
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        // Fog for depth
+        scene.fog = new THREE.FogExp2(0x0a0a0a, 0.02);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 2, 8);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.0;
+        container.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.enablePan = false;
+        controls.minDistance = 4;
+        controls.maxDistance = 15;
+        controls.maxPolarAngle = Math.PI / 1.8; // Prevent going too far below
+        controls.autoRotate = true;
+        controls.autoRotateSpeed = CONFIG.autoRotateSpeed;
+
+        // ============================================
+        // Lighting
+        // ============================================
+        // 1. Key Light (Main source)
+        const keyLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        keyLight.position.set(5, 5, 5);
+        keyLight.castShadow = true;
+        keyLight.shadow.mapSize.width = 1024;
+        keyLight.shadow.mapSize.height = 1024;
+        keyLight.shadow.bias = -0.001;
+        scene.add(keyLight);
+
+        // 2. Fill Light (Red tint for atmosphere)
+        const fillLight = new THREE.DirectionalLight(CONFIG.colors.red, 0.8);
+        fillLight.position.set(-5, 2, 5);
+        scene.add(fillLight);
+
+        // 3. Rim Light (Backlight for silhouette)
+        const rimLight = new THREE.SpotLight(CONFIG.colors.glow, 2);
+        rimLight.position.set(0, 5, -5);
+        rimLight.lookAt(0, 0, 0);
+        scene.add(rimLight);
+
+        // 4. Ambient
+        const ambientLight = new THREE.AmbientLight(0x404040, 0.5); // Soft white light
+        scene.add(ambientLight);
+
+        // ============================================
+        // Fedora Model Construction
+        // ============================================
+        const fedoraGroup = new THREE.Group();
+        scene.add(fedoraGroup);
+
+        // Materials
+        const feltMaterial = new THREE.MeshStandardMaterial({
+            color: CONFIG.colors.red,
+            roughness: 0.85, // Felt is not shiny
+            metalness: 0.1,
+            flatShading: false
+        });
+
+        const bandMaterial = new THREE.MeshStandardMaterial({
+            color: CONFIG.colors.black,
+            roughness: 0.6,
+            metalness: 0.2
+        });
+
+        // 1. Crown (Top part)
+        // Using a cylinder, but we will modify vertices to give it a "pinched" look
+        const crownGeo = new THREE.CylinderGeometry(1.2, 1.2, 1.2, 64, 10, true);
+        const crownPos = crownGeo.attributes.position;
+        
+        // Pinch the top vertices to create the Fedora crease
+        for (let i = 0; i < crownPos.count; i++) {
+            const y = crownPos.getY(i);
+            // Top ring of the cylinder
+            if (y > 0.4) {
+                // Indent the top center
+                // We identify top vertices by their Y value (approx)
+                // A more robust way for CylinderGeometry is checking indices, 
+                // but here we modify based on Y and angle.
+            }
+        }
+        
+        // Better approach for pinching: Scale top ring
+        // CylinderGeometry creates rings. Top ring is the last set of vertices.
+        const radiusTop = 1.2;
+        const segments = 64;
+        // The last 'segments' vertices are the top ring
+        for (let i = 0; i < segments; i++) {
+            const index = (10 * 2 * segments) + i; // Approximate for top cap
+            // Actually, let's just scale the geometry top radius slightly and add a dent
+        }
+        
+        // Let's use a simpler procedural approach for the crown shape
+        // Create a custom shape using Lathe or just modifying the cylinder top
+        // Re-creating crown with specific vertex manipulation
+        const crownGeometry = new THREE.CylinderGeometry(1.15, 1.2, 1.3, 64);
+        const posAttribute = crownGeometry.attributes.position;
+        const vector = new THREE.Vector3();
+
+        for (let i = 0; i < posAttribute.count; i++) {
+            vector.fromBufferAttribute(posAttribute, i);
+            // If vertex is at the top
+            if (vector.y > 0.5) {
+                // Pinch it: Move vertices towards center based on angle to create a "teardrop" or front indent
+                // Fedora crease is usually at the back or front. Let's do a front indent.
+                // Simple pinch:
+                vector.x *= 0.6; 
+                vector.z *= 0.6;
+                // Lift the center slightly
+                if (Math.abs(vector.x) < 0.2 && Math.abs(vector.z) < 0.2) {
+                    vector.y += 0.1;
+                }
+            }
+            posAttribute.setXYZ(i, vector.x, vector.y, vector.z);
+        }
+        crownGeometry.computeVertexNormals();
+
+        const crown = new THREE.Mesh(crownGeometry, feltMaterial);
+        crown.position.y = 0.65;
+        crown.castShadow = true;
+        crown.receiveShadow = true;
+        fedoraGroup.add(crown);
+
+        // 2. Brim (The wide bottom part)
+        // Torus is good, but a flattened cone or cylinder with a hole is better for shadows
+        const brimGeo = new THREE.CylinderGeometry(2.4, 2.4, 0.05, 64);
+        // We need to make the center hollow? No, just place crown on top.
+        // Actually, a real hat brim has a hole.
+        // Let's use a Torus for the brim, flattened.
+        const brimGeoTorus = new THREE.TorusGeometry(1.4, 1.0, 16, 100);
+        const brim = new THREE.Mesh(brimGeoTorus, feltMaterial);
+        brim.rotation.x = Math.PI / 2;
+        brim.scale.z = 0.05; // Flatten
+        brim.castShadow = true;
+        brim.receiveShadow = true;
+        fedoraGroup.add(brim);
+
+        // 3. Band (The stripe around the crown)
+        const bandGeo = new THREE.TorusGeometry(1.21, 0.08, 16, 100);
+        const band = new THREE.Mesh(bandGeo, bandMaterial);
+        band.rotation.x = Math.PI / 2;
+        band.position.y = 0.2;
+        fedoraGroup.add(band);
+
+        // ============================================
+        // Particle System
+        // ============================================
+        const particleGeo = new THREE.BufferGeometry();
+        const particlePositions = new Float32Array(CONFIG.particleCount * 3);
+        const particleSizes = new Float32Array(CONFIG.particleCount);
+        const particleSpeeds = new Float32Array(CONFIG.particleCount);
+        const particleOffsets = new Float32Array(CONFIG.particleCount * 2); // For swirl
+
+        for (let i = 0; i < CONFIG.particleCount; i++) {
+            // Initial random position in a sphere
+            const r = 3 + Math.random() * 4;
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            
+            particlePositions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+            particlePositions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta) - 2; // Shift down
+            particlePositions[i * 3 + 2] = r * Math.cos(phi);
+
+            particleSizes[i] = Math.random() * 0.05 + 0.02;
+            particleSpeeds[i] = Math.random() * 0.005 + 0.002;
+            particleOffsets[i * 2] = Math.random() * Math.PI * 2;
+            particleOffsets[i * 2 + 1] = Math.random() * 0.5 + 0.5;
+        }
+
+        particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+        particleGeo.setAttribute('size', new THREE.BufferAttribute(particleSizes, 1));
+
+        // Custom shader material for particles to handle glow and size attenuation better
+        // Or use PointsMaterial for simplicity and performance
+        const particleMaterial = new THREE.PointsMaterial({
+            color: CONFIG.colors.red,
+            size: 0.05,
+            transparent: true,
+            opacity: 0.6,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            sizeAttenuation: true
+        });
+
+        const particleSystem = new THREE.Points(particleGeo, particleMaterial);
+        scene.add(particleSystem);
+
+        // ============================================
+        // Floor (for shadow and reflection hints)
+        // ============================================
+        const planeGeometry = new THREE.PlaneGeometry(50, 50);
+        const planeMaterial = new THREE.ShadowMaterial({ opacity: 0.3 });
+        const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+        plane.rotation.x = -Math.PI / 2;
+        plane.position.y = -1.5;
+        plane.receiveShadow = true;
+        scene.add(plane);
+
+        // ============================================
+        // Event Listeners
+        // ============================================
+        
+        // 1. Mouse Move (Subtle Parallax)
+        const mouse = new THREE.Vector2();
+        const target = new THREE.Vector2();
+        const windowHalf = new THREE.Vector2(window.innerWidth / 2, window.innerHeight / 2);
+
+        document.addEventListener('mousemove', (event) => {
+            mouse.x = (event.clientX - windowHalf.x) / 100;
+            mouse.y = (event.clientY - windowHalf.y) / 100;
+        });
+
+        // 2. Click / Touch (Dissolve Effect)
+        const triggerDissolve = () => {
+            if (state.isDissolving) return;
+            state.isDissolving = true;
+            state.dissolveProgress = 0;
+            
+            // Change cursor
+            document.body.style.cursor = 'wait';
+        };
+
+        document.addEventListener('click', triggerDissolve);
+        document.addEventListener('touchstart', (e) => {
+            // Prevent double firing on some devices
+            // e.preventDefault(); 
+            triggerDissolve();
+        }, { passive: false });
+
+        // 3. Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // ============================================
+        // Animation Loop
+        // ============================================
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+            const time = clock.getElapsedTime();
+
+            // 1. Auto Rotation Logic
+            if (!state.isDissolving) {
+                controls.update();
+            } else {
+                controls.autoRotate = false;
+            }
+
+            // 2. Fedora Logic (Dissolve / Reform)
+            if (state.isDissolving) {
+                if (state.dissolveProgress < 1) {
+                    // Dissolving Phase
+                    state.dissolveProgress += delta * 0.8; // Speed of dissolve
+                    if (state.dissolveProgress > 1) state.dissolveProgress = 1;
+
+                    // Scale down and fade out
+                    const scale = 1 - state.dissolveProgress;
+                    fedoraGroup.scale.set(scale, scale, scale);
+                    fedoraGroup.rotation.y += delta * 2; // Spin faster while dying
+                    fedoraGroup.materialOpacity = 1 - state.dissolveProgress;
+                    
+                    // Apply opacity to children
+                    fedoraGroup.children.forEach(child => {
+                        if(child.material) child.material.opacity = 1 - state.dissolveProgress;
+                    });
+
+                } else if (state.reformDelay > 0) {
+                    // Waiting Phase
+                    state.reformDelay -= delta;
+                } else {
+                    // Reforming Phase
+                    state.dissolveProgress -= delta * 0.5; // Slower reform
+                    if (state.dissolveProgress <= 0) {
+                        state.dissolveProgress = 0;
+                        state.isDissolving = false;
+                        controls.autoRotate = true;
+                        document.body.style.cursor = 'default';
+                    }
+
+                    const scale = 1 - state.dissolveProgress;
+                    fedoraGroup.scale.set(scale, scale, scale);
+                    
+                    // Fade in
+                    fedoraGroup.children.forEach(child => {
+                        if(child.material) child.material.opacity = 1 - state.dissolveProgress;
+                    });
+                }
+            } else {
+                // Normal state: ensure opacity is 1
+                fedoraGroup.children.forEach(child => {
+                    if(child.material) child.material.opacity = 1;
+                    child.material.transparent = false;
+                });
+            }
+
+            // 3. Parallax Effect (Only when not dissolving)
+            if (!state.isDissolving) {
+                target.x = (1 - mouse.x) * 0.5;
+                target.y = (1 - mouse.y) * 0.5;
+                
+                // Smoothly interpolate current rotation to target
+                fedoraGroup.rotation.y += 0.05 * (target.x - fedoraGroup.rotation.y + (controls.getAzimuthalAngle() - fedoraGroup.rotation.y));
+                fedoraGroup.rotation.x += 0.05 * (-target.y - fedoraGroup.rotation.x);
+            }
+
+            // 4. Particle Animation
+            const positions = particleSystem.geometry.attributes.position.array;
+            
+            for (let i = 0; i < CONFIG.particleCount; i++) {
+                const i3 = i * 3;
+                
+                // Base movement: Float Up
+                positions[i3 + 1] += particleSpeeds[i];
+
+                // Swirl movement
+                const angle = time * 0.5 + particleOffsets[i * 2];
+                const radius = Math.sqrt(positions[i3]*positions[i3] + positions[i3+2]*positions[i3+2]);
+                
+                // If dissolving, particles fly outward
+                if (state.isDissolving && state.dissolveProgress < 1) {
+                    const force = state.dissolveProgress * 0.2;
+                    positions[i3] += (positions[i3]) * force;
+                    positions[i3 + 1] += force * 2;
+                    positions[i3 + 2] += (positions[i3 + 2]) * force;
+                } 
+                // If reforming, particles fly inward
+                else if (state.isDissolving && state.reformDelay <= 0) {
+                    // Lerp back to a random spot in the cloud
+                    // This is computationally expensive to calculate perfect targets, 
+                    // so we just guide them to center then randomize
+                    positions[i3] *= 0.98;
+                    positions[i3 + 1] *= 0.98;
+                    positions[i3 + 2] *= 0.98;
+                }
+                else {
+                    // Normal swirl
+                    const x = positions[i3];
+                    const z = positions[i3 + 2];
+                    positions[i3] = x * Math.cos(0.002) - z * Math.sin(0.002);
+                    positions[i3 + 2] = x * Math.sin(0.002) + z * Math.cos(0.002);
+                }
+
+                // Reset if too high
+                if (positions[i3 + 1] > 5) {
+                    positions[i3 + 1] = -3;
+                }
+            }
+            particleSystem.geometry.attributes.position.needsUpdate = true;
+
+            // 5. Render
+            renderer.render(scene, camera);
+        }
+
+        // ============================================
+        // Initialization
+        // ============================================
+        
+        // Hide loader when ready
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                const loader = document.getElementById('loader');
+                if(loader) {
+                    loader.style.opacity = '0';
+                    setTimeout(() => loader.remove(), 600);
+                }
+                animate();
+            }, 1000);
+        });
+
+    </script>
+</body>
+</html>
