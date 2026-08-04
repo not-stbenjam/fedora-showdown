@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0a090f">
+<title>Ember Fedora</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: radial-gradient(120vmax 120vmax at 50% 38%, #171219 0%, #0d0b12 45%, #070609 100%);
+    overflow: hidden;
+    font-family: "Avenir Next", "Segoe UI", system-ui, -apple-system, sans-serif;
+    -webkit-user-select: none; user-select: none;
+  }
+  .hero {
+    position: fixed; inset: 0;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .hero:focus-visible { outline: 1px solid rgba(255,120,90,.35); outline-offset: -2px; }
+  canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%; display: block;
+    animation: fadeIn 1.6s ease-out both;
+  }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  .vignette {
+    position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(90vmax 70vmax at 50% 45%, transparent 55%, rgba(0,0,0,.55) 100%);
+  }
+  .caption {
+    position: absolute; left: 50%; top: 75%;
+    transform: translateX(-50%);
+    text-align: center; pointer-events: none;
+    width: max(280px, 80vw);
+  }
+  .caption .title {
+    font-size: clamp(11px, 1.5vmin, 15px);
+    font-weight: 500;
+    letter-spacing: .42em; text-indent: .42em;
+    text-transform: uppercase;
+    color: rgba(232, 221, 215, .82);
+  }
+  .caption .rule {
+    width: 34px; height: 1px; margin: .9em auto .85em;
+    background: linear-gradient(90deg, transparent, rgba(255,110,80,.55), transparent);
+  }
+  .caption .sub {
+    font-size: clamp(9px, 1.15vmin, 11px);
+    font-weight: 400;
+    letter-spacing: .26em; text-indent: .26em;
+    text-transform: uppercase;
+    color: rgba(186, 175, 168, .42);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    canvas { animation: none; }
+  }
+</style>
+</head>
+<body>
+<main class="hero" id="hero" tabindex="0"
+      aria-label="Interactive hero: a crimson fedora spinning in three dimensions. Hover, tap, or press Enter to dissolve it into embers and watch it reform.">
+  <canvas id="scene" role="img"
+    aria-label="A crimson fedora rotates slowly against a dark background. When touched, it dissolves into thousands of glowing embers that swirl, then flow back together and reform the hat."></canvas>
+  <div class="vignette"></div>
+  <div class="caption">
+    <p class="title">Spun from embers</p>
+    <div class="rule"></div>
+    <p class="sub" id="subline">hover or tap &mdash; it scatters, swirls, and returns</p>
+  </div>
+</main>
+
+<script>
+(() => {
+"use strict";
+const TAU = Math.PI * 2;
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+const hero = document.getElementById('hero');
+const subline = document.getElementById('subline');
+const mq = matchMedia('(prefers-reduced-motion: reduce)');
+
+/* ---------- layout ---------- */
+let W = 0, H = 0, DPR = 1, unit = 200, cx = 0, cy = 0;
+function resize() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = Math.round(W * DPR);
+  canvas.height = Math.round(H * DPR);
+  unit = Math.min(W, H) * 0.225;
+  cx = W * 0.5; cy = H * 0.45;
+  if (mq.matches) drawStatic();
+}
+addEventListener('resize', resize);
+
+/* ---------- hat geometry (point-sampled fedora) ---------- */
+const N = 4600;
+const hx = new Float32Array(N), hy = new Float32Array(N), hz = new Float32Array(N);
+const nx = new Float32Array(N), ny = new Float32Array(N), nz = new Float32Array(N);
+const px = new Float32Array(N), py = new Float32Array(N), pz = new Float32Array(N);
+const vx = new Float32Array(N), vy = new Float32Array(N), vz = new Float32Array(N);
+const free = new Float32Array(N), delay = new Float32Array(N), phase = new Float32Array(N);
+const psize = new Float32Array(N), bright = new Float32Array(N);
+const imp = new Uint8Array(N), isOrb = new Uint8Array(N), orbSlot = new Int16Array(N);
+
+const Hh = 0.82, R0 = 0.95, R1c = 0.78, Rb0 = 0.90, Rb1 = 1.72;
+let gi = 0;
+function put(x, y, z, ax, ay, az) {
+  if (gi >= N) return;
+  const L = Math.hypot(ax, ay, az) || 1;
+  hx[gi] = x; hy[gi] = y; hz[gi] = z;
+  nx[gi] = ax / L; ny[gi] = ay / L; nz[gi] = az / L;
+  psize[gi] = 0.75 + Math.random() * 0.65;
+  bright[gi] = 0.72 + Math.random() * 0.28;
+  phase[gi] = Math.random() * TAU;
+  delay[gi] = Math.random();
+  px[gi] = x; py[gi] = y; pz[gi] = z;
+  orbSlot[gi] = -1;
+  gi++;
+}
+function build() {
+  const nBrim = Math.floor(N * 0.40), nEdge = Math.floor(N * 0.07),
+        nCrown = Math.floor(N * 0.33), nCap = N - nBrim - nEdge - nCrown;
+  // brim — curved annulus with a soft dip at the front
+  for (let k = 0; k < nBrim; k++) {
+    const th = Math.random() * TAU;
+    const r = Math.sqrt(Rb0 * Rb0 + (Rb1 * Rb1 - Rb0 * Rb0) * Math.random());
+    const t = (r - Rb0) / (Rb1 - Rb0);
+    const dip = Math.max(0, Math.sin(th));
+    const y = -0.24 * t * t - 0.10 * dip * dip * t;
+    const dydr = -0.48 * t / (Rb1 - Rb0);
+    put(r * Math.cos(th), y, r * Math.sin(th), -dydr * Math.cos(th), 1, -dydr * Math.sin(th));
+  }
+  // brim edge band
+  for (let k = 0; k < nEdge; k++) {
+    const th = Math.random() * TAU;
+    put(Rb1 * Math.cos(th), -0.075 * Math.random(), Rb1 * Math.sin(th), Math.cos(th), 0, Math.sin(th));
+  }
+  // crown — gently tapered, slight belly
+  for (let k = 0; k < nCrown; k++) {
+    const u = Math.random(), y = u * Hh, th = Math.random() * TAU;
+    const rb = R0 + (R1c - R0) * u + 0.05 * Math.sin(Math.PI * u);
+    const drdu = (R1c - R0) + 0.05 * Math.PI * Math.cos(Math.PI * u);
+    put(rb * Math.cos(th), y, rb * Math.sin(th), Math.cos(th), -drdu / Hh, Math.sin(th));
+  }
+  // cap — shallow dome with a center dent and front-to-back pinch
+  for (let k = 0; k < nCap; k++) {
+    const r = R1c * Math.sqrt(Math.random()), th = Math.random() * TAU, q = r / R1c;
+    let y = Hh + 0.16 * Math.pow(Math.max(0, 1 - q * q), 0.65)
+               - 0.15 * Math.exp(-q * q / 0.14);
+    const pxl = r * Math.cos(th);
+    y -= 0.05 * (1 - q) * Math.exp(-(pxl / 0.15) * (pxl / 0.15));
+    put(pxl, y, r * Math.sin(th), Math.cos(th) * 0.45 * q, 1, Math.sin(th) * 0.45 * q);
+  }
+}
+build();
+
+/* ---------- sprites ---------- */
+function radialSprite(sz, stops) {
+  const c = document.createElement('canvas');
+  c.width = c.height = sz;
+  const g = c.getContext('2d');
+  const gr = g.createRadialGradient(sz / 2, sz / 2, 0, sz / 2, sz / 2, sz / 2);
+  for (const s of stops) gr.addColorStop(s[0], s[1]);
+  g.fillStyle = gr; g.fillRect(0, 0, sz, sz);
+  return c;
+}
+const PAL = 26, pal = [];
+for (let b = 0; b < PAL; b++) {
+  const s = b / (PAL - 1);
+  const r = Math.min(255, Math.round(58 + 205 * s));
+  const g = Math.min(255, Math.round(8 + 78 * Math.pow(s, 1.6)));
+  const bl = Math.min(255, Math.round(14 + 62 * Math.pow(s, 1.6)));
+  pal.push(radialSprite(32, [
+    [0, `rgba(${r},${g},${bl},1)`],
+    [0.5, `rgba(${r},${g},${bl},0.85)`],
+    [1, `rgba(${r},${g},${bl},0)`]
+  ]));
+}
+const glowEmber = radialSprite(64, [
+  [0, 'rgba(255,224,178,0.95)'],
+  [0.22, 'rgba(255,158,80,0.55)'],
+  [1, 'rgba(255,90,30,0)']
+]);
+
+/* ---------- light ---------- */
+function norm3(x, y, z) { const l = Math.hypot(x, y, z) || 1; return [x / l, y / l, z / l]; }
+const [Lx, Ly, Lz] = norm3(-0.45, 0.80, -0.45);
+const [Hx, Hy, Hz] = norm3(Lx, Ly, Lz - 1);
+
+/* ---------- camera ---------- */
+const TILT = 0.34, cT = Math.cos(TILT), sT = Math.sin(TILT), CAM = 5.4;
+
+/* ---------- interaction state ---------- */
+let angle = 0.85, speed = 0.85, time = 0, last = 0, raf = 0;
+let interacting = false, actT = 0, orbitOn = false, orbitT = 0;
+let sumFree = 0, solidity = 1;
+const REFORM_START = 2.9, ORBIT_START = 4.8, K_ORBIT = 46;
+const orbList = [];
+const orbR = new Float32Array(N), orbSp = new Float32Array(N),
+      orbPh = new Float32Array(N), orbY0 = new Float32Array(N);
+const TRAIL = 16, MAXORB = 64;
+const trX = new Float32Array(MAXORB * TRAIL), trY = new Float32Array(MAXORB * TRAIL),
+      trN = new Int16Array(MAXORB), trHead = new Int16Array(MAXORB);
+
+/* ---------- ambient dust ---------- */
+const ND = 64;
+const dX = new Float32Array(ND), dY = new Float32Array(ND), dZ = new Float32Array(ND),
+      dS = new Float32Array(ND), dA = new Float32Array(ND), dV = new Float32Array(ND);
+for (let i = 0; i < ND; i++) {
+  dX[i] = Math.random() * 8 - 4;
+  dY[i] = Math.random() * 4.5 - 2;
+  dZ[i] = Math.random() * 4 - 2;
+  dS[i] = 0.5 + Math.random();
+  dA[i] = 0.035 + Math.random() * 0.06;
+  dV[i] = 0.02 + Math.random() * 0.05;
+}
+
+/* ---------- projection buffers ---------- */
+const SXa = new Float32Array(N), SYa = new Float32Array(N),
+      PERa = new Float32Array(N), SHDa = new Float32Array(N), VZa = new Float32Array(N);
+const order = Array.from({ length: N }, (_, i) => i);
+
+function project(cA, sA) {
+  for (let i = 0; i < N; i++) {
+    const Y = py[i] * cT - pz[i] * sT;
+    const Z = py[i] * sT + pz[i] * cT;
+    const per = CAM / (Z + CAM);
+    PERa[i] = per; VZa[i] = Z;
+    SXa[i] = cx + px[i] * unit * per;
+    SYa[i] = cy - Y * unit * per;
+    const nxr = nx[i] * cA + nz[i] * sA;
+    const nzr = nz[i] * cA - nx[i] * sA;
+    let d = nxr * Lx + ny[i] * Ly + nzr * Lz; if (d < 0) d = 0;
+    let sp = nxr * Hx + ny[i] * Hy + nzr * Hz;
+    sp = sp > 0 ? Math.pow(sp, 22) * 0.55 : 0;
+    SHDa[i] = bright[i] * (0.30 + 0.75 * d) + sp;
+  }
+  order.sort((a, b) => VZa[b] - VZa[a]);
+}
+
+/* ---------- simulation ---------- */
+function startOrbit() {
+  orbitOn = true; orbitT = 0;
+  let tries = 0;
+  while (orbList.length < K_ORBIT && tries < 4000 && orbList.length < MAXORB) {
+    tries++;
+    const i = (Math.random() * N) | 0;
+    if (isOrb[i]) continue;
+    isOrb[i] = 1;
+    orbR[i] = 2.05 + Math.random() * 0.85;
+    orbSp[i] = 0.55 + Math.random() * 0.6;
+    orbPh[i] = Math.atan2(pz[i], px[i]);
+    orbY0[i] = -0.15 + Math.random() * 1.0;
+    const slot = orbList.length;
+    orbSlot[i] = slot; orbList.push(i);
+    trN[slot] = 0; trHead[slot] = 0;
+    const rr = Math.hypot(px[i], pz[i]) + 1e-5;
+    vx[i] += px[i] / rr * 0.9; vz[i] += pz[i] / rr * 0.9; vy[i] += 0.25;
+  }
+}
+
+function step(dt) {
+  time += dt;
+  const tSpeed = interacting ? 0.14 : 0.85;
+  speed += (tSpeed - speed) * Math.min(1, dt * 2.6);
+  angle += speed * dt;
+  if (interacting) {
+    actT += dt;
+    if (orbitOn) orbitT += dt;
+  }
+  if (interacting && !orbitOn && actT >= ORBIT_START && orbList.length === 0) startOrbit();
+
+  const cA = Math.cos(angle), sA = Math.sin(angle);
+  let sf = 0;
+  for (let i = 0; i < N; i++) {
+    let fT = 0;
+    if (isOrb[i] && orbitOn) fT = 1;
+    else if (interacting && actT > delay[i] * 0.45 && actT < REFORM_START + delay[i] * 0.8) fT = 1;
+
+    free[i] += (fT - free[i]) * Math.min(1, dt * 3.0);
+    const f = free[i];
+    sf += f;
+
+    // release impulse, once per particle per scatter
+    if (fT > 0 && imp[i] === 0 && f > 0.02) {
+      imp[i] = 1;
+      const rr = Math.hypot(px[i], pz[i]) + 1e-5;
+      const ux = px[i] / rr, uz = pz[i] / rr;
+      const out = 0.5 + Math.random() * 0.8;
+      vx[i] += ux * out - uz * 0.45;
+      vz[i] += uz * out + ux * 0.45;
+      vy[i] += 0.35 + Math.random() * 0.75;
+    }
+    if (!interacting) imp[i] = 0;
+
+    // spring target
+    let gx, gy, gz, K;
+    if (isOrb[i] && orbitOn) {
+      const a = orbPh[i] + orbSp[i] * orbitT;
+      gx = orbR[i] * Math.cos(a); gz = orbR[i] * Math.sin(a);
+      gy = orbY0[i] + 0.12 * Math.sin(time * 1.2 + phase[i]);
+      K = 10;
+    } else {
+      gx = hx[i] * cA + hz[i] * sA;
+      gz = hz[i] * cA - hx[i] * sA;
+      gy = hy[i];
+      K = 34 * (1 - f) * (1 - f);
+    }
+    vx[i] += (gx - px[i]) * K * dt;
+    vy[i] += (gy - py[i]) * K * dt;
+    vz[i] += (gz - pz[i]) * K * dt;
+
+    if (f > 0.03) {
+      const dr = Math.exp(-dt * (1.3 + 5.2 * (1 - f)));
+      vx[i] *= dr; vy[i] *= dr; vz[i] *= dr;
+      if (!isOrb[i]) {
+        vy[i] += 0.38 * f * dt; // ember buoyancy
+        if (interacting && actT > 0.5 && actT < REFORM_START + 0.5) {
+          const env = Math.max(0, Math.min(1, (actT - 0.5) / 0.7) *
+                                  Math.min(1, (REFORM_START + 0.5 - actT) / 0.7));
+          const rr = Math.hypot(px[i], pz[i]) + 1e-5;
+          const sw = 2.4 * env;
+          vx[i] += (-pz[i] / rr) * sw * dt;
+          vz[i] += ( px[i] / rr) * sw * dt;
+          const rp = (1.7 - rr) * 0.45;
+          vx[i] += px[i] / rr * rp * dt;
+          vz[i] += pz[i] / rr * rp * dt;
+        }
+        vx[i] += Math.sin(time * 1.8 + phase[i]) * 0.30 * dt;
+        vz[i] += Math.cos(time * 1.4 + phase[i] * 1.7) * 0.30 * dt;
+        if (py[i] > 2.0) vy[i] -= (py[i] - 2.0) * 3 * dt;
+        if (py[i] < -1.25) vy[i] += (-1.25 - py[i]) * 3 * dt;
+        const rr2 = Math.hypot(px[i], pz[i]);
+        if (rr2 > 3.1) {
+          const g = (rr2 - 3.1) * 2.5 / rr2;
+          vx[i] -= px[i] * g * dt; vz[i] -= pz[i] * g * dt;
+        }
+      }
+      px[i] += vx[i] * dt; py[i] += vy[i] * dt; pz[i] += vz[i] * dt;
+    } else if (fT === 0 && !isOrb[i] && f < 0.12) {
+      px[i] = gx; py[i] = gy; pz[i] = gz;
+      vx[i] = 0; vy[i] = 0; vz[i] = 0;
+    } else {
+      px[i] += vx[i] * dt; py[i] += vy[i] * dt; pz[i] += vz[i] * dt;
+    }
+
+    if (isOrb[i] && !orbitOn && f < 0.02) { isOrb[i] = 0; orbSlot[i] = -1; }
+  }
+  for (let s = orbList.length - 1; s >= 0; s--)
+    if (!isOrb[orbList[s]]) orbList.splice(s, 1);
+
+  // dust drift
+  for (let i = 0; i < ND; i++) {
+    dY[i] += dV[i] * dt;
+    dX[i] += Math.sin(time * 0.3 + i) * 0.02 * dt;
+    if (dY[i] > 2.6) { dY[i] = -2.2; dX[i] = Math.random() * 8 - 4; }
+  }
+  sumFree = sf; solidity = 1 - sf / N;
+}
+
+/* ---------- render ---------- */
+function drawFrame() {
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  const ember = 1 - solidity;
+
+  // ambient halo behind the hat
+  let g = ctx.createRadialGradient(cx, cy - unit * 0.15, unit * 0.1, cx, cy - unit * 0.15, unit * 3.4);
+  g.addColorStop(0, `rgba(214,56,40,${(0.05 + 0.10 * ember).toFixed(3)})`);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+  // dust
+  if (!mq.matches) {
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < ND; i++) {
+      const Y = dY[i] * cT - dZ[i] * sT;
+      const Z = dY[i] * sT + dZ[i] * cT;
+      const per = CAM / (Z + CAM);
+      const sx = cx + dX[i] * unit * per, sy = cy - Y * unit * per;
+      const d = dS[i] * unit * 0.05 * per;
+      ctx.globalAlpha = dA[i];
+      ctx.drawImage(glowEmber, sx - d / 2, sy - d / 2, d, d);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  // soft ground shadow
+  const shY = cy + unit * 0.98;
+  const shAlpha = 0.42 * solidity + 0.04;
+  const sg = ctx.createRadialGradient(cx, shY, 0, cx, shY, unit * 1.75);
+  sg.addColorStop(0, `rgba(0,0,0,${shAlpha.toFixed(3)})`);
+  sg.addColorStop(0.55, `rgba(0,0,0,${(shAlpha * 0.45).toFixed(3)})`);
+  sg.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.save();
+  ctx.translate(cx, shY); ctx.scale(1, 0.30); ctx.translate(-cx, -shY);
+  ctx.fillStyle = sg;
+  ctx.fillRect(cx - unit * 1.8, shY - unit * 1.8, unit * 3.6, unit * 3.6);
+  ctx.restore();
+
+  // solid pass (painter's order, far to near)
+  ctx.globalCompositeOperation = 'source-over';
+  for (let k = 0; k < N; k++) {
+    const i = order[k];
+    const f = free[i];
+    if (f >= 0.98) continue;
+    let bi = (SHDa[i] / 1.35 * (PAL - 1)) | 0;
+    if (bi > PAL - 1) bi = PAL - 1; if (bi < 0) bi = 0;
+    const per = PERa[i];
+    const d = psize[i] * per * unit * 0.05 * (1 + f * 0.5);
+    const dz = Math.min(1.15, Math.max(0.45, 1.1 - VZa[i] * 0.16));
+    ctx.globalAlpha = Math.min(1, (1 - f) * 0.95 * dz + 0.05);
+    ctx.drawImage(pal[bi], SXa[i] - d / 2, SYa[i] - d / 2, d, d);
+  }
+
+  // ember glow pass
+  ctx.globalCompositeOperation = 'lighter';
+  for (let k = 0; k < N; k++) {
+    const i = order[k];
+    const f = free[i];
+    if (f <= 0.02 || isOrb[i]) continue;
+    const fl = 0.72 + 0.28 * Math.sin(time * 6 + phase[i]);
+    const d = psize[i] * PERa[i] * unit * 0.085 * (0.8 + 0.6 * f) * (0.8 + 0.4 * fl);
+    ctx.globalAlpha = Math.min(0.8, f * fl * 0.45);
+    ctx.drawImage(glowEmber, SXa[i] - d / 2, SYa[i] - d / 2, d, d);
+  }
+
+  // orbiters: faint trails + bright cores
+  ctx.lineWidth = 1;
+  for (let s = 0; s < orbList.length; s++) {
+    const i = orbList[s], slot = orbSlot[i];
+    if (slot < 0) continue;
+    const head = (trHead[slot] + 1) % TRAIL;
+    trHead[slot] = head;
+    trX[slot * TRAIL + head] = SXa[i];
+    trY[slot * TRAIL + head] = SYa[i];
+    if (trN[slot] < TRAIL) trN[slot]++;
+    for (let k = trN[slot] - 1; k > 0; k--) {
+      const a1 = (head - k + TRAIL * 2) % TRAIL;
+      const a2 = (head - k + 1 + TRAIL * 2) % TRAIL;
+      const tA = 1 - k / trN[slot];
+      ctx.strokeStyle = `rgba(255,180,110,${(0.26 * tA * tA).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.moveTo(trX[slot * TRAIL + a1], trY[slot * TRAIL + a1]);
+      ctx.lineTo(trX[slot * TRAIL + a2], trY[slot * TRAIL + a2]);
+      ctx.stroke();
+    }
+    const d = psize[i] * PERa[i] * unit * 0.18;
+    ctx.globalAlpha = 0.85;
+    ctx.drawImage(glowEmber, SXa[i] - d / 2, SYa[i] - d / 2, d, d);
+  }
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+/* ---------- loops ---------- */
+function frame(now) {
+  raf = requestAnimationFrame(frame);
+  let dt = (now - last) / 1000; last = now;
+  if (!(dt > 0) || dt > 0.05) dt = 0.016;
+  step(dt);
+  project(Math.cos(angle), Math.sin(angle));
+  drawFrame();
+}
+function resetSolid() {
+  interacting = false; orbitOn = false; actT = 0;
+  orbList.length = 0;
+  for (let i = 0; i < N; i++) {
+    free[i] = 0; imp[i] = 0; isOrb[i] = 0; orbSlot[i] = -1;
+    px[i] = hx[i]; py[i] = hy[i]; pz[i] = hz[i];
+    vx[i] = vy[i] = vz[i] = 0;
+  }
+  solidity = 1; sumFree = 0;
+}
+function drawStatic() {
+  resetSolid();
+  angle = 0.85; time = 0;
+  project(Math.cos(angle), Math.sin(angle));
+  drawFrame();
+}
+function start() {
+  if (mq.matches) { drawStatic(); return; }
+  if (raf) return;
+  last = performance.now();
+  raf = requestAnimationFrame(frame);
+}
+function stop() {
+  if (raf) cancelAnimationFrame(raf);
+  raf = 0;
+}
+function onMotionPref() {
+  if (mq.matches) { stop(); deactivate(); drawStatic(); subline.textContent = 'reduced motion — the hat rests'; }
+  else { subline.textContent = 'hover or tap — it scatters, swirls, and returns'; start(); }
+}
+if (mq.addEventListener) mq.addEventListener('change', onMotionPref);
+else if (mq.addListener) mq.addListener(onMotionPref);
+
+/* ---------- interaction ---------- */
+let autoT = 0;
+function activate() {
+  if (mq.matches || interacting) return;
+  interacting = true; actT = 0;
+}
+function deactivate() {
+  interacting = false; orbitOn = false;
+  clearTimeout(autoT);
+}
+hero.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') activate(); });
+hero.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') deactivate(); });
+hero.addEventListener('pointerdown', e => {
+  if (mq.matches) return;
+  if (interacting) return;
+  activate();
+  clearTimeout(autoT);
+  autoT = setTimeout(deactivate, 9500);
+  e.preventDefault();
+});
+hero.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    if (mq.matches) return;
+    if (interacting) { deactivate(); return; }
+    activate();
+    clearTimeout(autoT);
+    autoT = setTimeout(deactivate, 9500);
+  }
+});
+
+/* ---------- go ---------- */
+resize();
+onMotionPref();
+})();
+</script>
+</body>
+</html>
