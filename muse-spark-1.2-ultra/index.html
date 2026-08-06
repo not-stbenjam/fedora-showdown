@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Fedora — Ember</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#050507}
+  body{
+    font-family: ui-sans-system, system-ui, -apple-system, "SF Pro Display", Segoe UI, Inter, Roboto, Helvetica, Arial, sans-serif;
+    color:#e9e9ee;
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+    -moz-osx-font-smoothing:grayscale;
+  }
+  .hero{
+    position:relative;
+    width:100%;
+    height:100dvh;
+    min-height:560px;
+    overflow:hidden;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:
+      radial-gradient(1100px 680px at 50% -8%, rgba(255,32,32,0.08), transparent 62%),
+      radial-gradient(900px 700px at 50% 118%, rgba(200,0,0,0.055), transparent 62%),
+      radial-gradient(1200px 1200px at 50% 50%, #0e0e13 0%, #0a0a0f 38%, #07070a 68%, #050507 100%);
+    isolation:isolate;
+  }
+  #scene{
+    position:absolute;
+    inset:0;
+    width:100%;
+    height:100%;
+    display:block;
+    z-index:1;
+  }
+  .hero::before{
+    content:"";
+    position:absolute;
+    inset:0;
+    z-index:0;
+    pointer-events:none;
+    opacity:0.55;
+    background:
+      radial-gradient(1200px 600px at 50% 50%, transparent 45%, rgba(0,0,0,0.55) 92%),
+      linear-gradient(180deg, rgba(0,0,0,0.18), transparent 18%, transparent 82%, rgba(0,0,0,0.42));
+  }
+  .glow{
+    position:absolute;
+    left:50%;
+    top:50%;
+    width:min(78vw, 780px);
+    height:min(78vw, 780px);
+    transform:translate(-50%, -46%);
+    pointer-events:none;
+    z-index:1;
+    opacity:0.9;
+    background:
+      radial-gradient(circle at 50% 50%, rgba(255,18,18,0.10) 0%, rgba(255,18,18,0.06) 22%, transparent 62%),
+      radial-gradient(ellipse 70% 42% at 50% 92%, rgba(0,0,0,0.55) 0%, transparent 72%);
+    filter:blur(18px);
+  }
+  .caption-wrap{
+    position:absolute;
+    left:50%;
+    bottom:clamp(22px, 5.2vh, 56px);
+    transform:translateX(-50%);
+    z-index:3;
+    text-align:center;
+    pointer-events:none;
+    width:min(92vw, 560px);
+    padding:0 12px;
+  }
+  .eyebrow{
+    font-size:0.64rem;
+    font-weight:600;
+    letter-spacing:0.32em;
+    text-transform:uppercase;
+    color:#9f9fa8;
+    opacity:0.95;
+  }
+  .title{
+    margin:8px 0 0;
+    font-size:clamp(1.05rem, 2.8vw, 1.55rem);
+    font-weight:650;
+    letter-spacing:-0.03em;
+    line-height:1;
+    color:#f5f5f7;
+    text-shadow:0 2px 18px rgba(0,0,0,0.55);
+  }
+  .title span{
+    font-weight:400;
+    color:#c8c8d0;
+    letter-spacing:-0.02em;
+  }
+  .caption{
+    margin:14px 0 0;
+    font-size:0.74rem;
+    font-weight:600;
+    letter-spacing:0.2em;
+    text-transform:uppercase;
+    color:#c9c9d2;
+    opacity:0.92;
+    line-height:1.3;
+  }
+  .hint{
+    margin:7px 0 0;
+    font-size:0.73rem;
+    font-weight:450;
+    letter-spacing:0.02em;
+    color:#9a9da6;
+    opacity:0.72;
+  }
+  .hint em{
+    font-style:normal;
+    color:#b8bcc6;
+    border-bottom:1px dotted rgba(255,255,255,0.18);
+    padding-bottom:1px;
+  }
+  .stage-hit{
+    position:absolute;
+    inset:0;
+    z-index:2;
+    cursor:pointer;
+  }
+  .hero:focus{outline:none}
+  .hero:focus-visible .caption{
+    color:#fff;
+    text-shadow:0 0 10px rgba(255,40,40,0.45);
+  }
+  @media (max-width:600px){
+    .hero{min-height:520px}
+    .caption{font-size:0.68rem;letter-spacing:0.16em}
+    .hint{font-size:0.7rem}
+    .glow{width:92vw;height:92vw}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .hint::after{
+      content:" · motion reduced";
+      opacity:0.6;
+    }
+  }
+</style>
+</head>
+<body>
+<main class="hero" id="stage" tabindex="0" aria-label="Red fedora spinning. Hover or tap to disperse into embers.">
+  <canvas id="scene" aria-hidden="true"></canvas>
+  <div class="glow" aria-hidden="true"></div>
+  <div class="stage-hit" id="hit" aria-hidden="true"></div>
+  <div class="caption-wrap">
+    <div class="eyebrow">Red Hat</div>
+    <h1 class="title">Fedora <span>— ember edition</span></h1>
+    <p class="caption">Hover or tap to disperse — embers swirl and return</p>
+    <p class="hint">A few embers keep orbiting, trailing light</p>
+  </div>
+</main>
+<script>
+(() => {
+  const canvas = document.getElementById('scene');
+  const ctx = canvas.getContext('2d', { alpha: true });
+  const stage = document.getElementById('stage');
+  const hit = document.getElementById('hit');
+
+  const TAU = Math.PI * 2;
+  const isReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  let w = 0, h = 0, cx = 0, cy = 0, zoom = 300;
+  let dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const perspective = 2.24;
+  const pitch = 0.20;
+
+  const COUNT = 3400;
+  const particles = [];
+  const lightDir = normalize({x:0.48, y:0.88, z:0.42});
+
+  let rotationY = 0.32;
+  let rotSpeed = 0.42;
+  let lastTime = performance.now();
+  let state = 'idle';
+  let t0 = 0;
+  const TOTAL = 3180;
+  let orbitersEnabled = false;
+  let hoverArmed = true;
+
+  function normalize(v){
+    const l = Math.hypot(v.x, v.y, v.z) || 1;
+    return {x:v.x/l, y:v.y/l, z:v.z/l};
+  }
+  function lerp(a,b,t){ return a + (b-a)*t; }
+  function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
+  function easeInOutCubic(t){ return t<0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2,3)/2; }
+  function easeInQuad(t){ return t*t; }
+
+  // hat geometry
+  function generate(){
+    const crownH = 0.86;
+    const bottomR = 0.62;
+    const topR = 0.525;
+    const bandY0 = 0.11;
+    const bandH = 0.135;
+    const brimInner = 0.625;
+    const brimOuter = 1.165;
+
+    const nCrownSide = Math.floor(COUNT * 0.38);
+    const nCrownTop  = Math.floor(COUNT * 0.28);
+    const nBrim      = Math.floor(COUNT * 0.26);
+    const nBand      = COUNT - nCrownSide - nCrownTop - nBrim;
+
+    const frontTheta = Math.PI * 0.5;
+
+    function addCrownSide(){
+      for(let i=0;i<nCrownSide;i++){
+        const theta = Math.random()*TAU;
+        const y = Math.random()*crownH;
+        const t = y / crownH;
+        let radius = lerp(bottomR, topR, t);
+        let dTheta = Math.abs(((theta - frontTheta + Math.PI*3) % TAU) - Math.PI);
+        dTheta = Math.min(dTheta, TAU-dTheta);
+        const pinch = Math.exp(-(dTheta*dTheta)/0.32) * Math.max(0, (t-0.52)/0.48) * 0.135;
+        radius *= (1 - pinch);
+        // subtle crease narrowing at front center seam
+        const x = radius * Math.cos(theta) + (Math.random()-0.5)*0.012;
+        const z = radius * Math.sin(theta) + (Math.random()-0.5)*0.012;
+        const yPos = y + (Math.random()-0.5)*0.01;
+        let nx = Math.cos(theta), nz = Math.sin(theta), ny = 0.08 * (t-0.5);
+        const nl = Math.hypot(nx,ny,nz)||1; nx/=nl; ny/=nl; nz/=nl;
+        const r = 214 + Math.random()*34;
+        const g = 4 + Math.random()*10;
+        const b = 10 + Math.random()*8;
+        particles.push(makeParticle(x, yPos, z, nx, ny, nz, r,g,b));
+      }
+    }
+    function addCrownTop(){
+      for(let i=0;i<nCrownTop;i++){
+        const ang = Math.random()*TAU;
+        const rad = Math.sqrt(Math.random()) * topR * (0.96 + Math.random()*0.06);
+        let x = rad * Math.cos(ang);
+        let z = rad * Math.sin(ang);
+        // dome
+        const dome = 0.205 * Math.pow(Math.max(0, 1 - Math.pow(rad/topR,2)), 0.62);
+        let y = crownH + dome;
+        // central crease valley along front-back axis (x=0)
+        const valley = 0.125 * Math.exp(-(x*x)/0.032) * (1 - 0.28*(rad/topR)) * (0.9 + 0.15*Math.cos(ang*2));
+        y -= valley;
+        // pinch dip at front top edge: lower front
+        const frontFactor = Math.max(0, Math.sin(ang)); // front positive z
+        y -= 0.03 * frontFactor * Math.pow(rad/topR, 1.2);
+        // jitter
+        x += (Math.random()-0.5)*0.01;
+        z += (Math.random()-0.5)*0.01;
+        // normal approx
+        let nx = -0.55 * (x/topR) * (dome>0.02?1:0);
+        let nz = -0.55 * (z/topR) * (dome>0.02?1:0);
+        let ny = 1;
+        // valley tilts normal slightly
+        nx += -0.22 * (-2*x/0.032)* valley;
+        const nl = Math.hypot(nx,ny,nz)||1; nx/=nl; ny/=nl; nz/=nl;
+        const r = 232 + Math.random()*23;
+        const g = 10 + Math.random()*12;
+        const b = 12 + Math.random()*8;
+        particles.push(makeParticle(x,y,z,nx,ny,nz,r,g,b));
+      }
+    }
+    function addBrim(){
+      for(let i=0;i<nBrim;i++){
+        const theta = Math.random()*TAU;
+        const radInner2 = brimInner*brimInner;
+        const radOuter2 = brimOuter*brimOuter;
+        const rr = Math.sqrt(Math.random()*(radOuter2 - radInner2) + radInner2);
+        // front elongation: front (sin=1) longer
+        const frontScale = 1 + 0.065 * Math.max(0, Math.sin(theta)) * (rr - brimInner)/(brimOuter-brimInner);
+        let x = rr * Math.cos(theta);
+        let z = rr * Math.sin(theta) * frontScale;
+        const t = (rr - brimInner)/(brimOuter - brimInner);
+        const wave = 0.042 * Math.sin(theta*2 + 0.2) * t;
+        const downturn = -0.075 * t*t - 0.025 * Math.sin(theta) * t;
+        const y = -0.018 + wave + downturn + (Math.random()-0.5)*0.012;
+        let nx = 0, ny = 1, nz = 0;
+        // slight tilt at edge
+        if(t>0.7){
+          nx = Math.cos(theta)*0.12;
+          nz = Math.sin(theta)*0.12;
+          ny = 0.98;
+          const nl=Math.hypot(nx,ny,nz)||1; nx/=nl; ny/=nl; nz/=nl;
+        }
+        // color: brim slightly darker underside
+        const isUnderside = (Math.random()<0.12);
+        let r,g,b;
+        if(isUnderside){ r=118+Math.random()*18; g=2; b=4; }
+        else { r=192+Math.random()*22; g=0+Math.random()*5; b=3+Math.random()*5; }
+        particles.push(makeParticle(x,y,z,nx,ny,nz,r,g,b));
+      }
+    }
+    function addBand(){
+      for(let i=0;i<nBand;i++){
+        const theta = Math.random()*TAU;
+        const y = bandY0 + Math.random()*bandH;
+        const t = (y)/0.86;
+        let radius = lerp(bottomR, topR, t) + 0.016 + Math.random()*0.009;
+        let dTheta = Math.abs(((theta - frontTheta + Math.PI*3) % TAU) - Math.PI);
+        dTheta = Math.min(dTheta, TAU-dTheta);
+        radius *= (1 - 0.08 * Math.exp(-(dTheta*dTheta)/0.36) * Math.max(0,(t-0.5)/0.5));
+        const x = radius * Math.cos(theta) + (Math.random()-0.5)*0.008;
+        const z = radius * Math.sin(theta) + (Math.random()-0.5)*0.008;
+        const yPos = y + (Math.random()-0.5)*0.008;
+        let nx=Math.cos(theta), nz=Math.sin(theta), ny=0;
+        const nl=Math.hypot(nx,ny,nz)||1; nx/=nl; ny/=nl; nz/=nl;
+        const r= 13 + Math.random()*10;
+        const g= 11 + Math.random()*8;
+        const b= 12 + Math.random()*9;
+        particles.push(makeParticle(x,yPos,z,nx,ny,nz,r,g,b));
+      }
+    }
+
+    function makeParticle(x,y,z,nx,ny,nz,r,g,b){
+      const p = {
+        ox:x, oy:y, oz:z,
+        nx, ny, nz,
+        baseR:r, baseG:g, baseB:b,
+        baseSize: 0.0110 + Math.random()*0.0058,
+        phase: Math.random()*TAU,
+        swirlSpeed: (0.45 + Math.random()*0.95) * (Math.random()<0.5?1:-1),
+        startX:x, startY:y, startZ:z,
+        scatterX:0, scatterY:0, scatterZ:0,
+        emberR:0, emberG:0, emberB:0,
+        isOrbiter:false,
+        orbitRadius:0, orbitSpeed:0, orbitPhase:0, orbitY:0,
+        trail:[],
+        _glow:0,
+        sx:0, sy:0, sizeScreen:0, depth:0, alpha:1, colorStr:'',
+        glowColor:''
+      };
+      // ember palette per particle
+      const pal = Math.random();
+      if(pal < 0.38){ p.emberR=255; p.emberG=58; p.emberB=22; }
+      else if(pal < 0.72){ p.emberR=255; p.emberG=138; p.emberB=12; }
+      else { p.emberR=255; p.emberG=210; p.emberB=64; }
+      return p;
+    }
+
+    addCrownSide();
+    addCrownTop();
+    addBrim();
+    addBand();
+
+    // compute scatter targets
+    for(const p of particles){
+      const cx0=0, cy0=0.36, cz0=0;
+      let dx = p.ox - cx0, dy = p.oy - cy0, dz = p.oz - cz0;
+      let len = Math.hypot(dx,dy,dz) || 1;
+      dx/=len; dy/=len; dz/=len;
+      const dist = 0.92 + Math.random()*1.55 + Math.pow(Math.random(),2.2)*0.85;
+      const j = 0.42;
+      const jx = (Math.random()-0.5)*j;
+      const jy = (Math.random()-0.5)*j;
+      const jz = (Math.random()-0.5)*j;
+      p.scatterX = p.ox + dx*dist + jx;
+      p.scatterY = p.oy + dy*dist + jy + Math.random()*0.14;
+      p.scatterZ = p.oz + dz*dist + jz;
+      // occasional far embers
+      if(Math.random()<0.08){
+        p.scatterX *= 1.22;
+        p.scatterZ *= 1.22;
+        p.scatterY += 0.22;
+      }
+    }
+  }
+
+  function resize(){
+    const rect = stage.getBoundingClientRect();
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    w = rect.width;
+    h = rect.height;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    cx = w * 0.5;
+    cy = h * 0.5 - h*0.015;
+    const base = Math.min(w,h);
+    // responsive zoom: smaller on phones
+    const k = w < 560 ? 0.355 : w < 900 ? 0.38 : 0.395;
+    zoom = base * k;
+    // slight lift on tall screens
+    if(h > 820) cy -= 6;
+  }
+
+  function selectOrbiters(){
+    for(const p of particles) { p.isOrbiter=false; p.trail.length=0; }
+    const n = 13;
+    const picked = new Set();
+    while(picked.size < n){
+      picked.add(Math.floor(Math.random()*particles.length));
+    }
+    for(const idx of picked){
+      const p = particles[idx];
+      p.isOrbiter = true;
+      p.orbitRadius = 1.32 + Math.random()*0.62;
+      if(Math.random()<0.18) p.orbitRadius += 0.42; // a few wider
+      p.orbitSpeed = (0.32 + Math.random()*0.72) * (Math.random()<0.5?1:-1) * 0.95;
+      p.orbitPhase = Math.random()*TAU;
+      p.orbitY = 0.18 + (Math.random()-0.5)*0.96;
+      p.trail = [];
+      // boost size for orbiters slightly so they read as embers
+      p.baseSize = 0.0125 + Math.random()*0.0045;
+    }
+  }
+
+  function trigger(){
+    if(isReduced) return;
+    if(state !== 'idle') return;
+    state = 'active';
+    t0 = performance.now();
+    hoverArmed = false;
+    setTimeout(()=> hoverArmed=true, 420);
+    // capture start positions
+    const now = t0;
+    for(const p of particles){
+      if(orbitersEnabled && p.isOrbiter){
+        const ang = now*0.001 * p.orbitSpeed + p.orbitPhase;
+        p.startX = Math.cos(ang) * p.orbitRadius;
+        p.startY = p.orbitY + Math.sin(now*0.00062 + p.orbitPhase)*0.16;
+        p.startZ = Math.sin(ang) * p.orbitRadius;
+      } else {
+        p.startX = p.ox;
+        p.startY = p.oy;
+        p.startZ = p.oz;
+      }
+    }
+    orbitersEnabled = false;
+  }
+
+  // events
+  hit.addEventListener('pointerenter', () => { if(hoverArmed) trigger(); });
+  hit.addEventListener('pointerdown', (e) => { e.preventDefault(); trigger(); });
+  hit.addEventListener('click', (e) => { e.preventDefault(); trigger(); });
+  stage.addEventListener('keydown', (e) => {
+    if(e.code==='Space' || e.code==='Enter'){ e.preventDefault(); trigger(); }
+  });
+  // also allow hover on whole hero for desktop
+  let hoverTimer = 0;
+  stage.addEventListener('mousemove', () => {
+    // if idle and mouse moves after a pause, gently trigger? only on enter handled above.
+  });
+  window.addEventListener('resize', resize);
+
+  // touch: also trigger on touchstart already via pointerdown
+
+  generate();
+  resize();
+
+  if(isReduced){
+    // static render once
+    rotationY = 0.42;
+    drawStatic();
+    // still allow subtle interaction: pulse on tap but not dissolve
+    hit.addEventListener('click', () => {
+      canvas.style.transition = 'filter 420ms ease';
+      canvas.style.filter = 'brightness(1.14) saturate(1.12)';
+      setTimeout(()=> canvas.style.filter='', 520);
+    });
+  } else {
+    requestAnimationFrame(loop);
+  }
+
+  function drawStatic(){
+    ctx.clearRect(0,0,w,h);
+    drawShadow(rotationY);
+    // project all particles with fixed rotation
+    const cosR = Math.cos(rotationY), sinR = Math.sin(rotationY);
+    const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
+    for(const p of particles){
+      const x1 = p.ox*cosR + p.oz*sinR;
+      const z1 = -p.ox*sinR + p.oz*cosR;
+      const y1 = p.oy;
+      const y2 = y1*cosP - z1*sinP;
+      const z2 = y1*sinP + z1*cosP;
+      const x2 = x1;
+      const scale = perspective / (perspective - z2);
+      p.sx = cx + x2*scale*zoom;
+      p.sy = cy - y2*scale*zoom;
+      p.depth = z2;
+      p.sizeScreen = p.baseSize * scale * zoom;
+      // lighting
+      const nx1 = p.nx*cosR + p.nz*sinR;
+      const nz1 = -p.nx*sinR + p.nz*cosR;
+      const ny1 = p.ny;
+      const ny2 = ny1*cosP - nz1*sinP;
+      const nz2 = ny1*sinP + nz1*cosP;
+      const nx2 = nx1;
+      const d = Math.max(0, nx2*lightDir.x + ny2*lightDir.y + nz2*lightDir.z);
+      const bright = 0.54 + 0.46*d;
+      const rr = Math.min(255, Math.round(p.baseR * bright));
+      const gg = Math.min(255, Math.round(p.baseG * bright));
+      const bb = Math.min(255, Math.round(p.baseB * bright));
+      p.colorStr = `rgb(${rr} ${gg} ${bb})`;
+      p.alpha = 0.88 * (0.58 + 0.42 * Math.max(0, Math.min(1, (scale-0.55)/0.85)));
+    }
+    particles.sort((a,b)=> a.depth - b.depth);
+    for(const p of particles){
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = p.colorStr;
+      ctx.beginPath();
+      ctx.arc(p.sx, p.sy, Math.max(0.55, p.sizeScreen), 0, TAU);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function loop(now){
+    requestAnimationFrame(loop);
+    const dt = Math.min(0.034, (now - lastTime)/1000);
+    lastTime = now;
+
+    let progress = 0, phase = 'idle';
+    if(state === 'active'){
+      progress = Math.min(1, (now - t0)/TOTAL);
+      if(progress < 0.28) phase='disperse';
+      else if(progress < 0.63) phase='swirl';
+      else phase='reform';
+      if(progress >= 1){
+        state='idle';
+        orbitersEnabled = true;
+        selectOrbiters();
+        phase='idle';
+        progress=1;
+      }
+    }
+
+    // rotation speed control
+    let target = 0.42;
+    if(state==='active'){
+      if(phase==='disperse') target = lerp(0.42, 0.09, easeOutCubic(progress/0.28));
+      else if(phase==='swirl') target = 0.055;
+      else if(phase==='reform') {
+        const t = (progress-0.63)/0.37;
+        target = lerp(0.055, 0.42, easeInOutCubic(t));
+      }
+    }
+    // gentle lerp
+    rotSpeed += (target - rotSpeed) * (state==='active'? 0.07 : 0.05);
+    rotationY += rotSpeed * dt;
+
+    render(now, dt, progress, phase);
+  }
+
+  function drawShadow(rotY){
+    const cosR0 = Math.cos(rotY), sinR0 = Math.sin(rotY);
+    const cosP0 = Math.cos(pitch), sinP0 = Math.sin(pitch);
+    // ground center y = -0.14
+    const gy = -0.135;
+    const y2g = gy*cosP0;
+    const z2g = gy*sinP0;
+    const scaleG = perspective / (perspective - z2g);
+    const sgx = cx;
+    const sgy = cy - y2g*scaleG*zoom;
+
+    const sw = zoom * 2.42 * scaleG;
+    const sh = sw * 0.245;
+
+    // soft contact shadow
+    ctx.save();
+    ctx.globalAlpha = 0.95;
+    const grad = ctx.createRadialGradient(sgx, sgy, sw*0.02, sgx, sgy, sw*0.58);
+    grad.addColorStop(0, 'rgba(0,0,0,0.52)');
+    grad.addColorStop(0.22, 'rgba(0,0,0,0.28)');
+    grad.addColorStop(0.48, 'rgba(0,0,0,0.11)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.ellipse(sgx, sgy, sw*0.58, sh*0.92, 0, 0, TAU);
+    ctx.fill();
+    // tighter core shadow for depth
+    const grad2 = ctx.createRadialGradient(sgx, sgy, 0, sgx, sgy, sw*0.28);
+    grad2.addColorStop(0, 'rgba(0,0,0,0.30)');
+    grad2.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad2;
+    ctx.beginPath();
+    ctx.ellipse(sgx, sgy, sw*0.28, sh*0.62, 0, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+
+    // very subtle ground bounce light from hat (red)
+    ctx.save();
+    ctx.globalAlpha = 0.18;
+    const gradR = ctx.createRadialGradient(sgx, sgy, 0, sgx, sgy, sw*0.42);
+    gradR.addColorStop(0, 'rgba(255,28,28,0.14)');
+    gradR.addColorStop(1, 'rgba(255,28,28,0)');
+    ctx.fillStyle = gradR;
+    ctx.beginPath();
+    ctx.ellipse(sgx, sgy, sw*0.42, sh*0.7, 0, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function render(now, dt, progress, phase){
+    ctx.clearRect(0,0,w,h);
+    drawShadow(rotationY);
+
+    const cosR = Math.cos(rotationY), sinR = Math.sin(rotationY);
+    const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
+
+    // precompute glow strength for active
+    // for idle orbiters, need time-based glow
+
+    for(const p of particles){
+      let lx, ly, lz;
+      let glow = 0;
+
+      if(state === 'active'){
+        if(phase === 'disperse'){
+          const tRaw = progress / 0.28;
+          const t = easeOutCubic(Math.min(1,tRaw));
+          // scatter rotated slightly by t
+          const a = t * 1.9 * (p.swirlSpeed>0?1:-1);
+          const ca = Math.cos(a), sa = Math.sin(a);
+          const srx0 = p.scatterX*ca + p.scatterZ*sa;
+          const srz0 = -p.scatterX*sa + p.scatterZ*ca;
+          const sry0 = p.scatterY + t*0.18;
+          lx = lerp(p.startX, srx0, t) + Math.sin(t*9 + p.phase)*0.018*t;
+          ly = lerp(p.startY, sry0, t);
+          lz = lerp(p.startZ, srz0, t) + Math.cos(t*7 + p.phase)*0.012*t;
+          glow = lerp(0.15, 0.96, easeOutCubic(t));
+        } else if(phase === 'swirl'){
+          const t = (progress - 0.28)/0.35; // 0..1
+          const swirlT = (now - t0)/1000;
+          // rotate scatter around center with individual speed
+          const baseR = Math.hypot(p.scatterX, p.scatterZ);
+          const baseAng = Math.atan2(p.scatterZ, p.scatterX);
+          const ang = swirlT * p.swirlSpeed * 0.92 + p.phase;
+          const nr = baseR * (0.96 + 0.08*Math.sin(swirlT*0.9 + p.phase));
+          let srx = Math.cos(baseAng + ang*0.72) * nr;
+          let srz = Math.sin(baseAng + ang*0.72) * nr;
+          let sry = p.scatterY + Math.sin(swirlT*1.15 + p.phase)*0.20 + Math.cos(swirlT*0.7 + p.phase*1.3)*0.06;
+          // turbulence
+          srx += Math.cos(swirlT*1.9 + p.phase)*0.055;
+          srz += Math.sin(swirlT*2.05 + p.phase)*0.055;
+          // slight inward pull near end of swirl
+          const pull = easeInQuad(t) * 0.12;
+          srx *= (1 - pull*0.18);
+          srz *= (1 - pull*0.18);
+          lx = srx; ly = sry; lz = srz;
+          glow = 0.88 + 0.12*Math.sin(swirlT*3 + p.phase);
+          // fade a touch
+          glow *= (1 - t*0.08);
+        } else { // reform
+          const tRaw = (progress - 0.63)/0.37;
+          const t = easeInOutCubic(Math.min(1,tRaw));
+          const swirlT = (now - t0)/1000;
+          const baseR = Math.hypot(p.scatterX, p.scatterZ);
+          const baseAng = Math.atan2(p.scatterZ, p.scatterX);
+          const ang = swirlT * p.swirlSpeed * 0.92 + p.phase;
+          const nr = baseR * (0.96 + 0.08*Math.sin(swirlT*0.9 + p.phase));
+          let srx = Math.cos(baseAng + ang*0.72) * nr;
+          let srz = Math.sin(baseAng + ang*0.72) * nr;
+          let sry = p.scatterY + Math.sin(swirlT*1.15 + p.phase)*0.20 + Math.cos(swirlT*0.7 + p.phase*1.3)*0.06;
+          srx += Math.cos(swirlT*1.9 + p.phase)*0.055;
+          srz += Math.sin(swirlT*2.05 + p.phase)*0.055;
+          lx = lerp(srx, p.ox, t);
+          ly = lerp(sry, p.oy, t);
+          lz = lerp(srz, p.oz, t);
+          // subtle overshoot
+          const over = Math.sin(t*Math.PI)*0.035;
+          lx += (p.ox - srx)*over*0.15;
+          glow = lerp(0.88, 0.0, easeInOutCubic(t));
+        }
+        p._glow = glow;
+      } else {
+        // idle
+        if(orbitersEnabled && p.isOrbiter){
+          const ang = now*0.001 * p.orbitSpeed + p.orbitPhase;
+          lx = Math.cos(ang) * p.orbitRadius;
+          ly = p.orbitY + Math.sin(now*0.00058 + p.orbitPhase)*0.15 + Math.sin(now*0.00033 + p.phase)*0.06;
+          lz = Math.sin(ang) * p.orbitRadius;
+          glow = 0.38 + 0.22*Math.sin(now*0.0014 + p.phase);
+          p._glow = glow;
+        } else {
+          lx = p.ox; ly = p.oy; lz = p.oz;
+          p._glow = 0;
+        }
+      }
+
+      // apply hat rotation + pitch + perspective
+      const x1 = lx*cosR + lz*sinR;
+      const z1 = -lx*sinR + lz*cosR;
+      const y1 = ly;
+      const y2 = y1*cosP - z1*sinP;
+      const z2 = y1*sinP + z1*cosP;
+      const x2 = x1;
+      const scale = perspective / Math.max(0.32, (perspective - z2));
+      const sx = cx + x2*scale*zoom;
+      const sy = cy - y2*scale*zoom;
+
+      p.sx = sx; p.sy = sy; p.depth = z2; p._scale = scale;
+      p._lx = lx; p._ly = ly; p._lz = lz;
+      // size
+      let baseS = p.baseSize;
+      if(p._glow>0.02) baseS *= (1 + p._glow*0.42);
+      p.sizeScreen = baseS * scale * zoom;
+
+      // color & alpha
+      let rr, gg, bb, alpha;
+      const depthAlpha = 0.62 + 0.38 * Math.max(0, Math.min(1, (scale - 0.52)/0.85));
+      if(state === 'active'){
+        // lighting muted, ember mix
+        const g = p._glow;
+        // base hat color dimmed
+        const br = p.baseR, bgc = p.baseG, bbc = p.baseB;
+        let mr = lerp(br, p.emberR, g*0.72);
+        let mg = lerp(bgc, p.emberG, g*0.72);
+        let mb = lerp(bbc, p.emberB, g*0.72);
+        // add brightness when glowing
+        const bright = 1 + g*0.22;
+        mr = Math.min(255, mr*bright);
+        mg = Math.min(255, mg*bright);
+        mb = Math.min(255, mb*bright);
+        rr=mr; gg=mg; bb=mb;
+        alpha = depthAlpha * (0.82 + g*0.18);
+        // fade in at start, stay opaque
+        if(phase==='disperse'){
+          const t = progress/0.28;
+          alpha *= (0.65 + 0.35*easeOutCubic(t));
+        }
+        p.colorStr = `rgb(${Math.round(rr)} ${Math.round(gg)} ${Math.round(bb)})`;
+        p.glowColor = `rgb(${p.emberR} ${p.emberG} ${p.emberB})`;
+        p.alpha = alpha;
+      } else {
+        if(p.isOrbiter && orbitersEnabled){
+          // orbiters are ember-like
+          const g = p._glow;
+          let mr = lerp(210, p.emberR, 0.58 + g*0.2);
+          let mg = lerp(18, p.emberG, 0.58 + g*0.2);
+          let mb = lerp(18, p.emberB, 0.58 + g*0.2);
+          const bright = 1 + g*0.12;
+          mr=Math.min(255,mr*bright); mg=Math.min(255,mg*bright); mb=Math.min(255,mb*bright);
+          rr=mr; gg=mg; bb=mb;
+          p.colorStr = `rgb(${Math.round(rr)} ${Math.round(gg)} ${Math.round(bb)})`;
+          p.glowColor = `rgb(${p.emberR} ${p.emberG} ${p.emberB})`;
+          p.alpha = depthAlpha * (0.78 + g*0.22);
+        } else {
+          // normal hat lighting
+          const nx1 = p.nx*cosR + p.nz*sinR;
+          const nz1 = -p.nx*sinR + p.nz*cosR;
+          const ny1 = p.ny;
+          const ny2 = ny1*cosP - nz1*sinP;
+          const nz2 = ny1*sinP + nz1*cosP;
+          const nx2 = nx1;
+          const ndotl = Math.max(0, nx2*lightDir.x + ny2*lightDir.y + nz2*lightDir.z);
+          // soft specular
+          const halfX = lightDir.x, halfY = lightDir.y, halfZ = lightDir.z;
+          // quick specular approx: pow
+          const spec = Math.pow(Math.max(0, ny2*0.6 + nz2*0.35 + nx2*0.15), 22) * 0.32;
+          let bright = 0.56 + 0.46*ndotl + spec;
+          // band is darker base, don't overbrighten
+          const isBand = p.baseR < 30;
+          if(isBand) bright = 0.62 + 0.28*ndotl;
+          bright = Math.min(1.28, Math.max(0.52, bright));
+          rr = Math.min(255, Math.round(p.baseR * bright));
+          gg = Math.min(255, Math.round(p.baseG * bright));
+          bb = Math.min(255, Math.round(p.baseB * bright));
+          // brim underside a bit darker
+          p.colorStr = `rgb(${rr} ${gg} ${bb})`;
+          p.alpha = depthAlpha * 0.96;
+          p.glowColor = '';
+        }
+      }
+    }
+
+    // depth sort back to front
+    particles.sort((a,b)=> a.depth - b.depth);
+
+    // draw trails for orbiters first (so particles draw over)
+    if(orbitersEnabled && state==='idle'){
+      // update trails
+      for(const p of particles){
+        if(!p.isOrbiter) continue;
+        p.trail.push({x:p.sx, y:p.sy, s:p.sizeScreen, a:p.alpha, g:p._glow});
+        if(p.trail.length > 10) p.trail.shift();
+      }
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for(const p of particles){
+        if(!p.isOrbiter || p.trail.length<2) continue;
+        for(let i=0;i<p.trail.length-1;i++){
+          const pt = p.trail[i];
+          const q = i / (p.trail.length-1);
+          const alpha = pt.a * (0.02 + q*0.14) * (0.6 + pt.g*0.4);
+          if(alpha < 0.008) continue;
+          const rad = pt.s * (0.42 + q*0.52) * 0.85;
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = `rgba(${p.emberR}, ${p.emberG}, ${p.emberB}, ${alpha})`;
+          // use circle for each trail point
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, Math.max(0.7, rad*0.55), 0, TAU);
+          ctx.fill();
+          // also faint line segment to next point for continuity
+          if(i < p.trail.length-1){
+            const nxt = p.trail[i+1];
+            ctx.globalAlpha = alpha*0.32;
+            ctx.strokeStyle = `rgba(${p.emberR}, ${p.emberG}, ${Math.min(255,p.emberB+20)}, ${alpha*0.32})`;
+            ctx.lineWidth = Math.max(0.7, rad*0.45);
+            ctx.lineCap='round';
+            ctx.beginPath();
+            ctx.moveTo(pt.x, pt.y);
+            ctx.lineTo(nxt.x, nxt.y);
+            ctx.stroke();
+          }
+        }
+      }
+      ctx.restore();
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+    } else {
+      // clear trails when not idle
+      if(state==='active'){
+        for(const p of particles) if(p.isOrbiter) p.trail.length=0;
+      }
+    }
+
+    // draw particles
+    for(const p of particles){
+      const sx = p.sx, sy = p.sy;
+      const rad = p.sizeScreen;
+      if(rad < 0.45) continue;
+      // frustum cull
+      if(sx < -40 || sx > w+40 || sy < -40 || sy > h+40) continue;
+      // glow outer
+      if(p._glow > 0.18){
+        const innerA = p.alpha;
+        const glowA = innerA * p._glow * 0.18;
+        if(glowA > 0.015){
+          ctx.globalAlpha = glowA;
+          ctx.fillStyle = p.glowColor;
+          ctx.beginPath();
+          ctx.arc(sx, sy, rad*2.25, 0, TAU);
+          ctx.fill();
+          // second inner glow
+          ctx.globalAlpha = glowA * 0.55;
+          ctx.beginPath();
+          ctx.arc(sx, sy, rad*1.45, 0, TAU);
+          ctx.fill();
+        }
+        ctx.globalAlpha = innerA;
+        ctx.fillStyle = p.colorStr;
+        ctx.beginPath();
+        ctx.arc(sx, sy, Math.max(0.7, rad), 0, TAU);
+        ctx.fill();
+        // hot core for bright embers
+        if(p._glow > 0.65){
+          ctx.globalAlpha = innerA * (p._glow - 0.45) * 0.52;
+          ctx.fillStyle = 'rgba(255,255,255,0.92)';
+          ctx.beginPath();
+          ctx.arc(sx, sy, rad*0.42, 0, TAU);
+          ctx.fill();
+        }
+      } else {
+        ctx.globalAlpha = p.alpha;
+        ctx.fillStyle = p.colorStr;
+        ctx.beginPath();
+        ctx.arc(sx, sy, Math.max(0.7, rad), 0, TAU);
+        ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+})();
+</script>
+</body>
+</html>
