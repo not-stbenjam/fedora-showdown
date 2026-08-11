@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Red Hat Fedora — 3D Logo</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #08080d;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+
+  #scene-container {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background:
+      radial-gradient(ellipse 80% 60% at 50% 45%, #12121f 0%, #08080d 70%);
+  }
+
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+    touch-action: none;
+  }
+
+  #caption {
+    position: absolute;
+    bottom: clamp(28px, 6vh, 56px);
+    left: 50%;
+    transform: translateX(-50%);
+    text-align: center;
+    pointer-events: none;
+    transition: opacity 0.6s ease;
+  }
+
+  #caption .brand {
+    font-size: clamp(14px, 2.2vw, 26px);
+    font-weight: 700;
+    letter-spacing: 0.32em;
+    color: rgba(255, 255, 255, 0.82);
+    text-shadow: 0 0 30px rgba(180, 40, 40, 0.15);
+    margin-bottom: 6px;
+  }
+
+  #caption .tagline {
+    font-size: clamp(9px, 1.1vw, 13px);
+    font-weight: 400;
+    letter-spacing: 0.28em;
+    color: rgba(255, 255, 255, 0.3);
+    text-transform: uppercase;
+  }
+
+  #hint {
+    position: absolute;
+    bottom: clamp(72px, 12vh, 120px);
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: clamp(10px, 1.1vw, 13px);
+    letter-spacing: 0.18em;
+    color: rgba(255, 255, 255, 0.18);
+    pointer-events: none;
+    transition: opacity 1.2s ease;
+    white-space: nowrap;
+  }
+
+  #hint.hidden { opacity: 0; }
+</style>
+</head>
+<body>
+
+<div id="scene-container">
+  <canvas id="c"></canvas>
+  <div id="caption">
+    <div class="brand">RED HAT</div>
+    <div class="tagline">Fedora Project</div>
+  </div>
+  <div id="hint">hover or tap to interact</div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+/* ──────────────────────────────────────────────
+   Configuration
+   ────────────────────────────────────────────── */
+const RED       = 0xCC2222;
+const RED_DARK  = 0x8A1515;
+const RED_RIM   = 0xE83030;
+const BRIM_DROP = 0.04;
+const BRIM_CURL = 0.14;
+const HAT_SCALE = 1.0;
+
+const BURST_DUR   = 1.1;
+const SWIRL_DUR   = 2.6;
+const REFORM_DUR  = 1.9;
+const ORBIT_DUR   = 6.0;   // how long orbiting particles linger (then fade)
+
+const PARTICLE_COUNT = 4200;
+const CROWN_PARTICLE_RATIO = 0.58;
+
+const NORMAL_SPIN  = 0.12;  // rad/s
+const HOVER_SPIN   = 0.02;
+
+const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ──────────────────────────────────────────────
+   Renderer / Scene / Camera
+   ────────────────────────────────────────────── */
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({
+  canvas,
+  antialias: true,
+  alpha: false,
+  powerPreference: 'high-performance',
+});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x08080d);
+scene.fog = new THREE.Fog(0x08080d, 6, 14);
+
+const camera = new THREE.PerspectiveCamera(38, window.innerWidth / window.innerHeight, 0.1, 30);
+camera.position.set(0, 1.6, 5.2);
+camera.lookAt(0, 0.7, 0);
+
+/* ──────────────────────────────────────────────
+   Lighting
+   ────────────────────────────────────────────── */
+const ambient = new THREE.AmbientLight(0x223355, 0.35);
+scene.add(ambient);
+
+const keyLight = new THREE.DirectionalLight(0xffeedd, 2.2);
+keyLight.position.set(3.5, 5, 4);
+keyLight.castShadow = true;
+keyLight.shadow.mapSize.set(1024, 1024);
+keyLight.shadow.camera.near = 0.5;
+keyLight.shadow.camera.far = 15;
+keyLight.shadow.camera.left = -4;
+keyLight.shadow.camera.right = 4;
+keyLight.shadow.camera.top = 4;
+keyLight.shadow.camera.bottom = -4;
+keyLight.shadow.bias = -0.002;
+keyLight.shadow.radius = 4;
+scene.add(keyLight);
+
+const fillLight = new THREE.DirectionalLight(0x4488ff, 0.5);
+fillLight.position.set(-3, 1, -2);
+scene.add(fillLight);
+
+const rimLight = new THREE.DirectionalLight(0xff4422, 1.4);
+rimLight.position.set(-1, 2.5, -4);
+scene.add(rimLight);
+
+const topLight = new THREE.DirectionalLight(0xffffff, 0.3);
+topLight.position.set(0, 6, 0);
+scene.add(topLight);
+
+/* ──────────────────────────────────────────────
+   Ground / Shadow disc
+   ────────────────────────────────────────────── */
+function makeShadowTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 256;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+  g.addColorStop(0, 'rgba(0,0,0,0.55)');
+  g.addColorStop(0.35, 'rgba(0,0,0,0.30)');
+  g.addColorStop(0.7, 'rgba(0,0,0,0.08)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 256, 256);
+  const tex = new THREE.CanvasTexture(c);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+const shadowMat = new THREE.SpriteMaterial({
+  map: makeShadowTexture(),
+  transparent: true,
+  depthWrite: false,
+  opacity: 0.9,
+});
+const shadowSprite = new THREE.Sprite(shadowMat);
+shadowSprite.position.set(0, -0.02, 0);
+shadowSprite.scale.set(3.6, 3.6, 1);
+scene.add(shadowSprite);
+
+/* subtle ground plane to catch shadows */
+const groundGeo = new THREE.PlaneGeometry(12, 12);
+const groundMat = new THREE.ShadowMaterial({ opacity: 0.35, color: 0x000000 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -0.01;
+ground.receiveShadow = true;
+scene.add(ground);
+
+/* ──────────────────────────────────────────────
+   Hat geometry helpers
+   ────────────────────────────────────────────── */
+const crownProfile = [
+  new THREE.Vector2(1.000, 0.000),
+  new THREE.Vector2(0.995, 0.025),
+  new THREE.Vector2(0.980, 0.070),
+  new THREE.Vector2(0.955, 0.140),
+  new THREE.Vector2(0.915, 0.240),
+  new THREE.Vector2(0.865, 0.370),
+  new THREE.Vector2(0.805, 0.520),
+  new THREE.Vector2(0.745, 0.680),
+  new THREE.Vector2(0.690, 0.840),
+  new THREE.Vector2(0.645, 0.990),
+  new THREE.Vector2(0.610, 1.130),
+  new THREE.Vector2(0.585, 1.260),
+  new THREE.Vector2(0.568, 1.360),
+  new THREE.Vector2(0.555, 1.430),
+  new THREE.Vector2(0.545, 1.475),
+  new THREE.Vector2(0.540, 1.500),
+  new THREE.Vector2(0.545, 1.475),
+  new THREE.Vector2(0.555, 1.430),
+  new THREE.Vector2(0.568, 1.360),
+  new THREE.Vector2(0.585, 1.260),
+  new THREE.Vector2(0.610, 1.130),
+  new THREE.Vector2(0.645, 0.990),
+  new THREE.Vector2(0.690, 0.840),
+  new THREE.Vector2(0.745, 0.680),
+  new THREE.Vector2(0.805, 0.520),
+  new THREE.Vector2(0.865, 0.370),
+  new THREE.Vector2(0.915, 0.240),
+  new THREE.Vector2(0.955, 0.140),
+  new THREE.Vector2(0.980, 0.070),
+  new THREE.Vector2(0.995, 0.025),
+  new THREE.Vector2(1.000, 0.000),
+];
+
+function createCrown() {
+  const geo = new THREE.LatheGeometry(crownProfile, 48);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function createBrimGeometry(innerR, outerR, segs, rings) {
+  const pos = [];
+  const idx = [];
+  const uvs = [];
+
+  for (let j = 0; j <= rings; j++) {
+    const v = j / rings;
+    const r = innerR + (outerR - innerR) * v;
+    for (let i = 0; i <= segs; i++) {
+      const u = i / segs;
+      const theta = u * Math.PI * 2;
+      const x = r * Math.cos(theta);
+      const z = r * Math.sin(theta);
+      const droop = Math.sin(v * Math.PI) * BRIM_DROP;
+      const curl  = Math.pow(v, 2.5) * BRIM_CURL;
+      const y = -droop + curl;
+      pos.push(x, y, z);
+      uvs.push(u, v);
+    }
+  }
+
+  for (let j = 0; j < rings; j++) {
+    for (let i = 0; i < segs; i++) {
+      const a = j * (segs + 1) + i;
+      const b = a + 1;
+      const c = (j + 1) * (segs + 1) + i;
+      const d = c + 1;
+      idx.push(a, c, b);
+      idx.push(b, c, d);
+    }
+  }
+
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  g.computeVertexNormals();
+  return g;
+}
+
+function createHatband() {
+  const geo = new THREE.TorusGeometry(1.005, 0.055, 10, 52);
+  geo.rotateX(Math.PI / 2);
+  geo.translate(0, 0.015, 0);
+  return geo;
+}
+
+/* ──────────────────────────────────────────────
+   Build the hat group
+   ────────────────────────────────────────────── */
+const hatGroup = new THREE.Group();
+scene.add(hatGroup);
+
+const crownGeo = createCrown();
+const brimGeo  = createBrimGeometry(0.98, 2.25, 64, 14);
+const bandGeo  = createHatband();
+
+const hatMat = new THREE.MeshStandardMaterial({
+  color: RED,
+  roughness: 0.45,
+  metalness: 0.15,
+  envMapIntensity: 0.6,
+});
+
+const darkMat = new THREE.MeshStandardMaterial({
+  color: 0x151515,
+  roughness: 0.7,
+  metalness: 0.1,
+});
+
+const rimMat = new THREE.MeshStandardMaterial({
+  color: RED_RIM,
+  roughness: 0.3,
+  metalness: 0.3,
+  emissive: RED_RIM,
+  emissiveIntensity: 0.04,
+});
+
+const crown = new THREE.Mesh(crownGeo, hatMat);
+crown.castShadow = true;
+crown.receiveShadow = true;
+hatGroup.add(crown);
+
+const brim = new THREE.Mesh(brimGeo, hatMat);
+brim.castShadow = true;
+brim.receiveShadow = true;
+hatGroup.add(brim);
+
+const hatband = new THREE.Mesh(bandGeo, darkMat);
+hatband.castShadow = true;
+hatGroup.add(hatband);
+
+// tiny highlight rim on brim edge
+const brimEdgeGeo = new THREE.RingGeometry(2.20, 2.25, 64);
+brimEdgeGeo.rotateX(-Math.PI / 2);
+brimEdgeGeo.translate(0, BRIM_CURL - 0.01, 0);
+const brimEdge = new THREE.Mesh(brimEdgeGeo, rimMat);
+hatGroup.add(brimEdge);
+
+hatGroup.scale.setScalar(HAT_SCALE);
+hatGroup.position.y = 0.0;
+
+/* ──────────────────────────────────────────────
+   Glow texture for particles
+   ────────────────────────────────────────────── */
+function makeGlowTexture(size = 64) {
+  const c = document.createElement('canvas');
+  c.width = size; c.height = size;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+  g.addColorStop(0.0, 'rgba(255,220,190,1)');
+  g.addColorStop(0.1, 'rgba(255,180,140,0.95)');
+  g.addColorStop(0.3, 'rgba(255,120,70,0.70)');
+  g.addColorStop(0.55, 'rgba(200,60,30,0.30)');
+  g.addColorStop(0.8, 'rgba(120,20,10,0.08)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(c);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+const glowTex = makeGlowTexture();
+
+/* ──────────────────────────────────────────────
+   Particle system
+   ────────────────────────────────────────────── */
+const crownCount = Math.floor(PARTICLE_COUNT * CROWN_PARTICLE_RATIO);
+const brimCount  = PARTICLE_COUNT - crownCount;
+
+const origins    = new Float32Array(PARTICLE_COUNT * 3);
+const positions  = new Float32Array(PARTICLE_COUNT * 3);
+const velocities = new Float32Array(PARTICLE_COUNT * 3);
+const sizes      = new Float32Array(PARTICLE_COUNT);
+const alphas     = new Float32Array(PARTICLE_COUNT);
+const phases     = new Float32Array(PARTICLE_COUNT);
+const orbitFlag  = new Uint8Array(PARTICLE_COUNT);
+const burstTgt   = new Float32Array(PARTICLE_COUNT * 3);
+
+// Sample crown profile at parameter t in [0,1]
+function sampleCrownProfile(t) {
+  const n = crownProfile.length;
+  const idx = t * (n - 1);
+  const i0 = Math.floor(idx);
+  const i1 = Math.min(i0 + 1, n - 1);
+  const f = idx - i0;
+  return new THREE.Vector2(
+    crownProfile[i0].x + (crownProfile[i1].x - crownProfile[i0].x) * f,
+    crownProfile[i0].y + (crownProfile[i1].y - crownProfile[i0].y) * f,
+  );
+}
+
+function brimHeight(v) {
+  const droop = Math.sin(v * Math.PI) * BRIM_DROP;
+  const curl  = Math.pow(v, 2.5) * BRIM_CURL;
+  return -droop + curl;
+}
+
+// Generate particle origins on the hat surface
+(function generateOrigins() {
+  let idx = 0;
+
+  // Crown particles
+  for (let i = 0; i < crownCount; i++) {
+    const t = Math.random();
+    const angle = Math.random() * Math.PI * 2;
+    const p = sampleCrownProfile(t);
+    const r = Math.max(p.x, 0.01);
+    const jitter = 0.018;
+    origins[idx*3]   = (r + (Math.random()-0.5)*jitter) * Math.cos(angle);
+    origins[idx*3+1] = p.y + (Math.random()-0.5)*jitter;
+    origins[idx*3+2] = (r + (Math.random()-0.5)*jitter) * Math.sin(angle);
+    sizes[idx]   = 0.025 + Math.random() * 0.045;
+    alphas[idx]  = 0;
+    phases[idx]  = Math.random() * Math.PI * 2;
+    idx++;
+  }
+
+  // Brim particles
+  for (let i = 0; i < brimCount; i++) {
+    const v = Math.random();
+    const angle = Math.random() * Math.PI * 2;
+    const r = 0.98 + v * 1.27;
+    const y = brimHeight(v);
+    const jitter = 0.012;
+    origins[idx*3]   = (r + (Math.random()-0.5)*jitter) * Math.cos(angle);
+    origins[idx*3+1] = y + (Math.random()-0.5)*jitter;
+    origins[idx*3+2] = (r + (Math.random()-0.5)*jitter) * Math.sin(angle);
+    sizes[idx]   = 0.018 + Math.random() * 0.035;
+    alphas[idx]  = 0;
+    phases[idx]  = Math.random() * Math.PI * 2;
+    idx++;
+  }
+})();
+
+const particleGeo = new THREE.BufferGeometry();
+particleGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+particleGeo.setAttribute('size',    new THREE.BufferAttribute(sizes, 1));
+
+const particleMat = new THREE.PointsMaterial({
+  size: 0.065,
+  map: glowTex,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+  transparent: true,
+  opacity: 1.0,
+  color: new THREE.Color(0xff8844),
+  sizeAttenuation: true,
+});
+
+const particleSystem = new THREE.Points(particleGeo, particleMat);
+particleSystem.visible = false;
+scene.add(particleSystem);
+
+// Store initial positions = origins
+for (let i = 0; i < PARTICLE_COUNT; i++) {
+  positions[i*3]   = origins[i*3];
+  positions[i*3+1] = origins[i*3+1];
+  positions[i*3+2] = origins[i*3+2];
+}
+
+/* ──────────────────────────────────────────────
+   Custom shader for per-particle alpha + color variation
+   ────────────────────────────────────────────── */
+const particleVertShader = `
+  attribute float size;
+  attribute float alpha;
+  attribute vec3 customColor;
+  varying float vAlpha;
+  varying vec3  vColor;
+  void main() {
+    vAlpha  = alpha;
+    vColor  = customColor;
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    gl_PointSize = size * (300.0 / -mvPosition.z);
+    gl_Position  = projectionMatrix * mvPosition;
+  }
+`;
+
+const particleFragShader = `
+  uniform sampler2D pointTexture;
+  varying float vAlpha;
+  varying vec3  vColor;
+  void main() {
+    vec4 tex = texture2D(pointTexture, gl_PointCoord);
+    gl_FragColor = vec4(vColor, tex.a * vAlpha);
+  }
+`;
+
+// We'll use a simpler approach: just update opacity via material.opacity
+// and use vertex colors for variation. Actually let's keep it simple
+// and just use the standard PointsMaterial with a uniform color,
+// modulating overall opacity.
+
+// For per-particle alpha, let's use a custom ShaderMaterial.
+const particleCustomMat = new THREE.ShaderMaterial({
+  uniforms: {
+    pointTexture: { value: glowTex },
+  },
+  vertexShader: particleVertShader,
+  fragmentShader: particleFragShader,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+  transparent: true,
+});
+
+// Add color attribute
+const colors = new Float32Array(PARTICLE_COUNT * 3);
+for (let i = 0; i < PARTICLE_COUNT; i++) {
+  const warmth = 0.7 + Math.random() * 0.3;
+  const brightness = 0.6 + Math.random() * 0.4;
+  colors[i*3]   = 1.0 * brightness;
+  colors[i*3+1] = (0.45 + Math.random()*0.25) * warmth * brightness;
+  colors[i*3+2] = (0.15 + Math.random()*0.20) * warmth * brightness;
+}
+particleGeo.setAttribute('customColor', new THREE.BufferAttribute(colors, 3));
+particleGeo.setAttribute('alpha', new THREE.BufferAttribute(alphas, 1));
+
+// Replace material
+particleSystem.material = particleCustomMat;
+
+/* ──────────────────────────────────────────────
+   State
+   ────────────────────────────────────────────── */
+const state = {
+  isHovering: false,
+  sequenceActive: false,
+  phase: 'idle',   // idle | burst | swirl | reform | orbit
+  phaseTime: 0,
+  spinSpeed: REDUCED_MOTION ? 0 : NORMAL_SPIN,
+  targetSpinSpeed: REDUCED_MOTION ? 0 : NORMAL_SPIN,
+  orbitTimer: 0,
+  hintHidden: false,
+};
+
+/* ──────────────────────────────────────────────
+   Sequence control
+   ────────────────────────────────────────────── */
+function startSequence() {
+  if (state.sequenceActive) return;
+  if (REDUCED_MOTION) return;
+  state.sequenceActive = true;
+  state.phase = 'burst';
+  state.phaseTime = 0;
+  state.targetSpinSpeed = 0;
+
+  // Reset particles to origins
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    positions[i*3]   = origins[i*3];
+    positions[i*3+1] = origins[i*3+1];
+    positions[i*3+2] = origins[i*3+2];
+    velocities[i*3]   = 0;
+    velocities[i*3+1] = 0;
+    velocities[i*3+2] = 0;
+    alphas[i] = 0;
+
+    // Compute burst target: outward from origin, with randomness
+    const ox = origins[i*3];
+    const oy = origins[i*3+1];
+    const oz = origins[i*3+2];
+    const dist = Math.sqrt(ox*ox + oz*oz) || 0.01;
+    const burstDist = 1.2 + Math.random() * 2.2;
+    const horizJitter = (Math.random() - 0.5) * 0.6;
+    const vertJitter  = (Math.random() - 0.5) * 0.4;
+    burstTgt[i*3]   = ox + (ox/dist) * burstDist + horizJitter;
+    burstTgt[i*3+1] = oy + 0.6 + Math.random() * 1.6 + vertJitter;
+    burstTgt[i*3+2] = oz + (oz/dist) * burstDist + horizJitter;
+
+    // Decide orbit fate (≈4% keep orbiting)
+    orbitFlag[i] = (Math.random() < 0.04) ? 1 : 0;
+  }
+
+  particleSystem.visible = true;
+  particleGeo.attributes.position.needsUpdate = true;
+  particleGeo.attributes.alpha.needsUpdate = true;
+}
+
+function finishSequence() {
+  state.sequenceActive = false;
+  state.phase = 'idle';
+  state.targetSpinSpeed = NORMAL_SPIN;
+  particleSystem.visible = false;
+  state.orbitTimer = 0;
+}
+
+/* ──────────────────────────────────────────────
+   Particle update
+   ────────────────────────────────────────────── */
+const _v = new THREE.Vector3();
+const _up = new THREE.Vector3(0, 1, 0);
+
+function updateParticles(delta, time) {
+  const posAttr = particleGeo.attributes.position;
+  const alphaAttr = particleGeo.attributes.alpha;
+
+  if (state.phase === 'idle') {
+    // Fade out any remaining orbit particles if timer expired
+    if (state.orbitTimer > ORBIT_DUR) {
+      let allZero = true;
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        alphas[i] = Math.max(0, alphas[i] - delta * 0.5);
+        if (alphas[i] > 0.001) allZero = false;
+      }
+      alphaAttr.needsUpdate = true;
+      if (allZero) {
+        particleSystem.visible = false;
+      }
+    }
+    posAttr.needsUpdate = true;
+    return;
+  }
+
+  state.phaseTime += delta;
+
+  let burstProg, swirlProg, reformProg;
+
+  if (state.phase === 'burst') {
+    burstProg = Math.min(state.phaseTime / BURST_DUR, 1);
+    const ease = burstProg * burstProg * (3 - 2 * burstProg); // smoothstep
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      const i3 = i * 3;
+      // Lerp from origin to burst target
+      positions[i3]   = origins[i3]   + (burstTgt[i3]   - origins[i3])   * ease;
+      positions[i3+1] = origins[i3+1] + (burstTgt[i3+1] - origins[i3+1]) * ease;
+      positions[i3+2] = origins[i3+2] + (burstTgt[i3+2] - origins[i3+2]) * ease;
+      // Fade in
+      alphas[i] = ease * 0.92;
+      // Size pulse
+      sizes[i] = sizes[i] * (1 + ease * 0.3);
+    }
+    posAttr.needsUpdate = true;
+    alphaAttr.needsUpdate = true;
+
+    if (burstProg >= 1) {
+      state.phase = 'swirl';
+      state.phaseTime = 0;
+      // Give particles initial swirl velocities
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const i3 = i * 3;
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 0.4 + Math.random() * 0.8;
+        velocities[i3]   = Math.cos(angle) * speed;
+        velocities[i3+1] = (Math.random() - 0.5) * 0.3;
+        velocities[i3+2] = Math.sin(angle) * speed;
+      }
+    }
+    return;
+  }
+
+  if (state.phase === 'swirl') {
+    swirlProg = Math.min(state.phaseTime / SWIRL_DUR, 1);
+    const drag = 1 - delta * 1.8;
+
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      const i3 = i * 3;
+      const x = positions[i3];
+      const z = positions[i3+2];
+      const dist = Math.sqrt(x*x + z*z) || 0.001;
+
+      // Vortex: tangential acceleration
+      const swirlStrength = 3.2 * (1 - swirlProg * 0.4);
+      const tx = (-z / dist) * swirlStrength * delta;
+      const tz = ( x / dist) * swirlStrength * delta;
+
+      // Upward buoyancy gradually decreasing
+      const buoyancy = (1 - swirlProg) * 0.8;
+
+      velocities[i3]   += tx;
+      velocities[i3+1] += buoyancy * delta + (Math.random()-0.5) * delta * 0.2;
+      velocities[i3+2] += tz;
+
+      // Drag
+      velocities[i3]   *= drag;
+      velocities[i3+1] *= drag;
+      velocities[i3+2] *= drag;
+
+      // Random jitter for ember-like flicker
+      velocities[i3]   += (Math.random()-0.5) * delta * 0.15;
+      velocities[i3+1] += (Math.random()-0.5) * delta * 0.1;
+      velocities[i3+2] += (Math.random()-0.5) * delta * 0.15;
+
+      positions[i3]   += velocities[i3]   * delta;
+      positions[i3+1] += velocities[i3+1] * delta;
+      positions[i3+2] += velocities[i3+2] * delta;
+
+      // Fade alpha slightly during swirl (peaks then stays)
+      alphas[i] = Math.min(0.92, alphas[i] + delta * 0.3);
+    }
+
+    posAttr.needsUpdate = true;
+    alphaAttr.needsUpdate = true;
+
+    if (swirlProg >= 1) {
+      state.phase = 'reform';
+      state.phaseTime = 0;
+    }
+    return;
+  }
+
+  if (state.phase === 'reform') {
+    reformProg = Math.min(state.phaseTime / REFORM_DUR, 1);
+    const ease = 1 - Math.pow(1 - reformProg, 2); // ease-in
+
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      const i3 = i * 3;
+      if (orbitFlag[i]) {
+        // Orbiting particles: leave them where they are, fade slightly
+        alphas[i] = 0.5 + 0.3 * (1 - reformProg);
+        // Keep them drifting slowly
+        positions[i3]   += velocities[i3]   * delta * 0.3;
+        positions[i3+1] += velocities[i3+1] * delta * 0.3;
+        positions[i3+2] += velocities[i3+2] * delta * 0.3;
+        // Gentle attraction to keep them near
+        const dx = origins[i3] - positions[i3];
+        const dy = origins[i3+1] - positions[i3+1];
+        const dz = origins[i3+2] - positions[i3+2];
+        positions[i3]   += dx * delta * 0.15;
+        positions[i3+1] += dy * delta * 0.15;
+        positions[i3+2] += dz * delta * 0.15;
+      } else {
+        // Normal particles: return to origin
+        const dx = origins[i3] - positions[i3];
+        const dy = origins[i3+1] - positions[i3+1];
+        const dz = origins[i3+2] - positions[i3+2];
+        const accel = 2.5;
+        velocities[i3]   += dx * delta * accel;
+        velocities[i3+1] += dy * delta * accel;
+        velocities[i3+2] += dz * delta * accel;
+        velocities[i3]   *= (1 - delta * 4);
+        velocities[i3+1] *= (1 - delta * 4);
+        velocities[i3+2] *= (1 - delta * 4);
+        positions[i3]   += velocities[i3]   * delta;
+        positions[i3+1] += velocities[i3+1] * delta;
+        positions[i3+2] += velocities[i3+2] * delta;
+
+        alphas[i] = (1 - ease) * 0.92;
+      }
+    }
+
+    posAttr.needsUpdate = true;
+    alphaAttr.needsUpdate = true;
+
+    if (reformProg >= 1) {
+      // Sequence complete — hide particles, start orbit phase
+      state.phase = 'idle';
+      state.sequenceActive = false;
+      state.targetSpinSpeed = NORMAL_SPIN;
+      state.orbitTimer = 0;
+
+      // Hide non-orbiting particles, keep orbiting ones visible
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        if (!orbitFlag[i]) {
+          alphas[i] = 0;
+          positions[i*3]   = origins[i*3];
+          positions[i*3+1] = origins[i*3+1];
+          positions[i*3+2] = origins[i*3+2];
+        } else {
+          // Place orbiting particles in a ring around the hat
+          const ox = origins[i*3];
+          const oz = origins[i*3+2];
+          const dist = Math.sqrt(ox*ox + oz*oz) || 0.5;
+          const orbitR = 1.8 + Math.random() * 1.5;
+          const angle = Math.random() * Math.PI * 2;
+          positions[i*3]   = Math.cos(angle) * orbitR;
+          positions[i*3+1] = 0.2 + Math.random() * 0.8;
+          positions[i*3+2] = Math.sin(angle) * orbitR;
+          alphas[i] = 0.25 + Math.random() * 0.35;
+          // Give them orbital velocity
+          const orbSpeed = 0.3 + Math.random() * 0.5;
+          const dir = Math.random() > 0.5 ? 1 : -1;
+          velocities[i*3]   = -oz * dir * orbSpeed * 0.3;
+          velocities[i*3+1] = (Math.random()-0.5) * 0.1;
+          velocities[i*3+2] = ox * dir * orbSpeed * 0.3;
+        }
+      }
+      posAttr.needsUpdate = true;
+      alphaAttr.needsUpdate = true;
+      particleSystem.visible = true;
+    }
+    return;
+  }
+}
+
+/* ──────────────────────────────────────────────
+   Orbit update (after sequence)
+   ────────────────────────────────────────────── */
+function updateOrbitParticles(delta, time) {
+  if (state.phase !== 'idle') return;
+  if (!particleSystem.visible) return;
+  // Check if there are any orbiting particles
+  let hasOrbit = false;
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    if (orbitFlag[i] && alphas[i] > 0.001) { hasOrbit = true; break; }
+  }
+  if (!hasOrbit) { particleSystem.visible = false; return; }
+
+  state.orbitTimer += delta;
+
+  const posAttr = particleGeo.attributes.position;
+  const alphaAttr = particleGeo.attributes.alpha;
+
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    if (!orbitFlag[i]) continue;
+    const i3 = i * 3;
+    const x = positions[i3];
+    const z = positions[i3+2];
+    const dist = Math.sqrt(x*x + z*z) || 0.01;
+
+    // Gentle orbital motion
+    const orbSpeed = 0.4 + (1 / (dist + 0.5)) * 0.5;
+    const tx = (-z / dist) * orbSpeed * delta;
+    const tz = ( x / dist) * orbSpeed * delta;
+
+    velocities[i3]   += tx;
+    velocities[i3+2] += tz;
+    velocities[i3]   *= 0.98;
+    velocities[i3+2] *= 0.98;
+
+    positions[i3]   += velocities[i3]   * delta;
+    positions[i3+1] += velocities[i3+1] * delta;
+    positions[i3+2] += velocities[i3+2] * delta;
+
+    // Soft attraction to keep them in bounds
+    const targetDist = 2.0;
+    const currentDist = Math.sqrt(positions[i3]**2 + positions[i3+2]**2);
+    if (currentDist > 4.5) {
+      const pull = (currentDist - 4.5) * 0.5;
+      positions[i3]   -= (positions[i3]/currentDist) * pull * delta;
+      positions[i3+2] -= (positions[i3+2]/currentDist) * pull * delta;
+    }
+
+    // Vertical drift
+    positions[i3+1] += Math.sin(time * 0.5 + phases[i]) * delta * 0.04;
+    positions[i3+1] *= (1 - delta * 0.1);
+
+    // Fade over time
+    if (state.orbitTimer > ORBIT_DUR * 0.6) {
+      alphas[i] = Math.max(0, alphas[i] - delta * 0.08);
+    }
+  }
+
+  posAttr.needsUpdate = true;
+  alphaAttr.needsUpdate = true;
+
+  // Hide if all faded
+  let anyLeft = false;
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    if (orbitFlag[i] && alphas[i] > 0.001) { anyLeft = true; break; }
+  }
+  if (!anyLeft) particleSystem.visible = false;
+}
+
+/* ──────────────────────────────────────────────
+   Resize
+   ────────────────────────────────────────────── */
+function onResize() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+
+  // Adjust camera distance for very small / large screens
+  const scale = Math.min(w, h) / 700;
+  const dist = 4.5 + scale * 1.2;
+  camera.position.z = dist;
+  camera.lookAt(0, 0.7, 0);
+}
+window.addEventListener('resize', onResize);
+onResize();
+
+/* ──────────────────────────────────────────────
+   Interaction
+   ────────────────────────────────────────────── */
+function handleEnter() {
+  if (state.sequenceActive) return;
+  state.isHovering = true;
+  state.targetSpinSpeed = HOVER_SPIN;
+  if (!state.hintHidden) {
+    document.getElementById('hint').classList.add('hidden');
+    state.hintHidden = true;
+  }
+  // Small delay before sequence starts (let spin slow down first)
+  clearTimeout(state._seqTimer);
+  state._seqTimer = setTimeout(startSequence, 400);
+}
+
+function handleLeave() {
+  state.isHovering = false;
+  clearTimeout(state._seqTimer);
+  if (!state.sequenceActive) {
+    state.targetSpinSpeed = NORMAL_SPIN;
+  }
+}
+
+canvas.addEventListener('mouseenter', handleEnter);
+canvas.addEventListener('mouseleave', handleLeave);
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  if (state.sequenceActive) return;
+  if (state.phase === 'idle' && !state.isHovering) {
+    handleEnter();
+  } else if (state.phase === 'idle' && state.isHovering) {
+    // Tap while already hovering — restart
+    clearTimeout(state._seqTimer);
+    startSequence();
+  }
+}, { passive: false });
+canvas.addEventListener('touchend', (e) => {
+  // Don't immediately leave on touch end — give a moment
+  setTimeout(() => {
+    if (!canvas.matches(':hover')) {
+      handleLeave();
+    }
+  }, 300);
+});
+
+// Also support click for desktop
+canvas.addEventListener('click', () => {
+  if (state.sequenceActive) return;
+  if (state.phase === 'idle') {
+    handleEnter();
+  }
+});
+
+/* ──────────────────────────────────────────────
+   Animation loop
+   ────────────────────────────────────────────── */
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  const delta = Math.min(clock.getDelta(), 0.05);
+  const time  = clock.elapsedTime;
+
+  // Ease spin speed
+  state.spinSpeed += (state.targetSpinSpeed - state.spinSpeed) * delta * 2.5;
+
+  // Rotate hat
+  if (!REDUCED_MOTION) {
+    hatGroup.rotation.y += state.spinSpeed * delta;
+  }
+
+  // Slight tilt for elegance
+  hatGroup.rotation.x = Math.sin(time * 0.15) * 0.015;
+  hatGroup.rotation.z = Math.cos(time * 0.12) * 0.01;
+
+  // Update particles
+  updateParticles(delta, time);
+
+  // Update orbiting particles (after sequence)
+  updateOrbitParticles(delta, time);
+
+  // Subtle shadow pulse
+  const pulse = 1 + Math.sin(time * 0.3) * 0.015;
+  shadowSprite.scale.set(3.6 * pulse, 3.6 * pulse, 1);
+
+  renderer.render(scene, camera);
+}
+
+animate();
+
+/* ──────────────────────────────────────────────
+   Reduced motion: static display
+   ────────────────────────────────────────────── */
+if (REDUCED_MOTION) {
+  state.spinSpeed = 0;
+  state.targetSpinSpeed = 0;
+  document.getElementById('hint').textContent = 'reduced motion — static view';
+  document.getElementById('hint').classList.remove('hidden');
+}
+
+console.log('</> Red Hat Fedora — 3D logo ready');
+</script>
+</body>
+</html>
