@@ -358,6 +358,70 @@
     gap: 10px;
   }
 
+  .frame .model-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .frame .harness-info {
+    position: relative;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border: 1px solid rgba(148, 163, 184, 0.45);
+    border-radius: 50%;
+    background: rgba(30, 41, 59, 0.72);
+    color: var(--muted);
+    font: 700 10px/14px system-ui, sans-serif;
+    text-align: center;
+    text-transform: none;
+    cursor: help;
+    pointer-events: auto;
+  }
+
+  .frame .harness-info:hover,
+  .frame .harness-info:focus-visible {
+    border-color: var(--accent);
+    color: var(--text);
+    outline: none;
+  }
+
+  .frame .harness-info::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    top: calc(100% + 7px);
+    left: 0;
+    z-index: 20;
+    width: max-content;
+    max-width: min(240px, 70vw);
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: rgba(11, 13, 20, 0.96);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    color: var(--text);
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1.35;
+    letter-spacing: 0.01em;
+    text-align: left;
+    text-transform: none;
+    white-space: normal;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-2px);
+    transition: opacity 0.12s, transform 0.12s, visibility 0.12s;
+    pointer-events: none;
+  }
+
+  .frame .harness-info:hover::after,
+  .frame .harness-info:focus-visible::after {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+  }
+
   .frame .gen-stats {
     width: 100%;
     font-size: 9px;
@@ -977,23 +1041,9 @@ And respect reduced motion. Return only the finished HTML file.</div>
     </div>
     <div class="prompt-content">
       <div class="prompt-field" style="font-family: inherit; line-height: 1.8;">
-        <strong>FedoraBench</strong> gives every major AI model the same creative prompt and lets you compare the results side by side. The prompt asks each model to build a single-file HTML page with a spinning 3D Red Hat fedora that dissolves into particles on hover.
+        <strong>FedoraBench</strong> gives AI models the same creative coding prompt: build a single-file page with a spinning 3D fedora that dissolves into particles on hover.
         <br><br>
-        <strong>Harness / coding tool used per provider:</strong>
-        <br>
-        <span style="color: var(--muted);">Anthropic models</span> — Claude Code<br>
-        <span style="color: var(--muted);">Meta Muse 1.2+ models</span> — Muse Code<br>
-        <span style="color: var(--muted);">OpenAI models</span> — Codex (except GPT-5.5 Pro, which is not available in Codex and was done via the ChatGPT web interface)<br>
-        <span style="color: var(--muted);">Composer models</span> — Cursor<br>
-        <span style="color: var(--muted);">All other models</span> — Pi + OpenRouter
-        <br><br>
-        All models were run at the default effort level for their respective harness and model, unless otherwise noted. No cherry-picking, no retries, no manual edits. What you see is what each model produced on its first attempt.
-        <br><br>
-        Entries marked <span class="variant-badge" data-badge="Ultracode">Ultracode</span> were run using Claude Code's multi-agent mode (parallel implementations → judge → best result). This applies even when the model isn't from Anthropic — Claude Code supports <a href="https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration" target="_blank" rel="noopener">overriding the Anthropic base URL to OpenRouter</a>, so it orchestrates the workflow while the underlying model can be swapped to any provider.
-        <br><br>
-        Entries marked <span class="variant-badge" data-badge="None">None</span>, <span class="variant-badge" data-badge="Minimal">Minimal</span>, <span class="variant-badge" data-badge="Low">Low</span>, <span class="variant-badge" data-badge="Medium">Medium</span>, <span class="variant-badge" data-badge="High">High</span>, <span class="variant-badge" data-badge="XHigh">XHigh</span>, or <span class="variant-badge" data-badge="Max">Max</span> were run at that explicit reasoning effort in whichever harness supports it (e.g., Codex for OpenAI models, Muse Code for Muse Spark 1.2+). Automated Pi + OpenRouter additions use exactly the effort levels advertised for each model by OpenRouter.
-        <br><br>
-        <span class="variant-badge" data-badge="Ultra">Ultra</span> is a separate Codex multi-agent mode, not a reasoning effort — currently shown for Sol only. <span class="variant-badge" data-badge="Default">Default</span> identifies the original unlabelled run for each family, which used the harness default before effort-specific comparisons were added.
+        Use the sidebar or grid view to compare their results. The <strong>ⓘ</strong> beside a model name shows which coding harness produced it.
       </div>
     </div>
   </div>
@@ -1074,6 +1124,9 @@ And respect reduced motion. Return only the finished HTML file.</div>
     { id: "qwen3.5-397b", name: "Qwen3.5 397B",        group: "Alibaba", openrouterId: "qwen/qwen3.5-397b-a17b", dateAdded: "1970-01-01" },
     { id: "qwen3.5-27b", name: "Qwen3.5 27B",          group: "Alibaba", openrouterId: "qwen/qwen3.5-27b", dateAdded: "1970-01-01" },
     { id: "composer-2.5", name: "Composer 2.5", group: "Cursor", dateAdded: "2026-07-02" },
+    { id: "deepseek-v4-pro-0813-max", name: "DeepSeek V4 Pro 0813", family: "deepseek-v4-pro-0813", group: "DeepSeek", badge: "Max", openrouterId: "deepseek/deepseek-v4-pro-0813", dateAdded: "2026-08-12" },
+    { id: "deepseek-v4-pro-0813-high", name: "DeepSeek V4 Pro 0813", family: "deepseek-v4-pro-0813", group: "DeepSeek", badge: "High", openrouterId: "deepseek/deepseek-v4-pro-0813", dateAdded: "2026-08-12" },
+    { id: "deepseek-v4-pro-0813-low", name: "DeepSeek V4 Pro 0813", family: "deepseek-v4-pro-0813", group: "DeepSeek", badge: "Low", openrouterId: "deepseek/deepseek-v4-pro-0813", dateAdded: "2026-08-12" },
     { id: "deepseek-v4-flash-0731-xhigh", name: "DeepSeek V4 Flash 0731", family: "deepseek-v4-flash-0731", group: "DeepSeek", badge: "XHigh", openrouterId: "deepseek/deepseek-v4-flash-0731", dateAdded: "2026-07-31" },
     { id: "deepseek-v4-flash-0731-high", name: "DeepSeek V4 Flash 0731", family: "deepseek-v4-flash-0731", group: "DeepSeek", badge: "High", openrouterId: "deepseek/deepseek-v4-flash-0731", dateAdded: "2026-07-31" },
     { id: "deepseek-v4-flash-0731-medium", name: "DeepSeek V4 Flash 0731", family: "deepseek-v4-flash-0731", group: "DeepSeek", badge: "Medium", openrouterId: "deepseek/deepseek-v4-flash-0731", dateAdded: "2026-07-31" },
@@ -1085,6 +1138,10 @@ And respect reduced motion. Return only the finished HTML file.</div>
     { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", group: "DeepSeek", openrouterId: "deepseek/deepseek-v4-flash", dateAdded: "1970-01-01" },
     { id: "deepseek-v3.2", name: "DeepSeek V3.2",      group: "DeepSeek", openrouterId: "deepseek/deepseek-v3.2", dateAdded: "1970-01-01" },
     { id: "granite-4.1-8b", name: "Granite 4.1 8B",    group: "IBM", openrouterId: "ibm-granite/granite-4.1-8b", dateAdded: "1970-01-01" },
+    { id: "muse-glimmer-30b-xhigh", name: "Muse Glimmer 30B", family: "muse-glimmer-30b", group: "Meta", badge: "XHigh", harness: "Pi + OpenRouter", openrouterId: "meta/muse-glimmer-30b", dateAdded: "2026-08-12" },
+    { id: "muse-glimmer-30b-high", name: "Muse Glimmer 30B", family: "muse-glimmer-30b", group: "Meta", badge: "High", harness: "Pi + OpenRouter", openrouterId: "meta/muse-glimmer-30b", dateAdded: "2026-08-12" },
+    { id: "muse-glimmer-30b-medium", name: "Muse Glimmer 30B", family: "muse-glimmer-30b", group: "Meta", badge: "Medium", harness: "Pi + OpenRouter", openrouterId: "meta/muse-glimmer-30b", dateAdded: "2026-08-12" },
+    { id: "muse-glimmer-30b-low", name: "Muse Glimmer 30B", family: "muse-glimmer-30b", group: "Meta", badge: "Low", harness: "Pi + OpenRouter", openrouterId: "meta/muse-glimmer-30b", dateAdded: "2026-08-12" },
     { id: "muse-spark-1.1", name: "Muse Spark 1.1", group: "Meta", dateAdded: "2026-07-09" },
     { id: "muse-spark-1.2-minimal", name: "Muse Spark 1.2", family: "muse-spark-1.2", group: "Meta", badge: "Minimal", dateAdded: "2026-07-31" },
     { id: "muse-spark-1.2-low", name: "Muse Spark 1.2", family: "muse-spark-1.2", group: "Meta", badge: "Low", dateAdded: "2026-07-31" },
@@ -1109,6 +1166,10 @@ And respect reduced motion. Return only the finished HTML file.</div>
     { id: "kimi-k2.5",   name: "Kimi K2.5",           group: "Moonshot", openrouterId: "moonshotai/kimi-k2.5", dateAdded: "1970-01-01" },
     { id: "mimo-v2.5-pro", name: "MiMo V2.5 Pro",     group: "Xiaomi", openrouterId: "xiaomi/mimo-v2.5-pro", dateAdded: "1970-01-01" },
     { id: "mimo-v2.5",   name: "MiMo V2.5",           group: "Xiaomi", openrouterId: "xiaomi/mimo-v2.5", dateAdded: "1970-01-01" },
+    { id: "grok-4.6-xhigh", name: "Grok 4.6", family: "grok-4.6", group: "xAI", badge: "XHigh", openrouterId: "x-ai/grok-4.6", dateAdded: "2026-08-12" },
+    { id: "grok-4.6-high", name: "Grok 4.6", family: "grok-4.6", group: "xAI", badge: "High", openrouterId: "x-ai/grok-4.6", dateAdded: "2026-08-12" },
+    { id: "grok-4.6-medium", name: "Grok 4.6", family: "grok-4.6", group: "xAI", badge: "Medium", openrouterId: "x-ai/grok-4.6", dateAdded: "2026-08-12" },
+    { id: "grok-4.6-low", name: "Grok 4.6", family: "grok-4.6", group: "xAI", badge: "Low", openrouterId: "x-ai/grok-4.6", dateAdded: "2026-08-12" },
     { id: "grok-4.5", name: "Grok 4.5", group: "xAI", openrouterId: "x-ai/grok-4.5", dateAdded: "2026-07-08" },
     { id: "grok-build-0.1", name: "Grok Build 0.1", group: "xAI", openrouterId: "x-ai/grok-build-0.1", dateAdded: "2026-07-06" },
     { id: "grok-4.3",    name: "Grok 4.3",            group: "xAI", openrouterId: "x-ai/grok-4.3", dateAdded: "1970-01-01" },
@@ -1160,6 +1221,17 @@ And respect reduced motion. Return only the finished HTML file.</div>
     const baseName = m.name.endsWith(suffix) ? m.name.slice(0, -suffix.length) : m.name;
     return '<span class="variant-name-base">' + baseName + '</span>'
       + ' <span class="variant-badge" data-badge="' + badge + '">' + badge + '</span>';
+  }
+
+  function getHarness(m) {
+    if (m.harness) return m.harness;
+    if (m.badge === "Ultracode" || m.name.endsWith(" Ultracode")) return "Claude Code";
+    if (m.id === "gpt-5.5-pro") return "ChatGPT web";
+    if (m.family === "muse-spark-1.2") return "Muse Code";
+    if (m.group === "Anthropic") return "Claude Code";
+    if (m.group === "OpenAI") return "Codex";
+    if (m.group === "Cursor") return "Cursor";
+    return "Pi + OpenRouter";
   }
 
   function getFamilyId(m) {
@@ -1358,7 +1430,16 @@ And respect reduced motion. Return only the finished HTML file.</div>
       label.className = "label";
 
       const nameSpan = document.createElement("span");
+      nameSpan.className = "model-title";
       nameSpan.innerHTML = formatModelName(m);
+
+      const harnessInfo = document.createElement("button");
+      harnessInfo.type = "button";
+      harnessInfo.className = "harness-info";
+      harnessInfo.textContent = "i";
+      harnessInfo.dataset.tooltip = "Harness: " + getHarness(m);
+      harnessInfo.setAttribute("aria-label", "Harness: " + getHarness(m));
+      nameSpan.appendChild(harnessInfo);
       label.appendChild(nameSpan);
 
       const starDiv = document.createElement("div");

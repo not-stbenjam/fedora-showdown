@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fedora</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #08090d;
+    overflow: hidden;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #scene {
+    position: fixed;
+    inset: 0;
+    display: block;
+    cursor: pointer;
+    outline: none;
+    touch-action: manipulation;
+  }
+  .caption {
+    position: fixed;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #8b93a1;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0.85;
+    text-shadow: 0 1px 14px rgba(0, 0, 0, 0.6);
+  }
+  .caption::before {
+    content: "";
+    display: block;
+    width: 22px;
+    height: 1px;
+    margin: 0 auto 10px;
+    background: linear-gradient(90deg, transparent, rgba(220, 80, 70, 0.75), transparent);
+  }
+</style>
+</head>
+<body>
+<canvas id="scene" tabindex="0" role="button" aria-label="A spinning fedora hat. Activate to dissolve it into glowing particles."></canvas>
+<div class="caption" id="caption">red hat</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ------------------------------------------------------------------ config
+  var TAU = Math.PI * 2;
+  var TILT = 0.5;              // forward tilt of the hat (shows brim + crown)
+  var FOV = 4.2;               // perspective strength
+  var SEG = 26;                // angular segments of the lathe
+  var RED = [206, 45, 42];     // crown & brim base color
+  var BAND = [112, 24, 26];    // hat-band base color
+  var N_PARTICLES = 1600;      // ember particles
+  var ORB_N = 13;              // of those particles, these keep orbiting after
+
+  var DUR = { dissolve: 0.85, swirl: 1.5, reform: 1.6 };
+
+  // ------------------------------------------------------------------ dom
+  var canvas = document.getElementById('scene');
+  var ctx = canvas.getContext('2d');
+  var cap = document.getElementById('caption');
+
+  var W = 0, H = 0, DPR = 1, cx = 0, cy = 0, unit = 1, pxScale = 1;
+
+  // ------------------------------------------------------------------ easing
+  function easeIn(t) { return t * t; }
+  function easeOut(t) { return 1 - (1 - t) * (1 - t); }
+  function easeInOut(t) { return t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t); }
+  function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
+
+  // ------------------------------------------------------------------ reduced motion
+  var mq = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+  var reduceMotion = !!(mq && mq.matches);
+  if (mq) {
+    var onMQ = function (e) {
+      reduceMotion = e.matches;
+      if (reduceMotion) spin = 0;
+    };
+    if (mq.addEventListener) mq.addEventListener('change', onMQ);
+    else if (mq.addListener) mq.addListener(onMQ);
+  }
+
+  // ------------------------------------------------------------------ geometry
+  var verts = [];
+  var tris = [];
+
+  function cross(u, v) { return [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]]; }
+  function dot(u, v) { return u[0] * v[0] + u[1] * v[1] + u[2] * v[2]; }
+  function vx(x, y, z) { verts.push([x, y, z]); return verts.length - 1; }
+
+  function crownR(y) {
+    if (y <= 0.62) return 0.53 - 0.09 * (y / 0.62);
+    var t = (y - 0.62) / 0.38;
+    return 0.44 * Math.sqrt(Math.max(0, 1 - t * t));
+  }
+
+  // classic fedora crease: a lengthwise groove across the crown top
+  function creaseAt(y, x) {
+    if (y <= 0.55) return y;
+    var t = (y - 0.55) / 0.45;
+    var g = Math.exp(-(x * x) / (2 * 0.095 * 0.095));
+    return y - 0.11 * g * t * t;
+  }
+
+  function ringAt(y, r, crease) {
+    var out = [];
+    for (var s = 0; s < SEG; s++) {
+      var th = s / SEG * TAU;
+      var x = r * Math.cos(th);
+      var z = r * Math.sin(th);
+      var yy = crease ? creaseAt(y, x) : y;
+      out.push(vx(x, yy, z));
+    }
+    return out;
+  }
+
+  function connect(r0, r1, color, kind) {
+    for (var s = 0; s < SEG; s++) {
+      var s2 = (s + 1) % SEG;
+      var a = r0[s], b = r0[s2], c = r1[s2], d = r1[s];
+      tris.push({ a: a, b: b, c: c, color: color, kind: kind });
+      tris.push({ a: a, b: c, c: d, color: color, kind: kind });
+    }
+  }
+
+  (function buildHat() {
+    // crown
+    var prev = null, rows = 10;
+    for (var i = 0; i <= rows; i++) {
+      var y = i / rows;
+      var ring = ringAt(y, crownR(y), true);
+      if (prev) connect(prev, ring, RED, 'side');
+      prev = ring;
+    }
+    // band
+    prev = null;
+    var ys = [0.03, 0.20];
+    for (var b = 0; b < ys.length; b++) {
+      var by = ys[b];
+      var bring = ringAt(by, crownR(by) + 0.014, false);
+      if (prev) connect(prev, bring, BAND, 'side');
+      prev = bring;
+    }
+    // brim
+    prev = null;
+    var BR = [0.50, 0.78, 1.04, 1.26, 1.42];
+    for (var k = 0; k < BR.length; k++) {
+      var r = BR[k];
+      var t = (r - 0.50) / (1.42 - 0.50);
+      var brimY = -0.05 * Math.sin(Math.PI * t) + 0.06 * t * t;
+      var brimRing = ringAt(brimY, r, false);
+      if (prev) connect(prev, brimRing, RED, 'brim');
+      prev = brimRing;
+    }
+    // orient every face outward so lighting is consistent
+    for (var f = 0; f < tris.length; f++) {
+      var T = tris[f];
+      var A = verts[T.a], B = verts[T.b], C = verts[T.c];
+      var u = [B[0] - A[0], B[1] - A[1], B[2] - A[2]];
+      var v = [C[0] - A[0], C[1] - A[1], C[2] - A[2]];
+      var n = cross(u, v);
+      var mx = (A[0] + B[0] + C[0]) / 3, my = (A[1] + B[1] + C[1]) / 3, mz = (A[2] + B[2] + C[2]) / 3;
+      var ref;
+      if (T.kind === 'brim') ref = [0, 1, 0];
+      else { var l = Math.hypot(mx, mz) || 1; ref = [mx / l, 0, mz / l]; }
+      if (dot(n, ref) < 0) { var tmp = T.b; T.b = T.c; T.c = tmp; }
+    }
+  })();
+
+  // ------------------------------------------------------------------ transforms
+  var PX = new Float32Array(verts.length);
+  var PY = new Float32Array(verts.length);
+  var PZ = new Float32Array(verts.length);
+  var SX = new Float32Array(verts.length);
+  var SY = new Float32Array(verts.length);
+
+  function transformAll(ry) {
+    var cyr = Math.cos(ry), syr = Math.sin(ry);
+    var rx = TILT, cxr = Math.cos(rx), sxr = Math.sin(rx);
+    for (var i = 0; i < verts.length; i++) {
+      var p = verts[i];
+      var x1 = p[0] * cyr + p[2] * syr;
+      var z1 = -p[0] * syr + p[2] * cyr;
+      var y1 = p[1];
+      PX[i] = x1;
+      PY[i] = y1 * cxr - z1 * sxr;
+      PZ[i] = y1 * sxr + z1 * cxr;
+      var s = FOV / (FOV + PZ[i]);
+      SX[i] = cx + PX[i] * unit * s;
+      SY[i] = cy - PY[i] * unit * s;
+    }
+  }
+
+  function rotLocal(p, ry, out) {
+    var cyr = Math.cos(ry), syr = Math.sin(ry);
+    var x1 = p[0] * cyr + p[2] * syr;
+    var z1 = -p[0] * syr + p[2] * cyr;
+    var y1 = p[1];
+    var rx = TILT, cxr = Math.cos(rx), sxr = Math.sin(rx);
+    out[0] = x1;
+    out[1] = y1 * cxr - z1 * sxr;
+    out[2] = y1 * sxr + z1 * cxr;
+  }
+
+  // fixed studio light (world space) and half-vector for specular
+  var LX = 0.45, LY = 0.75, LZ = 0.5, HX, HY, HZ;
+  (function () {
+    var l = Math.hypot(LX, LY, LZ); LX /= l; LY /= l; LZ /= l;
+    var hx = LX, hy = LY, hz = LZ + 1;
+    var h = Math.hypot(hx, hy, hz); HX = hx / h; HY = hy / h; HZ = hz / h;
+  })();
+
+  // ------------------------------------------------------------------ glow sprites
+  function glowSprite(stops) {
+    var c = document.createElement('canvas');
+    c.width = c.height = 64;
+    var g = c.getContext('2d');
+    var grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    for (var i = 0; i < stops.length; i++) grad.addColorStop(stops[i][0], stops[i][1]);
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 64, 64);
+    return c;
+  }
+  var SPR = [
+    glowSprite([[0, 'rgba(255,250,240,1)'], [0.2, 'rgba(255,214,170,0.9)'], [0.5, 'rgba(255,120,50,0.5)'], [1, 'rgba(255,80,40,0)']]),   // ember
+    glowSprite([[0, 'rgba(255,240,235,1)'], [0.25, 'rgba(255,160,140,0.85)'], [0.55, 'rgba(224,60,50,0.45)'], [1, 'rgba(200,40,40,0)']]), // red
+    glowSprite([[0, 'rgba(255,255,255,1)'], [0.4, 'rgba(255,255,255,0.35)'], [1, 'rgba(255,255,255,0)']])                                     // white core
+  ];
+
+  // ------------------------------------------------------------------ particles
+  var particles = [];
+  var tmp = [0, 0, 0];
+
+  function makeParticle() {
+    return {
+      home: [0, 0, 0], pos: [0, 0, 0], vel: [0, 0, 0], out: [0, 0, 0],
+      push: 0, swirl: 0, swirlSign: 1, buoy: 0, phase: 0, flick: 0,
+      size: 2, spr: 0, orb: false, orbR: 0, orbSpeed: 0, orbPhase: 0, orbY: 0, hist: []
+    };
+  }
+
+  function sampleHome(p, i) {
+    var rnd = Math.random();
+    var th = Math.random() * TAU;
+    var y, rad, spr;
+    if (rnd < 0.14) {                    // band
+      y = 0.03 + Math.random() * 0.17;
+      rad = crownR(y) + 0.014;
+      spr = 1;
+    } else if (rnd < 0.55) {             // brim (area-weighted)
+      var rr = 0.5 + Math.sqrt(Math.random()) * (1.42 - 0.5);
+      var t = (rr - 0.5) / (1.42 - 0.5);
+      y = -0.05 * Math.sin(Math.PI * t) + 0.06 * t * t;
+      rad = rr;
+      spr = Math.random() < 0.75 ? 0 : 1;
+    } else {                             // crown
+      y = Math.random();
+      rad = crownR(y);
+      spr = Math.random() < 0.7 ? 0 : (Math.random() < 0.85 ? 1 : 2);
+    }
+    var x = rad * Math.cos(th);
+    var z = rad * Math.sin(th);
+    if (rnd >= 0.55 && y > 0.55) y = creaseAt(y, x); // crown crease only
+    p.home[0] = x; p.home[1] = y; p.home[2] = z;
+    p.spr = spr;
+
+    if (i < ORB_N) {
+      p.orb = true;
+      p.orbR = 1.5 + Math.random() * 0.6;
+      p.orbSpeed = (0.3 + Math.random() * 0.35) * (Math.random() < 0.5 ? -1 : 1);
+      p.orbPhase = Math.random() * TAU;
+      p.orbY = (Math.random() - 0.5) * 0.5;
+      p.spr = Math.random() < 0.5 ? 2 : 1;
+      p.size = 1.5 + Math.random() * 2.0;
+      p.hist = [];
+    } else {
+      // outward burst direction, biased upward like rising embers
+      var a2 = Math.random() * TAU;
+      var ph = Math.random() * 1.6 - 0.4;
+      p.out = [
+        Math.cos(a2) * Math.cos(ph),
+        Math.sin(ph) * 0.6 + 0.35,
+        Math.sin(a2) * Math.cos(ph)
+      ];
+      var ol = Math.hypot(p.out[0], p.out[1], p.out[2]) || 1;
+      p.out[0] /= ol; p.out[1] /= ol; p.out[2] /= ol;
+      p.push = 0.7 + Math.random() * 1.4;
+      p.swirl = 0.5 + Math.random() * 1.3;
+      p.swirlSign = Math.random() < 0.5 ? -1 : 1;
+      p.buoy = Math.random() < 0.15 ? -(0.05 + Math.random() * 0.2) : (0.05 + Math.random() * 0.45);
+      p.size = 1.4 + Math.random() * 3.2;
+    }
+    p.phase = Math.random() * TAU;
+    p.flick = 3 + Math.random() * 6;
+  }
+
+  function initParticles() {
+    for (var i = 0; i < N_PARTICLES; i++) {
+      var p = makeParticle();
+      sampleHome(p, i);
+      particles.push(p);
+    }
+  }
+
+  function orbPos(p, t) {
+    var a = t * p.orbSpeed + p.orbPhase;
+    var lx = Math.cos(a) * p.orbR;
+    var ly = p.orbY + Math.sin(a * 2.2 + p.orbPhase) * 0.12;
+    var lz = Math.sin(a) * p.orbR;
+    var rx = TILT, c = Math.cos(rx), s = Math.sin(rx);
+    return [lx, ly * c - lz * s, ly * s + lz * c];
+  }
+
+  // ------------------------------------------------------------------ state machine
+  var state = 'idle';
+  var stateT = 0;
+  var spin = 0;
+  var time = 0;
+  var intro = 0;
+
+  function beginDissolve() {
+    state = 'dissolve';
+    stateT = 0;
+    var ms = reduceMotion ? 0.08 : 1;
+    for (var i = 0; i < particles.length; i++) {
+      var p = particles[i];
+      if (p.orb) {
+        var o = orbPos(p, reduceMotion ? 0 : time);
+        p.pos[0] = o[0]; p.pos[1] = o[1]; p.pos[2] = o[2];
+        p.hist.length = 0;
+      } else {
+        rotLocal(p.home, spin, p.pos);
+      }
+      p.vel[0] = p.out[0] * p.push * ms;
+      p.vel[1] = p.out[1] * p.push * ms * 0.5 + 0.15 * ms;
+      p.vel[2] = p.out[2] * p.push * ms;
+    }
+  }
+
+  function trigger() {
+    if (state === 'idle') beginDissolve();
+    else if (state === 'swirl') { state = 'reform'; stateT = 0; }
+  }
+
+  function update(dt, t) {
+    time = t;
+    if (intro < 1) intro = Math.min(1, intro + dt / 1.0);
+
+    // spin target
+    var target = 1;
+    if (reduceMotion) target = 0;
+    else if (state === 'dissolve') target = 0.06;
+    else if (state === 'swirl') target = 0.03;
+    else if (state === 'reform') target = 0.35 + 0.65 * easeOut(stateT);
+    spin += (target - spin) * Math.min(1, dt * 2.5);
+
+    // state progress
+    if (state === 'dissolve') { stateT += dt / DUR.dissolve; if (stateT >= 1) { stateT = 0; state = 'swirl'; } }
+    else if (state === 'swirl') { stateT += dt / DUR.swirl; if (stateT >= 1) { stateT = 0; state = 'reform'; } }
+    else if (state === 'reform') {
+      stateT += dt / DUR.reform;
+      if (stateT >= 1) {
+        stateT = 0; state = 'idle';
+        for (var i = 0; i < particles.length; i++) particles[i].hist.length = 0;
+      }
+    }
+
+    updateParticles(dt, t);
+  }
+
+  function updateParticles(dt, t) {
+    if (state === 'idle') {
+      for (var i = 0; i < particles.length; i++) {
+        var p = particles[i];
+        if (!p.orb) continue;
+        var o = orbPos(p, reduceMotion ? 0 : t);
+        p.pos[0] = o[0]; p.pos[1] = o[1]; p.pos[2] = o[2];
+        if (!reduceMotion) {
+          p.hist.push([o[0], o[1], o[2]]);
+          if (p.hist.length > 20) p.hist.shift();
+        }
+      }
+      return;
+    }
+
+    if (state === 'dissolve' || state === 'swirl') {
+      var sw = state === 'swirl' ? 1 : easeIn(stateT) * 0.5;
+      var pushFade = state === 'dissolve' ? (1 - easeOut(stateT)) : 0;
+      var ms = reduceMotion ? 0.12 : 1;
+      for (var i = 0; i < particles.length; i++) {
+        var p = particles[i];
+        var x = p.pos[0], z = p.pos[2];
+        var r = Math.hypot(x, z);
+        var tx = -z, tz = x, tl = Math.hypot(tx, tz) || 1;
+        var swirlNow = sw * p.swirlSign * (0.4 + 0.7 * r) * ms;
+        var buoyNow = p.buoy * sw * ms;
+        p.vel[0] += ((tx / tl) * swirlNow + p.out[0] * p.push * pushFade * ms - p.vel[0] * 1.4) * dt;
+        p.vel[1] += (buoyNow - p.vel[1] * 1.1) * dt;
+        p.vel[2] += ((tz / tl) * swirlNow + p.out[2] * p.push * pushFade * ms - p.vel[2] * 1.4) * dt;
+        var n1 = Math.sin(t * 0.7 + p.phase) * 0.25 * ms;
+        var n2 = Math.cos(t * 0.5 + p.phase) * 0.25 * ms;
+        p.pos[0] += p.vel[0] * dt + n1 * dt;
+        p.pos[1] += p.vel[1] * dt + n2 * dt * 0.4;
+        p.pos[2] += p.vel[2] * dt + n2 * dt;
+      }
+      return;
+    }
+
+    if (state === 'reform') {
+      var a = 1 - Math.exp(-8 * dt);
+      for (var i = 0; i < particles.length; i++) {
+        var p = particles[i];
+        if (p.orb) {
+          var o = orbPos(p, reduceMotion ? 0 : t);
+          tmp[0] = o[0]; tmp[1] = o[1]; tmp[2] = o[2];
+        } else {
+          rotLocal(p.home, spin, tmp);
+        }
+        p.pos[0] += (tmp[0] - p.pos[0]) * a;
+        p.pos[1] += (tmp[1] - p.pos[1]) * a;
+        p.pos[2] += (tmp[2] - p.pos[2]) * a;
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------ alpha helpers
+  function hatAlpha() {
+    if (state === 'idle') return easeOut(intro);
+    if (state === 'dissolve') return (1 - easeInOut(stateT)) * easeOut(intro);
+    if (state === 'swirl') return 0;
+    if (state === 'reform') return stateT < 0.35 ? 0 : easeOut((stateT - 0.35) / 0.65) * easeOut(intro);
+    return 1;
+  }
+  function swarmAlpha() {
+    if (state === 'idle') return 0;
+    if (state === 'dissolve') return easeIn(stateT) * 0.85;
+    if (state === 'swirl') return 0.9;
+    if (state === 'reform') return 0.9 * (1 - stateT);
+    return 0;
+  }
+  function orbiterAlpha() {
+    if (state === 'idle') return easeOut(intro);
+    if (state === 'dissolve') return easeIn(stateT) * 0.85;
+    if (state === 'swirl') return 0.9;
+    if (state === 'reform') return stateT < 0.4 ? 0.9 * (1 - stateT / 0.4) : ((stateT - 0.4) / 0.6) * easeOut(intro);
+    return 1;
+  }
+
+  // ------------------------------------------------------------------ render
+  function drawHat(alpha) {
+    transformAll(spin);
+    var list = [];
+    for (var i = 0; i < tris.length; i++) {
+      var f = tris[i];
+      list.push({ f: f, depth: (PZ[f.a] + PZ[f.b] + PZ[f.c]) / 3 });
+    }
+    list.sort(function (a, b) { return a.depth - b.depth; });
+
+    ctx.globalAlpha = alpha;
+    for (var j = 0; j < list.length; j++) {
+      var f = list[j].f;
+      var ux = PX[f.b] - PX[f.a], uy = PY[f.b] - PY[f.a], uz = PZ[f.b] - PZ[f.a];
+      var vx_ = PX[f.c] - PX[f.a], vy_ = PY[f.c] - PY[f.a], vz_ = PZ[f.c] - PZ[f.a];
+      var nx = uy * vz_ - uz * vy_, ny = uz * vx_ - ux * vz_, nz = ux * vy_ - uy * vx_;
+      var nl = Math.hypot(nx, ny, nz) || 1;
+      nx /= nl; ny /= nl; nz /= nl;
+
+      var diff = Math.max(0, nx * LX + ny * LY + nz * LZ);
+      var spec = Math.pow(Math.max(0, nx * HX + ny * HY + nz * HZ), 26) * 0.5;
+      var sh = 0.42 + 0.62 * diff + spec + 0.10 * Math.max(0, ny);
+      if (sh > 1.35) sh = 1.35;
+
+      var c = f.color;
+      var r = Math.round(clamp(c[0] * sh, 0, 255));
+      var g = Math.round(clamp(c[1] * sh, 0, 255));
+      var b = Math.round(clamp(c[2] * sh, 0, 255));
+      ctx.fillStyle = 'rgb(' + r + ',' + g + ',' + b + ')';
+      ctx.beginPath();
+      ctx.moveTo(SX[f.a], SY[f.a]);
+      ctx.lineTo(SX[f.b], SY[f.b]);
+      ctx.lineTo(SX[f.c], SY[f.c]);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function project(pos, out) {
+    var s = FOV / (FOV + pos[2]);
+    out[0] = cx + pos[0] * unit * s;
+    out[1] = cy - pos[1] * unit * s;
+    out[2] = s;
+  }
+
+  function drawSwarm(t) {
+    var alpha = swarmAlpha();
+    if (alpha <= 0.001) return;
+    var scr = [0, 0, 0];
+    ctx.globalCompositeOperation = 'lighter';
+    for (var i = 0; i < particles.length; i++) {
+      var p = particles[i];
+      if (p.orb) continue;
+      project(p.pos, scr);
+      var a = alpha;
+      if (state === 'swirl') a *= 0.65 + 0.35 * Math.sin(t * p.flick + p.phase);
+      if (a <= 0.003) continue;
+      var sz = p.size * scr[2] * pxScale;
+      if (sz < 0.3) continue;
+      ctx.globalAlpha = Math.min(1, a);
+      ctx.drawImage(SPR[p.spr], scr[0] - sz, scr[1] - sz, sz * 2, sz * 2);
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function drawOrbiters(t) {
+    var alpha = orbiterAlpha();
+    if (alpha <= 0.001) return;
+    var scr = [0, 0, 0];
+    ctx.globalCompositeOperation = 'lighter';
+    for (var i = 0; i < particles.length; i++) {
+      var p = particles[i];
+      if (!p.orb) continue;
+
+      // faint trailing light
+      if (state === 'idle' && !reduceMotion && p.hist.length > 1) {
+        for (var k = 0; k < p.hist.length; k++) {
+          var q = p.hist[k];
+          var qs = FOV / (FOV + q[2]);
+          var qx = cx + q[0] * unit * qs;
+          var qy = cy - q[1] * unit * qs;
+          var t2 = (k + 1) / p.hist.length;
+          ctx.globalAlpha = alpha * t2 * 0.45;
+          var sz = (0.8 + t2 * 1.4) * qs * pxScale;
+          ctx.drawImage(SPR[p.spr], qx - sz, qy - sz, sz * 2, sz * 2);
+        }
+      }
+
+      var a = alpha;
+      if (state === 'swirl') a *= 0.65 + 0.35 * Math.sin(t * p.flick + p.phase);
+      project(p.pos, scr);
+      ctx.globalAlpha = Math.min(1, a);
+      var sz = p.size * scr[2] * pxScale * 1.2;
+      ctx.drawImage(SPR[p.spr], scr[0] - sz, scr[1] - sz, sz * 2, sz * 2);
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function render(t) {
+    // background
+    var bg = ctx.createRadialGradient(cx, cy * 0.9, 0, cx, cy * 0.9, Math.max(W, H) * 0.72);
+    bg.addColorStop(0, '#1a1e26');
+    bg.addColorStop(0.55, '#10131a');
+    bg.addColorStop(1, '#08090d');
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    // soft aura behind the hat
+    var glowR = unit * 2.2;
+    var aura = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
+    aura.addColorStop(0, 'rgba(224,64,56,0.16)');
+    aura.addColorStop(0.5, 'rgba(190,50,44,0.06)');
+    aura.addColorStop(1, 'rgba(190,50,44,0)');
+    ctx.fillStyle = aura;
+    ctx.beginPath();
+    ctx.arc(cx, cy, glowR, 0, TAU);
+    ctx.fill();
+
+    // ground shadow
+    ctx.save();
+    ctx.translate(cx, cy + unit * 1.05);
+    ctx.scale(1, 0.34);
+    var sg = ctx.createRadialGradient(0, 0, 0, 0, 0, unit * 1.3);
+    sg.addColorStop(0, 'rgba(0,0,0,0.45)');
+    sg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = sg;
+    ctx.beginPath();
+    ctx.arc(0, 0, unit * 1.3, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+
+    var ha = hatAlpha();
+    if (ha > 0.001) drawHat(ha);
+    drawSwarm(t);
+    drawOrbiters(t);
+
+    // vignette
+    var vg = ctx.createRadialGradient(cx, cy, Math.min(W, H) * 0.35, cx, cy, Math.max(W, H) * 0.75);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(0,0,0,0.4)');
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // ------------------------------------------------------------------ sizing & loop
+  function resize() {
+    DPR = Math.min(2, window.devicePixelRatio || 1);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = Math.round(W * DPR);
+    canvas.height = Math.round(H * DPR);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    cx = W / 2;
+    cy = H * 0.44;
+    unit = Math.min(W, H) * 0.26;
+    pxScale = clamp(Math.min(W, H) / 700, 0.7, 1.6);
+    cap.style.top = (cy + unit * 1.5 + 26) + 'px';
+  }
+
+  var last = performance.now();
+  function frame(ts) {
+    var dt = Math.min(0.05, (ts - last) / 1000);
+    last = ts;
+    update(dt, ts / 1000);
+    render(ts / 1000);
+    requestAnimationFrame(frame);
+  }
+
+  // ------------------------------------------------------------------ events
+  canvas.addEventListener('pointerenter', trigger);
+  canvas.addEventListener('pointerdown', trigger);
+  canvas.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+      e.preventDefault();
+      trigger();
+    }
+  });
+  window.addEventListener('resize', resize);
+
+  // ------------------------------------------------------------------ go
+  resize();
+  initParticles();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
