@@ -20,7 +20,10 @@ def model_metadata(reasoning=None):
         "id": "example/model",
         "name": "Example Model",
         "supported_parameters": ["max_tokens", "reasoning", "structured_outputs"],
-        "architecture": {"input_modalities": ["text"]},
+        "architecture": {
+            "input_modalities": ["text"],
+            "output_modalities": ["text"],
+        },
         "pricing": {"prompt": "0.000001", "completion": "0.000002"},
         "context_length": 32_768,
         "top_provider": {"max_completion_tokens": 8_192},
@@ -40,6 +43,17 @@ def variant(slug, effort, warning=()):
 
 
 class ModelDiscoveryTest(unittest.TestCase):
+    def test_includes_meta_openrouter_models_except_spark(self):
+        provider_groups = json.loads(discover_models.GROUPS_FILE.read_text())
+        glimmer = model_metadata()
+        glimmer["id"] = "meta/muse-glimmer-30b"
+        spark = model_metadata()
+        spark["id"] = "meta/muse-spark-1.2"
+
+        self.assertEqual("Meta", provider_groups["meta"])
+        self.assertTrue(discover_models.should_include(glimmer, float("inf")))
+        self.assertFalse(discover_models.should_include(spark, float("inf")))
+
     def test_uses_only_advertised_efforts_in_canonical_order(self):
         model = model_metadata({
             "supported_efforts": ["low", "max", "medium"],
@@ -117,6 +131,7 @@ const MODELS = [
 
         self.assertLess(content.index('id: "example-max"'), content.index('id: "example-low"'))
         self.assertLess(content.index('id: "example-low"'), content.index('id: "existing"'))
+        self.assertEqual(2, content.count('harness: "Pi + OpenRouter"'))
 
     def test_generates_one_pi_run_per_effort_and_materializes_after_success(self):
         efforts = ["max", "high", "low"]
