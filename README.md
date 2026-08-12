@@ -4,4 +4,4 @@ A vibe bench for AI coding models. Every model gets the same prompt — generate
 
 Browse models in the sidebar, rate them with stars, or use grid view to compare up to four at once. Community ratings are aggregated from votes.
 
-A GitHub Action automatically detects new models on OpenRouter, generates their fedora, and opens a PR to add them.
+A GitHub Action automatically detects new models on OpenRouter and opens one PR per model. When OpenRouter advertises model-specific reasoning efforts, the action runs those efforts in parallel and adds each successful result as a separate commit and comparison variant. Failed efforts are reported in the partial PR instead of discarding successful runs. Models without selectable efforts receive one default run.

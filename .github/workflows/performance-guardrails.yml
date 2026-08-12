@@ -7,8 +7,11 @@ on:
       - 'index.html'
       - '.github/scripts/model_families.py'
       - '.github/scripts/test_model_families.py'
+      - '.github/scripts/discover_models.py'
+      - '.github/scripts/test_discover_models.py'
       - '.github/scripts/performance_guardrails.py'
       - '.github/scripts/test_performance_guardrails.py'
+      - '.github/workflows/new-models.yml'
       - '.github/workflows/performance-guardrails.yml'
 
 permissions:
@@ -28,11 +31,17 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install Python dependencies
+        run: pip install requests
+
       - name: Run guardrail tests
         run: python3 .github/scripts/test_performance_guardrails.py
 
       - name: Run model family tests
         run: python3 .github/scripts/test_model_families.py
+
+      - name: Run model discovery tests
+        run: python3 .github/scripts/test_discover_models.py
 
       - name: Require warnings for high-risk pages
         run: python3 .github/scripts/performance_guardrails.py --index index.html */index.html
