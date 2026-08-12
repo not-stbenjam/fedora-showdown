@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>Red Hat</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg0: #070708;
+      --bg1: #12090b;
+      --ink: #7c756d;
+    }
+    * { box-sizing: border-box; margin: 0; }
+    html, body {
+      height: 100%;
+      background: var(--bg0);
+      color: var(--ink);
+      -webkit-font-smoothing: antialiased;
+    }
+    body {
+      min-height: 100dvh;
+      overflow: hidden;
+      font-family: Georgia, "Iowan Old Style", Palatino, "Palatino Linotype", serif;
+    }
+    .hero {
+      position: relative;
+      min-height: 100dvh;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      isolation: isolate;
+      background:
+        radial-gradient(ellipse 70% 48% at 50% 46%, var(--bg1) 0%, #0a0708 42%, var(--bg0) 72%);
+    }
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: auto 50% 42% auto;
+      width: min(52vmin, 420px);
+      height: min(52vmin, 420px);
+      transform: translate(50%, 40%);
+      background: radial-gradient(circle, rgba(168, 18, 22, 0.16), rgba(168, 18, 22, 0.04) 38%, transparent 70%);
+      filter: blur(8px);
+      pointer-events: none;
+      z-index: 0;
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse at center, transparent 52%, rgba(0, 0, 0, 0.55) 100%);
+      pointer-events: none;
+      z-index: 2;
+    }
+    .stage {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      width: min(92vw, 760px);
+      outline: none;
+    }
+    canvas {
+      display: block;
+      width: min(92vw, 760px);
+      height: min(92vw, 760px);
+      cursor: pointer;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .caption {
+      margin-top: -7.5%;
+      font-size: clamp(0.62rem, 1.5vw, 0.78rem);
+      letter-spacing: 0.46em;
+      text-transform: uppercase;
+      color: #6e675f;
+      font-weight: 400;
+      user-select: none;
+      pointer-events: none;
+      animation: rise 1.6s ease 0.25s both;
+    }
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .caption { animation: none; }
+    }
+    @media (max-height: 520px) {
+      .caption { margin-top: -6%; }
+    }
+  </style>
+</head>
+<body>
+  <main class="hero">
+    <div class="stage" id="stage" tabindex="0" role="img" aria-label="Red Hat fedora. Hover or tap to dissolve it into embers.">
+      <canvas id="c"></canvas>
+      <p class="caption">Red Hat</p>
+    </div>
+  </main>
+  <script>
+    (() => {
+      const TAU = Math.PI * 2;
+      const canvas = document.getElementById("c");
+      const stage = document.getElementById("stage");
+      const ctx = canvas.getContext("2d", { alpha: true, desynchronized: true });
+      const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+      const rnd = mulberry32(0x52484454);
+      const particles = [];
+      const orbiters = [];
+      const N_ORBIT = 22;
+
+      let W = 0, H = 0, dpr = 1, cx = 0, cy = 0, scale = 1;
+      let spin = 0.62;
+      let spinVel = reduced ? 0 : 0.48;
+      let mode = "idle";
+      let modeT = 0;
+      let time = 0;
+      let assembled = 1;
+      let last = performance.now();
+
+      function mulberry32(a) {
+        return () => {
+          a |= 0;
+          a = a + 0x6D2B79F5 | 0;
+          let t = Math.imul(a ^ a >>> 15, 1 | a);
+          t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+          return ((t ^ t >>> 14) >>> 0) / 4294967296;
+        };
+      }
+      const lerp = (a, b, t) => a + (b - a) * t;
+      const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+      const easeOut = (t) => 1 - Math.pow(1 - t, 3);
+      const easeInOut = (t) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      const n3 = (x, y, z) => {
+        const l = Math.hypot(x, y, z) || 1;
+        return [x / l, y / l, z / l];
+      };
+
+      function light(px, py, pz, nx, ny, nz, base, sat = 1) {
+        const L = n3(-0.38, 0.82, 0.52);
+        const ndotl = Math.max(0, nx * L[0] + ny * L[1] + nz * L[2]);
+        const wrap = ndotl * 0.72 + 0.28;
+        const vx = -px, vy = 1.4 - py, vz = 3.2 - pz;
+        const V = n3(vx, vy, vz);
+        const rim = Math.pow(1 - clamp(nx * V[0] + ny * V[1] + nz * V[2]), 1.8) * 0.28;
+        const occ = clamp(0.72 + py * 0.18 - Math.max(0, -ny) * 0.16);
+        const i = (0.2 + wrap * 0.82 + rim) * occ;
+        return {
+          r: Math.min(255, (base[0] * i + 22 * rim + 10 * ndotl) * sat),
+          g: Math.min(255, (base[1] * i + 7 * rim) * sat),
+          b: Math.min(255, (base[2] * i + 3 * rim) * sat)
+        };
+      }
+
+      function pushP(x, y, z, nx, ny, nz, base, size, kind) {
+        const N = n3(nx, ny, nz);
+        const col = light(x, y, z, N[0], N[1], N[2], base);
+        particles.push({
+          hx: x, hy: y, hz: z,
+          x, y, z,
+          sx: x, sy: y, sz: z,
+          vx: 0, vy: 0, vz: 0,
+          ex: 0, ey: 0, ez: 0,
+          cr: col.r, cg: col.g, cb: col.b,
+          br: base[0], bg: base[1], bb: base[2],
+          nx: N[0], ny: N[1], nz: N[2],
+          size, kind,
+          heat: 0,
+          delay: 0,
+          r1: rnd(), r2: rnd(), r3: rnd(),
+          seed: rnd() * TAU
+        });
+      }
+
+      function crownXZ(theta, h) {
+        const taper = 1 - 0.11 * h;
+        const rx = 0.70 * taper;
+        const rz = 0.86 * taper;
+        const front = Math.max(0, Math.sin(theta));
+        const pinch = 1 - 0.26 * front * front * (0.2 + 0.8 * h);
+        return [rx * pinch * Math.cos(theta), rz * Math.sin(theta)];
+      }
+
+      function brimY(theta, t) {
+        const side = Math.pow(Math.abs(Math.cos(theta)), 1.15);
+        const fb = Math.abs(Math.sin(theta));
+        return -0.04 + 0.23 * side * t * t - 0.055 * fb * t;
+      }
+
+      function dimpleIn(x, y, z) {
+        const d1 = Math.hypot(x + 0.26, (y - 0.72) * 1.2, z - 0.52);
+        const d2 = Math.hypot(x - 0.26, (y - 0.72) * 1.2, z - 0.52);
+        return Math.exp(-d1 * d1 / 0.045) + Math.exp(-d2 * d2 / 0.045);
+      }
+
+      function buildHat() {
+        const RED = [206, 8, 12];
+        const REDD = [118, 6, 10];
+        const BAND = [196, 158, 86];
+        const BANDD = [120, 90, 42];
+        const GOLD = [232, 196, 96];
+
+        // Crown wall
+        for (let i = 0; i < 40; i++) {
+          for (let j = 0; j < 24; j++) {
+            const theta = (i + rnd() * 0.85) / 40 * TAU;
+            const h = (j + rnd() * 0.8) / 23;
+            if (h < 0.18) continue;
+            let [x, z] = crownXZ(theta, h);
+            let y = 0.02 + h * 1.02;
+            const dip = dimpleIn(x, y, z) * 0.07;
+            const N = n3(x, 0.12, z);
+            x -= N[0] * dip;
+            z -= N[2] * dip;
+            const felt = 0.92 + rnd() * 0.16;
+            pushP(x, y, z, x, 0.18 - dip * 2, z, RED.map(v => v * felt), 1.05 + rnd() * 0.35, "crown");
+          }
+        }
+
+        // Crown top + crease
+        for (let i = 0; i < 18; i++) {
+          const v = (i + 0.4) / 18;
+          const ring = Math.floor(8 + v * 28);
+          for (let k = 0; k < ring; k++) {
+            const theta = (k + rnd() * 0.7) / ring * TAU;
+            const [bx, bz] = crownXZ(theta, 1);
+            const x = bx * v * (0.92 + rnd() * 0.06);
+            const z = bz * v * (0.92 + rnd() * 0.06);
+            const crease = Math.exp(-(x * x) / 0.055) * 0.17 * (1 - Math.abs(z) * 0.35);
+            const dome = 0.035 * (1 - v * v);
+            const y = 1.04 - crease + dome;
+            pushP(x, y, z, x * 0.4, 1, z * 0.15, RED.map(c => c * (0.88 + rnd() * 0.2)), 1.05, "top");
+          }
+        }
+
+        // Brim top
+        for (let i = 0; i < 52; i++) {
+          for (let j = 0; j < 18; j++) {
+            const theta = (i + rnd() * 0.8) / 52 * TAU;
+            const t = (j + rnd() * 0.75) / 17;
+            const [ix, iz] = crownXZ(theta, 0);
+            const ox = 1.50 * Math.cos(theta);
+            const oz = 1.64 * Math.sin(theta);
+            const x = lerp(ix * 1.04, ox, t);
+            const z = lerp(iz * 1.04, oz, t);
+            const y = brimY(theta, t);
+            const ddy = 0.46 * Math.pow(Math.abs(Math.cos(theta)), 1.15) * t - 0.05;
+            pushP(x, y, z, -x * 0.05, 1, -z * 0.04 + ddy * 0.2, RED.map(c => c * (0.9 + rnd() * 0.18)), 1.08, "brim");
+          }
+        }
+
+        // Brim underside
+        for (let i = 0; i < 40; i++) {
+          for (let j = 0; j < 10; j++) {
+            const theta = (i + rnd() * 0.8) / 40 * TAU;
+            const t = 0.12 + (j + rnd() * 0.7) / 10 * 0.88;
+            const [ix, iz] = crownXZ(theta, 0);
+            const x = lerp(ix * 1.05, 1.46 * Math.cos(theta), t);
+            const z = lerp(iz * 1.05, 1.60 * Math.sin(theta), t);
+            const y = brimY(theta, t) - 0.035;
+            pushP(x, y, z, 0, -1, 0, REDD.map(c => c * (0.85 + rnd() * 0.2)), 0.95, "under");
+          }
+        }
+
+        // Ribbon
+        for (let i = 0; i < 56; i++) {
+          for (let j = 0; j < 8; j++) {
+            const theta = (i + rnd() * 0.7) / 56 * TAU;
+            const h = (j + rnd() * 0.7) / 7;
+            const [cx0, cz0] = crownXZ(theta, 0.02 + h * 0.12);
+            const x = cx0 * 1.045;
+            const z = cz0 * 1.045;
+            const y = 0.035 + h * 0.175;
+            const edge = h < 0.12 || h > 0.88;
+            const base = edge ? GOLD : BAND.map((c, n) => lerp(c, BANDD[n], (Math.sin(theta * 2) + 1) * 0.18));
+            pushP(x, y, z, x, 0.05, z, base, edge ? 0.95 : 1.12, "band");
+          }
+        }
+
+        // Bow — wearer's left (−X)
+        const bow = (fx, fy, fz, sx, sy, sz, n, base, siz) => {
+          for (let i = 0; i < n; i++) {
+            const u = rnd() * TAU;
+            const v = rnd();
+            const x = fx + Math.cos(u) * sx * (0.35 + 0.65 * v);
+            const y = fy + Math.sin(u) * sy * (0.35 + 0.65 * v) + (rnd() - 0.5) * 0.02;
+            const z = fz + Math.sin(u * 2) * sz * 0.35 + (rnd() - 0.5) * sz;
+            pushP(x, y, z, -1, 0.2, 0, base, siz, "bow");
+          }
+        };
+        bow(-0.78, 0.14, 0.13, 0.16, 0.11, 0.08, 90, BAND, 1.05);
+        bow(-0.78, 0.14, -0.13, 0.16, 0.11, 0.08, 90, BAND, 1.05);
+        bow(-0.80, 0.12, 0, 0.07, 0.07, 0.05, 40, BANDD, 1.1);
+        for (let i = 0; i < 70; i++) {
+          const t = rnd();
+          const side = rnd() < 0.5 ? -1 : 1;
+          pushP(-0.74 - t * 0.06, 0.02 - t * 0.16, side * (0.04 + t * 0.07), -0.4, -0.7, side, BAND, 1, "bow");
+        }
+
+        // Inner crown shadow
+        for (let i = 0; i < 180; i++) {
+          const theta = rnd() * TAU;
+          const v = Math.sqrt(rnd()) * 0.82;
+          const [bx, bz] = crownXZ(theta, 0.3);
+          pushP(bx * v * 0.9, 0.16 + rnd() * 0.7, bz * v * 0.9, 0, -1, 0, [48, 4, 6], 0.85, "inner");
+        }
+
+        // Dedicated orbiters (clones, so the hat stays whole)
+        for (let i = 0; i < N_ORBIT; i++) {
+          const src = particles[(i * 97 + 13) % particles.length];
+          orbiters.push({
+            x: src.hx, y: src.hy, z: src.hz,
+            hx: src.hx, hy: src.hy, hz: src.hz,
+            ang: rnd() * TAU,
+            spd: 0.55 + rnd() * 0.85,
+            rx: 1.15 + rnd() * 0.85,
+            ry: 0.12 + rnd() * 0.28,
+            rz: 0.95 + rnd() * 0.7,
+            tilt: 0.25 + rnd() * 0.55,
+            phase: rnd() * TAU,
+            size: 1.35 + rnd() * 0.7,
+            cr: 255, cg: 150 + rnd() * 50, cb: 70,
+            alpha: 0,
+            trail: [],
+            r1: rnd()
+          });
+        }
+      }
+
+      function resize() {
+        const css = Math.min(stage.clientWidth || window.innerWidth, 760);
+        dpr = Math.min(window.devicePixelRatio || 1, 2);
+        W = canvas.width = Math.floor(css * dpr);
+        H = canvas.height = Math.floor(css * dpr);
+        canvas.style.width = css + "px";
+        canvas.style.height = css + "px";
+        cx = W * 0.5;
+        cy = H * 0.46;
+        scale = Math.min(W, H) * 0.27;
+      }
+
+      function project(x, y, z, ang) {
+        const c = Math.cos(ang), s = Math.sin(ang);
+        const rx = x * c - z * s;
+        const rz = x * s + z * c;
+        const tilt = -0.48;
+        const ct = Math.cos(tilt), st = Math.sin(tilt);
+        const ry = y * ct - rz * st;
+        const rz2 = y * st + rz * ct;
+        const persp = 3.6 / (3.6 + rz2 + 0.15);
+        return {
+          x: cx + rx * scale * persp,
+          y: cy - (ry - 0.28) * scale * persp,
+          z: rz2,
+          p: persp
+        };
+      }
+
+      function armBurst() {
+        for (const p of particles) {
+          const radial = Math.hypot(p.hx, p.hz);
+          p.delay = radial * 0.18 + p.r1 * 0.28 + (p.kind === "brim" ? 0 : 0.08);
+          const n = n3(
+            p.hx + (p.r1 - 0.5) * 0.8,
+            p.hy * 0.35 + 0.45 + p.r2 * 0.6,
+            p.hz + (p.r3 - 0.5) * 0.8
+          );
+          const mag = 1.05 + p.r2 * 2.15;
+          p.ex = n[0] * mag;
+          p.ey = n[1] * (0.7 + p.r3 * 1.5) + 0.35;
+          p.ez = n[2] * mag;
+        }
+        for (const o of orbiters) {
+          o.alpha = 0;
+          o.trail.length = 0;
+          o.x = o.hx;
+          o.y = o.hy;
+          o.z = o.hz;
+        }
+      }
+
+      function trigger() {
+        if (reduced) return;
+        if (mode !== "idle" && mode !== "orbit") return;
+        mode = "dissolve";
+        modeT = 0;
+        armBurst();
+      }
+
+      function update(dt) {
+        time += dt;
+        const targetSpin = (mode === "idle" || mode === "orbit") ? 0.48 : 0.055;
+        spinVel += (targetSpin - spinVel) * (1 - Math.pow(0.012, dt));
+        if (!reduced) spin += spinVel * dt;
+
+        if (mode === "idle") {
+          assembled = 1;
+          for (const p of particles) {
+            const breathe = reduced ? 0 : Math.sin(time * 0.9 + p.seed) * 0.006;
+            p.x = p.hx + p.nx * breathe;
+            p.y = p.hy + p.ny * breathe;
+            p.z = p.hz + p.nz * breathe;
+            p.heat = 0;
+          }
+          return;
+        }
+
+        modeT += dt;
+
+        if (mode === "dissolve") {
+          const dur = 1.75;
+          let heatSum = 0;
+          for (const p of particles) {
+            const t = clamp((modeT - p.delay) / 1.15);
+            const e = easeOut(t);
+            p.heat = e;
+            heatSum += e;
+            const wob = Math.sin(time * 9 + p.seed) * 0.04 * e;
+            p.x = p.hx + p.ex * e + wob * p.r1;
+            p.y = p.hy + p.ey * e - 0.18 * e * e + Math.sin(time * 6 + p.seed) * 0.05 * e;
+            p.z = p.hz + p.ez * e + wob * p.r2;
+          }
+          assembled = 1 - heatSum / particles.length;
+          const oIn = clamp((modeT - 0.25) / 0.8);
+          for (const o of orbiters) o.alpha = oIn * 0.9;
+          if (modeT > dur) {
+            mode = "swirl";
+            modeT = 0;
+          }
+          return;
+        }
+
+        if (mode === "swirl") {
+          assembled = 0;
+          const swirl = dt * (1.35 + Math.sin(modeT * 2.2) * 0.25);
+          for (const p of particles) {
+            p.heat = 0.85 + Math.sin(time * 14 + p.seed) * 0.15;
+            const ang = swirl * (0.75 + p.r1 * 0.9);
+            const c = Math.cos(ang), s = Math.sin(ang);
+            const nx = p.x * c - p.z * s;
+            const nz = p.x * s + p.z * c;
+            p.x = nx;
+            p.z = nz;
+            const r = Math.hypot(p.x, p.z);
+            const want = 1.35 + Math.sin(time * 1.6 + p.seed) * 0.35 + p.r2 * 0.4;
+            const k = 1 + (want - r) * dt * 1.4;
+            p.x *= k;
+            p.z *= k;
+            p.y += Math.sin(time * 2.8 + p.seed) * dt * 0.55;
+            p.y += (0.45 - p.y) * dt * 0.35;
+          }
+          for (const o of orbiters) {
+            o.alpha = 1;
+            o.ang += dt * o.spd * 1.4;
+          }
+          if (modeT > 1.85) {
+            mode = "reform";
+            modeT = 0;
+            for (const p of particles) {
+              p.sx = p.x; p.sy = p.y; p.sz = p.z;
+            }
+          }
+          return;
+        }
+
+        if (mode === "reform") {
+          const u = easeInOut(clamp(modeT / 2.2));
+          for (const p of particles) {
+            const ang = (1 - u) * (1.7 + p.r2 * 1.4);
+            const dx = p.sx - p.hx;
+            const dy = p.sy - p.hy;
+            const dz = p.sz - p.hz;
+            const c = Math.cos(ang), s = Math.sin(ang);
+            p.x = p.hx + (dx * c - dz * s) * (1 - u);
+            p.z = p.hz + (dx * s + dz * c) * (1 - u);
+            p.y = p.hy + dy * (1 - u) + Math.sin(u * Math.PI) * 0.1;
+            p.heat = 1 - u;
+          }
+          assembled = u;
+          if (modeT > 2.25) {
+            for (const p of particles) {
+              p.x = p.hx; p.y = p.hy; p.z = p.hz; p.heat = 0;
+            }
+            mode = "orbit";
+            modeT = 0;
+            assembled = 1;
+          }
+          return;
+        }
+
+        if (mode === "orbit") {
+          assembled = 1;
+          for (const p of particles) {
+            const breathe = Math.sin(time * 0.9 + p.seed) * 0.006;
+            p.x = p.hx + p.nx * breathe;
+            p.y = p.hy + p.ny * breathe;
+            p.z = p.hz + p.nz * breathe;
+            p.heat *= Math.pow(0.02, dt);
+          }
+          for (const o of orbiters) {
+            o.alpha = lerp(o.alpha, 0.95, 1 - Math.pow(0.05, dt));
+            o.ang += dt * o.spd;
+          }
+        }
+      }
+
+      function orbiterPos(o) {
+        if (mode === "dissolve" || mode === "swirl" || mode === "reform") {
+          const t = time * o.spd * (mode === "swirl" ? 1.6 : 1) + o.phase;
+          const lift = mode === "reform" ? lerp(0.55, 0.35, assembled) : 0.55;
+          return {
+            x: Math.cos(t) * o.rx * (mode === "dissolve" ? lerp(0.4, 1, o.alpha) : 1),
+            y: lift + Math.sin(t * 2 + o.phase) * o.ry,
+            z: Math.sin(t) * o.rz
+          };
+        }
+        const t = o.ang + o.phase;
+        let x = Math.cos(t) * o.rx;
+        let y = 0.42 + Math.sin(t * 2) * o.ry;
+        let z = Math.sin(t) * o.rz;
+        const ct = Math.cos(o.tilt), st = Math.sin(o.tilt);
+        const yy = y * ct - z * st;
+        const zz = y * st + z * ct;
+        return { x, y: yy, z: zz };
+      }
+
+      function draw() {
+        ctx.clearRect(0, 0, W, H);
+
+        // Grounded contact shadow
+        const sh = project(0, -0.08, 0, spin);
+        const shadowA = 0.22 * assembled;
+        const g = ctx.createRadialGradient(sh.x, sh.y + scale * 0.72, 2, sh.x, sh.y + scale * 0.74, scale * 1.15);
+        g.addColorStop(0, `rgba(0,0,0,${shadowA})`);
+        g.addColorStop(0.45, `rgba(0,0,0,${shadowA * 0.35})`);
+        g.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.ellipse(sh.x, sh.y + scale * 0.74, scale * 1.12, scale * 0.22, 0, 0, TAU);
+        ctx.fill();
+
+        const list = particles.map((p, i) => {
+          const pr = project(p.x, p.y, p.z, spin);
+          return { p, pr, i };
+        });
+        list.sort((a, b) => a.pr.z - b.pr.z);
+
+        for (const { p, pr } of list) {
+          if (pr.z < -2.8) continue;
+          const heat = p.heat;
+          const flicker = heat > 0.02 ? 0.85 + Math.sin(time * 18 + p.seed) * 0.15 : 1;
+          const r = lerp(p.cr, 255, heat * 0.72) * flicker;
+          const gch = lerp(p.cg, 132 + p.r2 * 40, heat * 0.7) * flicker;
+          const b = lerp(p.cb, 28, heat * 0.45);
+          const s = Math.max(0.55, p.size * pr.p * dpr * (1 + heat * 0.55));
+          const a = clamp(0.42 + pr.p * 0.5) * (p.kind === "inner" ? 0.55 : 0.92);
+
+          if (heat > 0.35 || (p.kind === "band" && assembled > 0.8 && pr.z > 0.15)) {
+            const glow = heat > 0.35 ? heat * 0.38 : 0.08;
+            ctx.fillStyle = `rgba(${r | 0},${gch | 0},${b | 0},${glow * a})`;
+            ctx.fillRect(pr.x - s * 1.8, pr.y - s * 1.8, s * 3.6, s * 3.6);
+          }
+
+          ctx.fillStyle = `rgba(${r | 0},${gch | 0},${b | 0},${a})`;
+          ctx.fillRect(pr.x - s * 0.5, pr.y - s * 0.5, s, s);
+        }
+
+        // Orbiters + trails
+        if (!reduced) {
+          for (const o of orbiters) {
+            if (o.alpha < 0.02) continue;
+            const pos = orbiterPos(o);
+            const pr = project(pos.x, pos.y, pos.z, spin);
+            o.trail.push({ x: pr.x, y: pr.y, z: pr.z });
+            if (o.trail.length > 18) o.trail.shift();
+
+            const tr = o.trail;
+            for (let i = 1; i < tr.length; i++) {
+              const q = i / tr.length;
+              ctx.strokeStyle = `rgba(255, ${150 + (o.r1 * 40) | 0}, 72, ${q * 0.22 * o.alpha})`;
+              ctx.lineWidth = (0.6 + q * 1.4) * dpr;
+              ctx.beginPath();
+              ctx.moveTo(tr[i - 1].x, tr[i - 1].y);
+              ctx.lineTo(tr[i].x, tr[i].y);
+              ctx.stroke();
+            }
+
+            const s = o.size * pr.p * dpr * 1.15;
+            ctx.fillStyle = `rgba(255, 170, 80, ${0.18 * o.alpha})`;
+            ctx.beginPath();
+            ctx.arc(pr.x, pr.y, s * 2.4, 0, TAU);
+            ctx.fill();
+            ctx.fillStyle = `rgba(255, 214, 150, ${0.9 * o.alpha})`;
+            ctx.beginPath();
+            ctx.arc(pr.x, pr.y, s * 0.55, 0, TAU);
+            ctx.fill();
+          }
+        }
+      }
+
+      function frame(now) {
+        const dt = Math.min(0.033, (now - last) / 1000);
+        last = now;
+        if (!reduced) update(dt);
+        else {
+          for (const p of particles) {
+            p.x = p.hx; p.y = p.hy; p.z = p.hz;
+          }
+        }
+        draw();
+        requestAnimationFrame(frame);
+      }
+
+      buildHat();
+      resize();
+      window.addEventListener("resize", resize);
+
+      if (!reduced) {
+        stage.addEventListener("pointerenter", trigger);
+        stage.addEventListener("click", trigger);
+        stage.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            trigger();
+          }
+        });
+      }
+
+      requestAnimationFrame((t) => {
+        last = t;
+        requestAnimationFrame(frame);
+      });
+    })();
+  </script>
+</body>
+</html>

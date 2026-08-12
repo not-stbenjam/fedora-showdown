@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#070708" />
+  <meta name="color-scheme" content="dark" />
+  <title>Fedora</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #070708;
+    }
+    body {
+      min-height: 100dvh;
+      font-family: Palatino, "Palatino Linotype", "Iowan Old Style", "Times New Roman", serif;
+      -webkit-font-smoothing: antialiased;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+      background:
+        radial-gradient(78vw 54vh at 50% 42%, rgba(86, 16, 14, 0.22), transparent 62%),
+        radial-gradient(120vw 70vh at 50% 118%, #050506, transparent 56%),
+        linear-gradient(180deg, #0c0c0e 0%, #070708 48%, #050506 100%);
+    }
+    canvas {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      cursor: pointer;
+    }
+    .caption {
+      position: fixed;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 2;
+      pointer-events: none;
+      user-select: none;
+      text-align: center;
+      color: rgba(255, 228, 220, 0.38);
+      font-size: clamp(0.66rem, 1.35vw, 0.78rem);
+      font-weight: 500;
+      letter-spacing: 0.58em;
+      text-transform: uppercase;
+      padding-left: 0.58em;
+    }
+    .caption span {
+      display: block;
+      margin-top: 0.55rem;
+      color: rgba(255, 214, 204, 0.2);
+      font-family: system-ui, "Segoe UI", sans-serif;
+      font-size: 0.6rem;
+      letter-spacing: 0.32em;
+      text-transform: lowercase;
+      padding-left: 0.32em;
+    }
+    .veil {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 1;
+      background: radial-gradient(ellipse at 50% 44%, transparent 34%, rgba(0, 0, 0, 0.46) 100%);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .caption span { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="c" role="img" aria-label="A red fedora. Hover or tap to scatter it into particles."></canvas>
+  <div class="veil"></div>
+  <p class="caption" id="caption">fedora<span id="hint">hover or tap</span></p>
+  <script>
+    (() => {
+      const TAU = Math.PI * 2;
+      const canvas = document.getElementById("c");
+      const caption = document.getElementById("caption");
+      const hint = document.getElementById("hint");
+      const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
+      const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+      const RX = 0.68, RZ = 0.92, CH = 1.1;
+      const BRX = 1.72, BRZ = 1.82;
+      const CAM = 5.2;
+      const TILT = 0.5;
+      const LIGHT = norm3(0.44, 0.82, 0.36);
+
+      let w = 0, h = 0, cx = 0, cy = 0, unit = 120;
+      let rotY = 0.95;
+      let spin = reduce ? 0 : 0.46;
+      let spinTo = spin;
+      let mode = "idle";
+      let clock = 0;
+      let last = performance.now();
+      let armed = 0;
+      let run = true;
+      let meshA = 1;
+      let peel = 0;
+
+      const faces = [];
+      const dust = [];
+      const sparks = [];
+      const faceOrder = [];
+      const dustOrder = [];
+
+      function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+      function lerp(a, b, k) { return a + (b - a) * k; }
+      function sat(v) { return clamp(v, 0, 1); }
+      function ease(k) { return k * k * (3 - 2 * k); }
+      function easeOut(k) { return 1 - (1 - k) ** 3; }
+      function hash(i) {
+        const s = Math.sin(i * 127.1 + 311.7) * 43758.5453123;
+        return s - Math.floor(s);
+      }
+      function norm3(x, y, z) {
+        const l = Math.hypot(x, y, z) || 1;
+        return [x / l, y / l, z / l];
+      }
+      function cross(ax, ay, az, bx, by, bz) {
+        return [ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx];
+      }
+
+      function crown(th, v) {
+        const taper = 1 - 0.11 * v * v;
+        const s = Math.sin(th);
+        const c = Math.cos(th);
+        const front = Math.max(0, s);
+        const pinch = 1 - 0.16 * v * front * front;
+        const x = RX * taper * pinch * c;
+        const z = RZ * taper * (1 - 0.05 * v * front) * s;
+        const dent = 0.28 * v * v * Math.exp(-3.35 * (x * x) / (RX * RX));
+        const y = v * CH - dent - 0.075 * v * v * front;
+        return [x, y, z];
+      }
+
+      function brim(th, u) {
+        const s = Math.sin(th);
+        const c = Math.cos(th);
+        const x = lerp(RX * 1.05, BRX, u) * c;
+        const z = lerp(RZ * 1.03, BRZ, u) * s;
+        const side = Math.abs(c) ** 1.55;
+        const fb = Math.abs(s) ** 2.05;
+        const y = -0.012 + 0.205 * u ** 1.32 * side - 0.07 * u ** 1.12 * fb;
+        return [x, y, z];
+      }
+
+      function band(th, v) {
+        const [x, , z] = crown(th, 0.012);
+        return [x * 1.055, 0.012 + v * 0.148, z * 1.055];
+      }
+
+      function addFace(a, b, c, d, rgb, kind) {
+        const n = norm3(...cross(
+          b[0] - a[0], b[1] - a[1], b[2] - a[2],
+          d[0] - a[0], d[1] - a[1], d[2] - a[2]
+        ));
+        faces.push({
+          a, b, c, d, n, rgb, kind,
+          mx: (a[0] + b[0] + c[0] + d[0]) * 0.25,
+          my: (a[1] + b[1] + c[1] + d[1]) * 0.25,
+          mz: (a[2] + b[2] + c[2] + d[2]) * 0.25
+        });
+      }
+
+      function addDust(x, y, z, nx, ny, nz, rgb, size, kind) {
+        const n = norm3(nx, ny, nz);
+        dust.push({
+          x, y, z, nx: n[0], ny: n[1], nz: n[2],
+          px: x, py: y, pz: z,
+          vx: 0, vy: 0, vz: 0,
+          r: rgb[0], g: rgb[1], b: rgb[2],
+          size, kind,
+          seed: Math.random(),
+          ph: Math.random() * TAU,
+          delay: Math.random() * 0.3,
+          heat: 0,
+          spark: null
+        });
+      }
+
+      function sample(fn, th, v, rgb, size, kind, jitter) {
+        const p = fn(th, v);
+        const q = fn(th + 0.04, v);
+        const r = fn(th, Math.min(1, v + 0.04));
+        const n = cross(q[0] - p[0], q[1] - p[1], q[2] - p[2], r[0] - p[0], r[1] - p[1], r[2] - p[2]);
+        addDust(
+          p[0] + (Math.random() - 0.5) * jitter,
+          p[1] + (Math.random() - 0.5) * jitter,
+          p[2] + (Math.random() - 0.5) * jitter,
+          n[0], n[1], n[2], rgb, size * (0.84 + Math.random() * 0.32), kind
+        );
+      }
+
+      function build() {
+        const red = [172, 16, 20];
+        const deep = [126, 11, 14];
+        const under = [56, 8, 10];
+        const rib = [24, 9, 11];
+        const edge = [198, 48, 42];
+        const topc = [180, 22, 24];
+
+        const ct = 38, cv = 13;
+        for (let i = 0; i < ct; i++) {
+          for (let j = 0; j < cv; j++) {
+            const t0 = i / ct * TAU, t1 = (i + 1) / ct * TAU;
+            const v0 = j / cv, v1 = (j + 1) / cv;
+            addFace(crown(t0, v0), crown(t1, v0), crown(t1, v1), crown(t0, v1), red, "crown");
+          }
+        }
+
+        const tt = 30;
+        for (let i = 0; i < tt; i++) {
+          for (let j = 0; j < tt; j++) {
+            const cell = (u, v) => {
+              if (Math.hypot(u, v) > 1.001) return null;
+              return crown(Math.atan2(v, u), 1);
+            };
+            const x0 = -1 + 2 * i / tt, x1 = -1 + 2 * (i + 1) / tt;
+            const z0 = -1 + 2 * j / tt, z1 = -1 + 2 * (j + 1) / tt;
+            const a = cell(x0, z0), b = cell(x1, z0), c = cell(x1, z1), d = cell(x0, z1);
+            if (a && b && c && d) addFace(a, b, c, d, topc, "top");
+          }
+        }
+
+        const bt = 42, bu = 8;
+        for (let i = 0; i < bt; i++) {
+          for (let j = 0; j < bu; j++) {
+            const t0 = i / bt * TAU, t1 = (i + 1) / bt * TAU;
+            const u0 = j / bu, u1 = (j + 1) / bu;
+            addFace(brim(t0, u0), brim(t1, u0), brim(t1, u1), brim(t0, u1), deep, "brim");
+            addFace(brim(t0, u1), brim(t1, u1), brim(t1, u0), brim(t0, u0), under, "under");
+          }
+        }
+
+        const rt = 34, rv = 3;
+        for (let i = 0; i < rt; i++) {
+          for (let j = 0; j < rv; j++) {
+            const t0 = i / rt * TAU, t1 = (i + 1) / rt * TAU;
+            const v0 = j / rv, v1 = (j + 1) / rv;
+            addFace(band(t0, v0), band(t1, v0), band(t1, v1), band(t0, v1), rib, "band");
+          }
+        }
+
+        for (let i = 0; i < 76; i++) {
+          for (let j = 0; j < 20; j++) {
+            sample(crown, (i + hash(i * 17 + j)) / 76 * TAU, (j + 0.28 + hash(j * 9 + i) * 0.46) / 20, red, 1.85, "crown", 0.011);
+          }
+        }
+
+        const golden = Math.PI * (3 - Math.sqrt(5));
+        for (let i = 0; i < 980; i++) {
+          const rad = Math.sqrt((i + 0.5) / 980);
+          const a = i * golden;
+          const p = crown(Math.atan2(Math.sin(a) * rad, Math.cos(a) * rad), 1);
+          addDust(p[0] * 0.985, p[1], p[2] * 0.985, p[0] * 0.35, 1, p[2] * 0.12, topc, 2, "top");
+        }
+
+        for (let i = 0; i < 86; i++) {
+          for (let j = 0; j < 15; j++) {
+            sample(brim, (i + hash(i + j * 11)) / 86 * TAU, (j + 0.22 + hash(j + i * 5) * 0.52) / 15, deep, 2.05, "brim", 0.013);
+          }
+        }
+
+        for (let i = 0; i < 240; i++) {
+          const p = brim(i / 240 * TAU, 1);
+          addDust(p[0], p[1] + 0.01, p[2], p[0], 0.28, p[2], edge, 1.65, "edge");
+        }
+
+        for (let i = 0; i < 68; i++) {
+          for (let j = 0; j < 6; j++) {
+            sample(band, (i + hash(i * 3 + j)) / 68 * TAU, j / 5, rib, 1.65, "band", 0.007);
+          }
+        }
+
+        for (let i = 0; i < faces.length; i++) faceOrder[i] = { f: faces[i], z: 0 };
+        for (let i = 0; i < dust.length; i++) dustOrder[i] = null;
+      }
+
+      function pickSparks() {
+        sparks.length = 0;
+        const pool = dust.filter((p) => p.kind === "crown" || p.kind === "edge" || p.kind === "brim");
+        for (let i = 0; i < 20; i++) {
+          const p = pool[(hash(i * 91 + 4) * pool.length) | 0];
+          if (!p || p.spark) continue;
+          p.spark = {
+            a: hash(i * 19) * TAU,
+            sp: 0.48 + hash(i * 31) * 0.92,
+            rad: 1.5 + hash(i * 43) * 1.08,
+            ht: 0.1 + hash(i * 61) * 1.05,
+            wob: 0.65 + hash(i * 11) * 1.45,
+            inc: (hash(i * 8) - 0.5) * 0.56,
+            trail: []
+          };
+          sparks.push(p);
+        }
+      }
+
+      function rot(x, y, z, cy, sy, cxi, sxi) {
+        const x1 = x * cy + z * sy;
+        const z1 = -x * sy + z * cy;
+        return [x1, y * cxi - z1 * sxi, y * sxi + z1 * cxi];
+      }
+
+      function proj(x, y, z) {
+        const d = CAM - z;
+        const s = unit * (CAM / d);
+        return [cx + x * s, cy - y * s, s, d];
+      }
+
+      function curl(x, y, z, time) {
+        return [
+          Math.cos(y * 1.7 - time * 0.7) * Math.sin(z * 1.3 + x) - Math.sin(z * 1.4 + time * 0.55) * Math.cos(x * 1.5),
+          Math.sin(z * 1.4 + time * 0.55) * Math.cos(x * 1.5) - Math.sin(x * 1.55 + time * 0.9) * Math.cos(y * 1.2 + z),
+          Math.sin(x * 1.55 + time * 0.9) * Math.cos(y * 1.2 + z) - Math.cos(y * 1.7 - time * 0.7) * Math.sin(z * 1.3 + x)
+        ];
+      }
+
+      function begin() {
+        if (reduce) return;
+        if (mode !== "idle" && mode !== "orbit") return;
+        const now = performance.now();
+        if (now - armed < 750) return;
+        armed = now;
+        mode = "scatter";
+        clock = 0;
+        peel = 0;
+        spinTo = 0.09;
+        for (const p of dust) {
+          p.spark = null;
+          const kick = 0.7 + p.seed * 1.25;
+          p.px = p.x; p.py = p.y; p.pz = p.z;
+          p.vx = p.nx * kick + Math.cos(p.ph) * 0.32;
+          p.vy = p.ny * 0.5 + 0.82 + p.seed * 1.05;
+          p.vz = p.nz * kick + Math.sin(p.ph * 1.3) * 0.32;
+          p.heat = 0;
+        }
+        pickSparks();
+        hint.style.opacity = "0.28";
+      }
+
+      function step(dt) {
+        if (reduce) return;
+        spin += (spinTo - spin) * 3.8 * dt;
+        rotY += spin * dt;
+        if (mode === "idle") return;
+
+        clock += dt;
+        const t = clock;
+        let burst = 0, swirl = 0, gather = 0;
+        if (mode !== "orbit") {
+          burst = sat(1 - Math.max(0, t - 1.5) / 0.3);
+          swirl = sat((t - 1.05) / 0.42) * (1 - sat((t - 2.55) / 0.55));
+          gather = sat((t - 2.38) / 1.7);
+          meshA = sat(1 - sat(t / 0.38) + sat((t - 2.55) / 1.15));
+        } else {
+          meshA = 1;
+        }
+
+        if (mode === "scatter" && t >= 1.15) mode = "swirl";
+        if ((mode === "swirl" || mode === "scatter") && t >= 2.48) mode = "gather";
+
+        if (mode === "scatter" || mode === "swirl" || mode === "gather") {
+          for (let i = 0; i < dust.length; i++) {
+            const p = dust[i];
+            const local = sat((t - p.delay) / 0.24);
+            if (gather > 0.985) {
+              p.px = p.x; p.py = p.y; p.pz = p.z; p.heat = 0;
+              continue;
+            }
+            const go = burst * (1 - gather) * local;
+            const [cxn, cyn, czn] = curl(p.px * 1.25, p.py * 1.35, p.pz * 1.25, t);
+            p.vx += cxn * 0.92 * dt * (go + swirl * 0.55);
+            p.vy += (cyn * 0.38 + 0.07) * dt * go;
+            p.vz += czn * 0.92 * dt * (go + swirl * 0.55);
+            p.vy -= 0.78 * dt * go;
+            p.vx *= 1 - 0.5 * dt;
+            p.vy *= 1 - 0.28 * dt;
+            p.vz *= 1 - 0.5 * dt;
+            p.px += p.vx * dt * (0.92 + go);
+            p.py += p.vy * dt * (0.92 + go);
+            p.pz += p.vz * dt * (0.92 + go);
+            if (swirl > 0) {
+              const ang = Math.atan2(p.pz, p.px);
+              const rad = Math.hypot(p.px, p.pz) + 1e-5;
+              const sw = swirl * (0.95 + 0.28 * Math.sin(p.ph + t * 1.32));
+              p.px += -Math.sin(ang) * sw * dt * (0.96 + rad * 0.2);
+              p.pz += Math.cos(ang) * sw * dt * (0.96 + rad * 0.2);
+              const tr = 1.5 + 0.36 * Math.sin(p.ph);
+              p.px += (Math.cos(ang) * tr - p.px) * 1.18 * dt * swirl;
+              p.pz += (Math.sin(ang) * tr - p.pz) * 1.18 * dt * swirl;
+              p.py += Math.sin(t * 1.65 + p.ph) * 0.18 * dt * swirl;
+            }
+            if (gather > 0) {
+              const k = ease(gather);
+              const pull = (1.05 + 7.2 * k * k) * dt;
+              p.px += (p.x - p.px) * pull;
+              p.py += (p.y - p.py) * pull;
+              p.pz += (p.z - p.pz) * pull;
+            }
+            p.heat = sat(go * 0.9 + swirl * 0.4 - gather * 0.94);
+          }
+        }
+
+        if (mode === "gather" && t > 4.25) {
+          for (const p of dust) {
+            if (!p.spark) { p.px = p.x; p.py = p.y; p.pz = p.z; p.heat = 0; }
+          }
+          mode = "orbit";
+          clock = 0;
+          spinTo = 0.46;
+          hint.style.opacity = "";
+        }
+
+        if (mode === "orbit") {
+          peel = sat(peel + dt * 1.15);
+          const e = easeOut(peel);
+          for (const p of sparks) {
+            const o = p.spark;
+            o.a += o.sp * dt;
+            const ox = Math.cos(o.a) * o.rad;
+            const oz0 = Math.sin(o.a) * o.rad;
+            const oy = o.ht + Math.sin(o.a * o.wob + p.ph) * 0.13;
+            p.px = lerp(p.x, ox, e);
+            p.py = lerp(p.y, oy + oz0 * Math.sin(o.inc), e);
+            p.pz = lerp(p.z, oz0 * Math.cos(o.inc), e);
+            p.heat = 0.18 * e;
+          }
+        }
+      }
+
+      function shade(rgb, n) {
+        const ndotl = Math.max(0, n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2]);
+        const rim = (1 - Math.max(0, n[2])) ** 2.15 * 0.26;
+        const spec = ndotl ** 20 * 0.2;
+        const fill = 0.14 + ndotl * 0.82;
+        return [
+          rgb[0] * fill + 255 * spec + 208 * rim,
+          rgb[1] * fill + 226 * spec + 86 * rim,
+          rgb[2] * fill + 208 * spec + 68 * rim
+        ];
+      }
+
+      function draw() {
+        ctx.fillStyle = "#070708";
+        ctx.fillRect(0, 0, w, h);
+
+        const glow = ctx.createRadialGradient(cx, cy - unit * 0.04, unit * 0.08, cx, cy, unit * 3.05);
+        glow.addColorStop(0, "rgba(90, 16, 14, 0.2)");
+        glow.addColorStop(0.48, "rgba(36, 10, 12, 0.07)");
+        glow.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = glow;
+        ctx.fillRect(0, 0, w, h);
+
+        const cY = Math.cos(rotY), sY = Math.sin(rotY);
+        const cX = Math.cos(TILT), sX = Math.sin(TILT);
+        const dissolving = mode === "scatter" || mode === "swirl";
+        const shadowK = lerp(1, 0.16, dissolving ? sat(clock / 0.7) : (mode === "gather" ? 1 - sat((clock - 2.38) / 1.1) : 0));
+
+        const sg = ctx.createRadialGradient(cx, cy + unit * 1.06, 0, cx, cy + unit * 1.06, unit * 1.75);
+        sg.addColorStop(0, `rgba(0,0,0,${0.52 * shadowK})`);
+        sg.addColorStop(0.42, `rgba(0,0,0,${0.2 * shadowK})`);
+        sg.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = sg;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy + unit * 1.06, unit * 1.72, unit * 0.3, 0, 0, TAU);
+        ctx.fill();
+
+        if (meshA > 0.03) {
+          const n = faces.length;
+          for (let i = 0; i < n; i++) {
+            const f = faces[i];
+            const p = rot(f.mx, f.my, f.mz, cY, sY, cX, sX);
+            faceOrder[i].f = f;
+            faceOrder[i].z = p[2];
+          }
+          faceOrder.sort((a, b) => a.z - b.z);
+          ctx.globalAlpha = sat(meshA);
+          for (let i = 0; i < n; i++) {
+            const f = faceOrder[i].f;
+            const a = rot(f.a[0], f.a[1], f.a[2], cY, sY, cX, sX);
+            const b = rot(f.b[0], f.b[1], f.b[2], cY, sY, cX, sX);
+            const c = rot(f.c[0], f.c[1], f.c[2], cY, sY, cX, sX);
+            const d = rot(f.d[0], f.d[1], f.d[2], cY, sY, cX, sX);
+            const pa = proj(a[0], a[1], a[2]);
+            const pb = proj(b[0], b[1], b[2]);
+            const pd = proj(d[0], d[1], d[2]);
+            const pc = proj(c[0], c[1], c[2]);
+            const front = (pb[0] - pa[0]) * (pd[1] - pa[1]) - (pb[1] - pa[1]) * (pd[0] - pa[0]) < 0;
+            const nr = rot(f.n[0], f.n[1], f.n[2], cY, sY, cX, sX);
+            const useN = front ? nr : [-nr[0], -nr[1], -nr[2]];
+            const base = (front || f.kind === "under") ? f.rgb : [f.rgb[0] * 0.45, f.rgb[1] * 0.42, f.rgb[2] * 0.42];
+            const col = shade(base, useN);
+            const fog = sat((pa[3] - 3.15) / 3.5);
+            ctx.fillStyle = `rgb(${(lerp(col[0], 10, fog * 0.32)) | 0},${(lerp(col[1], 8, fog * 0.32)) | 0},${(lerp(col[2], 8, fog * 0.32)) | 0})`;
+            ctx.beginPath();
+            ctx.moveTo(pa[0], pa[1]);
+            ctx.lineTo(pb[0], pb[1]);
+            ctx.lineTo(pc[0], pc[1]);
+            ctx.lineTo(pd[0], pd[1]);
+            ctx.closePath();
+            ctx.fill();
+          }
+          ctx.globalAlpha = 1;
+        }
+
+        const showDust = !reduce && mode !== "idle";
+        if (showDust) {
+          const n = dust.length;
+          let live = 0;
+          for (let i = 0; i < n; i++) {
+            const p = dust[i];
+            if (mode === "orbit" && !p.spark) continue;
+            const q = rot(p.px, p.py, p.pz, cY, sY, cX, sX);
+            const nr = rot(p.nx, p.ny, p.nz, cY, sY, cX, sX);
+            const pr = proj(q[0], q[1], q[2]);
+            dustOrder[live++] = { p, x: pr[0], y: pr[1], s: pr[2], depth: pr[3], nx: nr[0], ny: nr[1], nz: nr[2] };
+          }
+          const view = dustOrder.slice(0, live).sort((a, b) => b.depth - a.depth);
+          const dustA = mode === "orbit" ? 1 : sat((1 - meshA) * 1.35 + 0.12);
+          for (let i = 0; i < view.length; i++) {
+            const o = view[i];
+            const p = o.p;
+            const ndotl = Math.max(0, o.nx * LIGHT[0] + o.ny * LIGHT[1] + o.nz * LIGHT[2]);
+            const rim = (1 - Math.max(0, o.nz)) ** 2.2 * 0.28;
+            const fill = 0.16 + ndotl * 0.78;
+            const spec = ndotl ** 22 * 0.2;
+            let r = p.r * fill + 255 * spec + 210 * rim;
+            let g = p.g * fill + 230 * spec + 90 * rim;
+            let b = p.b * fill + 210 * spec + 70 * rim;
+            if (p.heat > 0) {
+              r = lerp(r, 255, p.heat * 0.86);
+              g = lerp(g, 164, p.heat * 0.68);
+              b = lerp(b, 68, p.heat * 0.4);
+            }
+            const fog = sat((o.depth - 3.2) / 3.4);
+            r = lerp(r, 10, fog * 0.34);
+            g = lerp(g, 8, fog * 0.34);
+            b = lerp(b, 8, fog * 0.34);
+            const size = Math.max(0.55, p.size * o.s * 0.02 * (1 + p.heat * 0.36));
+            const alpha = sat(dustA * (0.92 - fog * 0.24 + p.heat * 0.08));
+            if (alpha < 0.02) continue;
+            if (p.heat > 0.48) {
+              ctx.fillStyle = `rgba(255,148,68,${0.06 * p.heat * dustA})`;
+              ctx.beginPath();
+              ctx.arc(o.x, o.y, size * 3.1, 0, TAU);
+              ctx.fill();
+            }
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;
+            if (size < 1.2) ctx.fillRect(o.x - size * 0.5, o.y - size * 0.5, size, size);
+            else {
+              ctx.beginPath();
+              ctx.arc(o.x, o.y, size, 0, TAU);
+              ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+          }
+        }
+
+        if (mode === "orbit" && peel > 0.08) {
+          ctx.lineCap = "round";
+          for (const p of sparks) {
+            const o = p.spark;
+            const q = rot(p.px, p.py, p.pz, cY, sY, cX, sX);
+            const pr = proj(q[0], q[1], q[2]);
+            o.trail.push([pr[0], pr[1]]);
+            if (o.trail.length > 18) o.trail.shift();
+            const tr = o.trail;
+            for (let i = 1; i < tr.length; i++) {
+              const u = i / tr.length;
+              ctx.strokeStyle = `rgba(255,176,130,${0.04 * u * peel})`;
+              ctx.lineWidth = lerp(0.35, 1.55, u);
+              ctx.beginPath();
+              ctx.moveTo(tr[i - 1][0], tr[i - 1][1]);
+              ctx.lineTo(tr[i][0], tr[i][1]);
+              ctx.stroke();
+            }
+            ctx.fillStyle = `rgba(255,196,150,${0.14 * peel})`;
+            ctx.beginPath();
+            ctx.arc(pr[0], pr[1], 5.8 * peel, 0, TAU);
+            ctx.fill();
+            ctx.fillStyle = `rgba(255,228,200,${0.8 * peel})`;
+            ctx.beginPath();
+            ctx.arc(pr[0], pr[1], 1.25, 0, TAU);
+            ctx.fill();
+          }
+        }
+      }
+
+      function resize() {
+        const dpr = Math.min(devicePixelRatio || 1, 2);
+        w = innerWidth;
+        h = innerHeight;
+        canvas.width = (w * dpr) | 0;
+        canvas.height = (h * dpr) | 0;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        cx = w * 0.5;
+        cy = h * 0.452;
+        unit = Math.min(w, h) * 0.168;
+        caption.style.top = `${cy + unit * 1.84}px`;
+        draw();
+      }
+
+      function frame(now) {
+        if (!run) return;
+        const dt = Math.min(0.033, (now - last) / 1000);
+        last = now;
+        step(dt);
+        draw();
+        requestAnimationFrame(frame);
+      }
+
+      build();
+      if (reduce) {
+        canvas.setAttribute("aria-label", "A red fedora.");
+        hint.textContent = "";
+      }
+
+      addEventListener("resize", resize);
+      resize();
+      canvas.addEventListener("pointerenter", (e) => { if (e.pointerType === "mouse") begin(); });
+      canvas.addEventListener("pointerdown", begin);
+      document.addEventListener("visibilitychange", () => {
+        run = !document.hidden;
+        if (run) {
+          last = performance.now();
+          requestAnimationFrame(frame);
+        }
+      });
+
+      if (reduce) draw();
+      else requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>
