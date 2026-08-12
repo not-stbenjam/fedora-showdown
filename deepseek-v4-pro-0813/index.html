@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>fedora</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #050508;
+    overflow: hidden;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  canvas {
+    display: block;
+    position: fixed;
+    inset: 0;
+    cursor: pointer;
+    touch-action: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .caption {
+    position: fixed;
+    left: 50%;
+    top: 69%;
+    transform: translateX(-50%);
+    text-align: center;
+    pointer-events: none;
+    user-select: none;
+  }
+  .caption .title {
+    color: rgba(235, 235, 242, 0.85);
+    font-size: 15px;
+    font-weight: 400;
+    letter-spacing: 0.42em;
+    text-indent: 0.42em;
+    text-transform: uppercase;
+    text-shadow: 0 0 22px rgba(255, 92, 62, 0.35);
+  }
+  .caption .hint {
+    margin-top: 11px;
+    color: rgba(200, 200, 210, 0.42);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-indent: 0.18em;
+    transition: opacity 0.6s ease;
+  }
+  .caption .hint.hidden { opacity: 0; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="caption">
+  <div class="title">fedora</div>
+  <div class="hint" id="hint">hover &middot; tap to dissolve</div>
+</div>
+<script>
+(() => {
+  "use strict";
+
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+  const hint = document.getElementById("hint");
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ----------------------------- geometry ----------------------------- */
+
+  const BRIM_A = 1.35, BRIM_B = 1.05;
+  const CROWN_A = 0.84, CROWN_B = 0.62, CROWN_H = 0.80, CREASE = 0.12;
+
+  let homeX = [], homeY = [], homeZ = [], shade = [], size = [], phase = [];
+  let dRate = [], rRate = [], emberIdx = [];
+
+  const Lx = -0.45, Ly = 0.85, Lz = 0.45, Ll = Math.sqrt(Lx * Lx + Ly * Ly + Lz * Lz);
+
+  function add(x, y, z, nx, ny, nz, band) {
+    homeX.push(x); homeY.push(y); homeZ.push(z);
+    let d = (nx * Lx + ny * Ly + nz * Lz) / Ll;
+    let sh = d * 0.6 + 0.5;
+    sh *= band;
+    if (sh < 0.12) sh = 0.12;
+    if (sh > 1) sh = 1;
+    shade.push(sh);
+    size.push(0.75 + Math.random() * 0.7);
+    phase.push(Math.random() * 6.2831853);
+    dRate.push((1.4 + Math.random() * 2.0) * (1 + y * 0.5));
+    rRate.push(2.2 + Math.random() * 3.0);
+    emberIdx.push((Math.random() * 6) | 0);
+  }
+
+  // Brim (top surface)
+  for (let i = 0; i < 2000; i++) {
+    const r = Math.sqrt(Math.random());
+    const th = Math.random() * 6.2831853;
+    add(BRIM_A * r * Math.cos(th), 0, BRIM_B * r * Math.sin(th), 0, 1, 0, 1);
+  }
+  // Brim rim (edge / thickness)
+  for (let i = 0; i < 400; i++) {
+    const th = Math.random() * 6.2831853;
+    const y = -0.02 - Math.random() * 0.05;
+    add(BRIM_A * Math.cos(th), y, BRIM_B * Math.sin(th), Math.cos(th), 0.1, Math.sin(th), 0.85);
+  }
+  // Crown (rounded dome with a soft front-to-back crease)
+  for (let i = 0; i < 2600; i++) {
+    const u = Math.random();
+    const th = Math.random() * 6.2831853;
+    const r = Math.sqrt(1 - u * u);
+    const x = CROWN_A * r * Math.cos(th);
+    const z = CROWN_B * r * Math.sin(th);
+    const y = CROWN_H * u - CREASE * u * u * Math.sin(th) * Math.sin(th);
+    let nx = x / CROWN_A, ny = u * 1.5 + 0.5, nz = z / CROWN_B;
+    const nl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+    add(x, y, z, nx / nl, ny / nl, nz / nl, u < 0.16 ? 0.55 : 1);
+  }
+
+  const N = homeX.length;
+  homeX = Float32Array.from(homeX);
+  homeY = Float32Array.from(homeY);
+  homeZ = Float32Array.from(homeZ);
+  shade = Float32Array.from(shade);
+  size = Float32Array.from(size);
+  phase = Float32Array.from(phase);
+  dRate = Float32Array.from(dRate);
+  rRate = Float32Array.from(rRate);
+  emberIdx = Uint8Array.from(emberIdx);
+
+  /* ----------------------------- runtime state ----------------------------- */
+
+  const sarr = new Float32Array(N);
+  const freeX = Float32Array.from(homeX);
+  const freeY = Float32Array.from(homeY);
+  const freeZ = Float32Array.from(homeZ);
+  const fvx = new Float32Array(N);
+  const fvy = new Float32Array(N);
+  const fvz = new Float32Array(N);
+  const px = new Float32Array(N);
+  const py = new Float32Array(N);
+  const pz = new Float32Array(N);
+  const sxs = new Float32Array(N);
+  const sys = new Float32Array(N);
+  const scs = new Float32Array(N);
+  const orbiterActive = new Uint8Array(N);
+
+  const hatList = [];
+  const emberList = [];
+
+  const STATE = { DISSOLVING: 0, EMBER: 1, REFORMING: 2, FORMED: 3 };
+  let state = STATE.REFORMING;
+  let phaseStart = 0;
+
+  const DISSOLVE_HOLD = 1.2;
+  const EMBER_DURATION = 2.8;
+  const REFORM_HOLD = 1.5;
+
+  let angle = 0.6;
+  let spin = 0;
+  let time = 0;
+  let last = 0;
+  let hovering = false;
+  let shadowAlpha = 0.45;
+  let hintedYet = false;
+
+  const tilt = 0.34;
+  const D = 4.6;
+
+  for (let i = 0; i < N; i++) sarr[i] = reducedMotion ? 0 : 1;
+
+  /* ----------------------------- sprites ----------------------------- */
+
+  function hexToRgb(hex) {
+    const h = hex.replace("#", "");
+    return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+  }
+  function makeSprite(hex) {
+    const [r, g, b] = hexToRgb(hex);
+    const c = document.createElement("canvas");
+    c.width = c.height = 64;
+    const g = c.getContext("2d");
+    const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grd.addColorStop(0, `rgba(${r},${g},${b},1)`);
+    grd.addColorStop(0.28, `rgba(${r},${g},${b},0.82)`);
+    grd.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    g.fillStyle = grd;
+    g.fillRect(0, 0, 64, 64);
+    return c;
+  }
+
+  const hatShades = ["#6f0d0d", "#941212", "#b81c1c", "#d62626", "#ef3535", "#ff5050"].map(makeSprite);
+  const emberSprites = ["#ff5722", "#ff7a2a", "#ff9430", "#ffb03a", "#ffc94d", "#ff6b35"].map(makeSprite);
+  const orbiterSprite = makeSprite("#ffdca0");
+
+  /* ----------------------------- orbiters ----------------------------- */
+
+  const orbiters = [];
+
+  function clearOrbiters() {
+    orbiters.length = 0;
+    orbiterActive.fill(0);
+  }
+  function spawnOrbiters() {
+    clearOrbiters();
+    const count = 30;
+    const chosen = new Set();
+    while (chosen.size < count) chosen.add((Math.random() * N) | 0);
+    for (const pi of chosen) {
+      orbiters.push({
+        pi,
+        R: 1.55 + Math.random() * 0.7,
+        spd: 0.55 + Math.random() * 0.8,
+        incl: (Math.random() - 0.5) * 1.1,
+        yOff: 0.1 + Math.random() * 0.45,
+        ang: Math.random() * 6.2831853,
+        trail: []
+      });
+      orbiterActive[pi] = 1;
+    }
+  }
+
+  /* ----------------------------- interaction ----------------------------- */
+
+  function startDissolve() {
+    if (state !== STATE.FORMED) return;
+    if (!hintedYet) { hintedYet = true; hint.classList.add("hidden"); }
+    clearOrbiters();
+    state = STATE.DISSOLVING;
+    phaseStart = time;
+  }
+  function startReform() {
+    if (state === STATE.FORMED) return;
+    state = STATE.REFORMING;
+    phaseStart = time;
+  }
+
+  canvas.addEventListener("pointerenter", () => { hovering = true; startDissolve(); });
+  canvas.addEventListener("pointerdown", () => { hovering = true; startDissolve(); });
+  canvas.addEventListener("pointerup", () => { hovering = false; });
+  canvas.addEventListener("pointerleave", () => { hovering = false; startReform(); });
+  canvas.addEventListener("pointercancel", () => { hovering = false; startReform(); });
+
+  /* ----------------------------- layout ----------------------------- */
+
+  let w = 0, h = 0, cx = 0, cy = 0, f = 1;
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    w = window.innerWidth;
+    h = window.innerHeight;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    canvas.style.width = w + "px";
+    canvas.style.height = h + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cx = w / 2;
+    cy = h * 0.44;
+    f = Math.min(w, h) * 1.15;
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  /* ----------------------------- update ----------------------------- */
+
+  function update(dt) {
+    time += dt;
+
+    const targetSpin = (state === STATE.FORMED && !hovering) ? 1 : 0.16;
+    spin += (targetSpin - spin) * (1 - Math.exp(-dt * 4));
+    angle += spin * 0.9 * dt;
+
+    const shadowTarget = state === STATE.EMBER ? 0.1 : (state === STATE.FORMED ? 0.45 : 0.3);
+    shadowAlpha += (shadowTarget - shadowAlpha) * (1 - Math.exp(-dt * 4));
+
+    if (state === STATE.DISSOLVING && time - phaseStart > DISSOLVE_HOLD) { state = STATE.EMBER; phaseStart = time; }
+    else if (state === STATE.EMBER && time - phaseStart > EMBER_DURATION) { startReform(); }
+    else if (state === STATE.REFORMING && time - phaseStart > REFORM_HOLD) { state = STATE.FORMED; phaseStart = time; spawnOrbiters(); }
+
+    const ca = Math.cos(angle), sa = Math.sin(angle);
+    const ct = Math.cos(tilt), st = Math.sin(tilt);
+
+    for (let i = 0; i < N; i++) {
+      const hx = homeX[i], hy = homeY[i], hz = homeZ[i];
+      // rotate around Y, then tilt around X
+      const x = hx * ca + hz * sa;
+      const z = -hx * sa + hz * ca;
+      const y = hy;
+      const ax = x;
+      const ay = y * ct - z * st;
+      const az = y * st + z * ct;
+
+      // move separation factor toward its target (staggered via per-particle rates)
+      const targetS = (state === STATE.DISSOLVING || state === STATE.EMBER) ? 1 : 0;
+      let s = sarr[i];
+      if (targetS > s) { s += dRate[i] * dt; if (s > targetS) s = targetS; }
+      else if (targetS < s) { s -= rRate[i] * dt; if (s < targetS) s = targetS; }
+      sarr[i] = s;
+
+      if (!orbiterActive[i]) {
+        if (s > 0.001) {
+          const fx = freeX[i], fy = freeY[i], fz = freeZ[i];
+          const rr = Math.sqrt(fx * fx + fz * fz) + 0.0001;
+          const tx = -fz / rr, tz = fx / rr;
+          const reform = state === STATE.REFORMING;
+          const sw = 1.7 * (reform ? 0.35 : 1);
+          const att = state === STATE.EMBER ? 0.7 : 0.15;
+          const nscale = reform ? 0.35 : 1;
+          let Fx = tx * sw - fx * att;
+          let Fy = 0.25 - fy * att * 0.5;
+          let Fz = tz * sw - fz * att;
+          Fx += Math.sin(phase[i] + time * 1.3) * 0.9 * nscale;
+          Fy += Math.sin(phase[i] * 1.7 + time * 1.1) * 0.45 * nscale;
+          Fz += Math.cos(phase[i] * 0.9 + time * 1.5) * 0.9 * nscale;
+          if (state === STATE.DISSOLVING && s < 1) {
+            const kx = fx / rr, kz = fz / rr;
+            Fx += kx * 5.0; Fz += kz * 5.0; Fy += 1.0;
+          }
+          if (reform) {
+            Fx += (ax - fx) * 9;
+            Fy += (ay - fy) * 9;
+            Fz += (az - fz) * 9;
+          }
+          const damp = reform ? 3.5 : 1.4;
+          const kd = 1 - damp * dt;
+          fvx[i] = (fvx[i] + Fx * dt) * kd;
+          fvy[i] = (fvy[i] + Fy * dt) * kd;
+          fvz[i] = (fvz[i] + Fz * dt) * kd;
+          freeX[i] += fvx[i] * dt;
+          freeY[i] += fvy[i] * dt;
+          freeZ[i] += fvz[i] * dt;
+        } else {
+          freeX[i] = ax; freeY[i] = ay; freeZ[i] = az;
+          fvx[i] = fvy[i] = fvz[i] = 0;
+        }
+        const sm = s * s * (3 - 2 * s);
+        px[i] = ax + (freeX[i] - ax) * sm;
+        py[i] = ay + (freeY[i] - ay) * sm;
+        pz[i] = az + (freeZ[i] - az) * sm;
+      }
+    }
+
+    // orbiters follow their own path around the hat
+    for (const o of orbiters) {
+      o.ang += o.spd * dt;
+      const a = o.ang;
+      const ox = o.R * Math.cos(a);
+      const oy = o.yOff + o.R * Math.sin(a) * Math.sin(o.incl);
+      const oz = o.R * Math.sin(a) * Math.cos(o.incl);
+      const i = o.pi;
+      px[i] = ox;
+      py[i] = oy * ct - oz * st;
+      pz[i] = oy * st + oz * ct;
+    }
+  }
+
+  /* ----------------------------- render ----------------------------- */
+
+  function drawShadow() {
+    const ct = Math.cos(tilt), st = Math.sin(tilt);
+    const gy = -1.45;
+    const gy2 = gy * ct;
+    const gz2 = gy * st;
+    const depth = D - gz2;
+    const sc = f / depth;
+    const sx = cx;
+    const sy = cy - gy2 * sc;
+
+    ctx.save();
+    ctx.globalAlpha = shadowAlpha;
+    ctx.translate(sx, sy);
+    ctx.scale(1, 0.46);
+    const sr = BRIM_A * sc * 0.88;
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, sr);
+    g.addColorStop(0, "rgba(0,0,0,0.55)");
+    g.addColorStop(0.6, "rgba(0,0,0,0.28)");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, sr, 0, 6.2831853);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function render() {
+    // background
+    ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = 1;
+    const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h) * 0.75);
+    bg.addColorStop(0, "#17171f");
+    bg.addColorStop(0.5, "#0d0d14");
+    bg.addColorStop(1, "#050508");
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    drawShadow();
+
+    hatList.length = 0;
+    emberList.length = 0;
+
+    for (let i = 0; i < N; i++) {
+      const z = pz[i];
+      let depth = D - z;
+      if (depth < 0.35) depth = 0.35;
+      const sc = f / depth;
+      sxs[i] = cx + px[i] * sc;
+      sys[i] = cy - py[i] * sc;
+      scs[i] = sc;
+      if (orbiterActive[i]) continue;
+      if (sarr[i] < 0.5) hatList.push(i);
+      else emberList.push(i);
+    }
+
+    // hat particles (opaque-ish, painter's algorithm for depth)
+    hatList.sort((a, b) => (D - pz[b]) - (D - pz[a]));
+    ctx.globalCompositeOperation = "source-over";
+    for (let k = 0; k < hatList.length; k++) {
+      const i = hatList[k];
+      const sc = scs[i];
+      const rpx = sc * 0.011 * size[i];
+      const ds = rpx * 5.2;
+      const a = 0.9 * Math.min(1, 1 - sarr[i] * 2.2);
+      if (a <= 0.01) continue;
+      const si = (shade[i] * (hatShades.length - 1)) | 0;
+      ctx.globalAlpha = a;
+      ctx.drawImage(hatShades[si], sxs[i] - ds * 0.5, sys[i] - ds * 0.5, ds, ds);
+    }
+
+    // ember particles (additive glow)
+    ctx.globalCompositeOperation = "lighter";
+    for (let k = 0; k < emberList.length; k++) {
+      const i = emberList[k];
+      const sc = scs[i];
+      const rpx = sc * 0.012 * size[i] * (1 + sarr[i] * 1.8);
+      const ds = rpx * 5.5;
+      const flick = 0.72 + 0.28 * Math.sin(time * 7 + phase[i]);
+      const a = Math.min(1, (sarr[i] - 0.35) * 2.0) * 0.85 * flick;
+      if (a <= 0.01) continue;
+      ctx.globalAlpha = a;
+      ctx.drawImage(emberSprites[emberIdx[i]], sxs[i] - ds * 0.5, sys[i] - ds * 0.5, ds, ds);
+    }
+
+    // orbiting particles with faint trails
+    for (const o of orbiters) {
+      const i = o.pi;
+      const sc = scs[i];
+      const sx = sxs[i], sy = sys[i];
+      for (const t of o.trail) {
+        ctx.globalAlpha = t[3] * 0.3;
+        const ds = t[2] * 0.03;
+        ctx.drawImage(orbiterSprite, t[0] - ds * 0.5, t[1] - ds * 0.5, ds, ds);
+        t[3] *= 0.86;
+      }
+      for (let k = o.trail.length - 1; k >= 0; k--) {
+        if (o.trail[k][3] < 0.03) o.trail.splice(k, 1);
+      }
+      o.trail.push([sx, sy, sc, 1]);
+      const ds = sc * 0.05;
+      ctx.globalAlpha = 0.95;
+      ctx.drawImage(orbiterSprite, sx - ds * 0.5, sy - ds * 0.5, ds, ds);
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  /* ----------------------------- loop ----------------------------- */
+
+  function frame(t) {
+    if (!last) last = t;
+    let dt = (t - last) / 1000;
+    last = t;
+    if (dt > 0.05) dt = 0.05;
+    if (dt < 0) dt = 0;
+    update(dt);
+    render();
+    requestAnimationFrame(frame);
+  }
+
+  if (reducedMotion) {
+    state = STATE.FORMED;
+    for (let i = 0; i < N; i++) sarr[i] = 0;
+    angle = 0.6;
+    // static precompute of positions
+    const ca = Math.cos(angle), sa = Math.sin(angle);
+    const ct = Math.cos(tilt), st = Math.sin(tilt);
+    for (let i = 0; i < N; i++) {
+      const x = homeX[i] * ca + homeZ[i] * sa;
+      const z = -homeX[i] * sa + homeZ[i] * ca;
+      const y = homeY[i];
+      px[i] = x;
+      py[i] = y * ct - z * st;
+      pz[i] = y * st + z * ct;
+    }
+    hint.classList.add("hidden");
+    render();
+  } else {
+    requestAnimationFrame(frame);
+  }
+})();
+</script>
+</body>
+</html>
