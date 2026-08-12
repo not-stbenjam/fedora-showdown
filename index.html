@@ -982,6 +982,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
         <strong>Harness / coding tool used per provider:</strong>
         <br>
         <span style="color: var(--muted);">Anthropic models</span> — Claude Code<br>
+        <span style="color: var(--muted);">Meta Muse 1.2+ models</span> — Muse Code<br>
         <span style="color: var(--muted);">OpenAI models</span> — Codex (except GPT-5.5 Pro, which is not available in Codex and was done via the ChatGPT web interface)<br>
         <span style="color: var(--muted);">Composer models</span> — Cursor<br>
         <span style="color: var(--muted);">All other models</span> — Pi + OpenRouter
@@ -990,7 +991,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
         <br><br>
         Entries marked <span class="variant-badge" data-badge="Ultracode">Ultracode</span> were run using Claude Code's multi-agent mode (parallel implementations → judge → best result). This applies even when the model isn't from Anthropic — Claude Code supports <a href="https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration" target="_blank" rel="noopener">overriding the Anthropic base URL to OpenRouter</a>, so it orchestrates the workflow while the underlying model can be swapped to any provider.
         <br><br>
-        Entries marked <span class="variant-badge" data-badge="None">None</span>, <span class="variant-badge" data-badge="Minimal">Minimal</span>, <span class="variant-badge" data-badge="Low">Low</span>, <span class="variant-badge" data-badge="Medium">Medium</span>, <span class="variant-badge" data-badge="High">High</span>, <span class="variant-badge" data-badge="XHigh">XHigh</span>, or <span class="variant-badge" data-badge="Max">Max</span> were run at that explicit reasoning effort. Automated Pi + OpenRouter additions use exactly the effort levels advertised for each model by OpenRouter; GPT-5.6 Sol, Terra, and Luna effort variants were run in Codex.
+        Entries marked <span class="variant-badge" data-badge="None">None</span>, <span class="variant-badge" data-badge="Minimal">Minimal</span>, <span class="variant-badge" data-badge="Low">Low</span>, <span class="variant-badge" data-badge="Medium">Medium</span>, <span class="variant-badge" data-badge="High">High</span>, <span class="variant-badge" data-badge="XHigh">XHigh</span>, or <span class="variant-badge" data-badge="Max">Max</span> were run at that explicit reasoning effort in whichever harness supports it (e.g., Codex for OpenAI models, Muse Code for Muse Spark 1.2+). Automated Pi + OpenRouter additions use exactly the effort levels advertised for each model by OpenRouter.
         <br><br>
         <span class="variant-badge" data-badge="Ultra">Ultra</span> is a separate Codex multi-agent mode, not a reasoning effort — currently shown for Sol only. <span class="variant-badge" data-badge="Default">Default</span> identifies the original unlabelled run for each family, which used the harness default before effort-specific comparisons were added.
       </div>
@@ -1084,6 +1085,12 @@ And respect reduced motion. Return only the finished HTML file.</div>
     { id: "deepseek-v3.2", name: "DeepSeek V3.2",      group: "DeepSeek", openrouterId: "deepseek/deepseek-v3.2", dateAdded: "1970-01-01" },
     { id: "granite-4.1-8b", name: "Granite 4.1 8B",    group: "IBM", openrouterId: "ibm-granite/granite-4.1-8b", dateAdded: "1970-01-01" },
     { id: "muse-spark-1.1", name: "Muse Spark 1.1", group: "Meta", dateAdded: "2026-07-09" },
+    { id: "muse-spark-1.2-minimal", name: "Muse Spark 1.2", family: "muse-spark-1.2", group: "Meta", badge: "Minimal", dateAdded: "2026-07-31" },
+    { id: "muse-spark-1.2-low", name: "Muse Spark 1.2", family: "muse-spark-1.2", group: "Meta", badge: "Low", dateAdded: "2026-07-31" },
+    { id: "muse-spark-1.2-medium", name: "Muse Spark 1.2", family: "muse-spark-1.2", group: "Meta", badge: "Medium", dateAdded: "2026-07-31" },
+    { id: "muse-spark-1.2-high", name: "Muse Spark 1.2", family: "muse-spark-1.2", group: "Meta", badge: "High", dateAdded: "2026-07-31" },
+    { id: "muse-spark-1.2-xhigh", name: "Muse Spark 1.2", family: "muse-spark-1.2", group: "Meta", badge: "XHigh", dateAdded: "2026-07-31" },
+    { id: "muse-spark-1.2-ultra", name: "Muse Spark 1.2", family: "muse-spark-1.2", group: "Meta", badge: "Ultra", dateAdded: "2026-07-31" },
     { id: "llama-4-maverick", name: "Llama 4 Maverick",  group: "Meta", openrouterId: "meta-llama/llama-4-maverick", dateAdded: "1970-01-01" },
     { id: "minimax-m3",  name: "MiniMax M3",          group: "MiniMax", openrouterId: "minimax/minimax-m3", dateAdded: "1970-01-01" },
     { id: "minimax-m2.7", name: "MiniMax M2.7",        group: "MiniMax", openrouterId: "minimax/minimax-m2.7", dateAdded: "1970-01-01" },
@@ -1106,6 +1113,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
     { id: "grok-4.3",    name: "Grok 4.3",            group: "xAI", openrouterId: "x-ai/grok-4.3", dateAdded: "1970-01-01" },
     { id: "grok-4.20",   name: "Grok 4.20",           group: "xAI", openrouterId: "x-ai/grok-4.20", dateAdded: "1970-01-01" },
     { id: "grok-4",      name: "Grok 4",              group: "xAI", dateAdded: "1970-01-01" },
+    { id: "sakana-namazu", name: "Sakana Namazu", group: "Sakana", openrouterId: "sakana/sakana-namazu", dateAdded: "2026-08-11" },
     { id: "fugu-ultra",   name: "Fugu Ultra",           group: "Sakana", openrouterId: "sakana/fugu-ultra", dateAdded: "1970-01-01" },
     { id: "glm-5.2-ultracode", name: "GLM-5.2", family: "glm-5.2", group: "Z.ai", badge: "Ultracode", dateAdded: "2026-07-01" },
     { id: "glm-5.2",     name: "GLM-5.2", family: "glm-5.2", group: "Z.ai", badge: "Default", openrouterId: "z-ai/glm-5.2", dateAdded: "2026-07-01" },
@@ -1122,6 +1130,8 @@ And respect reduced motion. Return only the finished HTML file.</div>
     { id: "kat-coder-air-v2.5", name: "KAT-Coder-Air V2.5", group: "KwaiPilot", openrouterId: "kwaipilot/kat-coder-air-v2.5", dateAdded: "2026-07-15" },
     { id: "inkling-small", name: "Inkling Small", group: "Thinking Machines", openrouterId: "thinkingmachines/inkling-small", dateAdded: "2026-08-01" },
     { id: "inkling", name: "Inkling", group: "Thinking Machines", openrouterId: "thinkingmachines/inkling", dateAdded: "2026-07-20" },
+    { id: "ling-3.0-flash", name: "Ling-3.0-flash", group: "InclusionAI", openrouterId: "inclusionai/ling-3.0-flash", dateAdded: "2026-08-08" },
+    { id: "seed-2.0-code", name: "Seed-2.0-Code", group: "ByteDance", openrouterId: "bytedance-seed/seed-2.0-code", dateAdded: "2026-08-12" },
   ];
 
   const viewer = document.getElementById("viewer");

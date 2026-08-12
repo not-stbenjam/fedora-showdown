@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fedora</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#08080e}
+canvas{display:block;width:100%;height:100%;cursor:pointer}
+.caption{position:fixed;bottom:36px;left:50%;transform:translateX(-50%);color:rgba(255,180,160,.45);font-family:system-ui,-apple-system,sans-serif;font-size:12px;letter-spacing:.22em;text-transform:uppercase;pointer-events:none;user-select:none;z-index:1;transition:opacity .8s}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<p class="caption">Hover or tap to dissolve</p>
+<script>
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+const reducedMotion=window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+let W,H,cx,cy,dpr;
+function resize(){
+  dpr=devicePixelRatio||1;
+  W=canvas.width=innerWidth*dpr;
+  H=canvas.height=innerHeight*dpr;
+  canvas.style.width=innerWidth+'px';
+  canvas.style.height=innerHeight+'px';
+  cx=W/2;cy=H/2;
+}
+resize();
+addEventListener('resize',resize);
+
+let rotation=0,spinSpeed=reducedMotion?0:.0018,targetSpin=spinSpeed;
+let isHovered=false,dissolveProgress=0,reforming=false,particles=[];
+let time=0;
+
+canvas.addEventListener('mouseenter',()=>isHovered=true);
+canvas.addEventListener('mouseleave',()=>isHovered=false);
+canvas.addEventListener('touchstart',e=>{isHovered=true;e.preventDefault()},{passive:false});
+canvas.addEventListener('touchend',()=>{isHovered=false},{passive:true});
+
+function hatScale(){return Math.min(W,H)*.0028}
+
+function generateHatPoints(){
+  const pts=[],s=hatScale();
+  for(let i=0;i<100;i++){
+    const a=(i/100)*Math.PI*2,r=(75+Math.random()*55)*s;
+    pts.push({x:Math.cos(a)*r,y:-2*s,z:Math.sin(a)*r*.28});
+  }
+  for(let i=0;i<80;i++){
+    const a=(i/80)*Math.PI*2,r=(12+Math.random()*38)*s;
+    const y=(-8-Math.random()*82)*s;
+    pts.push({x:Math.cos(a)*r,y,z:Math.sin(a)*r*.28});
+  }
+  for(let i=0;i<25;i++){
+    const a=(i/25)*Math.PI*2,r=(3+Math.random()*12)*s;
+    pts.push({x:Math.cos(a)*r,y:-92*s,z:Math.sin(a)*r*.28});
+  }
+  for(let i=0;i<35;i++){
+    const a=(i/35)*Math.PI*2,r=52*s;
+    pts.push({x:Math.cos(a)*r,y:-6*s,z:Math.sin(a)*r*.28});
+  }
+  return pts;
+}
+const hatPoints=generateHatPoints();
+
+function mkParticle(x,y,z){
+  return{
+    x,y,z,
+    vx:(Math.random()-.5)*3.5,
+    vy:(Math.random()-.4)*2.5-.3,
+    vz:(Math.random()-.5)*3.5,
+    life:1,
+    decay:.0015+Math.random()*.004,
+    size:1+Math.random()*2.2,
+    hue:6+Math.random()*28,
+    light:42+Math.random()*38,
+    orbitR:0,orbitSpd:0,orbitA:Math.random()*Math.PI*2,orbitY:0,
+    returning:false,targetX:0,targetY:0,targetZ:0,reformT:0,
+    trail:[]
+  };
+}
+
+function createParticles(){
+  particles=[];
+  for(let i=0;i<2200;i++){
+    const p=hatPoints[Math.floor(Math.random()*hatPoints.length)];
+    const a=Math.random()*Math.PI*2,spd=1+Math.random()*2.8;
+    const pt=mkParticle(p.x,p.y,p.z);
+    pt.vx=Math.cos(a)*spd*(.4+pt.size*.25);
+    pt.vy=(Math.random()-.25)*spd;
+    pt.vz=Math.sin(a)*spd*(.4+pt.size*.25);
+    particles.push(pt);
+  }
+}
+
+function setReformTargets(){
+  for(let i=0;i<particles.length;i++){
+    const t=hatPoints[i%hatPoints.length];
+    particles[i].targetX=t.x;particles[i].targetY=t.y;particles[i].targetZ=t.z;
+    particles[i].returning=true;particles[i].reformT=Math.random();
+  }
+}
+
+function project(x,y,z){
+  const cR=Math.cos(rotation),sR=Math.sin(rotation);
+  const rx=x*cR-z*sR,rz=x*sR+z*cR;
+  const fov=550,d=fov+rz+420,s=fov/d;
+  return{x:cx+rx*s,y:cy+y*s*.75,s}
+}
+
+function drawFedora(){
+  const s=hatScale();
+  ctx.save();
+  ctx.translate(cx,cy+35*s);
+  const ps=.45+.55*Math.cos(rotation);
+  ctx.scale(ps,1);
+
+  // Shadow
+  ctx.save();
+  ctx.beginPath();ctx.ellipse(0,105*s,135*s,22*s,0,0,Math.PI*2);
+  ctx.fillStyle='rgba(0,0,0,.22)';ctx.filter='blur(28px)';ctx.fill();ctx.restore();
+
+  // Brim
+  ctx.beginPath();ctx.ellipse(0,0,135*s,23*s,0,0,Math.PI*2);
+  const bg=ctx.createRadialGradient(0,0,8*s,0,0,135*s);
+  bg.addColorStop(0,'#7a1515');bg.addColorStop(.55,'#5a0a0a');bg.addColorStop(1,'#2a0505');
+  ctx.fillStyle=bg;ctx.fill();
+
+  // Brim edge highlight
+  ctx.beginPath();ctx.ellipse(0,0,135*s,23*s,0,0,Math.PI*2);
+  ctx.strokeStyle='rgba(120,30,20,.15)';ctx.lineWidth=1.5*s;ctx.stroke();
+
+  // Crown
+  ctx.beginPath();
+  ctx.moveTo(-46*s,0);
+  ctx.bezierCurveTo(-48*s,-28*s,-32*s,-78*s,0,-93*s);
+  ctx.bezierCurveTo(32*s,-78*s,48*s,-28*s,46*s,0);
+  ctx.closePath();
+  const cg=ctx.createLinearGradient(-46*s,0,46*s,-93*s);
+  cg.addColorStop(0,'#5a0000');cg.addColorStop(.22,'#8b0000');cg.addColorStop(.48,'#b81818');
+  cg.addColorStop(.72,'#8b0000');cg.addColorStop(1,'#480000');
+  ctx.fillStyle=cg;ctx.fill();
+
+  // Crown highlight streak
+  ctx.beginPath();
+  ctx.moveTo(-11*s,-4*s);
+  ctx.bezierCurveTo(-14*s,-22*s,-7*s,-58*s,0,-78*s);
+  ctx.strokeStyle='rgba(255,85,55,.09)';ctx.lineWidth=3.5*s;ctx.stroke();
+
+  // Left highlight
+  ctx.beginPath();
+  ctx.moveTo(-30*s,-2*s);
+  ctx.bezierCurveTo(-32*s,-18*s,-22*s,-50*s,-8*s,-72*s);
+  ctx.strokeStyle='rgba(255,70,45,.06)';ctx.lineWidth=2*s;ctx.stroke();
+
+  // Hatband
+  ctx.beginPath();ctx.ellipse(0,-7*s,50*s,4.5*s,0,0,Math.PI*2);
+  ctx.fillStyle='#1a0000';ctx.fill();
+
+  // Hatband highlight
+  ctx.beginPath();ctx.ellipse(0,-7*s,50*s,2*s,0,0,Math.PI*2);
+  ctx.fillStyle='rgba(80,10,10,.3)';ctx.fill();
+
+  ctx.restore();
+}
+
+function drawParticles(){
+  ctx.save();
+  ctx.globalCompositeOperation='lighter';
+  for(const p of particles){
+    const pr=project(p.x,p.y,p.z);
+    const a=p.life*.65;
+    const sz=Math.max(.3,p.size*pr.s);
+    // Glow
+    if(sz>.6){
+      ctx.beginPath();ctx.arc(pr.x,pr.y,sz*4.5,0,Math.PI*2);
+      const g=ctx.createRadialGradient(pr.x,pr.y,0,pr.x,pr.y,sz*4.5);
+      g.addColorStop(0,`hsla(${p.hue},90%,${p.light}%,${a*.12})`);
+      g.addColorStop(1,`hsla(${p.hue},90%,${p.light}%,0)`);
+      ctx.fillStyle=g;ctx.fill();
+    }
+    // Core
+    ctx.beginPath();ctx.arc(pr.x,pr.y,sz,0,Math.PI*2);
+    ctx.fillStyle=`hsla(${p.hue},90%,${Math.min(p.light+12,85)}%,${a})`;ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawTrails(){
+  ctx.save();ctx.globalCompositeOperation='lighter';
+  for(const p of particles){
+    if(p.orbitR<=0||p.trail.length<2)continue;
+    for(let j=0;j<p.trail.length;j++){
+      const t=p.trail[j];
+      const pr=project(t.x,t.y,t.z);
+      const a=(j/p.trail.length)*p.life*.12;
+      const sz=Math.max(.15,p.size*pr.s*.4);
+      ctx.beginPath();ctx.arc(pr.x,pr.y,sz,0,Math.PI*2);
+      ctx.fillStyle=`hsla(${p.hue},80%,${p.light}%,${a})`;ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+function updateParticles(dt){
+  const sp=reducedMotion?.15:1;
+  const df=dt*60*sp;
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i];
+    if(p.returning){
+      p.reformT+=dt*1.1*sp;
+      if(p.reformT>=1){p.reformT=1;p.returning=false;
+        if(Math.random()<.13){p.orbitR=35+Math.random()*75;p.orbitSpd=(Math.random()-.5)*.018;
+          p.orbitY=(Math.random()-.5)*18;p.orbitA=Math.random()*Math.PI*2;p.trail=[];}
+      }
+      const t=p.reformT,e=t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
+      p.x+=(p.targetX-p.x)*.07*df;p.y+=(p.targetY-p.y)*.07*df;p.z+=(p.targetZ-p.z)*.07*df;
+    }else if(p.orbitR>0){
+      p.orbitA+=p.orbitSpd*df;
+      p.x=Math.cos(p.orbitA)*p.orbitR;
+      p.y=-35*hatScale()+Math.sin(p.orbitA*1.4)*p.orbitY;
+      p.z=Math.sin(p.orbitA)*p.orbitR*.28;
+      p.trail.push({x:p.x,y:p.y,z:p.z});
+      if(p.trail.length>10)p.trail.shift();
+      p.life-=dt*.007*sp;
+    }else{
+      p.vy-=.012*df;
+      p.vx*=.994;p.vz*=.994;
+      const dist=Math.sqrt(p.x*p.x+p.z*p.z);
+      if(dist>.5){p.vx+=(-p.z/dist)*.025*df;p.vz+=(p.x/dist)*.025*df;}
+      p.x+=p.vx*df;p.y+=p.vy*df;p.z+=p.vz*df;
+      p.life-=p.decay*df;
+    }
+  }
+  particles=particles.filter(p=>p.life>.008);
+}
+
+let lastT=performance.now();
+function animate(now){
+  const dt=Math.min((now-lastT)/1000,.05);lastT=now;time+=dt;
+
+  // Spin speed
+  if(isHovered&&!reducedMotion)targetSpin=.0003;
+  else targetSpin=reducedMotion?0:.0018;
+  spinSpeed+=(targetSpin-spinSpeed)*.025;
+  rotation+=spinSpeed;
+
+  // Dissolve / reform
+  if(isHovered&&dissolveProgress<1){
+    dissolveProgress=Math.min(1,dissolveProgress+dt*.75);
+    if(dissolveProgress>.05&&particles.length===0)createParticles();
+  }else if(!isHovered&&dissolveProgress>0&&!reforming){
+    if(particles.length>0){reforming=true;setReformTargets();}
+  }
+
+  if(reforming){
+    const allDone=particles.every(p=>{
+      if(!p.returning)return true;
+      p.reformT+=dt*1.1*(reducedMotion?.15:1);
+      if(p.reformT>=1){p.reformT=1;p.returning=false;
+        if(Math.random()<.13){p.orbitR=35+Math.random()*75;p.orbitSpd=(Math.random()-.5)*.018;
+          p.orbitY=(Math.random()-.5)*18;p.orbitA=Math.random()*Math.PI*2;p.trail=[];}
+        return true;
+      }
+      const t=p.reformT,e=t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
+      p.x+=(p.targetX-p.x)*.07*(reducedMotion?.15:1);
+      p.y+=(p.targetY-p.y)*.07*(reducedMotion?.15:1);
+      p.z+=(p.targetZ-p.z)*.07*(reducedMotion?.15:1);
+      return false;
+    });
+    if(allDone){particles=[];reforming=false;dissolveProgress=0;}
+  }
+
+  // Clear
+  ctx.clearRect(0,0,W,H);
+
+  // Background
+  const bg=ctx.createRadialGradient(cx,cy*.72,0,cx,cy,Math.max(W,H)*.72);
+  bg.addColorStop(0,'#11111f');bg.addColorStop(.55,'#0a0a14');bg.addColorStop(1,'#050508');
+  ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+
+  // Ambient glow
+  const ag=ctx.createRadialGradient(cx,cy-50,0,cx,cy-50,280);
+  ag.addColorStop(0,'rgba(160,18,18,.035)');ag.addColorStop(1,'rgba(160,18,18,0)');
+  ctx.fillStyle=ag;ctx.fillRect(0,0,W,H);
+
+  // Vignette
+  const vg=ctx.createRadialGradient(cx,cy,Math.min(W,H)*.25,cx,cy,Math.max(W,H)*.75);
+  vg.addColorStop(0,'rgba(0,0,0,0)');vg.addColorStop(1,'rgba(0,0,0,.45)');
+  ctx.fillStyle=vg;ctx.fillRect(0,0,W,H);
+
+  // Hat
+  if(dissolveProgress<1){ctx.globalAlpha=1-dissolveProgress;drawFedora();ctx.globalAlpha=1;}
+
+  // Trails
+  drawTrails();
+
+  // Particles
+  if(particles.length>0){drawParticles();updateParticles(dt);}
+
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

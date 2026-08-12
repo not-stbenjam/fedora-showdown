@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fedora — Embers</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  :root{--red:#cc0000;--red2:#7a0000}
+  html,body{height:100%;background:#07090e}
+  body{
+    font-family: ui-sans-system,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
+    color:#e8e6e3;overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* hero background */
+  .hero{
+    position:fixed;inset:0;
+    background:
+      radial-gradient(1200px 700px at 50% 18%, #1b1e2a 0%, transparent 60%),
+      radial-gradient(900px 600px at 50% 105%, rgba(204,0,0,0.10) 0%, transparent 70%),
+      radial-gradient(700px 500px at 20% 80%, rgba(80,30,30,0.18) 0%, transparent 60%),
+      linear-gradient(180deg,#0b0e16 0%,#07090e 55%,#05070b 100%);
+  }
+  .vignette{
+    position:fixed;inset:0;pointer-events:none;
+    background: radial-gradient(120% 120% at 50% 50%, transparent 55%, rgba(0,0,0,0.65) 100%);
+  }
+  .floor{
+    position:fixed;left:50%;bottom:8%;width:min(900px,92vw);height:220px;transform:translateX(-50%);
+    background: radial-gradient(60% 50% at 50% 0%, rgba(255,255,255,0.07) 0%, transparent 70%);
+    filter:blur(0.5px);pointer-events:none;
+  }
+  .floor::after{
+    content:"";position:absolute;left:50%;top:12%;width:56%;height:42%;transform:translateX(-50%);
+    background: radial-gradient(50% 50% at 50% 50%, rgba(204,0,0,0.28) 0%, rgba(0,0,0,0) 72%);
+    filter:blur(18px);opacity:.9;
+  }
+  .shadow{
+    position:fixed;left:50%;bottom:11%;width:420px;height:70px;transform:translateX(-50%);
+    background: radial-gradient(50% 50% at 50% 50%, rgba(0,0,0,0.9) 0%, transparent 70%);
+    filter:blur(6px);opacity:.85;pointer-events:none;
+  }
+  /* layout */
+  .wrap{
+    position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    padding:24px;
+  }
+  .stage{
+    position:relative;width:min(560px,92vw);height:min(520px,62vh);
+    display:flex;align-items:center;justify-content:center;
+    cursor:pointer;outline:none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  canvas{
+    width:100%;height:100%;display:block;
+  }
+  .caption{
+    margin-top:6px;text-align:center;user-select:none;
+  }
+  .caption h1{
+    font-size:13px;letter-spacing:0.32em;text-transform:uppercase;font-weight:600;color:#e9e6e2;
+  }
+  .caption p{
+    margin-top:8px;font-size:12.5px;letter-spacing:0.08em;color:#9aa0ad;opacity:.95;
+  }
+  .hint{
+    margin-top:14px;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#6b7280;
+    opacity:.75;transition:opacity .4s;
+  }
+  .stage:hover + .caption + .hint, .stage:focus-visible + .caption + .hint{opacity:0}
+  /* reduced motion */
+  @media (prefers-reduced-motion: reduce){
+    .hint::after{content:" — motion reduced"}
+  }
+</style>
+</head>
+<body>
+<div class="hero"></div>
+<div class="floor"></div>
+<div class="shadow" id="shadow"></div>
+<div class="vignette"></div>
+
+<div class="wrap">
+  <div class="stage" id="stage" tabindex="0" aria-label="Fedora — hover or tap to dissolve">
+    <canvas id="c" width="900" height="900" aria-hidden="true"></canvas>
+  </div>
+  <div class="caption">
+    <h1>Fedora</h1>
+    <p>An elegant red hat, held together by embers.</p>
+  </div>
+  <div class="hint" id="hint">Hover or tap to dissolve</div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const stage = document.getElementById('stage');
+const shadowEl = document.getElementById('shadow');
+const hintEl = document.getElementById('hint');
+const DPR = Math.min(2, devicePixelRatio || 1);
+
+function resize(){
+  const r = canvas.getBoundingClientRect();
+  canvas.width = Math.round(r.width * DPR);
+  canvas.height = Math.round(r.height * DPR);
+}
+resize();
+addEventListener('resize', resize);
+
+const prefersReduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// Geometry: build point cloud forming fedora
+// Hat params (normalized units)
+const N = prefersReduced ? 1800 : 4200;
+const particles = [];
+
+function rand(a,b){ return a + Math.random()*(b-a); }
+
+// sample hat surface
+function sampleHat(){
+  // choose part
+  const r = Math.random();
+  let x,y,z, nx,ny,nz;
+  if(r < 0.42){
+    // brim: elliptical annulus, slightly curved up at edge
+    const ang = rand(0, Math.PI*2);
+    // brim radii: outer ~1.65, inner ~0.72, width varies front/back
+    const frontScale = 1.12; // front extends
+    const inner = 0.74 + Math.random()*0.02;
+    const outer = 1.62 + Math.random()*0.08;
+    const t = Math.pow(Math.random(), 0.9);
+    const rad = inner + t*(outer - inner);
+    const elliptic = rad * (0.92 + 0.08*Math.cos(ang)); // subtle oval
+    // front elongation
+    const fy = Math.cos(ang) > 0 ? frontScale : 1;
+    x = Math.cos(ang)*elliptic*1.35;
+    y = Math.sin(ang)*elliptic*0.95 * fy;
+    // brim curl up at rim
+    const edge = (rad - inner)/(outer-inner);
+    z = -0.22 + edge*edge*0.18 + Math.sin(ang*2)*0.015;
+    // add thickness scattered
+    z += rand(-0.025,0.025);
+  } else if(r < 0.78){
+    // crown sides: tapered cylinder oval
+    const ang = rand(0, Math.PI*2);
+    // oval crown footprint
+    const rx = 0.74, ry = 0.62;
+    // pinch front (fedora crease) - slightly indent at front center
+    let px = Math.cos(ang)*rx;
+    let py = Math.sin(ang)*ry;
+    // taper inward toward top
+    const h = rand(0,1); // 0 bottom, 1 top
+    const taper = 1 - h*0.12;
+    px *= taper; py *= taper;
+    // pinch: front center dip
+    if(py > 0.35) {
+      const pinch = Math.exp(-Math.pow(px/0.22,2)) * 0.18 * (py/0.62);
+      py -= pinch;
+      // side dents
+      const d = Math.pow(px/0.55,2);
+      // subtle
+    }
+    // center crease valley
+    const crease = Math.exp(-Math.pow(px/0.34,2)) * 0.10;
+    x = px;
+    y = py - crease*0.6;
+    z = -0.22 + h*0.72;
+    // add band region slightly bulge
+    if(h>0.18 && h<0.30) {
+      // band slightly outward
+      const b = Math.sin(Math.PI*(h-0.18)/0.12);
+      x *= 1+b*0.015; y *= 1+b*0.015;
+    }
+  } else {
+    // crown top
+    const ang = rand(0, Math.PI*2);
+    const rad = Math.pow(Math.random(),0.7)*0.68;
+    const hTaper = 0.88; // top is tapered
+    let px = Math.cos(ang)*rad*0.74*hTaper;
+    let py = Math.sin(ang)*rad*0.62*hTaper;
+    // center crease ridge
+    const creaseDepth = Math.exp(-Math.pow(px/0.30,2))*0.22;
+    // front pinch valley
+    let pinch = 0;
+    if(py>0) pinch = Math.exp(-Math.pow(px/0.20,2))*0.16;
+    x = px;
+    y = py - creaseDepth*0.3 - pinch*0.4;
+    z = 0.50 + rand(-0.02,0.03) - creaseDepth*0.15;
+  }
+  // overall orientation: y is front-back, x side, z up
+  return {x,y,z};
+}
+
+for(let i=0;i<N;i++){
+  const p = sampleHat();
+  // store base
+  particles.push({
+    bx:p.x, by:p.y, bz:p.z,
+    x:p.x, y:p.y, z:p.z,
+    vx:0,vy:0,vz:0,
+    // orbit phase for lingering orbiters
+    phase: Math.random()*Math.PI*2,
+    orb: Math.random()<0.04, // 4% keep orbiting
+    size: rand(0.9,1.9),
+    bright: rand(0.6,1),
+    col: Math.random()<0.78 ? 0 : 1 // 0 red, 1 amber ember
+  });
+}
+
+// animation state
+let t = 0;
+let yaw = 0;
+let hover = false, hovering = false;
+let dissolve = 0; // 0 solid -> 1 fully scattered
+let dissolveVel = 0;
+let reformHold = 0;
+
+stage.addEventListener('pointerenter', ()=> hovering=true);
+stage.addEventListener('pointerleave', ()=> hovering=false);
+stage.addEventListener('pointerdown', ()=> hovering=true);
+stage.addEventListener('focus', ()=> hovering=true);
+stage.addEventListener('blur', ()=> hovering=false);
+stage.addEventListener('touchstart', ()=> hovering=true, {passive:true});
+
+if(prefersReduced){
+  hintEl.textContent = 'Motion reduced';
+}
+
+function frame(dt){
+  requestAnimationFrame(frame);
+  t += dt*0.001;
+
+  // dissolve control
+  const target = hovering ? 1 : 0;
+  // smooth with inertia
+  const k = hovering ? 0.018 : 0.012;
+  dissolveVel += (target - dissolve)*k;
+  dissolveVel *= 0.92;
+  dissolve += dissolveVel;
+  dissolve = Math.max(0, Math.min(1, dissolve));
+
+  // rotation: slow when dissolving
+  const spinSpeed = 0.55 * (1 - dissolve*0.88) + 0.04;
+  if(!prefersReduced) yaw += dt*0.001 * spinSpeed;
+  else yaw += dt*0.001 * 0.18;
+
+  // when dissolve completes, auto reform after ~2.6s if still hovering? keep dissolved while hovering
+  // if not hovering, it reforms via spring above
+
+  draw(dt);
+}
+
+function rotateY(x,z, a){
+  const ca=Math.cos(a), sa=Math.sin(a);
+  return [x*ca + z*sa, -x*sa + z*ca];
+}
+function rotateX(y,z, a){
+  const ca=Math.cos(a), sa=Math.sin(a);
+  return [y*ca - z*sa, y*sa + z*ca];
+}
+
+function draw(dt){
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0,0,W,H);
+  const cx = W*0.5, cy = H*0.5 - 18*DPR;
+  const focal = 520*DPR;
+  const scale = Math.min(W,H)*0.34;
+
+  // slight tilt
+  const pitch = 0.22 + Math.sin(t*0.22)*0.03;
+
+  // shadow opacity scales with dissolve
+  shadowEl.style.opacity = (0.85*(1 - dissolve*0.7)).toFixed(2);
+  shadowEl.style.transform = `translateX(-50%) scale(${1 + dissolve*0.18}, ${1 - dissolve*0.15})`;
+
+  // swirl: when dissolving, particles orbit around center
+  const swirl = dissolve * (1.1 + Math.sin(t*0.6)*0.15);
+
+  // depth sort
+  const projected = [];
+  for(let p of particles){
+    // base position
+    let x = p.bx, y = p.by, z = p.bz;
+
+    // deformed position when dissolving: explode + swirl
+    if(dissolve > 0.001){
+      // explode direction: outward from center + random
+      const d = Math.sqrt(x*x + y*y + z*z) + 0.001;
+      const nx = x/d, ny=y/d, nz=z/d;
+      const rnd = p.phase;
+      const explode = dissolve* (1.6 + Math.sin(rnd*2)*0.3);
+      // swirl angle around Z
+      const ang = Math.atan2(y,x) + dissolve* (3.2 + (p.orb?1.2:0)) + t*(p.orb?0.9:0.45)*dissolve;
+      const rad = Math.sqrt(x*x+y*y) + explode*0.55;
+      const sx = Math.cos(ang)*rad;
+      const sy = Math.sin(ang)*rad;
+      let sz = z + explode*(0.35 + Math.sin(rnd)*0.2) + Math.sin(t*0.8+rnd)*0.12*dissolve;
+      // add vertical drift
+      sz += dissolve*0.4*Math.sin(t*0.5+rnd*1.3);
+
+      // lerp between original and scattered
+      const e = Math.pow(dissolve, 0.9);
+      // ease: scattered more chaotic
+      x = x*(1-e) + sx*e + Math.sin(t*0.7+rnd)*0.04*e;
+      y = y*(1-e) + sy*e;
+      z = z*(1-e) + sz*e;
+
+      // lingering orbiters stay out longer
+      if(p.orb && dissolve>0.5){
+        const stay = (dissolve-0.5)/0.5;
+        x += Math.cos(t*0.6+rnd)*0.35*stay;
+        y += Math.sin(t*0.6+rnd)*0.28*stay;
+        z += Math.sin(t*0.9+rnd*1.1)*0.18*stay;
+      }
+    }
+
+    // apply 3D rotation: yaw around Z (vertical), pitch around X
+    let [rx, rz1] = rotateY(x, y, yaw); // yaw around vertical (swap y as second)
+    // Wait: we used y as front; rotate around Z: x,y
+    // Actually rotateY above rotates x/z, need rotateZ
+    // fix: yaw around Z axis
+    // recompute correctly:
+    // Let's do yaw around Z
+    const ca=Math.cos(yaw), sa=Math.sin(yaw);
+    const qx = x*ca - y*sa;
+    const qy = x*sa + y*ca;
+    let qz = z;
+    // pitch around X
+    const cp=Math.cos(pitch), sp=Math.sin(pitch);
+    const py2 = qy*cp - qz*sp;
+    const pz = qy*sp + qz*cp;
+    x=qx; y=py2; z=pz;
+
+    // perspective
+    const persp = focal / (focal + y*0.9*scale*0.002 + 700);
+    // Actually use simpler: depth = y (front-back), but perspective on z?
+    // Use z depth for perspective instead: camera looks along Y, so depth = y
+    const depth = y;
+    const s = focal / (focal - depth*90 + 420);
+    const px = cx + x*scale*s;
+    const py = cy - z*scale*s; // z is up
+
+    const sz = p.size * DPR * s * (0.85 + 0.35*p.bright);
+    // lighting: normal approx from base position for hat shading, fade when dissolved to ember
+    const baseShade = 0.55 + 0.45*Math.max(0, (p.bz+0.3))*1.1 - 0.25*Math.max(0, -p.by);
+    const ember = dissolve*0.9 + (p.orb?0.18:0);
+    projected.push({px,py,s,sz,depth,baseShade,ember,p});
+  }
+
+  projected.sort((a,b)=> a.depth - b.depth);
+
+  // draw with additive glow
+  ctx.globalCompositeOperation = 'source-over';
+  for(let o of projected){
+    const alpha = Math.min(1, Math.max(0.12, o.s*0.9)) * (0.92 - dissolve*0.22 + o.ember*0.3);
+    if(o.sz < 0.6) continue;
+    // color lerp red hat -> ember amber
+    const e = Math.min(1, o.ember + dissolve*0.55);
+    // hat color
+    let r = 186 + o.baseShade*28, g = 10 + o.baseShade*12, b = 18;
+    // ember color
+    const er=255, eg= 138 + Math.sin(t*2+o.p.phase)*18, eb= 22;
+    r = r*(1-e) + er*e;
+    g = g*(1-e) + eg*e;
+    b = b*(1-e) + eb*e;
+
+    // glow
+    if(e>0.15 || o.sz>1.2){
+      ctx.globalAlpha = alpha*0.18*e;
+      ctx.fillStyle = `rgb(${r|0},${g|0},${b|0})`;
+      ctx.beginPath();
+      ctx.arc(o.px,o.py, o.sz*2.2,0,Math.PI*2);
+      ctx.fill();
+    }
+    // core
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = `rgb(${r|0},${g|0},${b|0})`;
+    ctx.beginPath();
+    ctx.arc(o.px,o.py, o.sz*0.95,0,Math.PI*2);
+    ctx.fill();
+
+    // trailing for orbiters when reforming
+    if(o.p.orb && dissolve>0.08){
+      ctx.globalAlpha = alpha*0.14;
+      ctx.beginPath();
+      ctx.arc(o.px - Math.cos(o.p.phase+t)*2, o.py - Math.sin(o.p.phase+t)*1.2, o.sz*1.6,0,Math.PI*2);
+      ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+let last = performance.now();
+function loop(now){
+  const dt = Math.min(33, now-last);
+  last = now;
+  // call frame logic inline
+  // dissolved logic handled in frame()
+  // we need to call our frame
+  // reuse frame() but it expects rAF loop - call draw via internal
+  // Quick: inline update
+  const t2 = now*0.001;
+  // update dissolve
+  const target = hovering ? 1 : 0;
+  const k = hovering ? 0.018 : 0.011;
+  // use closure vars
+  dissolveVel += (target - dissolve)*k;
+  dissolveVel *= 0.925;
+  dissolve += dissolveVel;
+  dissolve = Math.max(0,Math.min(1,dissolve));
+  const spinSpeed = prefersReduced?0.18 : (0.62*(1 - dissolve*0.90)+0.05);
+  yaw += dt*0.001*spinSpeed;
+  t = t2*1.0;
+  draw(dt);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// reduced motion: no dissolve, keep elegant slow spin
+if(prefersReduced){
+  stage.addEventListener('pointerenter', e=> hovering=false);
+}
+</script>
+</body>
+</html>
