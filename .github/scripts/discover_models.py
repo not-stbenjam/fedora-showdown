@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import requests
@@ -28,6 +29,21 @@ PI_TIMEOUT = 1800
 MIN_HTML_SIZE = 1024
 LOOKBACK_SECONDS = 30 * 24 * 3600
 ARTIFACTS_DIR = REPO_ROOT / "artifacts"
+MAX_PARALLEL_EFFORTS = max(1, int(os.environ.get("MAX_PARALLEL_EFFORTS", "7")))
+
+# OpenRouter returns supported_efforts in descending order. Keep a canonical
+# order here as a guard against malformed or out-of-order API responses.
+OPENROUTER_EFFORTS = ("max", "xhigh", "high", "medium", "low", "minimal", "none")
+PI_THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
+OPENROUTER_TO_PI_EFFORT = {
+    "none": "off",
+    "minimal": "minimal",
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+    "xhigh": "xhigh",
+    "max": "max",
+}
 
 SKIP_PROVIDERS = {
     "anthracite-org", "cognitivecomputations", "gryphe", "mancer",
@@ -148,6 +164,76 @@ def generate_display_name(model):
     return name.strip()
 
 
+def get_effort_levels(model):
+    """Return OpenRouter-advertised efforts, or None for one default run.
+
+    OpenRouter omits supported_efforts when a model does not expose an effort
+    selector. An explicit null means every gateway effort is accepted.
+    """
+    reasoning = model.get("reasoning")
+    if not isinstance(reasoning, dict) or "supported_efforts" not in reasoning:
+        return [None]
+
+    advertised = reasoning["supported_efforts"]
+    if advertised is None:
+        efforts = list(OPENROUTER_EFFORTS)
+    elif isinstance(advertised, list):
+        advertised_set = set(advertised)
+        unknown = advertised_set.difference(OPENROUTER_EFFORTS)
+        if unknown:
+            logging.warning(
+                "Ignoring unknown OpenRouter effort levels for %s: %s",
+                model["id"],
+                ", ".join(sorted(unknown)),
+            )
+        efforts = [effort for effort in OPENROUTER_EFFORTS if effort in advertised_set]
+    else:
+        logging.warning(
+            "Invalid supported_efforts metadata for %s; using the model default",
+            model["id"],
+        )
+        return [None]
+
+    if reasoning.get("mandatory"):
+        efforts = [effort for effort in efforts if effort != "none"]
+
+    if not efforts:
+        logging.warning(
+            "No usable effort levels advertised for %s; using the model default",
+            model["id"],
+        )
+        return [None]
+    return efforts
+
+
+def effort_slug(base_slug, effort):
+    return base_slug if effort is None else f"{base_slug}-{effort}"
+
+
+def effort_badge(effort):
+    if effort == "none":
+        return "None"
+    if effort == "xhigh":
+        return "XHigh"
+    return effort.capitalize()
+
+
+def build_pi_command(model_id, effort, prompt):
+    cmd = [
+        "pi",
+        "--provider", "openrouter",
+        "--model", model_id,
+    ]
+    if effort is not None:
+        cmd.extend(["--thinking", OPENROUTER_TO_PI_EFFORT[effort]])
+    cmd.extend([
+        "--no-context-files", "--no-extensions",
+        "--no-skills", "--no-themes", "--no-session",
+        "-p", prompt,
+    ])
+    return cmd
+
+
 def get_existing_openrouter_ids():
     """Extract all openrouterId values already in index.html."""
     content = INDEX_HTML.read_text()
@@ -216,10 +302,14 @@ def write_pi_model_config(model, work_dir):
         if modality in {"text", "image"}
     ]
 
+    efforts = get_effort_levels(model)
     definition = {
         "id": model["id"],
         "name": model.get("name") or model["id"],
-        "reasoning": bool({"reasoning", "include_reasoning"} & supported),
+        "reasoning": bool(
+            isinstance(model.get("reasoning"), dict)
+            or {"reasoning", "include_reasoning"} & supported
+        ),
         "input": input_modalities or ["text"],
         "cost": {
             "input": float(pricing.get("prompt") or "0") * 1_000_000,
@@ -237,6 +327,15 @@ def write_pi_model_config(model, work_dir):
             "supportsStrictMode": "structured_outputs" in supported,
         },
     }
+    if efforts != [None]:
+        supported_map = {
+            OPENROUTER_TO_PI_EFFORT[effort]: effort
+            for effort in efforts
+        }
+        definition["thinkingLevelMap"] = {
+            level: supported_map.get(level)
+            for level in PI_THINKING_LEVELS
+        }
     config = {"providers": {"openrouter": {"models": [definition]}}}
     config_path = work_dir / "models.json"
     config_path.write_text(json.dumps(config, indent=2) + "\n")
@@ -256,21 +355,17 @@ def _save_workdir_artifact(slug, work_dir):
     logging.info(f"Saved Pi working directory to artifacts/{slug}/")
 
 
-def run_pi(model, slug, work_dir):
+def run_pi(model, slug, effort, work_dir):
     model_id = model["id"]
     prompt = PROMPT_FILE.read_text().strip()
     pi_config_dir = write_pi_model_config(model, work_dir)
 
-    cmd = [
-        "pi",
-        "--provider", "openrouter",
-        "--model", model_id,
-        "--no-context-files", "--no-extensions",
-        "--no-skills", "--no-themes", "--no-session",
-        "-p", prompt,
-    ]
+    cmd = build_pi_command(model_id, effort, prompt)
 
-    logging.info(f"Running Pi with model {model_id} in {work_dir}")
+    effort_label = effort or "default"
+    logging.info(
+        f"Running Pi with model {model_id} at {effort_label} effort in {work_dir}"
+    )
 
     stdout_path = work_dir / "pi-stdout.log"
     stderr_path = work_dir / "pi-stderr.log"
@@ -288,11 +383,11 @@ def run_pi(model, slug, work_dir):
         proc.wait()
         logging.error(f"Pi timed out after {PI_TIMEOUT}s for {model_id}")
         _save_workdir_artifact(slug, work_dir)
-        return False
+        return None
     except Exception as e:
         logging.error(f"Pi failed for {model_id}: {e}")
         _save_workdir_artifact(slug, work_dir)
-        return False
+        return None
 
     stdout = stdout_path.read_text(errors="replace")
     stderr = stderr_path.read_text(errors="replace")
@@ -306,7 +401,7 @@ def run_pi(model, slug, work_dir):
         else:
             logging.error("Pi failed without writing to stderr")
         _save_workdir_artifact(slug, work_dir)
-        return False
+        return None
 
     output_file = work_dir / "index.html"
     if not output_file.exists():
@@ -323,29 +418,25 @@ def run_pi(model, slug, work_dir):
             else:
                 logging.error(f"No HTML file produced for {model_id}")
                 _save_workdir_artifact(slug, work_dir)
-                return False
+                return None
         else:
             logging.error(f"No HTML file produced for {model_id}")
             _save_workdir_artifact(slug, work_dir)
-            return False
+            return None
 
     size = output_file.stat().st_size
     if size < MIN_HTML_SIZE:
         logging.error(f"index.html too small ({size} bytes) for {model_id}")
         _save_workdir_artifact(slug, work_dir)
-        return False
+        return None
 
     content = output_file.read_text(errors="replace")
     if not re.search(r"<!DOCTYPE|<html", content, re.IGNORECASE):
         logging.error(f"index.html doesn't look like valid HTML for {model_id}")
         _save_workdir_artifact(slug, work_dir)
-        return False
+        return None
 
     _save_workdir_artifact(slug, work_dir)
-
-    dest = REPO_ROOT / slug
-    dest.mkdir(exist_ok=True)
-    (dest / "index.html").write_text(content)
 
     performance_audit = audit_html(content)
     if performance_audit.requires_warning:
@@ -356,10 +447,38 @@ def run_pi(model, slug, work_dir):
         )
 
     logging.info(f"Generated {slug}/index.html ({size} bytes)")
-    return performance_audit
+    return {
+        "slug": slug,
+        "effort": effort,
+        "content": content,
+        "performance_audit": performance_audit,
+    }
 
 
-def update_models_array(slug, display_name, group, openrouter_id, performance_audit):
+def format_model_entry(variant, base_slug, display_name, group, openrouter_id, today):
+    fields = [
+        f'id: {json.dumps(variant["slug"])}',
+        f'name: {json.dumps(display_name)}',
+    ]
+    if variant["effort"] is not None:
+        fields.extend([
+            f'family: {json.dumps(base_slug)}',
+            f'group: {json.dumps(group)}',
+            f'badge: {json.dumps(effort_badge(variant["effort"]))}',
+        ])
+    else:
+        fields.append(f'group: {json.dumps(group)}')
+    fields.extend([
+        f'openrouterId: {json.dumps(openrouter_id)}',
+        f'dateAdded: {json.dumps(today)}',
+    ])
+    warning = warning_message(variant["performance_audit"])
+    if warning:
+        fields.append(f'perfWarning: {json.dumps(warning)}')
+    return "    { " + ", ".join(fields) + " },\n"
+
+
+def update_models_array(base_slug, display_name, group, openrouter_id, variants):
     lines = INDEX_HTML.read_text().splitlines(keepends=True)
 
     array_start = None
@@ -375,46 +494,67 @@ def update_models_array(slug, display_name, group, openrouter_id, performance_au
         raise RuntimeError("Could not find MODELS array in index.html")
 
     today = time.strftime("%Y-%m-%d")
-    warning = warning_message(performance_audit)
-    warning_field = f", perfWarning: {json.dumps(warning)}" if warning else ""
-    new_entry = (
-        f'    {{ id: "{slug}", name: "{display_name}", '
-        f'group: "{group}", openrouterId: "{openrouter_id}", dateAdded: "{today}"'
-        f"{warning_field} }},\n"
-    )
+    new_entries = [
+        format_model_entry(
+            variant, base_slug, display_name, group, openrouter_id, today
+        )
+        for variant in variants
+    ]
 
     first_group_line = None
+    last_family_line = None
     for i in range(array_start + 1, array_end):
         if f'group: "{group}"' in lines[i]:
-            first_group_line = i
-            break
+            if first_group_line is None:
+                first_group_line = i
+            if f'family: "{base_slug}"' in lines[i]:
+                last_family_line = i
 
-    if first_group_line is not None:
-        lines.insert(first_group_line, new_entry)
+    if last_family_line is not None:
+        insert_at = last_family_line + 1
+        lines[insert_at:insert_at] = new_entries
+    elif first_group_line is not None:
+        lines[first_group_line:first_group_line] = new_entries
     else:
-        lines.insert(array_end, new_entry)
+        lines[array_end:array_end] = new_entries
 
     INDEX_HTML.write_text("".join(lines))
-    logging.info(f"Added {slug} to MODELS array in group {group}")
+    logging.info(
+        "Added %s variants for %s to the MODELS array in group %s",
+        len(variants),
+        base_slug,
+        group,
+    )
 
 
-def create_pr(slug, display_name, group, model_id, performance_audit):
-    branch = pick_branch_name(slug)
+def create_pr(
+    base_slug, display_name, group, model_id, variants, failed_efforts=()
+):
+    branch = pick_branch_name(base_slug)
 
     subprocess.run(
         ["git", "checkout", "-b", branch, "main"],
         cwd=REPO_ROOT, check=True,
     )
-    subprocess.run(
-        ["git", "add", f"{slug}/index.html", "index.html"],
-        cwd=REPO_ROOT, check=True,
-    )
+    for variant in variants:
+        update_models_array(
+            base_slug, display_name, group, model_id, [variant]
+        )
+        subprocess.run(
+            ["git", "add", f'{variant["slug"]}/index.html', "index.html"],
+            cwd=REPO_ROOT, check=True,
+        )
+        if variant["effort"] is None:
+            commit_msg = f"Add {display_name} ({group})"
+        else:
+            commit_msg = (
+                f"Add {display_name} at {variant['effort']} effort ({group})"
+            )
+        subprocess.run(
+            ["git", "commit", "-m", commit_msg],
+            cwd=REPO_ROOT, check=True,
+        )
 
-    commit_msg = f"Add {display_name} ({group})"
-    subprocess.run(
-        ["git", "commit", "-m", commit_msg],
-        cwd=REPO_ROOT, check=True,
-    )
     subprocess.run(
         ["git", "push", "-u", "origin", branch],
         cwd=REPO_ROOT, check=True,
@@ -430,23 +570,43 @@ def create_pr(slug, display_name, group, model_id, performance_audit):
         capture_output=True, text=True, cwd=REPO_ROOT, check=True,
     ).stdout.strip()
 
-    preview_url = (
-        f"https://htmlpreview.github.io/?{repo_url}/blob/{sha}/{slug}/index.html"
-    )
+    effort_values = [variant["effort"] for variant in variants]
+    effort_note = ""
+    if effort_values != [None]:
+        effort_note = "- Included OpenRouter effort levels: " + ", ".join(
+            f"`{effort}`" for effort in effort_values
+        ) + "\n"
+    failure_note = ""
+    if failed_efforts:
+        failure_note = "- Failed effort levels (not included): " + ", ".join(
+            f"`{effort or 'default'}`" for effort in failed_efforts
+        ) + "; see the workflow's `pi-workdirs` artifact for logs\n"
 
-    performance_note = ""
-    if performance_audit.requires_warning:
-        performance_note = (
-            f"- Performance warning: {warning_message(performance_audit)}\n"
+    performance_notes = ""
+    preview_notes = ""
+    for variant in variants:
+        label = effort_badge(variant["effort"]) if variant["effort"] else "Default"
+        audit = variant["performance_audit"]
+        if audit.requires_warning:
+            performance_notes += (
+                f"- Performance warning ({label}): {warning_message(audit)}\n"
+            )
+        preview_url = (
+            f"https://htmlpreview.github.io/?{repo_url}/blob/{sha}/"
+            f"{variant['slug']}/index.html"
         )
+        preview_label = "Preview" if len(variants) == 1 else f"Preview: {label}"
+        preview_notes += f"- [{preview_label}]({preview_url})\n"
 
     pr_body = (
         f"Adds **{display_name}** to the showdown.\n\n"
         f"- OpenRouter model: `{model_id}`\n"
         f"- Group: {group}\n"
+        f"{effort_note}"
+        f"{failure_note}"
         f"- Generated by Pi coding agent via OpenRouter\n"
-        f"{performance_note}"
-        f"- [Preview]({preview_url})\n\n"
+        f"{performance_notes}"
+        f"{preview_notes}\n"
         f"---\n"
         f"*Automated by the model discovery workflow.*"
     )
@@ -466,6 +626,47 @@ def create_pr(slug, display_name, group, model_id, performance_audit):
     else:
         logging.error(f"Failed to create PR: {result.stderr}")
         return False
+
+
+def generate_variants(model, base_slug, efforts):
+    """Run all advertised efforts concurrently and preserve every success."""
+    with tempfile.TemporaryDirectory(prefix=f"pi-{base_slug}-") as tmp:
+        temp_root = Path(tmp)
+        jobs = []
+        for effort in efforts:
+            slug = effort_slug(base_slug, effort)
+            work_dir = temp_root / slug
+            work_dir.mkdir()
+            jobs.append((slug, effort, work_dir))
+
+        worker_count = min(MAX_PARALLEL_EFFORTS, len(jobs))
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = [
+                executor.submit(run_pi, model, slug, effort, work_dir)
+                for slug, effort, work_dir in jobs
+            ]
+            variants = [future.result() for future in futures]
+
+    successful_variants = [variant for variant in variants if variant is not None]
+    failed_efforts = [
+        effort
+        for (_, effort, _), variant in zip(jobs, variants)
+        if variant is None
+    ]
+    if failed_efforts:
+        logging.warning(
+            "%s generation failed for: %s; preserving %s successful run(s)",
+            base_slug,
+            ", ".join(effort or "default" for effort in failed_efforts),
+            len(successful_variants),
+        )
+
+    for variant in successful_variants:
+        dest = REPO_ROOT / variant["slug"]
+        dest.mkdir(exist_ok=False)
+        (dest / "index.html").write_text(variant["content"])
+
+    return successful_variants, failed_efforts
 
 
 def main():
@@ -515,8 +716,20 @@ def main():
             continue
 
         slug = generate_slug(model["id"])
-        if (REPO_ROOT / slug / "index.html").exists():
-            logging.info(f"Skipping {model['id']} - directory {slug}/ already exists")
+        efforts = get_effort_levels(model)
+        variant_slugs = [effort_slug(slug, effort) for effort in efforts]
+        existing_variant = next(
+            (
+                variant_slug
+                for variant_slug in variant_slugs
+                if (REPO_ROOT / variant_slug / "index.html").exists()
+            ),
+            None,
+        )
+        if existing_variant:
+            logging.info(
+                f"Skipping {model['id']} - directory {existing_variant}/ already exists"
+            )
             continue
 
         if not MODEL_FILTER and branch_exists(f"bot/add-{slug}"):
@@ -540,10 +753,13 @@ def main():
             "slug": slug,
             "display_name": display_name,
             "group": group,
+            "efforts": efforts,
         })
+        effort_summary = ",".join(effort or "default" for effort in efforts)
         logging.info(
             f"  NEW: {model['id']} -> slug={slug}, name={display_name}, "
-            f"group={group}, ${prompt_price:.2f}/${completion_price:.2f} per 1M tokens"
+            f"group={group}, efforts={effort_summary}, "
+            f"${prompt_price:.2f}/${completion_price:.2f} per 1M tokens"
         )
 
     logging.info(f"New models to process: {len(new_models)}")
@@ -563,21 +779,21 @@ def main():
         slug = nm["slug"]
         display_name = nm["display_name"]
         group = nm["group"]
+        efforts = nm["efforts"]
 
         logging.info(f"--- Processing {model_id} ---")
 
         subprocess.run(["git", "checkout", "main"], cwd=REPO_ROOT, check=True)
         subprocess.run(["git", "checkout", "--", "."], cwd=REPO_ROOT)
 
-        with tempfile.TemporaryDirectory(prefix=f"pi-{slug}-") as tmp:
-            performance_audit = run_pi(nm["model"], slug, Path(tmp))
-            if performance_audit is False:
-                logging.error(f"Skipping {slug} - Pi generation failed")
-                continue
+        variants, failed_efforts = generate_variants(nm["model"], slug, efforts)
+        if not variants:
+            logging.error(f"Skipping {slug} - every Pi generation failed")
+            continue
 
-        update_models_array(slug, display_name, group, model_id, performance_audit)
-
-        if create_pr(slug, display_name, group, model_id, performance_audit):
+        if create_pr(
+            slug, display_name, group, model_id, variants, failed_efforts
+        ):
             processed += 1
 
         subprocess.run(["git", "checkout", "main"], cwd=REPO_ROOT, check=True)

@@ -43,7 +43,8 @@ jobs:
           python-version: '3.12'
 
       - name: Install Pi coding agent
-        run: npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+        # 0.84.1 adds per-model thinkingLevelMap metadata and max effort support.
+        run: npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.1
 
       - name: Install Python dependencies
         run: pip install requests
@@ -60,6 +61,7 @@ jobs:
           MODEL_FILTER: ${{ inputs.model_id || '' }}
           DRY_RUN: ${{ inputs.dry_run == true }}
           MAX_MODELS: ${{ inputs.max_models || '5' }}
+          MAX_PARALLEL_EFFORTS: '7'
         run: python3 .github/scripts/discover_models.py
 
       - name: Upload Pi working directories
