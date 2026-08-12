@@ -358,6 +358,70 @@
     gap: 10px;
   }
 
+  .frame .model-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .frame .harness-info {
+    position: relative;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border: 1px solid rgba(148, 163, 184, 0.45);
+    border-radius: 50%;
+    background: rgba(30, 41, 59, 0.72);
+    color: var(--muted);
+    font: 700 10px/14px system-ui, sans-serif;
+    text-align: center;
+    text-transform: none;
+    cursor: help;
+    pointer-events: auto;
+  }
+
+  .frame .harness-info:hover,
+  .frame .harness-info:focus-visible {
+    border-color: var(--accent);
+    color: var(--text);
+    outline: none;
+  }
+
+  .frame .harness-info::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    top: calc(100% + 7px);
+    left: 0;
+    z-index: 20;
+    width: max-content;
+    max-width: min(240px, 70vw);
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: rgba(11, 13, 20, 0.96);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    color: var(--text);
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1.35;
+    letter-spacing: 0.01em;
+    text-align: left;
+    text-transform: none;
+    white-space: normal;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-2px);
+    transition: opacity 0.12s, transform 0.12s, visibility 0.12s;
+    pointer-events: none;
+  }
+
+  .frame .harness-info:hover::after,
+  .frame .harness-info:focus-visible::after {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+  }
+
   .frame .gen-stats {
     width: 100%;
     font-size: 9px;
@@ -979,15 +1043,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
       <div class="prompt-field" style="font-family: inherit; line-height: 1.8;">
         <strong>FedoraBench</strong> gives every major AI model the same creative prompt and lets you compare the results side by side. The prompt asks each model to build a single-file HTML page with a spinning 3D Red Hat fedora that dissolves into particles on hover.
         <br><br>
-        <strong>Harness / coding tool used per provider:</strong>
-        <br>
-        <span style="color: var(--muted);">Anthropic models</span> — Claude Code<br>
-        <span style="color: var(--muted);">Meta Muse 1.2+ models</span> — Muse Code<br>
-        <span style="color: var(--muted);">OpenAI models</span> — Codex (except GPT-5.5 Pro, which is not available in Codex and was done via the ChatGPT web interface)<br>
-        <span style="color: var(--muted);">Composer models</span> — Cursor<br>
-        <span style="color: var(--muted);">All other models</span> — Pi + OpenRouter
-        <br><br>
-        All models were run at the default effort level for their respective harness and model, unless otherwise noted. No cherry-picking, no retries, no manual edits. What you see is what each model produced on its first attempt.
+        The <strong>ⓘ</strong> beside each model name shows the coding harness used for that run. All models were run at the default effort level for their respective harness and model, unless otherwise noted. No cherry-picking, no retries, no manual edits. What you see is what each model produced on its first attempt.
         <br><br>
         Entries marked <span class="variant-badge" data-badge="Ultracode">Ultracode</span> were run using Claude Code's multi-agent mode (parallel implementations → judge → best result). This applies even when the model isn't from Anthropic — Claude Code supports <a href="https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration" target="_blank" rel="noopener">overriding the Anthropic base URL to OpenRouter</a>, so it orchestrates the workflow while the underlying model can be swapped to any provider.
         <br><br>
@@ -1163,6 +1219,17 @@ And respect reduced motion. Return only the finished HTML file.</div>
     const baseName = m.name.endsWith(suffix) ? m.name.slice(0, -suffix.length) : m.name;
     return '<span class="variant-name-base">' + baseName + '</span>'
       + ' <span class="variant-badge" data-badge="' + badge + '">' + badge + '</span>';
+  }
+
+  function getHarness(m) {
+    if (m.harness) return m.harness;
+    if (m.badge === "Ultracode" || m.name.endsWith(" Ultracode")) return "Claude Code";
+    if (m.id === "gpt-5.5-pro") return "ChatGPT web";
+    if (m.family === "muse-spark-1.2") return "Muse Code";
+    if (m.group === "Anthropic") return "Claude Code";
+    if (m.group === "OpenAI") return "Codex";
+    if (m.group === "Cursor") return "Cursor";
+    return "Pi + OpenRouter";
   }
 
   function getFamilyId(m) {
@@ -1361,7 +1428,16 @@ And respect reduced motion. Return only the finished HTML file.</div>
       label.className = "label";
 
       const nameSpan = document.createElement("span");
+      nameSpan.className = "model-title";
       nameSpan.innerHTML = formatModelName(m);
+
+      const harnessInfo = document.createElement("button");
+      harnessInfo.type = "button";
+      harnessInfo.className = "harness-info";
+      harnessInfo.textContent = "i";
+      harnessInfo.dataset.tooltip = "Harness: " + getHarness(m);
+      harnessInfo.setAttribute("aria-label", "Harness: " + getHarness(m));
+      nameSpan.appendChild(harnessInfo);
       label.appendChild(nameSpan);
 
       const starDiv = document.createElement("div");

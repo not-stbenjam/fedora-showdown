@@ -208,6 +208,18 @@ class ModelFamiliesTest(unittest.TestCase):
             self.index_html,
         )
 
+    def test_viewer_exposes_harness_without_crowding_sidebar(self):
+        self.assertIn("function getHarness(m)", self.index_html)
+        self.assertIn('harnessInfo.className = "harness-info";', self.index_html)
+        self.assertIn(
+            'harnessInfo.setAttribute("aria-label", "Harness: " + getHarness(m));',
+            self.index_html,
+        )
+        sidebar_button_source = self.index_html.split(
+            "function createModelButton", 1
+        )[1].split("function addGroupedEntries", 1)[0]
+        self.assertNotIn("harness-info", sidebar_button_source)
+
 
 if __name__ == "__main__":
     unittest.main()

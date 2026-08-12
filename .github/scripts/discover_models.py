@@ -105,6 +105,9 @@ def should_include(model, cost_ceiling):
         return False
 
     lower_id = mid.lower()
+    model_part = lower_id.split("/", 1)[1]
+    if provider == "meta" and re.search(r"(?:^|[-_.])spark(?:$|[-_.])", model_part):
+        return False
     if any(p in lower_id for p in SKIP_NAME_PATTERNS):
         return False
     if any(x in lower_id for x in ["-vl-", "-vl/", "/vl-", "-vision"]):
@@ -469,6 +472,7 @@ def format_model_entry(variant, base_slug, display_name, group, openrouter_id, t
     else:
         fields.append(f'group: {json.dumps(group)}')
     fields.extend([
+        'harness: "Pi + OpenRouter"',
         f'openrouterId: {json.dumps(openrouter_id)}',
         f'dateAdded: {json.dumps(today)}',
     ])
