@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#08080b">
+<title>The Fedora — a hat of light</title>
+<link rel="icon" href="data:,">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: #08080b;
+    overflow: hidden;
+    overscroll-behavior: none;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .stage {
+    position: fixed;
+    inset: 0;
+    outline: none;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .stage canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .caption {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: clamp(20px, 5.5vh, 60px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .title {
+    position: relative;
+    font-weight: 600;
+    font-size: clamp(12px, 1.55vw, 15px);
+    letter-spacing: .5em;
+    text-indent: .5em;
+    text-transform: uppercase;
+    color: #f0e8e3;
+    text-shadow: 0 0 26px rgba(210, 26, 20, .35), 0 2px 16px rgba(0, 0, 0, .8);
+    transition: color .6s ease, text-shadow .6s ease;
+  }
+  .title::after {
+    content: '';
+    position: absolute;
+    right: -20px;
+    top: 50%;
+    width: 5px;
+    height: 5px;
+    margin-top: -3px;
+    border-radius: 50%;
+    background: #d81a12;
+    box-shadow: 0 0 10px rgba(224, 32, 24, .85);
+  }
+  .hint {
+    font-size: clamp(9px, 1.15vw, 11px);
+    letter-spacing: .32em;
+    text-indent: .32em;
+    text-transform: uppercase;
+    color: #8d7f78;
+    opacity: .85;
+    transition: opacity 1.2s ease;
+  }
+  .stage.seen .hint { opacity: .3; }
+  .stage:focus-visible .title {
+    color: #fff;
+    text-shadow: 0 0 34px rgba(240, 66, 48, .65), 0 2px 16px rgba(0, 0, 0, .8);
+  }
+</style>
+</head>
+<body>
+<main id="stage" class="stage" role="img" tabindex="0"
+  aria-label="A red fedora spinning in a dark scene. Hover, tap, or focus it to dissolve the hat into glowing embers that swirl and then reform it.">
+  <canvas id="scene" aria-hidden="true"></canvas>
+  <div class="caption">
+    <div class="title">The&nbsp;Fedora</div>
+    <div class="hint" id="hint">Hover or tap to set it alight</div>
+  </div>
+</main>
+<noscript><style>.hint{display:none}</style></noscript>
+<script>
+(() => {
+'use strict';
+
+/* ============================== setup ============================== */
+const stage  = document.getElementById('stage');
+const canvas = document.getElementById('scene');
+const hint   = document.getElementById('hint');
+const ctx    = canvas.getContext('2d', { alpha: false });
+const trail  = document.createElement('canvas');
+const tctx   = trail.getContext('2d');
+const TAU    = Math.PI * 2;
+
+const BASE_OMEGA = 0.85;          // hat spin speed (rad/s)
+const PERSP      = 7.5;           // perspective strength
+const TILT_X     = 0.16;          // hat tilt (front toward viewer)
+const TILT_Z     = -0.22;         // hat tilt (left side up)
+const HINT_MAIN  = 'Hover or tap to set it alight';
+const HINT_DONE  = '…and it always comes back together';
+const HINT_STILL = 'Motion reduced — the hat rests';
+
+let W = 0, H = 0, DPR = 1, cx = 0, cy = 0, unit = 100;
+let bgGrad = null, vigGrad = null;
+
+const rmq = window.matchMedia('(prefers-reduced-motion: reduce)');
+let reduced = rmq.matches;
+
+let spin = 0;
+let omega  = reduced ? 0 : BASE_OMEGA;
+let omegaT = reduced ? 0 : BASE_OMEGA;
+let mode = 'hat';                 // 'hat' | 'storm' | 'reform'
+let tStorm = 0, tReform = 0, settledN = 0;
+let orbiting = false, orbitT0 = 0;
+let glowPulse = 0;
+let camX = 0, camY = 0, ptx = 0, pty = 0;
+let hintDone = false;
+const rings = [];
+
+/* ============================ geometry ============================= */
+/* A fedora described as a point cloud: elliptical crown with a creased,
+   dented top, a hat band, and a wide brim with a gentle wave. */
+const P = [];
+const CXA = 1.05, CZB = 0.88;     // crown base half-widths (x, z)
+const HC  = 1.32, HS  = 1.78;     // crown rim heights: dent / side puffs
+const BRA = 2.35, BRB = 2.05;     // brim outer half-widths
+const L = (() => { const l = Math.hypot(-0.42, 0.72, 0.55); return [-0.42 / l, 0.72 / l, 0.55 / l]; })();
+
+function ell(a, b, th) {
+  const c = Math.cos(th), s = Math.sin(th);
+  return a * b / Math.hypot(b * c, a * s);
+}
+
+function addP(x, y, z, nx, ny, nz, ci, sz, isBrim) {
+  const nl = Math.hypot(nx, ny, nz) || 1;
+  P.push({
+    x, y, z, nx: nx / nl, ny: ny / nl, nz: nz / nl,
+    ci, sz, isBrim,
+    s1: Math.random(), s2: Math.random(), s3: Math.random(),
+    ph: Math.random() * TAU, fl: 4 + Math.random() * 9,
+    stormCi: 1, ld: 0,
+    px: 0, py: 0, pz: 0, vx: 0, vy: 0, vz: 0,
+    launched: false, settled: true, frozen: false, orb: null
+  });
+}
+
+(function build() {
+  const NTH = 76;
+  /* crown walls */
+  for (let i = 0; i < NTH; i++) {
+    const th = ((i + Math.random() * 0.7) / NTH) * TAU;
+    const r0 = ell(CXA, CZB, th);
+    const topRim = HC + (HS - HC) * Math.cos(th) * Math.cos(th);
+    const nY = Math.max(7, Math.round(topRim * 11));
+    for (let j = 0; j < nY; j++) {
+      const f = (j + Math.random() * 0.6) / nY;
+      const y = topRim * f;
+      const r = r0 * (1 - 0.12 * f * f);
+      const ci = y < 0.34 ? 2 : (Math.random() < 0.28 ? 0 : 1);
+      addP(Math.cos(th) * r, y, Math.sin(th) * r, Math.cos(th) / CXA, 0.22, Math.sin(th) / CZB, ci, 0.030, false);
+    }
+  }
+  /* crown cap: a domed top with the centre crease (valley) running front to back */
+  const NTC = 72, CAPB = 0.22;
+  for (let i = 0; i < NTC; i++) {
+    const th = ((i + Math.random() * 0.8) / NTC) * TAU;
+    const r0 = ell(CXA, CZB, th);
+    for (let j = 0; j < 9; j++) {
+      const u = (j + Math.random() * 0.7) / 9;
+      const x = u * r0 * Math.cos(th), z = u * r0 * Math.sin(th);
+      const xa = x / CXA, za = z / CZB;
+      const y = HC + (HS - HC) * xa * xa + CAPB * (1 - xa * xa - za * za);
+      const ci = (u < 0.45 && Math.abs(x) > 0.55 && Math.random() < 0.25) ? 0 : 1;
+      addP(x, y, z, 0.15, 0.9, 0.1, ci, 0.030, false);
+    }
+  }
+  /* band */
+  for (let i = 0; i < NTH; i++) {
+    const th = ((i + Math.random() * 0.7) / NTH) * TAU;
+    const r = ell(CXA, CZB, th) * 1.012;
+    for (let j = 0; j < 2; j++) {
+      const y = 0.03 + (j + Math.random() * 0.6) * 0.13;
+      addP(Math.cos(th) * r, y, Math.sin(th) * r, Math.cos(th) / CXA, 0, Math.sin(th) / CZB, 3, 0.027, false);
+    }
+  }
+  /* brim (top + a darker underside for solidity) */
+  const NTB = 96;
+  for (let i = 0; i < NTB; i++) {
+    const th = ((i + Math.random() * 0.75) / NTB) * TAU;
+    const rIn = ell(CXA, CZB, th), rOut = ell(BRA, BRB, th);
+    const hEdge = 0.16 * Math.sin(th + 2.1) + 0.07 * Math.sin(2 * th + 0.8);
+    for (let j = 0; j < 13; j++) {
+      const s = Math.pow((j + Math.random() * 0.7) / 13, 0.75);
+      const r = rIn + (rOut - rIn) * s;
+      const y = hEdge * s * s * s;
+      const ci = (s > 0.82 && Math.random() < 0.5) ? 0 : (Math.random() < 0.3 ? 2 : 1);
+      addP(Math.cos(th) * r, y, Math.sin(th) * r, 0, 1, 0, ci, 0.031, true);
+    }
+    for (let j = 0; j < 4; j++) {
+      const s = 0.25 + Math.random() * 0.75;
+      const r = rIn + (rOut - rIn) * s;
+      const y = hEdge * s * s * s - 0.045;
+      addP(Math.cos(th) * r, y, Math.sin(th) * r, 0, -1, 0, 3, 0.026, true);
+    }
+  }
+  /* per-particle extras: launch order (centre outwards) + ember palette */
+  for (const p of P) {
+    p.rad = Math.hypot(p.x, p.y, p.z);
+    p.stormCi = p.s3 < 0.5 ? 4 : (p.s3 < 0.75 ? 5 : 1);
+  }
+  const order = P.slice().sort((a, b) => a.rad - b.rad);
+  order.forEach((p, i) => { p.ld = 0.08 + (i / order.length) * 0.9 + Math.random() * 0.1; });
+})();
+
+/* the few particles that keep orbiting after the hat reforms */
+const orbiterPool = (() => {
+  const brim = P.filter(p => p.isBrim);
+  const n = 22, out = [];
+  for (let i = 0; i < n; i++) out.push(brim[Math.floor(brim.length * (i + 0.5) / n)]);
+  return out;
+})();
+
+/* ============================= sprites ============================= */
+function makeSprite(stops) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 96;
+  const g = c.getContext('2d');
+  const gr = g.createRadialGradient(48, 48, 0, 48, 48, 48);
+  for (const s of stops) gr.addColorStop(s[0], s[1]);
+  g.fillStyle = gr;
+  g.fillRect(0, 0, 96, 96);
+  return c;
+}
+const SPR = [
+  makeSprite([[0, 'rgba(255,118,96,1)'],  [0.28, 'rgba(238,44,34,0.85)'], [0.55, 'rgba(186,22,20,0.28)'], [0.8, 'rgba(120,12,12,0.05)'], [1, 'rgba(120,12,12,0)']]),
+  makeSprite([[0, 'rgba(238,74,62,0.95)'], [0.3, 'rgba(198,28,24,0.6)'],  [0.58, 'rgba(140,16,16,0.2)'],  [0.82, 'rgba(100,12,12,0.04)'], [1, 'rgba(100,12,12,0)']]),
+  makeSprite([[0, 'rgba(180,42,40,0.85)'], [0.32, 'rgba(128,24,22,0.45)'], [0.6, 'rgba(78,12,12,0.14)'],  [0.84, 'rgba(50,8,8,0.03)'],  [1, 'rgba(50,8,8,0)']]),
+  makeSprite([[0, 'rgba(122,32,30,0.8)'],  [0.34, 'rgba(80,18,18,0.35)'],  [0.62, 'rgba(44,8,8,0.1)'],   [0.85, 'rgba(28,5,5,0.03)'],  [1, 'rgba(28,5,5,0)']]),
+  makeSprite([[0, 'rgba(255,192,124,0.92)'],[0.28, 'rgba(255,124,44,0.55)'],[0.55, 'rgba(202,72,22,0.18)'], [0.8, 'rgba(150,40,14,0.04)'], [1, 'rgba(150,40,14,0)']]),
+  makeSprite([[0, 'rgba(255,222,176,0.92)'],[0.3, 'rgba(255,162,74,0.5)'], [0.6, 'rgba(214,92,32,0.15)'], [0.82, 'rgba(160,50,20,0.04)'], [1, 'rgba(160,50,20,0)']]),
+];
+
+/* =========================== rotation ============================= */
+/* M = Tilt * Ry(spin) — the hat spins about its own (slightly tilted) axis */
+let m0 = 1, m1 = 0, m2 = 0, m3 = 0, m4 = 1, m5 = 0, m6 = 0, m7 = 0, m8 = 1;
+const cz  = Math.cos(TILT_Z), sz  = Math.sin(TILT_Z);
+const cxx = Math.cos(TILT_X), sxx = Math.sin(TILT_X);
+const t00 = cz, t01 = -sz * cxx, t02 = sz * sxx;
+const t10 = sz, t11 =  cz * cxx, t12 = -cz * sxx;
+const t21 = sxx, t22 = cxx;
+
+function computeMatrix() {
+  const ct = Math.cos(spin), st = Math.sin(spin);
+  m0 = t00 * ct - t02 * st; m1 = t01; m2 = t00 * st + t02 * ct;
+  m3 = t10 * ct - t12 * st; m4 = t11; m5 = t10 * st + t12 * ct;
+  m6 = -t22 * st;           m7 = t21; m8 = t22 * ct;
+}
+function setWorld(p) {
+  const x = p.x, y = p.y, z = p.z;
+  p.px = m0 * x + m1 * y + m2 * z;
+  p.py = m3 * x + m4 * y + m5 * z;
+  p.pz = m6 * x + m7 * y + m8 * z;
+}
+
+/* ============================ resize ============================== */
+function resize() {
+  W = window.innerWidth; H = window.innerHeight;
+  DPR = Math.min(window.devicePixelRatio || 1, 1.75);
+  canvas.width  = Math.round(W * DPR);
+  canvas.height = Math.round(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  trail.width  = canvas.width;
+  trail.height = canvas.height;
+  tctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  cx = W / 2; cy = H * 0.46;
+  unit = Math.min(W, H) / 7.6;
+
+  bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+  bgGrad.addColorStop(0, '#0d0d12');
+  bgGrad.addColorStop(0.55, '#09090d');
+  bgGrad.addColorStop(1, '#060608');
+
+  vigGrad = ctx.createRadialGradient(cx, cy, Math.min(W, H) * 0.30, cx, cy, Math.hypot(W, H) * 0.72);
+  vigGrad.addColorStop(0, 'rgba(0,0,0,0)');
+  vigGrad.addColorStop(1, 'rgba(0,0,0,0.55)');
+}
+
+/* ========================= phases & events ======================== */
+function beginReform() {
+  mode = 'reform'; tReform = 0; settledN = 0; omegaT = BASE_OMEGA;
+  for (const p of P) p.settled = false;
+}
+
+function spawnOrbiters() {
+  orbiting = true; orbitT0 = animT;
+  for (const p of orbiterPool) {
+    p.orb = {
+      R: 2.75 + Math.random() * 0.6,
+      tz: (Math.random() < 0.5 ? -1 : 1) * (0.32 + Math.random() * 0.2),
+      tx: (Math.random() - 0.5) * 0.55,
+      sp: (Math.random() < 0.5 ? -1 : 1) * (0.5 + Math.random() * 0.45),
+      ang: Math.random() * TAU,
+      e: 0
+    };
+  }
+}
+
+function trigger() {
+  stage.classList.add('seen');
+  if (reduced) { glowPulse = Math.max(glowPulse, 0.8); return; }
+  if (mode === 'storm') { tStorm = Math.min(tStorm, 2.75); return; }  // hover spam just extends the swirl
+  if (mode === 'reform') return;
+  mode = 'storm'; tStorm = 0;
+  omegaT = 0.16;                       // the spin slows right down…
+  orbiting = false;
+  for (const p of P) {
+    p.frozen = !!p.orb;                // ex-orbiters dissolve from where they are
+    p.orb = null; p.launched = false; p.settled = false;
+    p.vx = 0; p.vy = 0; p.vz = 0;
+  }
+  rings.push({ r: unit * 0.9, a: 0.5, v: unit * 1.9 });
+  rings.push({ r: unit * 0.9, a: 0.3, v: unit * 1.15 });
+  glowPulse = Math.max(glowPulse, 0.55);
+}
+
+function update(dt) {
+  if (!reduced) {
+    omega += (omegaT - omega) * (1 - Math.exp(-2.5 * dt));
+    spin += omega * dt;
+  }
+  computeMatrix();
+
+  camX += ((reduced ? 0 : ptx * unit * 0.45) - camX) * (1 - Math.exp(-3 * dt));
+  camY += ((reduced ? 0 : pty * unit * 0.35) - camY) * (1 - Math.exp(-3 * dt));
+  glowPulse *= Math.exp(-2.2 * dt);
+
+  for (let i = rings.length - 1; i >= 0; i--) {
+    rings[i].r += rings[i].v * dt;
+    rings[i].a -= dt * 0.45;
+    if (rings[i].a <= 0) rings.splice(i, 1);
+  }
+
+  if (mode === 'hat') {
+    for (const p of P) setWorld(p);
+    if (orbiting) {
+      for (const p of orbiterPool) {
+        const o = p.orb; if (!o) continue;
+        o.e = Math.min(1, o.e + dt / 1.35);
+        const e = o.e * o.e * (3 - 2 * o.e);
+        const ang = o.ang + o.sp * (animT - orbitT0);
+        let ox = Math.cos(ang) * o.R, oy = 0.3 + 0.25 * Math.sin(ang * 2 + 1.3), oz = Math.sin(ang) * o.R;
+        const c1 = Math.cos(o.tz), s1 = Math.sin(o.tz);
+        const x1 = c1 * ox - s1 * oy, y1 = s1 * ox + c1 * oy;
+        const c2 = Math.cos(o.tx), s2 = Math.sin(o.tx);
+        const y2 = c2 * y1 - s2 * oz, z2 = s2 * y1 + c2 * oz;
+        const hx = m0 * p.x + m1 * p.y + m2 * p.z;
+        const hy = m3 * p.x + m4 * p.y + m5 * p.z;
+        const hz = m6 * p.x + m7 * p.y + m8 * p.z;
+        p.px = hx + (x1 - hx) * e;
+        p.py = hy + (y2 - hy) * e;
+        p.pz = hz + (z2 - hz) * e;
+      }
+    }
+  } else if (mode === 'storm') {
+    tStorm += dt;
+    for (const p of P) {
+      if (!p.launched) {
+        if (tStorm >= p.ld) {
+          /* burst outward like a puff of embers */
+          p.launched = true;
+          const dl = Math.hypot(p.px, p.py, p.pz) || 1;
+          const ox = p.px / dl, oy = p.py / dl, oz = p.pz / dl;
+          const tx = -oz, tz = ox;
+          const sp = 1.3 + 2.6 * p.s1;
+          p.vx = (ox * 0.5 + tx * 0.5) * sp + (p.s2 - 0.5) * 1.6;
+          p.vy = (oy * 0.5 + 0.45) * sp + 0.6 + p.s2 * 1.3;
+          p.vz = (oz * 0.5 + tz * 0.5) * sp + (p.s3 - 0.5) * 1.6;
+        } else {
+          if (!p.frozen) setWorld(p);
+          continue;
+        }
+      }
+      /* swirl, buoyancy, drag, gentle confinement */
+      const sw = 2.4 * (0.4 + 0.6 * Math.exp(-tStorm / 1.7));
+      p.vx += sw * Math.sin(p.py * 0.8 + animT * 1.2 + p.ph) * dt;
+      p.vy += sw * Math.cos(p.px * 0.8 - animT * 1.0 + p.ph * 1.7) * dt;
+      p.vz += sw * Math.sin(p.px * 0.7 + p.pz * 0.6 + animT * 0.9 + p.ph * 2.3) * dt;
+      p.vy += 1.4 * Math.exp(-tStorm / 2.0) * dt;
+      const dr = Math.exp(-1.05 * dt);
+      p.vx *= dr; p.vy *= dr; p.vz *= dr;
+      p.px += p.vx * dt; p.py += p.vy * dt; p.pz += p.vz * dt;
+      const d2 = Math.hypot(p.px, p.py, p.pz);
+      if (d2 > 5.2) {
+        const f = (d2 - 5.2) * 2.4 * dt;
+        p.vx -= (p.px / d2) * f; p.vy -= (p.py / d2) * f; p.vz -= (p.pz / d2) * f;
+      }
+    }
+    if (tStorm > 3.7) beginReform();
+  } else if (mode === 'reform') {
+    tReform += dt;
+    for (const p of P) {
+      if (p.settled) { setWorld(p); continue; }
+      const rd = p.ld * 0.5 + p.s2 * 0.18;      // staggered return
+      if (tReform < rd) {
+        const sw = 0.9;
+        p.vx += sw * Math.sin(p.py * 0.8 + animT * 1.1 + p.ph) * dt;
+        p.vy += sw * Math.cos(p.px * 0.8 - animT * 0.9 + p.ph) * dt;
+        p.vz += sw * Math.sin(p.px * 0.7 + p.pz * 0.6 + animT * 0.8 + p.ph) * dt;
+        const dr = Math.exp(-1.7 * dt);
+        p.vx *= dr; p.vy *= dr; p.vz *= dr;
+        p.px += p.vx * dt; p.py += p.vy * dt; p.pz += p.vz * dt;
+      } else {
+        /* spring back onto the spinning hat */
+        const wx = m0 * p.x + m1 * p.y + m2 * p.z;
+        const wy = m3 * p.x + m4 * p.y + m5 * p.z;
+        const wz = m6 * p.x + m7 * p.y + m8 * p.z;
+        const k = 26 * dt, c = 1 - Math.min(1, 4.5 * dt);
+        p.vx = p.vx * c + (wx - p.px) * k;
+        p.vy = p.vy * c + (wy - p.py) * k;
+        p.vz = p.vz * c + (wz - p.pz) * k;
+        p.px += p.vx * dt; p.py += p.vy * dt; p.pz += p.vz * dt;
+        const dx = wx - p.px, dy = wy - p.py, dz = wz - p.pz;
+        if (dx * dx + dy * dy + dz * dz < 0.0012) {
+          p.px = wx; p.py = wy; p.pz = wz;
+          p.settled = true; settledN++;
+        }
+      }
+    }
+    if (settledN === P.length || tReform > 6) {
+      mode = 'hat'; omegaT = BASE_OMEGA;
+      glowPulse = Math.max(glowPulse, 0.7);
+      spawnOrbiters();
+      if (!hintDone) { hintDone = true; if (!reduced) hint.textContent = HINT_DONE; }
+    }
+  }
+}
+
+/* ============================= render ============================= */
+function render() {
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  /* ambient light behind the hat */
+  const gx = cx + camX * 0.4, gy = cy + camY * 0.4;
+  let gr = ctx.createRadialGradient(gx, gy, 0, gx, gy, unit * 4.0);
+  gr.addColorStop(0, 'rgba(170,28,24,' + (0.15 + 0.2 * Math.min(1, glowPulse)).toFixed(3) + ')');
+  gr.addColorStop(1, 'rgba(170,28,24,0)');
+  ctx.fillStyle = gr;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = vigGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  /* soft floor shadow + a faint red bounce */
+  const shY = Math.min(cy + 2.95 * unit, H - H * 0.045);
+  const shR = unit * (2.25 + 0.12 * Math.sin(spin * 2));
+  ctx.save();
+  ctx.translate(cx + camX, shY);
+  ctx.scale(1, 0.24);
+  let sg = ctx.createRadialGradient(0, 0, 0, 0, 0, shR);
+  sg.addColorStop(0, 'rgba(0,0,0,0.5)');
+  sg.addColorStop(0.7, 'rgba(0,0,0,0.26)');
+  sg.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = sg;
+  ctx.beginPath(); ctx.arc(0, 0, shR, 0, TAU); ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  ctx.translate(cx + camX, shY - 2);
+  ctx.scale(1, 0.3);
+  sg = ctx.createRadialGradient(0, 0, 0, 0, 0, unit * 1.9);
+  sg.addColorStop(0, 'rgba(150,24,22,0.13)');
+  sg.addColorStop(1, 'rgba(150,24,22,0)');
+  ctx.fillStyle = sg;
+  ctx.beginPath(); ctx.arc(0, 0, unit * 1.9, 0, TAU); ctx.fill();
+  ctx.restore();
+
+  /* trail canvas: fade, then stamp the orbiting embers */
+  tctx.globalCompositeOperation = 'destination-out';
+  tctx.globalAlpha = 1 - Math.pow(0.95, lastDt * 60);
+  tctx.fillStyle = '#000';
+  tctx.fillRect(0, 0, W, H);
+  tctx.globalAlpha = 1;
+  if (orbiting) {
+    tctx.globalCompositeOperation = 'lighter';
+    for (const p of orbiterPool) {
+      if (!p.orb) continue;
+      const k = PERSP / (PERSP + p.pz);
+      const sx = cx + camX + p.px * unit * k;
+      const sy = cy + camY - p.py * unit * k;
+      const s = Math.max(2, p.sz * unit * k * 1.9);
+      tctx.globalAlpha = 0.035;
+      tctx.drawImage(SPR[p.s3 < 0.6 ? 4 : 5], sx - s / 2, sy - s / 2, s, s);
+    }
+    tctx.globalAlpha = 1;
+  }
+
+  /* particles */
+  ctx.globalCompositeOperation = 'lighter';
+  for (const p of P) {
+    const k = PERSP / (PERSP + p.pz);
+    const sx = cx + camX + p.px * unit * k;
+    const sy = cy + camY - p.py * unit * k;
+    if (sx < -24 || sx > W + 24 || sy < -24 || sy > H + 24) continue;
+    let ci, a, s;
+    if (mode === 'storm' && p.launched) {
+      ci = p.stormCi;
+      a = 0.5 * (0.55 + 0.45 * (0.6 + 0.4 * Math.sin(animT * p.fl + p.ph))) * (0.75 + 0.25 * p.s1);
+      s = p.sz * unit * k * 3.9;
+    } else if (p.orb) {
+      ci = p.s3 < 0.6 ? 4 : 5;
+      a = 0.42 * (0.7 + 0.3 * Math.sin(animT * 2.3 + p.ph));
+      s = p.sz * unit * k * 2.0;
+    } else {
+      const nxw = m0 * p.nx + m1 * p.ny + m2 * p.nz;
+      const nyw = m3 * p.nx + m4 * p.ny + m5 * p.nz;
+      const nzw = m6 * p.nx + m7 * p.ny + m8 * p.nz;
+      const b = 0.42 + 0.58 * Math.max(0, nxw * L[0] + nyw * L[1] + nzw * L[2]);
+      ci = p.ci;
+      a = 0.75 * (0.4 + 0.6 * b) * (0.94 + 0.06 * Math.sin(animT * 1.7 + p.ph)) * introA;
+      s = p.sz * unit * k * 3.4;
+    }
+    s = Math.max(2, s);
+    ctx.globalAlpha = a;
+    ctx.drawImage(SPR[ci], sx - s / 2, sy - s / 2, s, s);
+  }
+  ctx.globalAlpha = 1;
+
+  if (orbiting) {
+    ctx.globalAlpha = 0.85;
+    ctx.drawImage(trail, 0, 0, W, H);
+    ctx.globalAlpha = 1;
+  }
+
+  /* shockwave rings + a soft pulse on arrival */
+  for (const r of rings) {
+    ctx.beginPath();
+    ctx.arc(cx + camX, cy + camY, r.r, 0, TAU);
+    ctx.strokeStyle = 'rgba(255,72,52,' + Math.max(0, r.a).toFixed(3) + ')';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+  if (glowPulse > 0.015) {
+    const pr = unit * 3.4;
+    gr = ctx.createRadialGradient(cx + camX, cy + camY, 0, cx + camX, cy + camY, pr);
+    gr.addColorStop(0, 'rgba(255,84,52,' + (0.22 * glowPulse).toFixed(3) + ')');
+    gr.addColorStop(1, 'rgba(255,84,52,0)');
+    ctx.fillStyle = gr;
+    ctx.beginPath(); ctx.arc(cx + camX, cy + camY, pr, 0, TAU); ctx.fill();
+  }
+}
+
+/* ============================ main loop =========================== */
+let last = performance.now(), animT = 0, lastDt = 0.016, introA = 0;
+let ema = 16, frameN = 0;
+function frame(now) {
+  let dt = (now - last) / 1000;
+  last = now;
+  if (!(dt > 0)) dt = 0.016;
+  dt = Math.min(dt, 0.05);
+  lastDt = dt;
+  animT += dt;
+  introA = Math.min(1, animT / 1.6);
+
+  /* adaptive quality: drop resolution if the device struggles */
+  ema += (dt * 1000 - ema) * 0.04;
+  frameN++;
+  if (frameN % 150 === 0 && ema > 27 && DPR > 1) { DPR = Math.max(1, DPR - 0.25); resize(); }
+
+  update(dt);
+  render();
+  requestAnimationFrame(frame);
+}
+
+/* ============================ events ============================== */
+stage.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') trigger(); });
+stage.addEventListener('pointerdown', () => trigger());
+stage.addEventListener('pointermove', e => { ptx = e.clientX / W - 0.5; pty = e.clientY / H - 0.5; });
+stage.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); trigger(); }
+});
+stage.addEventListener('focus', trigger);
+window.addEventListener('resize', resize);
+
+rmq.addEventListener('change', () => {
+  reduced = rmq.matches;
+  if (reduced) {
+    mode = 'hat'; orbiting = false;
+    omega = 0; omegaT = 0;
+    for (const p of P) { p.orb = null; p.launched = false; p.settled = false; p.frozen = false; }
+    rings.length = 0;
+    hint.textContent = HINT_STILL;
+  } else {
+    omegaT = BASE_OMEGA;
+    hint.textContent = hintDone ? HINT_DONE : HINT_MAIN;
+  }
+});
+
+/* ============================== go ================================ */
+resize();
+if (reduced) hint.textContent = HINT_STILL;
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
