@@ -1,0 +1,1182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Red Hat Fedora 3D</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #08080a;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      color: #e5e5e7;
+    }
+
+    #scene-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* Ambient background gradient glow */
+    .bg-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      background: radial-gradient(circle at 50% 45%, rgba(220, 20, 40, 0.05) 0%, rgba(10, 10, 14, 0.4) 50%, rgba(5, 5, 8, 0.95) 100%);
+    }
+
+    /* Cinematic vignette */
+    .vignette {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      box-shadow: inset 0 0 120px rgba(0, 0, 0, 0.85);
+    }
+
+    /* UI Overlay */
+    .ui-layer {
+      position: absolute;
+      bottom: 8%;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      pointer-events: none;
+      z-index: 10;
+      transition: opacity 0.6s ease;
+    }
+
+    .brand-title {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.35em;
+      text-transform: uppercase;
+      color: #ffffff;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      opacity: 0.95;
+    }
+
+    .brand-title .red-dot {
+      width: 6px;
+      height: 6px;
+      background: #ee0000;
+      border-radius: 50%;
+      display: inline-block;
+      box-shadow: 0 0 8px #ee0000;
+    }
+
+    .caption {
+      font-size: 11px;
+      font-weight: 400;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.45);
+      transition: color 0.4s ease, opacity 0.4s ease;
+    }
+
+    .hint-chip {
+      margin-top: 14px;
+      font-size: 10px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      padding: 5px 14px;
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: rgba(255, 255, 255, 0.5);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    #scene-container:hover .hint-chip,
+    #scene-container.active .hint-chip {
+      background: rgba(238, 0, 0, 0.12);
+      border-color: rgba(238, 0, 0, 0.3);
+      color: rgba(255, 255, 255, 0.9);
+      box-shadow: 0 0 15px rgba(238, 0, 0, 0.15);
+    }
+
+    /* Accessibility indicator for reduced motion */
+    @media (prefers-reduced-motion: reduce) {
+      .hint-chip {
+        display: none;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .ui-layer {
+        bottom: 6%;
+      }
+      .brand-title {
+        font-size: 12px;
+        letter-spacing: 0.28em;
+      }
+      .caption {
+        font-size: 10px;
+      }
+      .hint-chip {
+        font-size: 9px;
+        padding: 4px 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="scene-container">
+    <canvas id="glcanvas"></canvas>
+    <div class="bg-overlay"></div>
+    <div class="vignette"></div>
+
+    <div class="ui-layer">
+      <div class="brand-title">
+        <span class="red-dot"></span>
+        <span>Red Hat</span>
+        <span class="red-dot"></span>
+      </div>
+      <div class="caption">The Open Source Foundation</div>
+      <div class="hint-chip">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41m14.14-14.14l-1.41 1.41"></path>
+        </svg>
+        <span id="hint-text">Hover or tap to dissolve</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      'use strict';
+
+      const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      // Canvas & WebGL setup
+      const container = document.getElementById('scene-container');
+      const canvas = document.getElementById('glcanvas');
+      const gl = canvas.getContext('webgl', { antialias: true, alpha: false, depth: true, powerPreference: 'high-performance' });
+
+      if (!gl) {
+        document.body.innerHTML = '<div style="color:white;text-align:center;padding:50px;">WebGL not supported</div>';
+        return;
+      }
+
+      // Extension for float textures if available or standard rendering
+      gl.getExtension('OES_standard_derivatives');
+
+      // State Management
+      let width = 0;
+      let height = 0;
+      let dpr = 1;
+
+      // Animation parameters
+      let baseRotationY = -0.35;
+      let spinVelocity = prefersReducedMotion ? 0 : 0.015;
+      let targetSpinVelocity = prefersReducedMotion ? 0 : 0.015;
+      let rotationX = 0.28; // slight tilt down towards viewer
+      let targetRotationX = 0.28;
+      let isInteracting = false;
+      let dissolveProgress = 0.0; // 0 = solid, 1 = fully exploded
+      let dissolveTarget = 0.0;
+      let dissolveCycle = 0; // for triggering auto-re-formation cycle
+
+      // Shader source: Solid Mesh (Fedora & Ribbon)
+      const meshVsSource = `
+        precision highp float;
+        attribute vec3 aPosition;
+        attribute vec3 aNormal;
+        attribute vec3 aColor;
+        attribute float aPartType; // 0: Brim, 1: Band, 2: Crown
+
+        uniform mat4 uModel;
+        uniform mat4 uView;
+        uniform mat4 uProjection;
+        uniform mat3 uNormalMatrix;
+        uniform float uDissolve;
+        uniform float uTime;
+
+        varying vec3 vNormal;
+        varying vec3 vPosition;
+        varying vec3 vColor;
+        varying float vPartType;
+        varying vec3 vWorldPos;
+
+        void main() {
+          vNormal = normalize(uNormalMatrix * aNormal);
+          vColor = aColor;
+          vPartType = aPartType;
+
+          vec4 worldPos = uModel * vec4(aPosition, 1.0);
+          vWorldPos = worldPos.xyz;
+          vPosition = (uView * worldPos).xyz;
+
+          gl_Position = uProjection * uView * worldPos;
+        }
+      `;
+
+      const meshFsSource = `
+        precision highp float;
+        varying vec3 vNormal;
+        varying vec3 vPosition;
+        varying vec3 vColor;
+        varying float vPartType;
+        varying vec3 vWorldPos;
+
+        uniform float uDissolve;
+        uniform vec3 uLightPos1;
+        uniform vec3 uLightPos2;
+        uniform vec3 uEyePos;
+
+        void main() {
+          if (uDissolve > 0.98) {
+            discard;
+          }
+
+          vec3 N = normalize(vNormal);
+          vec3 V = normalize(-vPosition);
+
+          // Key light (soft warm white)
+          vec3 L1 = normalize(uLightPos1 - vPosition);
+          float diff1 = max(dot(N, L1), 0.0);
+
+          // Fill/rim light (cool cyan/white)
+          vec3 L2 = normalize(uLightPos2 - vPosition);
+          float diff2 = max(dot(N, L2), 0.0);
+
+          // Velvet / Felt cloth Fresnel effect
+          float fresnel = pow(1.0 - max(dot(N, V), 0.0), 2.5);
+
+          // Specular highlight
+          vec3 H1 = normalize(L1 + V);
+          float spec1 = pow(max(dot(N, H1), 0.0), 16.0) * 0.25;
+
+          // Ambient & Shadowing
+          vec3 ambient = vec3(0.06, 0.02, 0.03);
+
+          vec3 baseCol = vColor;
+          if (vPartType > 0.5 && vPartType < 1.5) {
+            // Ribbon / Band: deep dark rich sheen
+            baseCol = vec3(0.09, 0.09, 0.11);
+          }
+
+          // Felt velvet response: soft wrap lighting
+          float wrapLight = max(dot(N, L1) * 0.5 + 0.5, 0.0);
+          vec3 diffuseCol = baseCol * (diff1 * 0.85 + wrapLight * 0.35 + diff2 * 0.25);
+
+          // Rim glow in rich scarlet
+          vec3 rimColor = (vPartType > 0.5 && vPartType < 1.5) ? vec3(0.2, 0.2, 0.25) : vec3(1.0, 0.2, 0.15);
+          vec3 finalColor = ambient + diffuseCol + spec1 * vec3(1.0, 0.9, 0.8) + fresnel * rimColor * 0.45;
+
+          // Dissolve alpha fade
+          float alpha = 1.0 - smoothstep(0.0, 0.85, uDissolve);
+          gl_FragColor = vec4(finalColor, alpha);
+        }
+      `;
+
+      // Shader source: Shadow / Reflection ground
+      const shadowVsSource = `
+        precision highp float;
+        attribute vec2 aPosition;
+        uniform mat4 uProjection;
+        uniform mat4 uView;
+        uniform mat4 uModel;
+        varying vec2 vUV;
+
+        void main() {
+          vUV = aPosition;
+          vec4 worldPos = uModel * vec4(aPosition.x * 3.5, -1.3, aPosition.y * 3.5, 1.0);
+          gl_Position = uProjection * uView * worldPos;
+        }
+      `;
+
+      const shadowFsSource = `
+        precision highp float;
+        varying vec2 vUV;
+        uniform float uDissolve;
+
+        void main() {
+          float dist = length(vUV);
+          if (dist > 1.0) discard;
+
+          // Soft contact shadow falloff + subtle red ambient bleed
+          float shadowAlpha = (1.0 - smoothstep(0.0, 1.0, dist)) * 0.65;
+          shadowAlpha *= (1.0 - uDissolve * 0.7);
+
+          vec3 shadowColor = vec3(0.02, 0.01, 0.015);
+          gl_FragColor = vec4(shadowColor, shadowAlpha);
+        }
+      `;
+
+      // Shader source: Particles (Disintegration & Orbiters)
+      const particleVsSource = `
+        precision highp float;
+        attribute vec3 aBasePos;
+        attribute vec3 aNormal;
+        attribute vec3 aVelocity;
+        attribute vec4 aSeed; // x: id/phase, y: lifetime, z: scale, w: type (0: main, 1: lingering orbiter)
+
+        uniform mat4 uModel;
+        uniform mat4 uView;
+        uniform mat4 uProjection;
+        uniform float uDissolve;
+        uniform float uTime;
+        uniform float uDPR;
+        uniform vec2 uViewport;
+
+        varying vec4 vColor;
+        varying float vType;
+        varying float vAlpha;
+
+        // Simplex-like noise helper
+        vec3 curlNoise(vec3 p) {
+          float s = sin(p.y * 1.8 + uTime * 1.5);
+          float c = cos(p.z * 1.8 + uTime * 1.2);
+          float s2 = sin(p.x * 1.8 + uTime * 1.7);
+          return vec3(s + c * 0.5, c - s2 * 0.5, s2 + s * 0.5);
+        }
+
+        void main() {
+          vType = aSeed.w;
+          float isOrbiter = aSeed.w;
+
+          vec3 p = aBasePos;
+          float t = uDissolve;
+
+          if (isOrbiter > 0.5) {
+            // Persistent orbiting ember
+            float angle = aSeed.x * 6.28318 + uTime * (0.6 + aSeed.z * 0.4);
+            float radius = 1.6 + aSeed.y * 1.2 + sin(uTime * 1.5 + aSeed.x * 10.0) * 0.3;
+            float height = (aSeed.z - 0.5) * 1.8 + sin(angle * 2.0 + uTime) * 0.4;
+
+            vec3 orbPos = vec3(cos(angle) * radius, height, sin(angle) * radius);
+            
+            // Blend from hat pos to orbit during dissolve, stay orbiting after
+            p = mix(aBasePos, orbPos, clamp(uDissolve * 1.5, 0.0, 1.0));
+            
+            // If reformed, keep a steady smooth orbit
+            if (uDissolve < 0.05) {
+              p = orbPos;
+            }
+
+            vec4 worldPos = uModel * vec4(p, 1.0);
+            gl_Position = uProjection * uView * worldPos;
+
+            // Point size
+            float pSize = (18.0 + aSeed.z * 12.0) * uDPR * (1.0 / -gl_Position.z);
+            gl_PointSize = clamp(pSize, 2.0, 48.0);
+
+            // Glowing ember colors (bright gold-orange-red)
+            float flicker = sin(uTime * 8.0 + aSeed.x * 20.0) * 0.2 + 0.8;
+            vColor = vec4(1.0, 0.55 + aSeed.z * 0.35, 0.15, 0.95 * flicker);
+            vAlpha = 0.9;
+          } else {
+            // Main hat dissolution particles
+            if (t > 0.001) {
+              // Smooth burst outward with turbulence
+              float burstProg = smoothstep(0.0, 0.45, t);
+              float swirlProg = smoothstep(0.1, 0.8, t);
+              float reformProg = smoothstep(0.65, 1.0, t); // in cycle, returns
+
+              // Ejection direction along surface normal + random velocity
+              vec3 burstDir = normalize(aNormal * 0.7 + aVelocity * 1.5);
+              vec3 curl = curlNoise(p * 1.2 + aSeed.xyz * 3.0);
+
+              // Dispersion equation
+              float expansion = burstProg * (1.8 + aSeed.z * 2.5);
+              vec3 dispersedPos = p + burstDir * expansion + curl * (swirlProg * 1.2);
+
+              // Swirling vortex around Y axis
+              float rotAngle = swirlProg * (2.5 + aSeed.x * 3.0);
+              float cosR = cos(rotAngle);
+              float sinR = sin(rotAngle);
+              vec3 rotatedPos = vec3(
+                dispersedPos.x * cosR - dispersedPos.z * sinR,
+                dispersedPos.y + sin(uTime * 2.0 + aSeed.y * 6.28) * 0.35 * swirlProg,
+                dispersedPos.x * sinR + dispersedPos.z * cosR
+              );
+
+              p = rotatedPos;
+            }
+
+            vec4 worldPos = uModel * vec4(p, 1.0);
+            gl_Position = uProjection * uView * worldPos;
+
+            // Size based on dissolve state & distance
+            float baseSize = mix(0.0, (14.0 + aSeed.z * 16.0), smoothstep(0.0, 0.15, t));
+            gl_PointSize = clamp(baseSize * uDPR * (1.0 / -gl_Position.z), 1.0, 36.0);
+
+            // Embers fiery gradient: Core white-yellow -> Red Hat Crimson -> Dark Red
+            float heat = clamp((1.0 - t * 0.7) + aSeed.z * 0.4, 0.0, 1.0);
+            vec3 coreCol = mix(vec3(0.93, 0.04, 0.12), vec3(1.0, 0.75, 0.2), heat);
+            vColor = vec4(coreCol, 1.0);
+            vAlpha = smoothstep(0.0, 0.1, t);
+          }
+        }
+      `;
+
+      const particleFsSource = `
+        precision highp float;
+        varying vec4 vColor;
+        varying float vType;
+        varying float vAlpha;
+
+        void main() {
+          vec2 coord = gl_PointCoord - vec2(0.5);
+          float dist = length(coord);
+          if (dist > 0.5) discard;
+
+          // Smooth radial falloff with intense glowing core
+          float intensity = exp(-dist * dist * 10.0);
+          float halo = exp(-dist * 3.5) * 0.5;
+          float glow = intensity + halo;
+
+          vec3 col = vColor.rgb * (1.0 + intensity * 1.5);
+          float a = glow * vAlpha * vColor.a;
+
+          gl_FragColor = vec4(col * a, a);
+        }
+      `;
+
+      // WebGL Helper Functions
+      function compileShader(type, src) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, src);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+          console.error('Shader error:', gl.getShaderInfoLog(shader));
+          gl.deleteShader(shader);
+          return null;
+        }
+        return shader;
+      }
+
+      function createProgram(vsSrc, fsSrc) {
+        const vs = compileShader(gl.VERTEX_SHADER, vsSrc);
+        const fs = compileShader(gl.FRAGMENT_SHADER, fsSrc);
+        const prog = gl.createProgram();
+        gl.attachShader(prog, vs);
+        gl.attachShader(prog, fs);
+        gl.linkProgram(prog);
+        if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+          console.error('Program link error:', gl.getProgramInfoLog(prog));
+          return null;
+        }
+        return prog;
+      }
+
+      const meshProgram = createProgram(meshVsSource, meshFsSource);
+      const shadowProgram = createProgram(shadowVsSource, shadowFsSource);
+      const particleProgram = createProgram(particleVsSource, particleFsSource);
+
+      // Procedural Geometry Generation for Fedora Hat
+      // Fedora has 3 main parts:
+      // 1. Brim: Wide curled disk
+      // 2. Crown: Tapered body with front pinch indentation & top C-crease
+      // 3. Ribbon / Band: Cylindrical wrap around the crown base
+
+      function generateFedoraGeometry() {
+        const positions = [];
+        const normals = [];
+        const colors = [];
+        const partTypes = [];
+        const indices = [];
+
+        const RED = [0.933, 0.04, 0.12];      // #EE0A1E Red Hat Red
+        const DARK_RED = [0.72, 0.02, 0.08]; // Crease / shadow red
+        const BAND_COL = [0.10, 0.10, 0.12]; // Black/charcoal ribbon
+
+        // Helper to push triangle
+        function addTriangle(p1, p2, p3, n1, n2, n3, c1, c2, c3, type) {
+          const base = positions.length / 3;
+          positions.push(...p1, ...p2, ...p3);
+          normals.push(...n1, ...n2, ...n3);
+          colors.push(...c1, ...c2, ...c3);
+          partTypes.push(type, type, type);
+          indices.push(base, base + 1, base + 2);
+        }
+
+        // Helper: parametric crown surface formula
+        function crownPoint(u, v) {
+          // u: around circumference [0, 2pi], v: height ratio [0, 1]
+          const angle = u;
+          const h = v; // 0 (base) to 1 (top)
+
+          // Base ellipse: slightly longer front-to-back
+          const rx0 = 1.02;
+          const rz0 = 1.18;
+
+          // Tapering upwards
+          const taper = 1.0 - h * 0.18;
+          let rx = rx0 * taper;
+          let rz = rz0 * taper;
+
+          // Side pinch (creases at front sides: angle approx +/- 0.8 rad, where front is +z or -z)
+          // Front is +Z (angle = pi/2), Back is -Z (angle = -pi/2 or 3pi/2)
+          const frontZ = Math.sin(angle);
+          const sideX = Math.cos(angle);
+
+          // Pinch indentations at the front-left and front-right
+          const pinchL = Math.exp(-Math.pow(angle - 1.0, 2) / 0.35);
+          const pinchR = Math.exp(-Math.pow(angle - 2.14, 2) / 0.35);
+          const pinch = (pinchL + pinchR) * Math.min(Math.max((h - 0.15) * 1.5, 0.0), 1.0) * 0.22;
+
+          let r = 1.0 - pinch;
+          let x = Math.cos(angle) * rx * r;
+          let z = Math.sin(angle) * rz * r;
+          let y = h * 0.95;
+
+          // Top crown crease (indentation along the top centerline)
+          if (h > 0.8) {
+            const topFactor = (h - 0.8) / 0.2;
+            const centerDist = Math.abs(x) / rx0;
+            // Center crease dips in middle, side lobes stay high
+            const creaseDip = (1.0 - Math.min(centerDist * 1.6, 1.0)) * 0.28 * topFactor;
+            // Back teardrop taper
+            const tearDrop = (z > 0 ? 0.05 : -0.05) * topFactor;
+            y -= creaseDip;
+            y += tearDrop;
+          }
+
+          return [x, y, z];
+        }
+
+        // Helper: parametric brim surface
+        function brimPoint(rRatio, angle, isUnder) {
+          // rRatio from 0 (inner crown base) to 1 (outer rim)
+          const rInner = 1.0;
+          const rOuterX = 2.15;
+          const rOuterZ = 2.45;
+
+          const cosA = Math.cos(angle);
+          const sinA = Math.sin(angle);
+
+          const rX = rInner * (1.0 - rRatio) + rOuterX * rRatio;
+          const rZ = rInner * (1.0 - rRatio) + rOuterZ * rRatio;
+
+          let x = cosA * rX;
+          let z = sinA * rZ;
+
+          // Fedora brim swooping curves:
+          // Sides roll up smoothly (+Y), Front swoops gracefully down (-Y), Back rolls up (+Y)
+          const sideCurl = Math.pow(rRatio, 1.6) * Math.pow(cosA, 2) * 0.26;
+          const frontDip = Math.pow(rRatio, 1.4) * (sinA > 0 ? -sinA * 0.18 : -sinA * 0.12);
+          const backLift = Math.pow(rRatio, 1.8) * (sinA < 0 ? -sinA * 0.22 : 0.0);
+
+          let y = -0.04 + sideCurl + frontDip + backLift + (isUnder ? -0.015 : 0.01);
+
+          return [x, y, z];
+        }
+
+        // 1. Generate Crown Mesh
+        const crownRadialSegs = 64;
+        const crownHeightSegs = 32;
+
+        for (let j = 0; j < crownHeightSegs; j++) {
+          const v0 = j / crownHeightSegs;
+          const v1 = (j + 1) / crownHeightSegs;
+
+          for (let i = 0; i < crownRadialSegs; i++) {
+            const u0 = (i / crownRadialSegs) * Math.PI * 2;
+            const u1 = ((i + 1) / crownRadialSegs) * Math.PI * 2;
+
+            const p00 = crownPoint(u0, v0);
+            const p10 = crownPoint(u1, v0);
+            const p01 = crownPoint(u0, v1);
+            const p11 = crownPoint(u1, v1);
+
+            // Compute geometric normals
+            const nA = calcNormal(p00, p10, p01);
+            const nB = calcNormal(p10, p11, p01);
+
+            const col = (v0 > 0.75 && Math.abs(p00[0]) < 0.4) ? DARK_RED : RED;
+
+            addTriangle(p00, p10, p01, nA, nA, nA, col, col, col, 2);
+            addTriangle(p10, p11, p01, nB, nB, nB, col, col, col, 2);
+          }
+        }
+
+        // Crown Top Cap (fill the top creased dome)
+        const capCenter = [0, 0.78, 0.05];
+        const vTop = 1.0;
+        for (let i = 0; i < crownRadialSegs; i++) {
+          const u0 = (i / crownRadialSegs) * Math.PI * 2;
+          const u1 = ((i + 1) / crownRadialSegs) * Math.PI * 2;
+          const p0 = crownPoint(u0, vTop);
+          const p1 = crownPoint(u1, vTop);
+          const norm = calcNormal(capCenter, p0, p1);
+          addTriangle(capCenter, p0, p1, norm, norm, norm, DARK_RED, RED, RED, 2);
+        }
+
+        // 2. Generate Brim Mesh (Top and Bottom surfaces with thickness)
+        const brimRadialSegs = 64;
+        const brimRingSegs = 18;
+
+        for (let j = 0; j < brimRingSegs; j++) {
+          const r0 = j / brimRingSegs;
+          const r1 = (j + 1) / brimRingSegs;
+
+          for (let i = 0; i < brimRadialSegs; i++) {
+            const u0 = (i / brimRadialSegs) * Math.PI * 2;
+            const u1 = ((i + 1) / brimRadialSegs) * Math.PI * 2;
+
+            // Top Brim
+            const pt00 = brimPoint(r0, u0, false);
+            const pt10 = brimPoint(r0, u1, false);
+            const pt01 = brimPoint(r1, u0, false);
+            const pt11 = brimPoint(r1, u1, false);
+
+            const nTopA = calcNormal(pt00, pt10, pt01);
+            const nTopB = calcNormal(pt10, pt11, pt01);
+
+            addTriangle(pt00, pt10, pt01, nTopA, nTopA, nTopA, RED, RED, RED, 0);
+            addTriangle(pt10, pt11, pt01, nTopB, nTopB, nTopB, RED, RED, RED, 0);
+
+            // Bottom Brim (facing down)
+            const pb00 = brimPoint(r0, u0, true);
+            const pb10 = brimPoint(r0, u1, true);
+            const pb01 = brimPoint(r1, u0, true);
+            const pb11 = brimPoint(r1, u1, true);
+
+            const nBotA = calcNormal(pb00, pb01, pb10);
+            const nBotB = calcNormal(pb10, pb01, pb11);
+
+            addTriangle(pb00, pb01, pb10, nBotA, nBotA, nBotA, DARK_RED, DARK_RED, DARK_RED, 0);
+            addTriangle(pb10, pb01, pb11, nBotB, nBotB, nBotB, DARK_RED, DARK_RED, DARK_RED, 0);
+          }
+        }
+
+        // 3. Generate Black Hatband / Ribbon
+        const bandSegs = 64;
+        const bandHeight = 0.18;
+        const bandOffset = 0.02; // slightly elevated from crown base
+
+        for (let i = 0; i < bandSegs; i++) {
+          const u0 = (i / bandSegs) * Math.PI * 2;
+          const u1 = ((i + 1) / bandSegs) * Math.PI * 2;
+
+          const pBase0 = crownPoint(u0, 0.01);
+          const pBase1 = crownPoint(u1, 0.01);
+          const pTop0 = crownPoint(u0, 0.22);
+          const pTop1 = crownPoint(u1, 0.22);
+
+          // Offset outwards slightly so band sits cleanly over crown
+          const scaleOut = 1.025;
+          const b00 = [pBase0[0] * scaleOut, pBase0[1], pBase0[2] * scaleOut];
+          const b10 = [pBase1[0] * scaleOut, pBase1[1], pBase1[2] * scaleOut];
+          const b01 = [pTop0[0] * scaleOut, pTop0[1], pTop0[2] * scaleOut];
+          const b11 = [pTop1[0] * scaleOut, pTop1[1], pTop1[2] * scaleOut];
+
+          const nA = calcNormal(b00, b10, b01);
+          const nB = calcNormal(b10, b11, b01);
+
+          addTriangle(b00, b10, b01, nA, nA, nA, BAND_COL, BAND_COL, BAND_COL, 1);
+          addTriangle(b10, b11, b01, nB, nB, nB, BAND_COL, BAND_COL, BAND_COL, 1);
+        }
+
+        return {
+          positions: new Float32Array(positions),
+          normals: new Float32Array(normals),
+          colors: new Float32Array(colors),
+          partTypes: new Float32Array(partTypes),
+          indices: new Uint16Array(indices)
+        };
+      }
+
+      function calcNormal(p1, p2, p3) {
+        const ax = p2[0] - p1[0], ay = p2[1] - p1[1], az = p2[2] - p1[2];
+        const bx = p3[0] - p1[0], by = p3[1] - p1[1], bz = p3[2] - p1[2];
+        let nx = ay * bz - az * by;
+        let ny = az * bx - ax * bz;
+        let nz = ax * by - ay * bx;
+        const len = Math.hypot(nx, ny, nz) || 1.0;
+        return [nx / len, ny / len, nz / len];
+      }
+
+      // Generate Particles from Mesh + Lingering Orbiters
+      function generateParticleCloud(meshGeo) {
+        const numMeshVerts = meshGeo.positions.length / 3;
+        const targetParticles = 20000;
+        const lingeringCount = 70; // lingering persistent glowing embers
+
+        const particlePositions = [];
+        const particleNormals = [];
+        const particleVelocities = [];
+        const particleSeeds = [];
+
+        // Distribute particles across the fedora surface
+        for (let i = 0; i < targetParticles; i++) {
+          const vertIdx = Math.floor(Math.random() * numMeshVerts) * 3;
+          // Add slight jitter
+          const jx = (Math.random() - 0.5) * 0.03;
+          const jy = (Math.random() - 0.5) * 0.03;
+          const jz = (Math.random() - 0.5) * 0.03;
+
+          const px = meshGeo.positions[vertIdx] + jx;
+          const py = meshGeo.positions[vertIdx + 1] + jy;
+          const pz = meshGeo.positions[vertIdx + 2] + jz;
+
+          const nx = meshGeo.normals[vertIdx];
+          const ny = meshGeo.normals[vertIdx + 1];
+          const nz = meshGeo.normals[vertIdx + 2];
+
+          // Velocity vector based on surface normal + random burst
+          const speed = 0.4 + Math.random() * 0.9;
+          const vx = (nx + (Math.random() - 0.5) * 0.6) * speed;
+          const vy = (ny + (Math.random() - 0.5) * 0.6 + 0.3) * speed;
+          const vz = (nz + (Math.random() - 0.5) * 0.6) * speed;
+
+          particlePositions.push(px, py, pz);
+          particleNormals.push(nx, ny, nz);
+          particleVelocities.push(vx, vy, vz);
+          // Seed: phase, lifetime, scale, type (0 = standard ember)
+          particleSeeds.push(Math.random(), Math.random(), Math.random(), 0.0);
+        }
+
+        // Add persistent lingering orbiter particles
+        for (let i = 0; i < lingeringCount; i++) {
+          const vertIdx = Math.floor(Math.random() * numMeshVerts) * 3;
+          const px = meshGeo.positions[vertIdx];
+          const py = meshGeo.positions[vertIdx + 1];
+          const pz = meshGeo.positions[vertIdx + 2];
+
+          particlePositions.push(px, py, pz);
+          particleNormals.push(0, 1, 0);
+          particleVelocities.push(0, 0, 0);
+          // type 1.0 = persistent lingering orbiter
+          particleSeeds.push(i / lingeringCount, Math.random(), Math.random(), 1.0);
+        }
+
+        return {
+          positions: new Float32Array(particlePositions),
+          normals: new Float32Array(particleNormals),
+          velocities: new Float32Array(particleVelocities),
+          seeds: new Float32Array(particleSeeds),
+          count: targetParticles + lingeringCount
+        };
+      }
+
+      // Ground Quad for soft floor shadow
+      const shadowQuad = new Float32Array([
+        -1, -1,
+         1, -1,
+        -1,  1,
+        -1,  1,
+         1, -1,
+         1,  1
+      ]);
+
+      // Build Geometries & GPU Buffers
+      const fedoraMesh = generateFedoraGeometry();
+      const fedoraParticles = generateParticleCloud(fedoraMesh);
+
+      // Mesh Buffers
+      const meshVbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, meshVbo);
+      gl.bufferData(gl.ARRAY_BUFFER, fedoraMesh.positions, gl.STATIC_DRAW);
+
+      const meshNormVbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, meshNormVbo);
+      gl.bufferData(gl.ARRAY_BUFFER, fedoraMesh.normals, gl.STATIC_DRAW);
+
+      const meshColorVbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, meshColorVbo);
+      gl.bufferData(gl.ARRAY_BUFFER, fedoraMesh.colors, gl.STATIC_DRAW);
+
+      const meshTypeVbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, meshTypeVbo);
+      gl.bufferData(gl.ARRAY_BUFFER, fedoraMesh.partTypes, gl.STATIC_DRAW);
+
+      const meshIbo = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, meshIbo);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, fedoraMesh.indices, gl.STATIC_DRAW);
+
+      // Particle Buffers
+      const partPosVbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, partPosVbo);
+      gl.bufferData(gl.ARRAY_BUFFER, fedoraParticles.positions, gl.STATIC_DRAW);
+
+      const partNormVbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, partNormVbo);
+      gl.bufferData(gl.ARRAY_BUFFER, fedoraParticles.normals, gl.STATIC_DRAW);
+
+      const partVelVbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, partVelVbo);
+      gl.bufferData(gl.ARRAY_BUFFER, fedoraParticles.velocities, gl.STATIC_DRAW);
+
+      const partSeedVbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, partSeedVbo);
+      gl.bufferData(gl.ARRAY_BUFFER, fedoraParticles.seeds, gl.STATIC_DRAW);
+
+      // Shadow Buffers
+      const shadowVbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, shadowVbo);
+      gl.bufferData(gl.ARRAY_BUFFER, shadowQuad, gl.STATIC_DRAW);
+
+      // Matrix Math Utilities
+      function mat4Create() {
+        return new Float32Array(16);
+      }
+
+      function mat4Perspective(out, fovy, aspect, near, far) {
+        const f = 1.0 / Math.tan(fovy / 2);
+        const nf = 1 / (near - far);
+        out[0] = f / aspect; out[1] = 0; out[2] = 0; out[3] = 0;
+        out[4] = 0; out[5] = f; out[6] = 0; out[7] = 0;
+        out[8] = 0; out[9] = 0; out[10] = (far + near) * nf; out[11] = -1;
+        out[12] = 0; out[13] = 0; out[14] = (2 * far * near) * nf; out[15] = 0;
+        return out;
+      }
+
+      function mat4LookAt(out, eye, center, up) {
+        let x0, x1, x2, y0, y1, y2, z0, z1, z2, len;
+        let eyex = eye[0], eyey = eye[1], eyez = eye[2];
+        let upx = up[0], upy = up[1], upz = up[2];
+        let centerx = center[0], centery = center[1], centerz = center[2];
+
+        z0 = eyex - centerx; z1 = eyey - centery; z2 = eyez - centerz;
+        len = 1 / Math.hypot(z0, z1, z2);
+        z0 *= len; z1 *= len; z2 *= len;
+
+        x0 = upy * z2 - upz * z1;
+        x1 = upz * z0 - upx * z2;
+        x2 = upx * z1 - upy * z0;
+        len = 1 / Math.hypot(x0, x1, x2);
+        x0 *= len; x1 *= len; x2 *= len;
+
+        y0 = z1 * x2 - z2 * x1;
+        y1 = z2 * x0 - z0 * x2;
+        y2 = z0 * x1 - z1 * x0;
+        len = 1 / Math.hypot(y0, y1, y2);
+        y0 *= len; y1 *= len; y2 *= len;
+
+        out[0] = x0; out[1] = y0; out[2] = z0; out[3] = 0;
+        out[4] = x1; out[5] = y1; out[6] = z1; out[7] = 0;
+        out[8] = x2; out[9] = y2; out[10] = z2; out[11] = 0;
+        out[12] = -(x0 * eyex + x1 * eyey + x2 * eyez);
+        out[13] = -(y0 * eyex + y1 * eyey + y2 * eyez);
+        out[14] = -(z0 * eyex + z1 * eyey + z2 * eyez);
+        out[15] = 1;
+        return out;
+      }
+
+      function mat4Identity(out) {
+        for (let i = 0; i < 16; i++) out[i] = (i % 5 === 0) ? 1 : 0;
+        return out;
+      }
+
+      function mat4RotateY(out, a, rad) {
+        const s = Math.sin(rad), c = Math.cos(rad);
+        const a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+        const a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+        out[0] = a00 * c - a20 * s; out[1] = a01 * c - a21 * s;
+        out[2] = a02 * c - a22 * s; out[3] = a03 * c - a23 * s;
+        out[8] = a00 * s + a20 * c; out[9] = a01 * s + a21 * c;
+        out[10] = a02 * s + a22 * c; out[11] = a03 * s + a23 * c;
+        return out;
+      }
+
+      function mat4RotateX(out, a, rad) {
+        const s = Math.sin(rad), c = Math.cos(rad);
+        const a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+        const a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+        out[4] = a10 * c + a20 * s; out[5] = a11 * c + a21 * s;
+        out[6] = a12 * c + a22 * s; out[7] = a13 * c + a23 * s;
+        out[8] = a20 * c - a10 * s; out[9] = a21 * c - a11 * s;
+        out[10] = a22 * c - a12 * s; out[11] = a23 * c - a13 * s;
+        return out;
+      }
+
+      function mat3NormalFromMat4(out, a) {
+        const a00 = a[0], a01 = a[1], a02 = a[2];
+        const a10 = a[4], a11 = a[5], a12 = a[6];
+        const a20 = a[8], a21 = a[9], a22 = a[10];
+
+        const b01 = a22 * a11 - a12 * a21;
+        const b11 = -a22 * a10 + a12 * a20;
+        const b21 = a21 * a10 - a11 * a20;
+
+        let det = a00 * b01 + a01 * b11 + a02 * b21;
+        if (!det) return null;
+        det = 1.0 / det;
+
+        out[0] = b01 * det;
+        out[1] = (-a22 * a01 + a02 * a21) * det;
+        out[2] = (a12 * a01 - a02 * a11) * det;
+        out[3] = b11 * det;
+        out[4] = (a22 * a00 - a02 * a20) * det;
+        out[5] = (-a12 * a00 + a02 * a10) * det;
+        out[6] = b21 * det;
+        out[7] = (-a21 * a00 + a01 * a20) * det;
+        out[8] = (a11 * a00 - a01 * a10) * det;
+        return out;
+      }
+
+      // Matrices
+      const projMatrix = mat4Create();
+      const viewMatrix = mat4Create();
+      const modelMatrix = mat4Create();
+      const normalMatrix = new Float32Array(9);
+
+      // Window Resize Handler
+      function handleResize() {
+        dpr = Math.min(window.devicePixelRatio || 1, 2);
+        width = window.innerWidth;
+        height = window.innerHeight;
+        canvas.width = Math.floor(width * dpr);
+        canvas.height = Math.floor(height * dpr);
+        gl.viewport(0, 0, canvas.width, canvas.height);
+      }
+      window.addEventListener('resize', handleResize);
+      handleResize();
+
+      // Interaction Handling
+      let touchStartX = 0;
+      let touchStartY = 0;
+      let isTouching = false;
+      let autoRebuildTimeout = null;
+
+      function triggerDissolveSequence() {
+        if (prefersReducedMotion) return;
+        isInteracting = true;
+        container.classList.add('active');
+        dissolveTarget = 1.0;
+        targetSpinVelocity = 0.003; // slow down smoothly
+
+        clearTimeout(autoRebuildTimeout);
+        // After swirling for 2.8 seconds, flow back together and reform perfectly
+        autoRebuildTimeout = setTimeout(() => {
+          dissolveTarget = 0.0;
+          targetSpinVelocity = 0.015;
+          container.classList.remove('active');
+          setTimeout(() => {
+            isInteracting = false;
+          }, 1200);
+        }, 2900);
+      }
+
+      container.addEventListener('mouseenter', () => {
+        triggerDissolveSequence();
+      });
+
+      container.addEventListener('touchstart', (e) => {
+        isTouching = true;
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+        triggerDissolveSequence();
+      }, { passive: true });
+
+      // Interactive subtle tilt on mouse move
+      window.addEventListener('pointermove', (e) => {
+        if (prefersReducedMotion) return;
+        const normX = (e.clientX / window.innerWidth) * 2 - 1;
+        const normY = (e.clientY / window.innerHeight) * 2 - 1;
+        targetRotationX = 0.28 + normY * 0.18;
+      });
+
+      // Main Render Loop
+      let lastTime = performance.now();
+      let totalTime = 0;
+
+      function render(now) {
+        requestAnimationFrame(render);
+        const dt = Math.min((now - lastTime) * 0.001, 0.1);
+        lastTime = now;
+        totalTime += dt;
+
+        // Smooth physics interpolation
+        spinVelocity += (targetSpinVelocity - spinVelocity) * (dt * 3.5);
+        if (!prefersReducedMotion) {
+          baseRotationY += spinVelocity;
+        }
+        rotationX += (targetRotationX - rotationX) * (dt * 4.0);
+
+        // Smooth dissolve progress (easing in/out)
+        const dissolveSpeed = dissolveTarget > dissolveProgress ? 1.8 : 1.4;
+        dissolveProgress += (dissolveTarget - dissolveProgress) * (dt * dissolveSpeed);
+
+        // Camera setup
+        const fov = (width < 640 ? 46 : 38) * (Math.PI / 180);
+        const aspect = width / height;
+        mat4Perspective(projMatrix, fov, aspect, 0.1, 100.0);
+
+        // Camera position (elevated, looking at fedora center)
+        const eye = [0.0, 1.2, 5.8];
+        const center = [0.0, -0.05, 0.0];
+        const up = [0.0, 1.0, 0.0];
+        mat4LookAt(viewMatrix, eye, center, up);
+
+        // Model matrix for Hat & Shadow
+        mat4Identity(modelMatrix);
+        mat4RotateX(modelMatrix, modelMatrix, rotationX);
+        mat4RotateY(modelMatrix, modelMatrix, baseRotationY);
+
+        mat3NormalFromMat4(normalMatrix, modelMatrix);
+
+        // Clear Color & Depth
+        gl.clearColor(0.03, 0.03, 0.04, 1.0);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+        // 1. Render Ground Soft Shadow
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.depthMask(false);
+        gl.disable(gl.DEPTH_TEST);
+
+        gl.useProgram(shadowProgram);
+        gl.uniformMatrix4fv(gl.getUniformLocation(shadowProgram, 'uProjection'), false, projMatrix);
+        gl.uniformMatrix4fv(gl.getUniformLocation(shadowProgram, 'uView'), false, viewMatrix);
+        gl.uniformMatrix4fv(gl.getUniformLocation(shadowProgram, 'uModel'), false, modelMatrix);
+        gl.uniform1f(gl.getUniformLocation(shadowProgram, 'uDissolve'), dissolveProgress);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, shadowVbo);
+        const aShadowPos = gl.getAttribLocation(shadowProgram, 'aPosition');
+        gl.enableVertexAttribArray(aShadowPos);
+        gl.vertexAttribPointer(aShadowPos, 2, gl.FLOAT, false, 0, 0);
+
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        gl.disableVertexAttribArray(aShadowPos);
+
+        // 2. Render Solid Fedora Mesh (if not fully dissolved)
+        if (dissolveProgress < 0.96) {
+          gl.enable(gl.DEPTH_TEST);
+          gl.depthMask(true);
+          gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+          gl.useProgram(meshProgram);
+          gl.uniformMatrix4fv(gl.getUniformLocation(meshProgram, 'uProjection'), false, projMatrix);
+          gl.uniformMatrix4fv(gl.getUniformLocation(meshProgram, 'uView'), false, viewMatrix);
+          gl.uniformMatrix4fv(gl.getUniformLocation(meshProgram, 'uModel'), false, modelMatrix);
+          gl.uniformMatrix3fv(gl.getUniformLocation(meshProgram, 'uNormalMatrix'), false, normalMatrix);
+          gl.uniform1f(gl.getUniformLocation(meshProgram, 'uDissolve'), dissolveProgress);
+          gl.uniform1f(gl.getUniformLocation(meshProgram, 'uTime'), totalTime);
+          gl.uniform3f(gl.getUniformLocation(meshProgram, 'uLightPos1'), -3.5, 5.0, 4.5);
+          gl.uniform3f(gl.getUniformLocation(meshProgram, 'uLightPos2'), 4.0, 2.0, -3.0);
+          gl.uniform3f(gl.getUniformLocation(meshProgram, 'uEyePos'), eye[0], eye[1], eye[2]);
+
+          // Position attribute
+          gl.bindBuffer(gl.ARRAY_BUFFER, meshVbo);
+          const aPos = gl.getAttribLocation(meshProgram, 'aPosition');
+          gl.enableVertexAttribArray(aPos);
+          gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 0, 0);
+
+          // Normal attribute
+          gl.bindBuffer(gl.ARRAY_BUFFER, meshNormVbo);
+          const aNorm = gl.getAttribLocation(meshProgram, 'aNormal');
+          gl.enableVertexAttribArray(aNorm);
+          gl.vertexAttribPointer(aNorm, 3, gl.FLOAT, false, 0, 0);
+
+          // Color attribute
+          gl.bindBuffer(gl.ARRAY_BUFFER, meshColorVbo);
+          const aCol = gl.getAttribLocation(meshProgram, 'aColor');
+          gl.enableVertexAttribArray(aCol);
+          gl.vertexAttribPointer(aCol, 3, gl.FLOAT, false, 0, 0);
+
+          // Part Type attribute
+          gl.bindBuffer(gl.ARRAY_BUFFER, meshTypeVbo);
+          const aType = gl.getAttribLocation(meshProgram, 'aPartType');
+          gl.enableVertexAttribArray(aType);
+          gl.vertexAttribPointer(aType, 1, gl.FLOAT, false, 0, 0);
+
+          // Draw Mesh Elements
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, meshIbo);
+          gl.drawElements(gl.TRIANGLES, fedoraMesh.indices.length, gl.UNSIGNED_SHORT, 0);
+
+          gl.disableVertexAttribArray(aPos);
+          gl.disableVertexAttribArray(aNorm);
+          gl.disableVertexAttribArray(aCol);
+          gl.disableVertexAttribArray(aType);
+        }
+
+        // 3. Render Glowing Particles & Lingering Embers
+        // Use additive blending for soft particle glow
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+        gl.depthMask(false);
+
+        gl.useProgram(particleProgram);
+        gl.uniformMatrix4fv(gl.getUniformLocation(particleProgram, 'uProjection'), false, projMatrix);
+        gl.uniformMatrix4fv(gl.getUniformLocation(particleProgram, 'uView'), false, viewMatrix);
+        gl.uniformMatrix4fv(gl.getUniformLocation(particleProgram, 'uModel'), false, modelMatrix);
+        gl.uniform1f(gl.getUniformLocation(particleProgram, 'uDissolve'), dissolveProgress);
+        gl.uniform1f(gl.getUniformLocation(particleProgram, 'uTime'), totalTime);
+        gl.uniform1f(gl.getUniformLocation(particleProgram, 'uDPR'), dpr);
+        gl.uniform2f(gl.getUniformLocation(particleProgram, 'uViewport'), canvas.width, canvas.height);
+
+        // Position
+        gl.bindBuffer(gl.ARRAY_BUFFER, partPosVbo);
+        const aPartPos = gl.getAttribLocation(particleProgram, 'aBasePos');
+        gl.enableVertexAttribArray(aPartPos);
+        gl.vertexAttribPointer(aPartPos, 3, gl.FLOAT, false, 0, 0);
+
+        // Normal
+        gl.bindBuffer(gl.ARRAY_BUFFER, partNormVbo);
+        const aPartNorm = gl.getAttribLocation(particleProgram, 'aNormal');
+        gl.enableVertexAttribArray(aPartNorm);
+        gl.vertexAttribPointer(aPartNorm, 3, gl.FLOAT, false, 0, 0);
+
+        // Velocity
+        gl.bindBuffer(gl.ARRAY_BUFFER, partVelVbo);
+        const aPartVel = gl.getAttribLocation(particleProgram, 'aVelocity');
+        gl.enableVertexAttribArray(aPartVel);
+        gl.vertexAttribPointer(aPartVel, 3, gl.FLOAT, false, 0, 0);
+
+        // Seed / Phase / Type
+        gl.bindBuffer(gl.ARRAY_BUFFER, partSeedVbo);
+        const aPartSeed = gl.getAttribLocation(particleProgram, 'aSeed');
+        gl.enableVertexAttribArray(aPartSeed);
+        gl.vertexAttribPointer(aPartSeed, 4, gl.FLOAT, false, 0, 0);
+
+        gl.drawArrays(gl.POINTS, 0, fedoraParticles.count);
+
+        gl.disableVertexAttribArray(aPartPos);
+        gl.disableVertexAttribArray(aPartNorm);
+        gl.disableVertexAttribArray(aPartVel);
+        gl.disableVertexAttribArray(aPartSeed);
+      }
+
+      requestAnimationFrame(render);
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,1273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>The Red Hat — 3D Particle Experience</title>
+  <style>
+    /* Reset & Deep Dark Luxury Aesthetic */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    :root {
+      --bg-dark: #060608;
+      --bg-radial: radial-gradient(circle at 50% 45%, #18080f 0%, #0d060a 40%, #060508 80%, #030305 100%);
+      --accent-red: #e00613;
+      --accent-glow: rgba(224, 6, 19, 0.45);
+      --text-main: #f5f5f8;
+      --text-muted: #9594a0;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      --card-bg: rgba(20, 20, 26, 0.7);
+      --card-border: rgba(255, 255, 255, 0.09);
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--bg-dark);
+      background-image: var(--bg-radial);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      align-items: center;
+      touch-action: manipulation;
+    }
+
+    /* Ambient Background Glow */
+    .ambient-glow {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: min(85vw, 680px);
+      height: min(85vw, 680px);
+      background: radial-gradient(circle, rgba(224, 6, 19, 0.14) 0%, rgba(224, 6, 19, 0.04) 45%, transparent 70%);
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 0;
+      filter: blur(50px);
+      transition: opacity 1.2s ease, transform 1.2s ease;
+    }
+
+    .ambient-glow.active {
+      opacity: 1.6;
+      transform: translate(-50%, -50%) scale(1.2);
+      background: radial-gradient(circle, rgba(255, 80, 40, 0.22) 0%, rgba(224, 6, 19, 0.08) 50%, transparent 75%);
+    }
+
+    /* Floor Ground Shadow & Floor Ember Glow */
+    .floor-shadow {
+      position: absolute;
+      top: calc(50% + 140px);
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 330px;
+      height: 72px;
+      background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.88) 0%, rgba(0, 0, 0, 0.55) 45%, transparent 75%);
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 1;
+      filter: blur(14px);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+    }
+
+    .floor-glow {
+      position: absolute;
+      top: calc(50% + 140px);
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 480px;
+      height: 110px;
+      background: radial-gradient(ellipse at center, rgba(255, 75, 25, 0.32) 0%, rgba(224, 6, 19, 0.1) 50%, transparent 80%);
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 1;
+      filter: blur(20px);
+      opacity: 0;
+      transition: opacity 0.8s ease;
+    }
+
+    /* Top Brand Tag */
+    header {
+      position: relative;
+      z-index: 10;
+      padding-top: clamp(18px, 3.8vh, 36px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      pointer-events: none;
+    }
+
+    .brand-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 16px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 100px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background-color: var(--accent-red);
+      box-shadow: 0 0 10px var(--accent-red);
+      transition: background-color 0.3s, box-shadow 0.3s;
+    }
+
+    .status-dot.active {
+      background-color: #ff9933;
+      box-shadow: 0 0 12px #ff9933, 0 0 22px #ff3b00;
+    }
+
+    /* WebGL Stage Container */
+    main.stage-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 2;
+      cursor: pointer;
+    }
+
+    canvas#glCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      outline: none;
+    }
+
+    /* Bottom Caption & Controls */
+    footer.hero-caption {
+      position: relative;
+      z-index: 10;
+      padding-bottom: clamp(24px, 4.8vh, 44px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 12px;
+      max-width: 620px;
+      padding-left: 20px;
+      padding-right: 20px;
+      pointer-events: auto;
+    }
+
+    .title-group {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 5px;
+    }
+
+    h1.hero-title {
+      font-size: clamp(21px, 3.4vw, 29px);
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #ffffff;
+      text-shadow: 0 2px 20px rgba(0, 0, 0, 0.75);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    h1.hero-title span.red-text {
+      color: var(--accent-red);
+      text-shadow: 0 0 24px rgba(224, 6, 19, 0.75);
+    }
+
+    p.caption-text {
+      font-size: clamp(13px, 1.8vw, 14.5px);
+      color: var(--text-muted);
+      line-height: 1.5;
+      font-weight: 400;
+      letter-spacing: 0.02em;
+      transition: color 0.3s;
+    }
+
+    .interactive-pill-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 4px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .pill-btn {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      padding: 7px 16px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      transition: all 0.25s ease;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+
+    .pill-btn:hover {
+      color: #fff;
+      border-color: rgba(255, 255, 255, 0.28);
+      background: rgba(32, 32, 42, 0.9);
+      transform: translateY(-1px);
+    }
+
+    .pill-btn.active {
+      color: #ffaa44;
+      border-color: rgba(255, 170, 68, 0.45);
+      background: rgba(255, 120, 30, 0.16);
+      box-shadow: 0 0 16px rgba(255, 100, 20, 0.25);
+    }
+
+    .pill-btn svg {
+      width: 14px;
+      height: 14px;
+      fill: currentColor;
+    }
+
+    /* Reduced Motion Fallback */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+      }
+      .ambient-glow {
+        transition: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Ambient Glow & Ground Layers -->
+  <div class="ambient-glow" id="ambientGlow"></div>
+  <div class="floor-shadow" id="floorShadow"></div>
+  <div class="floor-glow" id="floorGlow"></div>
+
+  <!-- Top Brand Tag -->
+  <header>
+    <div class="brand-tag">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusLabel">Red Hat • 3D Fedora</span>
+    </div>
+  </header>
+
+  <!-- Interactive 3D Stage -->
+  <main class="stage-container" id="stageContainer" role="region" aria-label="Interactive 3D Fedora Hat Particle Scene" tabindex="0">
+    <canvas id="glCanvas"></canvas>
+  </main>
+
+  <!-- Bottom Hero Caption & Accessibility Controls -->
+  <footer class="hero-caption">
+    <div class="title-group">
+      <h1 class="hero-title"><span class="red-text">RED HAT</span> FEDORA</h1>
+      <p class="caption-text" id="captionText">Hover or tap to dissolve into glowing embers • Release to reform</p>
+    </div>
+
+    <div class="interactive-pill-bar">
+      <button class="pill-btn" id="toggleDissolveBtn" title="Toggle particle dissolve animation">
+        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+        <span id="dissolveBtnLabel">Ignite & Dissolve</span>
+      </button>
+      <button class="pill-btn" id="reducedMotionBtn" title="Toggle reduced motion mode">
+        <svg viewBox="0 0 24 24"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
+        <span id="motionBtnLabel">Motion: Standard</span>
+      </button>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      'use strict';
+
+      // --- Matrix 4x4 & 3x3 Math Engine ---
+      const Mat4 = {
+        create() {
+          return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+        },
+        identity(out) {
+          out.fill(0);
+          out[0] = out[5] = out[10] = out[15] = 1;
+          return out;
+        },
+        perspective(out, fovy, aspect, near, far) {
+          const f = 1.0 / Math.tan(fovy / 2);
+          const nf = 1 / (near - far);
+          out.fill(0);
+          out[0] = f / aspect;
+          out[5] = f;
+          out[10] = (far + near) * nf;
+          out[11] = -1;
+          out[14] = (2 * far * near) * nf;
+          return out;
+        },
+        lookAt(out, eye, center, up) {
+          let eyex = eye[0], eyey = eye[1], eyez = eye[2];
+          let centerx = center[0], centery = center[1], centerz = center[2];
+          let upx = up[0], upy = up[1], upz = up[2];
+
+          let z0 = eyex - centerx, z1 = eyey - centery, z2 = eyez - centerz;
+          let len = 1 / Math.hypot(z0, z1, z2);
+          z0 *= len; z1 *= len; z2 *= len;
+
+          let x0 = upy * z2 - upz * z1, x1 = upz * z0 - upx * z2, x2 = upx * z1 - upy * z0;
+          len = Math.hypot(x0, x1, x2);
+          if (!len) { x0 = 0; x1 = 0; x2 = 0; } else { len = 1 / len; x0 *= len; x1 *= len; x2 *= len; }
+
+          let y0 = z1 * x2 - z2 * x1, y1 = z2 * x0 - z0 * x2, y2 = z0 * x1 - z1 * x0;
+          len = Math.hypot(y0, y1, y2);
+          if (!len) { y0 = 0; y1 = 0; y2 = 0; } else { len = 1 / len; y0 *= len; y1 *= len; y2 *= len; }
+
+          out[0] = x0; out[1] = y0; out[2] = z0; out[3] = 0;
+          out[4] = x1; out[5] = y1; out[6] = z1; out[7] = 0;
+          out[8] = x2; out[9] = y2; out[10] = z2; out[11] = 0;
+          out[12] = -(x0 * eyex + x1 * eyey + x2 * eyez);
+          out[13] = -(y0 * eyex + y1 * eyey + y2 * eyez);
+          out[14] = -(z0 * eyex + z1 * eyey + z2 * eyez);
+          out[15] = 1;
+          return out;
+        },
+        multiply(out, a, b) {
+          let a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+          let a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+          let a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+          let a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
+
+          let b0 = b[0], b1 = b[1], b2 = b[2], b3 = b[3];
+          out[0] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+          out[1] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+          out[2] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+          out[3] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+
+          b0 = b[4]; b1 = b[5]; b2 = b[6]; b3 = b[7];
+          out[4] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+          out[5] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+          out[6] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+          out[7] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+
+          b0 = b[8]; b1 = b[9]; b2 = b[10]; b3 = b[11];
+          out[8] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+          out[9] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+          out[10] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+          out[11] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+
+          b0 = b[12]; b1 = b[13]; b2 = b[14]; b3 = b[15];
+          out[12] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+          out[13] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+          out[14] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+          out[15] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+          return out;
+        },
+        rotateX(out, a, rad) {
+          let s = Math.sin(rad), c = Math.cos(rad);
+          let a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+          let a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+          if (a !== out) {
+            out[0] = a[0]; out[1] = a[1]; out[2] = a[2]; out[3] = a[3];
+            out[12] = a[12]; out[13] = a[13]; out[14] = a[14]; out[15] = a[15];
+          }
+          out[4] = a10 * c + a20 * s;
+          out[5] = a11 * c + a21 * s;
+          out[6] = a12 * c + a22 * s;
+          out[7] = a13 * c + a23 * s;
+          out[8] = a20 * c - a10 * s;
+          out[9] = a21 * c - a11 * s;
+          out[10] = a22 * c - a12 * s;
+          out[11] = a23 * c - a13 * s;
+          return out;
+        },
+        rotateY(out, a, rad) {
+          let s = Math.sin(rad), c = Math.cos(rad);
+          let a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+          let a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+          if (a !== out) {
+            out[4] = a[4]; out[5] = a[5]; out[6] = a[6]; out[7] = a[7];
+            out[12] = a[12]; out[13] = a[13]; out[14] = a[14]; out[15] = a[15];
+          }
+          out[0] = a00 * c - a20 * s;
+          out[1] = a01 * c - a21 * s;
+          out[2] = a02 * c - a22 * s;
+          out[3] = a03 * c - a23 * s;
+          out[8] = a00 * s + a20 * c;
+          out[9] = a01 * s + a21 * c;
+          out[10] = a02 * s + a22 * c;
+          out[11] = a03 * s + a23 * c;
+          return out;
+        },
+        rotateZ(out, a, rad) {
+          let s = Math.sin(rad), c = Math.cos(rad);
+          let a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+          let a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+          if (a !== out) {
+            out[8] = a[8]; out[9] = a[9]; out[10] = a[10]; out[11] = a[11];
+            out[12] = a[12]; out[13] = a[13]; out[14] = a[14]; out[15] = a[15];
+          }
+          out[0] = a00 * c + a10 * s;
+          out[1] = a01 * c + a11 * s;
+          out[2] = a02 * c + a12 * s;
+          out[3] = a03 * c + a13 * s;
+          out[4] = a10 * c - a00 * s;
+          out[5] = a11 * c - a01 * s;
+          out[6] = a12 * c - a02 * s;
+          out[7] = a13 * c - a03 * s;
+          return out;
+        },
+        translate(out, a, v) {
+          let x = v[0], y = v[1], z = v[2];
+          if (a === out) {
+            out[12] = a[0] * x + a[4] * y + a[8] * z + a[12];
+            out[13] = a[1] * x + a[5] * y + a[9] * z + a[13];
+            out[14] = a[2] * x + a[6] * y + a[10] * z + a[14];
+            out[15] = a[3] * x + a[7] * y + a[11] * z + a[15];
+          } else {
+            for (let i = 0; i < 12; i++) out[i] = a[i];
+            out[12] = a[0] * x + a[4] * y + a[8] * z + a[12];
+            out[13] = a[1] * x + a[5] * y + a[9] * z + a[13];
+            out[14] = a[2] * x + a[6] * y + a[10] * z + a[14];
+            out[15] = a[3] * x + a[7] * y + a[11] * z + a[15];
+          }
+          return out;
+        }
+      };
+
+      const Mat3 = {
+        normalFromMat4(out, a) {
+          let a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+          let a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+          let a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+          let a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
+
+          let b00 = a00 * a11 - a01 * a10;
+          let b01 = a00 * a12 - a02 * a10;
+          let b02 = a00 * a13 - a03 * a10;
+          let b03 = a01 * a12 - a02 * a11;
+          let b04 = a01 * a13 - a03 * a11;
+          let b05 = a02 * a13 - a03 * a12;
+          let b06 = a20 * a31 - a21 * a30;
+          let b07 = a20 * a32 - a22 * a30;
+          let b08 = a20 * a33 - a23 * a30;
+          let b09 = a21 * a32 - a22 * a31;
+          let b10 = a21 * a33 - a23 * a31;
+          let b11 = a22 * a33 - a23 * a32;
+
+          let det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+          if (!det) return null;
+          det = 1.0 / det;
+
+          out[0] = (a11 * b11 - a12 * b10 + a13 * b09) * det;
+          out[1] = (a12 * b08 - a10 * b11 - a13 * b07) * det;
+          out[2] = (a10 * b10 - a11 * b08 + a13 * b06) * det;
+          out[3] = (a02 * b10 - a01 * b11 - a03 * b09) * det;
+          out[4] = (a00 * b11 - a02 * b08 + a03 * b07) * det;
+          out[5] = (a01 * b08 - a00 * b10 - a03 * b06) * det;
+          out[6] = (a31 * b05 - a32 * b04 + a33 * b03) * det;
+          out[7] = (a32 * b02 - a30 * b05 - a33 * b01) * det;
+          out[8] = (a30 * b04 - a31 * b02 + a33 * b00) * det;
+          return out;
+        }
+      };
+
+      // --- High-Fidelity Parametric Fedora Point Cloud Generator ---
+      function generateFedoraPointCloud() {
+        const positions = [];
+        const normals = [];
+        const colors = [];
+        const seeds = [];
+        const flags = [];
+
+        function addPoint(x, y, z, nx, ny, nz, r, g, b, isOrbit = 0.0, size = 1.0) {
+          positions.push(x, y, z);
+          normals.push(nx, ny, nz);
+          colors.push(r, g, b);
+          seeds.push(
+            Math.random(),
+            Math.random(),
+            Math.random(),
+            Math.random()
+          );
+          flags.push(isOrbit, size);
+        }
+
+        // 1. Persistent Orbiting Satellite Embers (~340 embers)
+        const orbiterCount = 340;
+        for (let i = 0; i < orbiterCount; i++) {
+          addPoint(
+            0, 0.45, 0,
+            0, 1, 0,
+            1.0, 0.55, 0.20,
+            1.0, 1.5 + Math.random() * 0.9
+          );
+        }
+
+        // Fedora Dimensions
+        const inRx = 0.76, inRz = 0.96;
+        const outRx = 1.54, outRz = 1.84;
+        const H = 0.74;
+        const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+
+        // Parametric Brim
+        function getBrim(u, v, isBottom) {
+          const cosU = Math.cos(u);
+          const sinU = Math.sin(u);
+
+          const rx = inRx + (outRx - inRx) * v;
+          const rz = inRz + (outRz - inRz) * v;
+
+          const x = rx * sinU;
+          const z = rz * cosU;
+
+          const frontDip = cosU > 0 ? -0.25 * Math.pow(v, 1.3) * Math.pow(cosU, 1.2) : 0;
+          const backCurl = cosU < 0 ? 0.32 * Math.pow(v, 1.3) * Math.pow(-cosU, 1.2) : 0;
+          const sideLift = 0.12 * Math.pow(v, 1.7) * Math.pow(sinU, 2);
+
+          let y = frontDip + backCurl + sideLift;
+          if (isBottom) y -= 0.024;
+          return { x, y, z };
+        }
+
+        // Parametric Crown Wall
+        function getCrownWall(u, v) {
+          const cosU = Math.cos(u);
+          const sinU = Math.sin(u);
+
+          let rx = inRx * (1.0 - 0.16 * v);
+          let rz = inRz * (1.0 - 0.14 * v);
+
+          if (cosU > 0.08 && v > 0.20) {
+            const hFactor = Math.sin(Math.PI * Math.min(1.0, (v - 0.20) / 0.80));
+            const aFactor = Math.pow(Math.abs(sinU), 1.2) * Math.pow(cosU, 0.65);
+            const pinch = 0.35 * hFactor * aFactor;
+            rx *= (1.0 - pinch);
+          }
+
+          const x = rx * sinU;
+          const z = rz * cosU;
+          let y = v * H;
+
+          const frontDip = cosU > 0 ? -0.25 * Math.pow(0.04, 1.3) * Math.pow(cosU, 1.2) : 0;
+          const backCurl = cosU < 0 ? 0.32 * Math.pow(0.04, 1.3) * Math.pow(-cosU, 1.2) : 0;
+          const sideLift = 0.12 * Math.pow(0.04, 1.7) * Math.pow(sinU, 2);
+          y += (frontDip + backCurl + sideLift) * (1.0 - v * 0.75);
+
+          return { x, y, z };
+        }
+
+        // Parametric Crown Top & Crease
+        function getCrownTop(u, v) {
+          const topRx = inRx * (1.0 - 0.16);
+          const topRz = inRz * (1.0 - 0.14);
+
+          const cosU = Math.cos(u);
+          const sinU = Math.sin(u);
+
+          const lx = v * topRx * sinU;
+          const lz = v * topRz * cosU;
+
+          const zNorm = lz / topRz;
+          const crease = 0.26 * Math.exp(-Math.pow(lx / 0.24, 2)) * (1.0 - 0.35 * zNorm);
+          const dome = 0.05 * (1.0 - Math.pow(v, 2));
+
+          const y = H + dome - crease;
+          return { x: lx, y, z: lz };
+        }
+
+        // 2. Fibonacci Spiral Sampling for Brim Top (~22,000 points)
+        const numBrimTop = 22000;
+        for (let i = 0; i < numBrimTop; i++) {
+          const v = Math.sqrt((i + 0.5) / numBrimTop);
+          const u = i * goldenAngle;
+
+          const p = getBrim(u, v, false);
+          const eps = 0.005;
+          const pu = getBrim(u + eps, v, false);
+          const pv = getBrim(u, Math.min(1, v + eps), false);
+          let nx = (pu.y - p.y) * (pv.z - p.z) - (pu.z - p.z) * (pv.y - p.y);
+          let ny = (pu.z - p.z) * (pv.x - p.x) - (pu.x - p.x) * (pv.z - p.z);
+          let nz = (pu.x - p.x) * (pv.y - p.y) - (pu.y - p.y) * (pv.x - p.x);
+          let len = Math.hypot(nx, ny, nz) || 1;
+          nx /= len; ny /= len; nz /= len;
+          if (ny < 0) { nx = -nx; ny = -ny; nz = -nz; }
+
+          const red = 0.94 + Math.random() * 0.06;
+          addPoint(p.x, p.y, p.z, nx, ny, nz, red, 0.04, 0.06, 0.0, 1.0);
+        }
+
+        // 3. Fibonacci Spiral Sampling for Brim Underside (~12,000 points)
+        const numBrimBot = 12000;
+        for (let i = 0; i < numBrimBot; i++) {
+          const v = Math.sqrt((i + 0.5) / numBrimBot);
+          const u = i * goldenAngle;
+
+          const p = getBrim(u, v, true);
+          const eps = 0.005;
+          const pu = getBrim(u + eps, v, true);
+          const pv = getBrim(u, Math.min(1, v + eps), true);
+          let nx = (pu.y - p.y) * (pv.z - p.z) - (pu.z - p.z) * (pv.y - p.y);
+          let ny = (pu.z - p.z) * (pv.x - p.x) - (pu.x - p.x) * (pv.z - p.z);
+          let nz = (pu.x - p.x) * (pv.y - p.y) - (pu.y - p.y) * (pv.x - p.x);
+          let len = Math.hypot(nx, ny, nz) || 1;
+          nx /= len; ny /= len; nz /= len;
+          if (ny > 0) { nx = -nx; ny = -ny; nz = -nz; }
+
+          const red = 0.82 + Math.random() * 0.06;
+          addPoint(p.x, p.y, p.z, nx, ny, nz, red, 0.03, 0.04, 0.0, 1.0);
+        }
+
+        // 4. Helical Stratified Sampling for Crown Wall & Obsidian Ribbon (~18,000 points)
+        const numCrownWall = 18000;
+        for (let i = 0; i < numCrownWall; i++) {
+          const v = (i + 0.5) / numCrownWall;
+          const u = i * goldenAngle;
+
+          const p = getCrownWall(u, v);
+          const eps = 0.005;
+          const pu = getCrownWall(u + eps, v);
+          const pv = getCrownWall(u, Math.min(1, v + eps));
+          let nx = (pu.y - p.y) * (pv.z - p.z) - (pu.z - p.z) * (pv.y - p.y);
+          let ny = (pu.z - p.z) * (pv.x - p.x) - (pu.x - p.x) * (pv.z - p.z);
+          let nz = (pu.x - p.x) * (pv.y - p.y) - (pu.y - p.y) * (pv.x - p.x);
+          let len = Math.hypot(nx, ny, nz) || 1;
+          nx /= len; ny /= len; nz /= len;
+          if (nx * p.x + nz * p.z < 0) { nx = -nx; ny = -ny; nz = -nz; }
+
+          // Obsidian Ribbon Band (v < 0.22)
+          if (v < 0.22) {
+            const rx = p.x * 1.024;
+            const rz = p.z * 1.024;
+            const satin = 0.08 + Math.random() * 0.035;
+            addPoint(rx, p.y, rz, nx, ny, nz, satin, satin, satin * 1.15, 0.0, 1.0);
+          } else {
+            const red = 0.94 + Math.random() * 0.06;
+            addPoint(p.x, p.y, p.z, nx, ny, nz, red, 0.04, 0.06, 0.0, 1.0);
+          }
+        }
+
+        // 5. Fibonacci Spiral Sampling for Crown Top & Teardrop Crease (~11,000 points)
+        const numCrownTop = 11000;
+        for (let i = 0; i < numCrownTop; i++) {
+          const v = Math.sqrt((i + 0.5) / numCrownTop);
+          const u = i * goldenAngle;
+
+          const p = getCrownTop(u, v);
+          const eps = 0.005;
+          const pu = getCrownTop(u + eps, v);
+          const pv = getCrownTop(u, Math.min(1, v + eps));
+          let nx = (pu.y - p.y) * (pv.z - p.z) - (pu.z - p.z) * (pv.y - p.y);
+          let ny = (pu.z - p.z) * (pv.x - p.x) - (pu.x - p.x) * (pv.z - p.z);
+          let nz = (pu.x - p.x) * (pv.y - p.y) - (pu.y - p.y) * (pv.x - p.x);
+          let len = Math.hypot(nx, ny, nz) || 1;
+          nx /= len; ny /= len; nz /= len;
+          if (ny < 0) { nx = -nx; ny = -ny; nz = -nz; }
+
+          const red = 0.94 + Math.random() * 0.06;
+          addPoint(p.x, p.y, p.z, nx, ny, nz, red, 0.04, 0.06, 0.0, 1.0);
+        }
+
+        // 6. Ribbon Bow Knot Accent on Left Flank (~550 points)
+        const bowPoints = 550;
+        for (let i = 0; i < bowPoints; i++) {
+          const bowU = 3 * Math.PI / 2 + (Math.random() - 0.5) * 0.38;
+          const bowV = Math.random() * 0.18 + 0.02;
+          const baseP = getCrownWall(bowU, bowV);
+          const bulge = 0.05 * (1.0 - Math.pow((bowV - 0.11) / 0.09, 2));
+          const bx = baseP.x * (1.026 + bulge);
+          const bz = baseP.z * (1.026 + bulge);
+          const by = baseP.y;
+          const satin = 0.10 + Math.random() * 0.04;
+          addPoint(bx, by, bz, -1, 0, 0, satin, satin, satin * 1.25, 0.0, 1.1);
+        }
+
+        return {
+          positions: new Float32Array(positions),
+          normals: new Float32Array(normals),
+          colors: new Float32Array(colors),
+          seeds: new Float32Array(seeds),
+          flags: new Float32Array(flags),
+          count: positions.length / 3
+        };
+      }
+
+      // --- WebGL Shaders ---
+      const vsSource = `
+        precision highp float;
+
+        attribute vec3 aHomePos;
+        attribute vec3 aNormal;
+        attribute vec3 aColor;
+        attribute vec4 aSeed;
+        attribute vec2 aFlags; // x: isOrbit (1.0/0.0), y: size
+
+        uniform mat4 uMVP;
+        uniform mat4 uModel;
+        uniform mat3 uNormalMat;
+        uniform vec3 uCameraPos;
+        uniform float uTime;
+        uniform float uDissolve;
+        uniform float uReducedMotion;
+        uniform float uDPR;
+        uniform vec2 uViewport;
+
+        varying vec3 vColor;
+        varying vec3 vNormal;
+        varying vec3 vWorldPos;
+        varying float vDissolve;
+        varying float vIsEmber;
+        varying float vFlicker;
+
+        // Dynamic 3D curl turbulence field
+        vec3 curlNoise(vec3 p) {
+          float x = sin(p.y * 2.4 + uTime * 1.3 + aSeed.x * 6.28) * cos(p.z * 1.7 + aSeed.y * 6.28);
+          float y = sin(p.z * 2.0 + uTime * 1.0 + aSeed.z * 6.28) * cos(p.x * 2.1 + aSeed.w * 6.28);
+          float z = sin(p.x * 2.2 + uTime * 1.4 + aSeed.x * 3.14) * cos(p.y * 1.8 + aSeed.z * 3.14);
+          return vec3(x, y, z);
+        }
+
+        void main() {
+          float isOrbit = aFlags.x;
+          float baseSize = aFlags.y;
+          vec3 localPos = aHomePos;
+          vec3 normal = aNormal;
+
+          float effectiveDissolve = uDissolve;
+          if (uReducedMotion > 0.5) {
+            effectiveDissolve = effectiveDissolve * 0.15;
+          }
+
+          // Staggered detachment for organic ignition wave
+          float detachThreshold = fract(aSeed.x * 1.931);
+          float localProgress = clamp((effectiveDissolve - detachThreshold * 0.28) / 0.72, 0.0, 1.0);
+          float t = localProgress * localProgress * (3.0 - 2.0 * localProgress);
+
+          vec3 displacedPos = localPos;
+
+          if (isOrbit > 0.5) {
+            // Persistent satellite embers gracefully orbiting in 3D ellipses
+            float orbitSpeed = 0.65 + aSeed.w * 0.45;
+            float orbitAngle = uTime * orbitSpeed + aSeed.x * 6.28318;
+            float orbitRadius = 1.9 + aSeed.y * 0.65;
+            float orbitHeight = (aSeed.z - 0.5) * 1.5 + sin(uTime * 0.9 + aSeed.y * 3.1415) * 0.25;
+            float tilt = aSeed.z * 0.6 - 0.3;
+
+            vec3 orbitPos = vec3(
+              cos(orbitAngle) * orbitRadius,
+              orbitHeight + sin(orbitAngle) * tilt * 1.2,
+              sin(orbitAngle) * orbitRadius
+            );
+
+            if (t > 0.0) {
+              orbitPos += curlNoise(orbitPos * 0.8) * (t * 0.85);
+            }
+
+            displacedPos = orbitPos;
+            vIsEmber = 1.0;
+          } else {
+            // Standard hat particle in ember swirl
+            if (t > 0.001) {
+              // Elegant ember vortex swirl
+              float angleOffset = t * (2.8 + aSeed.w * 2.2);
+              float cosA = cos(angleOffset);
+              float sinA = sin(angleOffset);
+              vec3 rotatedPos = vec3(
+                localPos.x * cosA - localPos.z * sinA,
+                localPos.y,
+                localPos.x * sinA + localPos.z * cosA
+              );
+
+              vec3 normalDrift = normal * (t * (0.35 + aSeed.y * 0.45));
+              vec3 heatUp = vec3(0.0, t * (0.65 + aSeed.y * 0.65) + sin(uTime * 1.5 + aSeed.x * 6.28) * 0.08 * t, 0.0);
+              vec3 expansion = vec3(localPos.x, 0.0, localPos.z) * (t * (0.4 + aSeed.w * 0.45));
+              vec3 turb = curlNoise(localPos * 1.4 + vec3(0.0, uTime * 0.5, 0.0)) * (t * 0.65);
+
+              displacedPos = rotatedPos + normalDrift + heatUp + expansion + turb;
+              vIsEmber = t;
+            } else {
+              vIsEmber = 0.0;
+            }
+          }
+
+          vec4 worldPos = uModel * vec4(displacedPos, 1.0);
+          vWorldPos = worldPos.xyz;
+          vNormal = normalize(uNormalMat * normal);
+          vDissolve = t;
+
+          // Twinkle & flame flicker
+          vFlicker = sin(uTime * (8.0 + aSeed.w * 10.0) + aSeed.x * 40.0) * 0.22 + 0.78;
+          vColor = aColor;
+
+          vec4 clipPos = uMVP * vec4(displacedPos, 1.0);
+          gl_Position = clipPos;
+
+          // Screen-space point size attenuation
+          float pointSize = baseSize * (uViewport.y / 700.0) * (5.8 / max(0.1, clipPos.w)) * uDPR;
+
+          if (vIsEmber > 0.05 || isOrbit > 0.5) {
+            pointSize *= (1.4 + vDissolve * 1.1);
+          }
+
+          gl_PointSize = clamp(pointSize, 1.0, 72.0 * uDPR);
+        }
+      `;
+
+      const fsSource = `
+        precision highp float;
+
+        varying vec3 vColor;
+        varying vec3 vNormal;
+        varying vec3 vWorldPos;
+        varying float vDissolve;
+        varying float vIsEmber;
+        varying float vFlicker;
+
+        uniform vec3 uCameraPos;
+
+        void main() {
+          vec2 coord = gl_PointCoord * 2.0 - 1.0;
+          float distSq = dot(coord, coord);
+          if (distSq > 1.0) {
+            discard;
+          }
+          float r = sqrt(distSq);
+
+          // Studio Lighting Setup
+          vec3 N = normalize(vNormal);
+          vec3 V = normalize(uCameraPos - vWorldPos);
+
+          vec3 L_key = normalize(vec3(0.55, 0.85, 0.65));
+          vec3 L_fill = normalize(vec3(-0.65, 0.35, -0.4));
+          vec3 L_rim = normalize(vec3(0.0, 0.55, -0.85));
+
+          float NdotL_key = max(0.0, dot(N, L_key));
+          float NdotL_fill = max(0.0, dot(N, L_fill));
+          float NdotV = max(0.0, dot(N, V));
+
+          // Velvet / Felt grazing sheen
+          float rim = pow(1.0 - NdotV, 2.0);
+          float rimLight = max(0.0, dot(N, L_rim)) * rim * 1.6;
+
+          vec3 H = normalize(L_key + V);
+          float spec = pow(max(0.0, dot(N, H)), 16.0) * 0.35;
+
+          float isRibbon = (vColor.r < 0.2 && vColor.g < 0.2 && vColor.b < 0.2) ? 1.0 : 0.0;
+
+          vec3 solidColor;
+          if (isRibbon > 0.5) {
+            // Obsidian satin ribbon
+            vec3 ribbonBase = vec3(0.09, 0.09, 0.10);
+            solidColor = ribbonBase * (0.4 + 0.6 * NdotL_key + 0.3 * NdotL_fill) + vec3(0.30) * spec + vec3(0.16) * rim;
+          } else {
+            // Signature Red Hat crimson velvet felt with warm studio illumination
+            vec3 feltAmbient = vec3(0.48, 0.03, 0.055);
+            vec3 feltLit = vec3(0.98, 0.06, 0.10);
+            vec3 feltHighlight = vec3(1.0, 0.35, 0.28);
+
+            vec3 felt = mix(feltAmbient, feltLit, NdotL_key * 0.72 + NdotL_fill * 0.28);
+            felt += feltHighlight * (rim * 0.50 + rimLight * 0.60 + spec * 0.26);
+            solidColor = felt;
+          }
+
+          // Glowing Ember Color Spectrum (Luminous White Core -> Fiery Amber -> Scarlet Corona)
+          float core = 1.0 - smoothstep(0.0, 0.24, r);
+          float mid = 1.0 - smoothstep(0.12, 0.58, r);
+          float halo = 1.0 - smoothstep(0.32, 1.0, r);
+
+          vec3 coreColor = vec3(1.0, 0.98, 0.88) * 1.6;
+          vec3 midColor = vec3(1.0, 0.52, 0.10) * 1.3;
+          vec3 haloColor = vec3(0.95, 0.08, 0.16);
+
+          vec3 emberColor = (haloColor * halo * 0.75 + midColor * mid * 1.25 + coreColor * core * 1.5) * vFlicker;
+
+          // Smooth blend between solid hat felt and radiant ember
+          float emberMix = clamp(vIsEmber * 1.25, 0.0, 1.0);
+          vec3 finalColor = mix(solidColor, emberColor, emberMix);
+
+          // Antialiased edge & bloom falloff
+          float softEdge = 1.0 - smoothstep(0.70, 1.0, r);
+          float finalAlpha = (vIsEmber > 0.01) ? ((halo * 0.55 + mid * 0.35 + core * 0.10) * softEdge) : 1.0;
+
+          gl_FragColor = vec4(finalColor, finalAlpha);
+        }
+      `;
+
+      // --- WebGL Context & Resource Initialization ---
+      const canvas = document.getElementById('glCanvas');
+      const gl = canvas.getContext('webgl', {
+        antialias: true,
+        alpha: true,
+        depth: true,
+        premultipliedAlpha: false
+      }) || canvas.getContext('experimental-webgl');
+
+      if (!gl) {
+        document.getElementById('captionText').textContent = 'WebGL is not supported in this browser.';
+        return;
+      }
+
+      function compileShader(src, type) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, src);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+          console.error(gl.getShaderInfoLog(shader));
+          gl.deleteShader(shader);
+          return null;
+        }
+        return shader;
+      }
+
+      const vs = compileShader(vsSource, gl.VERTEX_SHADER);
+      const fs = compileShader(fsSource, gl.FRAGMENT_SHADER);
+      const program = gl.createProgram();
+      gl.attachShader(program, vs);
+      gl.attachShader(program, fs);
+      gl.linkProgram(program);
+
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.error(gl.getProgramInfoLog(program));
+        return;
+      }
+
+      gl.useProgram(program);
+
+      // Uniform Locations
+      const uMVP = gl.getUniformLocation(program, 'uMVP');
+      const uModel = gl.getUniformLocation(program, 'uModel');
+      const uNormalMat = gl.getUniformLocation(program, 'uNormalMat');
+      const uCameraPos = gl.getUniformLocation(program, 'uCameraPos');
+      const uTime = gl.getUniformLocation(program, 'uTime');
+      const uDissolve = gl.getUniformLocation(program, 'uDissolve');
+      const uReducedMotion = gl.getUniformLocation(program, 'uReducedMotion');
+      const uDPR = gl.getUniformLocation(program, 'uDPR');
+      const uViewport = gl.getUniformLocation(program, 'uViewport');
+
+      // Attribute Locations
+      const aHomePos = gl.getAttribLocation(program, 'aHomePos');
+      const aNormal = gl.getAttribLocation(program, 'aNormal');
+      const aColor = gl.getAttribLocation(program, 'aColor');
+      const aSeed = gl.getAttribLocation(program, 'aSeed');
+      const aFlags = gl.getAttribLocation(program, 'aFlags');
+
+      // Generate & Buffer Particles
+      const particleData = generateFedoraPointCloud();
+
+      function createVBO(data) {
+        const buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+        return buffer;
+      }
+
+      const bufPos = createVBO(particleData.positions);
+      const bufNorm = createVBO(particleData.normals);
+      const bufCol = createVBO(particleData.colors);
+      const bufSeed = createVBO(particleData.seeds);
+      const bufFlags = createVBO(particleData.flags);
+
+      function bindAttr(buffer, loc, size) {
+        if (loc === -1) return;
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.enableVertexAttribArray(loc);
+        gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+      }
+
+      bindAttr(bufPos, aHomePos, 3);
+      bindAttr(bufNorm, aNormal, 3);
+      bindAttr(bufCol, aColor, 3);
+      bindAttr(bufSeed, aSeed, 4);
+      bindAttr(bufFlags, aFlags, 2);
+
+      // WebGL State Flags
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(gl.LEQUAL);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+      // --- Interaction State Machine ---
+      let isHovered = false;
+      let isToggled = false;
+      let targetDissolve = 0.0;
+      let currentDissolve = 0.0;
+
+      // Spin and angle controls
+      let rotationAngle = 0.45;
+      let currentSpinSpeed = 0.55;
+      const cruiseSpinSpeed = 0.55;
+      const slowSpinSpeed = 0.07;
+
+      // Mouse Parallax
+      let targetMouseX = 0, targetMouseY = 0;
+      let mouseX = 0, mouseY = 0;
+
+      // Reduced motion preference
+      const mediaQueryReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+      let reducedMotionSystem = mediaQueryReducedMotion.matches;
+      let reducedMotionUser = reducedMotionSystem;
+
+      // DOM Elements
+      const stageContainer = document.getElementById('stageContainer');
+      const ambientGlow = document.getElementById('ambientGlow');
+      const floorShadow = document.getElementById('floorShadow');
+      const floorGlow = document.getElementById('floorGlow');
+      const statusDot = document.getElementById('statusDot');
+      const statusLabel = document.getElementById('statusLabel');
+      const toggleDissolveBtn = document.getElementById('toggleDissolveBtn');
+      const dissolveBtnLabel = document.getElementById('dissolveBtnLabel');
+      const reducedMotionBtn = document.getElementById('reducedMotionBtn');
+      const motionBtnLabel = document.getElementById('motionBtnLabel');
+
+      function updateMotionUI() {
+        if (reducedMotionUser) {
+          reducedMotionBtn.classList.add('active');
+          motionBtnLabel.textContent = 'Motion: Subdued';
+        } else {
+          reducedMotionBtn.classList.remove('active');
+          motionBtnLabel.textContent = 'Motion: Standard';
+        }
+      }
+
+      function updateDissolveState() {
+        const active = isHovered || isToggled;
+        targetDissolve = active ? 1.0 : 0.0;
+
+        if (active) {
+          ambientGlow.classList.add('active');
+          statusDot.classList.add('active');
+          statusLabel.textContent = 'Ember Storm • Active';
+          toggleDissolveBtn.classList.add('active');
+          dissolveBtnLabel.textContent = 'Reforming Hat...';
+        } else {
+          ambientGlow.classList.remove('active');
+          statusDot.classList.remove('active');
+          statusLabel.textContent = 'Red Hat • 3D Fedora';
+          toggleDissolveBtn.classList.remove('active');
+          dissolveBtnLabel.textContent = 'Ignite & Dissolve';
+        }
+      }
+
+      // Pointer / Hover Events
+      stageContainer.addEventListener('pointerenter', (e) => {
+        if (e.pointerType === 'mouse') {
+          isHovered = true;
+          updateDissolveState();
+        }
+      });
+
+      stageContainer.addEventListener('pointerleave', (e) => {
+        if (e.pointerType === 'mouse') {
+          isHovered = false;
+          updateDissolveState();
+        }
+      });
+
+      // Tap / Click Trigger
+      stageContainer.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'touch') {
+          isToggled = !isToggled;
+          updateDissolveState();
+        }
+      });
+
+      // Mouse Parallax Tracking
+      window.addEventListener('pointermove', (e) => {
+        const cx = window.innerWidth / 2;
+        const cy = window.innerHeight / 2;
+        targetMouseX = (e.clientX - cx) / cx;
+        targetMouseY = (e.clientY - cy) / cy;
+      });
+
+      // UI Button Handlers
+      toggleDissolveBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        isToggled = !isToggled;
+        updateDissolveState();
+      });
+
+      reducedMotionBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        reducedMotionUser = !reducedMotionUser;
+        updateMotionUI();
+      });
+
+      mediaQueryReducedMotion.addEventListener('change', (e) => {
+        reducedMotionUser = e.matches;
+        updateMotionUI();
+      });
+
+      // Keyboard Accessibility
+      stageContainer.addEventListener('keydown', (e) => {
+        if (e.code === 'Space' || e.code === 'Enter') {
+          e.preventDefault();
+          isToggled = !isToggled;
+          updateDissolveState();
+        }
+      });
+
+      updateMotionUI();
+
+      // Check URL parameters for testing if present (e.g. ?dissolved=1)
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.has('dissolved')) {
+        const val = parseFloat(urlParams.get('dissolved')) || 1.0;
+        isToggled = true;
+        currentDissolve = val;
+        targetDissolve = val;
+        updateDissolveState();
+      }
+
+      // --- Matrix Allocations ---
+      const matProj = Mat4.create();
+      const matView = Mat4.create();
+      const matModel = Mat4.create();
+      const matMVP = Mat4.create();
+      const matTemp = Mat4.create();
+      const matNormal = new Float32Array(9);
+
+      // Camera coordinates
+      const cameraPos = [0.0, 0.45, 4.6];
+      const cameraTarget = [0.0, 0.35, 0.0];
+      const cameraUp = [0.0, 1.0, 0.0];
+
+      // Resize Handler
+      let viewportWidth = 0, viewportHeight = 0, dpr = 1.0;
+      function onResize() {
+        dpr = Math.min(window.devicePixelRatio || 1.0, 2.0);
+        viewportWidth = canvas.clientWidth;
+        viewportHeight = canvas.clientHeight;
+
+        if (canvas.width !== Math.floor(viewportWidth * dpr) || canvas.height !== Math.floor(viewportHeight * dpr)) {
+          canvas.width = Math.floor(viewportWidth * dpr);
+          canvas.height = Math.floor(viewportHeight * dpr);
+        }
+        gl.viewport(0, 0, canvas.width, canvas.height);
+      }
+
+      window.addEventListener('resize', onResize);
+      onResize();
+
+      // --- Render Animation Loop ---
+      let lastTime = performance.now();
+
+      function render(now) {
+        requestAnimationFrame(render);
+
+        const dt = Math.min((now - lastTime) / 1000, 0.1);
+        lastTime = now;
+        const timeSec = now * 0.001;
+
+        // Smooth Mouse Parallax
+        mouseX += (targetMouseX - mouseX) * (1.0 - Math.exp(-dt * 6.0));
+        mouseY += (targetMouseY - mouseY) * (1.0 - Math.exp(-dt * 6.0));
+
+        // Smooth Dissolve Transition
+        const dissolveSpeed = targetDissolve > currentDissolve ? 2.4 : 1.8;
+        currentDissolve += (targetDissolve - currentDissolve) * (1.0 - Math.exp(-dt * dissolveSpeed));
+
+        // Smooth Spin Speed Control
+        const targetSpeed = (currentDissolve > 0.05) ? slowSpinSpeed : cruiseSpinSpeed;
+        currentSpinSpeed += (targetSpeed - currentSpinSpeed) * (1.0 - Math.exp(-dt * 3.5));
+
+        // Update Rotation
+        if (!reducedMotionUser) {
+          rotationAngle += currentSpinSpeed * dt;
+        } else {
+          rotationAngle += 0.03 * dt;
+        }
+
+        // Synchronize Floor Shadow & Floor Glow
+        const dissolvePct = currentDissolve;
+        floorShadow.style.opacity = Math.max(0.0, 0.88 * (1.0 - dissolvePct * 0.9)).toFixed(3);
+        floorGlow.style.opacity = (dissolvePct * 0.9).toFixed(3);
+        const floorScale = 1.0 + dissolvePct * 0.25;
+        floorShadow.style.transform = `translate(-50%, -50%) scale(${floorScale})`;
+        floorGlow.style.transform = `translate(-50%, -50%) scale(${floorScale})`;
+
+        // WebGL Viewport & Clear
+        onResize();
+        gl.clearColor(0.0, 0.0, 0.0, 0.0);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+        // Perspective Matrix
+        const aspect = viewportWidth / Math.max(1, viewportHeight);
+        const fov = aspect < 1.0 ? (52 * Math.PI / 180) : (44 * Math.PI / 180);
+        Mat4.perspective(matProj, fov, aspect, 0.1, 100.0);
+
+        // Camera View with subtle mouse parallax
+        const eye = [
+          cameraPos[0] + mouseX * 0.35,
+          cameraPos[1] - mouseY * 0.25,
+          cameraPos[2]
+        ];
+        Mat4.lookAt(matView, eye, cameraTarget, cameraUp);
+
+        // Model Matrix: jaunty fedora tilt + continuous smooth 3D rotation
+        Mat4.identity(matModel);
+        Mat4.translate(matModel, matModel, [0.0, 0.35, 0.0]);
+        // Parallax tilt
+        Mat4.rotateX(matModel, matModel, 0.32 - mouseY * 0.15);
+        Mat4.rotateZ(matModel, matModel, -0.09 + mouseX * 0.1);
+        Mat4.rotateY(matModel, matModel, rotationAngle);
+        // Center pivot
+        Mat4.translate(matModel, matModel, [0.0, -0.38, 0.0]);
+
+        // Compute MVP and Normal Matrices
+        Mat4.multiply(matTemp, matView, matModel);
+        Mat4.multiply(matMVP, matProj, matTemp);
+        Mat3.normalFromMat4(matNormal, matModel);
+
+        // Send Uniforms to Shaders
+        gl.uniformMatrix4fv(uMVP, false, matMVP);
+        gl.uniformMatrix4fv(uModel, false, matModel);
+        gl.uniformMatrix3fv(uNormalMat, false, matNormal);
+        gl.uniform3fv(uCameraPos, eye);
+        gl.uniform1f(uTime, timeSec);
+        gl.uniform1f(uDissolve, currentDissolve);
+        gl.uniform1f(uReducedMotion, reducedMotionUser ? 1.0 : 0.0);
+        gl.uniform1f(uDPR, dpr);
+        gl.uniform2f(uViewport, viewportWidth, viewportHeight);
+
+        // Dynamic depth mask: when mostly solid, write depth; when dissolved, soft blend
+        if (currentDissolve > 0.4) {
+          gl.depthMask(false);
+        } else {
+          gl.depthMask(true);
+        }
+
+        // Draw Particle Cloud
+        gl.drawArrays(gl.POINTS, 0, particleData.count);
+      }
+
+      requestAnimationFrame(render);
+    })();
+  </script>
+</body>
+</html>
