@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fedora — an ember study</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06070b;
+    background-image: radial-gradient(130% 100% at 50% -10%, #0e1220 0%, #090b12 45%, #05060a 100%);
+    color: #c9cedb;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    overflow: hidden;
+  }
+  .hero { position: fixed; inset: 0; overflow: hidden; }
+  .stage {
+    position: absolute; inset: 0; display: block;
+    width: 100%; height: 100%; margin: 0; padding: 0;
+    border: 0; background: transparent;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  .stage:focus-visible { outline: 2px solid #ff8a60; outline-offset: -2px; }
+  #scene { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; left: 0; right: 0;
+    bottom: clamp(26px, 8vh, 74px);
+    text-align: center; pointer-events: none; user-select: none;
+  }
+  .cap-title {
+    font-size: clamp(11px, 1.4vw, 13px);
+    font-weight: 600; letter-spacing: .44em; text-indent: .44em;
+    text-transform: uppercase; color: #b6bdcc;
+  }
+  .cap-sub {
+    margin-top: .85em;
+    font-size: clamp(10px, 1.2vw, 12px);
+    letter-spacing: .16em; color: #8a92a6;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .cap-sub { animation: breathe 5.5s ease-in-out infinite; }
+    @keyframes breathe { 0%, 100% { opacity: .8 } 50% { opacity: 1 } }
+  }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; margin: -1px;
+    padding: 0; border: 0; overflow: hidden;
+    clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+  }
+  .vignette {
+    position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(115% 100% at 50% 42%, transparent 52%, rgba(0, 0, 0, .55) 100%);
+  }
+  noscript p {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    color: #8a92a6; letter-spacing: .1em;
+  }
+</style>
+</head>
+<body>
+<main class="hero">
+  <button id="stage" class="stage" aria-label="A fedora of embers — activate to scatter it apart and let it reform">
+    <canvas id="scene" aria-hidden="true"></canvas>
+  </button>
+  <p id="live" class="sr-only" aria-live="polite"></p>
+  <div class="caption">
+    <p class="cap-title">The Fedora</p>
+    <p class="cap-sub" id="sub">hover, tap, or press Enter — scatter it to embers</p>
+  </div>
+  <div class="vignette" aria-hidden="true"></div>
+  <noscript><p>This scene needs JavaScript — a fedora of embers lives here.</p></noscript>
+</main>
+<script>
+(() => {
+'use strict';
+
+/* ---------- utils ---------- */
+const TAU = Math.PI * 2;
+const c01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const ss = (a, b, x) => { x = c01((x - a) / (b - a)); return x * x * (3 - 2 * x); };
+const rand = Math.random;
+
+const hero = document.getElementById('stage');
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+const sub = document.getElementById('sub');
+const live = document.getElementById('live');
+const mq = matchMedia('(prefers-reduced-motion: reduce)');
+let reduced = mq.matches;
+
+/* ---------- glow sprites (pre-rendered, no external assets) ---------- */
+const ramp = [[40,3,8],[96,7,16],[152,11,24],[205,20,34],[230,46,40],[247,90,46],[255,128,56],[255,168,82],[255,206,134]];
+const NC = ramp.length;
+const sprites = [];
+{
+  const SZ = 48;
+  for (let i = 0; i < NC; i++) {
+    const c = document.createElement('canvas'); c.width = c.height = SZ;
+    const g = c.getContext('2d');
+    const t = i / (NC - 1);
+    const j = Math.min(Math.floor(t * (ramp.length - 1)), ramp.length - 2);
+    const f = t * (ramp.length - 1) - j;
+    const r = Math.round(lerp(ramp[j][0], ramp[j + 1][0], f));
+    const gr = Math.round(lerp(ramp[j][1], ramp[j + 1][1], f));
+    const b = Math.round(lerp(ramp[j][2], ramp[j + 1][2], f));
+    const hot = Math.min(1, t * 0.9 + 0.1);
+    const core = 'rgb(' + Math.round(lerp(r, 255, hot * 0.85)) + ',' +
+                        Math.round(lerp(gr, 240, hot * 0.6)) + ',' +
+                        Math.round(lerp(b, 215, hot * 0.5)) + ')';
+    const grad = g.createRadialGradient(SZ / 2, SZ / 2, 0, SZ / 2, SZ / 2, SZ / 2);
+    grad.addColorStop(0, core);
+    grad.addColorStop(0.22, 'rgba(' + r + ',' + gr + ',' + b + ',0.85)');
+    grad.addColorStop(0.55, 'rgba(' + r + ',' + gr + ',' + b + ',0.25)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = grad; g.fillRect(0, 0, SZ, SZ);
+    sprites.push(c);
+  }
+}
+/* a cool faint sprite for background dust */
+const dustSpr = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 32;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+  grad.addColorStop(0, 'rgba(196,209,238,0.9)');
+  grad.addColorStop(0.5, 'rgba(160,178,220,0.25)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = grad; g.fillRect(0, 0, 32, 32);
+  return c;
+})();
+
+/* ---------- geometry: a stylized fedora (crown with a pinch, curling brim, band) ---------- */
+const R0 = 0.60, ROUT = 1.45, CH = 1.02;   // crown base radius, brim edge radius, crown height
+
+/* particle state (structure of typed arrays) */
+let N = 0;
+let lx, ly, lz;        // hat-local position
+let nx, ny, nz;        // hat-local normal (for lighting)
+let ps;                // base sprite size
+let d, amp, om, ph, fl; // dissolve delay, burst amplitude, swirl speed, phase, flicker speed
+let dx0, dy0, dz0;     // burst direction (hat-local)
+let kind;              // 0 crown, 1 brim, 2 band
+let halo;              // 1 for the rare soft-glow particles
+let rim, vj;           // brim rim factor, color jitter
+
+function build(n) {
+  N = n;
+  lx = new Float32Array(n); ly = new Float32Array(n); lz = new Float32Array(n);
+  nx = new Float32Array(n); ny = new Float32Array(n); nz = new Float32Array(n);
+  ps = new Float32Array(n);
+  d = new Float32Array(n); amp = new Float32Array(n); om = new Float32Array(n);
+  ph = new Float32Array(n); fl = new Float32Array(n);
+  dx0 = new Float32Array(n); dy0 = new Float32Array(n); dz0 = new Float32Array(n);
+  kind = new Uint8Array(n);
+  halo = new Uint8Array(n);
+  rim = new Float32Array(n); vj = new Float32Array(n);
+
+  const nCrown = Math.round(n * 0.55);
+  const nSide = Math.round(nCrown * 0.82);  // the rest of the crown budget closes the top
+  for (let i = 0; i < n; i++) {
+    let x, y, z, mx, my, mz, k = 0, s = 0;
+    if (i < nSide) {
+      /* crown side: tapered tube with a front/back pinch (the fedora crease) */
+      const th = rand() * TAU, t = rand();
+      const yt = CH * (1 - 0.11 * Math.pow(Math.abs(Math.cos(th)), 3));
+      y = t * yt;
+      const pinch = 0.16 * ss(0.25, 1, t) * Math.pow(Math.abs(Math.cos(th)), 2.5);
+      const r = R0 * (1 - 0.30 * Math.pow(t, 1.25)) * (1 - pinch)
+              + 0.02 * Math.pow(Math.abs(Math.sin(th)), 2) * t;
+      x = Math.cos(th) * r; z = Math.sin(th) * r;
+      mx = Math.cos(th); my = 0.30; mz = Math.sin(th);
+      k = t < 0.13 ? 2 : 0;                 // hat band at the crown base
+    } else if (i < nCrown) {
+      /* crown top: closed cap, flat at the center, dipping into the pinch at the rim */
+      const th = rand() * TAU, u = Math.sqrt(rand());
+      const pinchT = 0.16 * Math.pow(Math.abs(Math.cos(th)), 2.5);
+      const rTop = R0 * (1 - 0.30) * (1 - pinchT) + 0.02 * Math.pow(Math.abs(Math.sin(th)), 2);
+      const yRim = CH * (1 - 0.11 * Math.pow(Math.abs(Math.cos(th)), 3));
+      const rho = u * rTop;
+      y = CH - (CH - yRim) * Math.pow(u, 1.6);
+      x = Math.cos(th) * rho; z = Math.sin(th) * rho;
+      mx = Math.cos(th) * 0.22 * u; my = 1; mz = Math.sin(th) * 0.22 * u;
+    } else {
+      /* brim: annulus snapped down at the front, curling back up at the edge */
+      const th = rand() * TAU;
+      s = Math.sqrt(rand());
+      const rOut = ROUT * (1 - 0.085 * Math.cos(2 * th));
+      const r = lerp(R0, rOut, s);
+      const droop = (0.32 * Math.pow(s, 2.4) * (0.55 + 0.45 * Math.pow(Math.abs(Math.sin(th)), 1.4))
+                  + 0.16 * Math.pow(s, 2.2) * Math.pow(Math.max(0, Math.cos(th)), 2))
+                  * (1 - 0.16 * ss(0.86, 1, s));
+      y = -0.04 * s - droop;
+      x = Math.cos(th) * r; z = Math.sin(th) * r;
+      mx = Math.cos(th) * droop * 1.6; my = 1; mz = Math.sin(th) * droop * 1.6;
+      k = 1;
+    }
+    const inv = 1 / Math.hypot(mx, my, mz);
+    lx[i] = x; ly[i] = y; lz[i] = z;
+    nx[i] = mx * inv; ny[i] = my * inv; nz[i] = mz * inv;
+
+    /* dissolve character */
+    let dly = c01(0.7 * (1 - y / 1.1) + 0.3 * rand());
+    d[i] = dly;
+    amp[i] = 0.55 + rand() * 1.15;
+    om[i] = (rand() < 0.5 ? -1 : 1) * (0.8 + rand() * 1.5);
+    ph[i] = rand() * TAU;
+    fl[i] = 3 + rand() * 6;
+    const bdx = x, bdy = y + 0.5, bdz = z;   // burst: outward and upward, like embers
+    const binv = 1 / Math.hypot(bdx, bdy, bdz);
+    dx0[i] = bdx * binv; dy0[i] = bdy * binv; dz0[i] = bdz * binv;
+    kind[i] = k; rim[i] = k === 1 ? s : 0;
+    vj[i] = rand();
+    let p = 0.95 + rand() * 1.15;
+    if (rand() < 0.03) { p *= 2.3; halo[i] = 1; }   // a few soft halos
+    ps[i] = p;
+  }
+}
+
+/* ---------- lingering orbiters: a few embers keep circling after the reform ---------- */
+const NORB = 22, TRAILN = 14;
+const ou = new Float32Array(NORB * 3), ov = new Float32Array(NORB * 3);
+const orad = new Float32Array(NORB), ow = new Float32Array(NORB), oph = new Float32Array(NORB);
+const trail = [], tpos = new Int32Array(NORB);
+for (let k = 0; k < NORB; k++) {
+  let ax = rand() * 2 - 1, ay = rand() * 1.4 - 0.7, az = rand() * 2 - 1;
+  const al = Math.hypot(ax, ay, az) || 1; ax /= al; ay /= al; az /= al;
+  let ux = -az, uy = 0, uz = ax;              // cross(a, up)
+  if (Math.hypot(ux, uy, uz) < 0.05) { ux = 1; uy = 0; uz = 0; }
+  const ul = Math.hypot(ux, uy, uz); ux /= ul; uy /= ul; uz /= ul;
+  const vx = ay * uz - az * uy, vy = az * ux - ax * uz, vz = ax * uy - ay * ux; // cross(a, u)
+  ou[k * 3] = ux; ou[k * 3 + 1] = uy; ou[k * 3 + 2] = uz;
+  ov[k * 3] = vx; ov[k * 3 + 1] = vy; ov[k * 3 + 2] = vz;
+  orad[k] = 0.60 + rand() * 0.75;
+  ow[k] = (rand() < 0.5 ? -1 : 1) * (0.45 + rand() * 0.75);
+  oph[k] = rand() * TAU;
+  trail.push(new Float32Array(TRAILN * 2)); tpos[k] = 0;
+}
+
+/* ---------- background dust ---------- */
+const NDUST = 64;
+const du0 = new Float32Array(NDUST), du1 = new Float32Array(NDUST);
+const dus = new Float32Array(NDUST), dut = new Float32Array(NDUST), dup = new Float32Array(NDUST);
+for (let k = 0; k < NDUST; k++) {
+  du0[k] = rand(); du1[k] = rand();
+  dus[k] = 0.25 + rand() * 0.75; dut[k] = 0.3 + rand() * 0.9; dup[k] = rand() * TAU;
+}
+
+/* ---------- viewport ---------- */
+let W = 0, Hh = 0, DPR = 1, S = 100, cx = 0, cyC = 0, pScale = 2;
+let rebuildQueued = 0;   // rebuilding mid-dissolve would teleport the hat — wait for the reform
+let dirty = true;        // reduced-motion: only re-rasterize when something changed
+function resize() {
+  DPR = Math.min(devicePixelRatio || 1, 1.75);
+  W = innerWidth; Hh = innerHeight;
+  canvas.width = Math.round(W * DPR); canvas.height = Math.round(Hh * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  S = Math.min(W, Hh) * 0.25;
+  cx = W / 2; cyC = Hh * 0.435;
+  pScale = Math.max(1.4, S * 0.0072);
+  const coarse = matchMedia('(pointer: coarse)').matches;
+  const want = Math.round(Math.min(Math.max(W * Hh / 260 / (DPR > 1 ? DPR : 1), 2200), coarse ? 4200 : 6600));
+  if (!N || Math.abs(want - N) > Math.max(600, N * 0.25)) {
+    if (state === 'formed') build(want); else rebuildQueued = want;
+  }
+  for (let k = 0; k < NORB; k++) { trail[k].fill(0); tpos[k] = 0; }  // no streaks across the jump
+  dirty = true;
+}
+addEventListener('resize', resize);
+
+/* ---------- interaction & effect clock ---------- */
+const EXP = 1.05, SWL = 1.55, REF = 1.95;   // explode, swirl, reform durations
+const DUR = EXP + SWL + REF + 0.55 + 0.35 + 0.12; // + max stagger + settle pad
+let state = 'formed', T = 0;
+let angle = 0.62, spin = 0.55, hovered = false;
+let orbLive = false, orbT = 0;
+let pulse = 0;                               // reduced-motion answer: brightness only
+
+function trigger() {
+  if (reduced) { pulse = 1; live.textContent = 'The fedora glows.'; return; }
+  if (state !== 'formed') return;
+  state = 'active'; T = 0;
+  live.textContent = 'The hat scatters into embers.';
+}
+hero.addEventListener('pointerenter', () => { hovered = true; trigger(); });
+hero.addEventListener('pointerleave', () => { hovered = false; });
+hero.addEventListener('click', trigger);   // a real button: Enter/Space map to click natively
+document.addEventListener('visibilitychange', () => { last = performance.now(); });
+
+function applyReduced() {
+  sub.textContent = reduced
+    ? 'reduced motion honored — the hat holds still'
+    : 'hover, tap, or press Enter — scatter it to embers';
+  if (reduced) { state = 'formed'; T = 0; orbLive = false; pulse = 0; }
+  dirty = true;
+}
+mq.addEventListener('change', e => { reduced = e.matches; applyReduced(); });
+
+/* ---------- render ---------- */
+const TILT = 0.50, FOC = 4.0;               // camera: looking down ~29°, mild perspective
+const LX = -0.48, LY = 0.60, LZ = 0.64;     // key light (already unit length)
+let last = performance.now();
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  let dt = (now - last) / 1000; last = now;
+  if (dt > 0.05) dt = 0.05; if (dt <= 0) dt = 0.001;
+
+  const spinT = reduced ? 0 : (hovered || state === 'active') ? 0.10 : 0.55;
+  spin += (spinT - spin) * Math.min(1, dt * 3);
+  if (!reduced) angle += spin * dt;
+  if (state === 'active') {
+    T += dt;
+    if (T >= DUR) {
+      state = 'formed'; T = 0; orbLive = true; orbT = 0;
+      live.textContent = 'The fedora reforms.';
+      if (rebuildQueued) { build(rebuildQueued); rebuildQueued = 0; }
+    }
+  }
+  if (orbLive) orbT = Math.min(orbT + dt, 4);
+  if (pulse > 0) pulse = Math.max(0, pulse - dt * 1.1);
+  if (reduced && pulse <= 0 && !dirty) return;   // static scene: skip the idle re-raster
+
+  const env = state === 'active' ? Math.pow(Math.sin(Math.PI * Math.min(T / DUR, 1)), 0.7) : 0;
+  const bob = reduced ? 0 : Math.sin(now * 0.0006) * 0.022;
+  const tSec = now * 0.001;
+
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  ctx.clearRect(0, 0, W, Hh);
+
+  /* soft red aura behind the hat — breathes up a little during the burst */
+  let g = ctx.createRadialGradient(cx, cyC - S * 0.1, 0, cx, cyC - S * 0.1, S * 2.3);
+  g.addColorStop(0, 'rgba(212,48,34,' + (0.10 + 0.07 * env + (reduced ? 0 : 0.02 + 0.02 * Math.sin(tSec * 0.8))) + ')');
+  g.addColorStop(1, 'rgba(212,48,34,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, Hh);
+
+  /* contact shadow on the floor */
+  const shEnv = 1 - 0.9 * env;
+  if (shEnv > 0.02) {
+    const rx = S * 1.55 * (1 - 0.06 * env), ry = S * 0.185;
+    ctx.save();
+    ctx.translate(cx, cyC + S * 1.82 - bob * S * 0.5);
+    ctx.scale(1, ry / rx);
+    g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+    g.addColorStop(0, 'rgba(0,0,0,' + 0.44 * shEnv + ')');
+    g.addColorStop(0.7, 'rgba(0,0,0,' + 0.16 * shEnv + ')');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(-rx, -rx, rx * 2, rx * 2);
+    ctx.restore();
+  }
+
+  /* the hat: additive glowing particles */
+  ctx.globalCompositeOperation = 'lighter';
+  const ca = Math.cos(angle), sa = Math.sin(angle);
+  const ct = Math.cos(TILT), st = Math.sin(TILT);
+  const boost = 1 + 0.9 * pulse;
+
+  for (let i = 0; i < N; i++) {
+    let X = lx[i], Y = ly[i], Z = lz[i], heat = 0, flick = 1;
+    if (state === 'active') {
+      const dly = d[i];
+      const Tu = T - dly * 0.55;
+      if (Tu > 0) {
+        const u1 = Tu >= EXP ? 1 : Tu / EXP;
+        const ssw = c01((Tu - EXP) / SWL);
+        const ur = c01((Tu - EXP - SWL - dly * 0.35) / REF);
+        const eo = 1 - Math.pow(1 - u1, 3);
+        const ret = Math.pow(1 - ur, 1.5);
+        const mag = amp[i] * eo * (1 - 0.30 * ssw) * ret;
+        if (mag > 0.0004) {
+          const psi = om[i] * (0.45 * Tu + 2.0 * Math.max(0, Tu - EXP));
+          const cp = Math.cos(psi), sp2 = Math.sin(psi);
+          const wig = 0.05 * ssw * ret;
+          X += (dx0[i] * cp - dz0[i] * sp2) * mag + Math.sin(T * fl[i] + ph[i]) * wig;
+          Y += dy0[i] * 0.9 * mag + 0.34 * ssw * ret + Math.sin(T * fl[i] * 0.8 + ph[i] * 2.1) * wig;
+          Z += (dx0[i] * sp2 + dz0[i] * cp) * mag + Math.cos(T * fl[i] * 0.9 + ph[i] * 3.3) * wig;
+        }
+        heat = eo * ret;
+        flick = 0.72 + 0.28 * Math.sin(T * fl[i] + ph[i]);
+        flick = 1 + (flick - 1) * heat;       // shimmer fades as embers cool and reform
+      }
+    }
+    /* spin around Y, then tilt toward the camera */
+    const x1 = X * ca - Z * sa, z1 = X * sa + Z * ca;
+    const y1 = Y + bob;
+    const y2 = y1 * ct - z1 * st, z2 = y1 * st + z1 * ct;
+    if (FOC - z2 < 0.2) continue;             // too close to / behind the camera
+    const persp = FOC / (FOC - z2);
+    const sx = cx + x1 * S * persp, sy = cyC - y2 * S * persp;
+    if (sx < -24 || sx > W + 24 || sy < -24 || sy > Hh + 24) continue;
+
+    /* lambert-ish shading from the rotated normal */
+    const n1 = nx[i] * ca - nz[i] * sa;
+    const lam = n1 * LX + ny[i] * LY + (nx[i] * sa + nz[i] * ca) * LZ;
+    const lit = lam > 0 ? Math.sqrt(lam) : 0;
+
+    let b = 0.22 + 0.9 * lit;
+    if (kind[i] === 2) b *= 0.34;                 // dark band
+    else if (kind[i] === 1 && rim[i] > 0.86) b += 0.22;  // lit brim edge
+    b *= 0.9 + 0.2 * vj[i];
+    b *= boost + 0.35 * heat;
+    let ci = (b * (NC - 1) + 0.5) | 0;
+    if (ci < 0) ci = 0; else if (ci > NC - 1) ci = NC - 1;
+
+    let a = (kind[i] === 2 ? 0.62 : 0.85) * (0.35 + 0.75 * lit);
+    a *= 0.5 + 0.5 * c01((z2 + 1.7) / 3.4);       // far side falls into depth
+    a *= flick;
+    if (heat > 0) a *= 1 + 0.75 * heat;
+    if (halo[i]) a *= 0.5;                    // halo particles glow softer
+    if (a > 1) a = 1;
+    if (a < 0.02) continue;
+
+    const sz = ps[i] * pScale * persp;
+    ctx.globalAlpha = a;
+    ctx.drawImage(sprites[ci], sx - sz, sy - sz, sz + sz, sz + sz);
+  }
+
+  /* lingering orbiters with faint trails */
+  const orbAmt = state === 'active' ? Math.max(0, 1 - T / 0.4) : orbLive ? Math.min(1, orbT / 2.2) : 0;
+  if (orbAmt > 0.01 && !reduced) {
+    for (let k = 0; k < NORB; k++) {
+      const arg = ow[k] * tSec + oph[k];
+      const rr = orad[k] * (0.92 + 0.08 * Math.sin(tSec * 0.7 + oph[k]));
+      const co = Math.cos(arg), si = Math.sin(arg);
+      const ox = (ou[k * 3] * co + ov[k * 3] * si) * rr;
+      const oy = (ou[k * 3 + 1] * co + ov[k * 3 + 1] * si) * rr;
+      const oz = (ou[k * 3 + 2] * co + ov[k * 3 + 2] * si) * rr;
+      const x1 = ox * ca - oz * sa, z1 = ox * sa + oz * ca;
+      const y1 = oy + bob;
+      const y2 = y1 * ct - z1 * st, z2 = y1 * st + z1 * ct;
+      const persp = FOC / (FOC - z2);
+      const sx = cx + x1 * S * persp, sy = cyC - y2 * S * persp;
+      if (sx < -60 || sx > W + 60 || sy < -60 || sy > Hh + 60) continue;
+
+      const tt = trail[k], ti = tpos[k];
+      tt[ti] = sx; tt[ti + 1] = sy;
+      const next = (ti + 2) % (TRAILN * 2);
+      const flick2 = 0.65 + 0.35 * Math.sin(tSec * 2.2 + oph[k]);
+      ctx.lineWidth = 1;
+      for (let seg = 0; seg < TRAILN * 2 - 2; seg += 2) {
+        const q = (next + seg) % (TRAILN * 2);
+        const q2 = (q + 2) % (TRAILN * 2);
+        const age = seg / (TRAILN * 2);   // bright at the head, fading along the tail
+        ctx.globalAlpha = 0.28 * orbAmt * age * flick2;
+        ctx.strokeStyle = 'rgba(255,190,120,1)';
+        ctx.beginPath();
+        ctx.moveTo(tt[q], tt[q + 1]);
+        ctx.lineTo(tt[q2], tt[q2 + 1]);
+        ctx.stroke();
+      }
+      tpos[k] = next;
+      const hs = 2.6 * pScale * persp;
+      ctx.globalAlpha = 0.85 * orbAmt * flick2;
+      ctx.drawImage(sprites[NC - 2], sx - hs, sy - hs, hs + hs, hs + hs);
+    }
+  }
+
+  /* background dust */
+  for (let k = 0; k < NDUST; k++) {
+    const fx = reduced ? du0[k] : du0[k] + 0.018 * Math.sin(tSec * 0.05 * dus[k] + dup[k]);
+    const fy = reduced ? du1[k] : du1[k] + 0.012 * Math.sin(tSec * 0.04 * dus[k] + dup[k] * 2.0);
+    const tw = reduced ? 0.6 : 0.5 + 0.5 * Math.sin(tSec * dut[k] + dup[k]);
+    const dsz = 1.1 + dus[k] * 1.5;
+    ctx.globalAlpha = 0.05 + 0.09 * tw;
+    ctx.drawImage(dustSpr, fx * W - dsz, fy * Hh - dsz, dsz + dsz, dsz + dsz);
+  }
+
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  dirty = false;
+}
+
+/* ---------- go ---------- */
+resize();
+applyReduced();
+requestAnimationFrame(t => { last = t; requestAnimationFrame(frame); });
+
+})();
+</script>
+</body>
+</html>

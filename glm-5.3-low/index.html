@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fedora</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: radial-gradient(120% 90% at 50% 20%, #171017 0%, #0b070c 55%, #050308 100%);
+    color: #d8cfd6;
+    font-family: ui-serif, Georgia, "Times New Roman", serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .scene {
+    position: relative;
+    width: min(92vmin, 700px);
+    aspect-ratio: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    user-select: none;
+  }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .caption {
+    position: absolute;
+    bottom: 6%;
+    text-align: center;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+    font-size: clamp(9px, 1.6vmin, 13px);
+    color: #a896a3;
+    text-shadow: 0 1px 8px rgba(0,0,0,0.8);
+    pointer-events: none;
+    transition: color 0.6s ease;
+  }
+  .scene:hover .caption { color: #e8b9a0; }
+  .hint {
+    position: absolute;
+    bottom: 2%;
+    font-size: clamp(8px, 1.3vmin, 11px);
+    letter-spacing: 0.2em;
+    color: #554a53;
+    pointer-events: none;
+    transition: opacity 1s ease;
+  }
+</style>
+</head>
+<body>
+<div class="scene" id="scene">
+  <canvas id="c"></canvas>
+  <div class="caption">The Fedora</div>
+  <div class="hint" id="hint">hover or tap</div>
+</div>
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const scene = document.getElementById('scene');
+  const hint = document.getElementById('hint');
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  let W = 0, H = 0, DPR = 1;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    const r = scene.getBoundingClientRect();
+    W = Math.floor(r.width); H = Math.floor(r.height);
+    canvas.width = W * DPR; canvas.height = H * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---------- Fedorahat point cloud ----------
+  // Profile in (radius, height), hat units. Crown ~ tall, brim wide & downturned.
+  const COUNT = 4200;
+  const pts = [];
+  const rand = (a, b) => a + Math.random() * (b - a);
+
+  function profile(u) {
+    // u: 0 = top of crown, 1 = outer brim edge
+    if (u < 0.28) {                       // crown dome
+      const t = u / 0.28;
+      const r = 0.52 * Math.sqrt(Math.max(0, 1 - (1 - t) * (1 - t)));
+      const y = 1.30 - 0.38 * (1 - Math.cos(t * Math.PI / 2)) * 0.9;
+      return { r, y, part: 0 };
+    }
+    if (u < 0.36) {                       // crown wall taper
+      const t = (u - 0.28) / 0.08;
+      return { r: 0.52 + 0.06 * t * t, y: 0.92 - 0.92 * t, part: 0 };
+    }
+    if (u < 0.42) {                       // band
+      const t = (u - 0.36) / 0.06;
+      return { r: 0.585 + 0.02 * t, y: 0.0 - 0.16 * t, part: 1 };
+    }
+    // brim: dips slightly then turns down at the edge
+    const t = (u - 0.42) / 0.58;
+    const dip = -0.10 * Math.sin(Math.PI * Math.min(1, t * 1.6));
+    const edge = 2.1 * t * t * t;
+    return { r: 0.605 + 1.05 * t, y: -0.16 + dip - edge, part: 2 };
+  }
+
+  for (let i = 0; i < COUNT; i++) {
+    // bias density so the brim (large area) still gets plenty of points
+    let u;
+    const roll = Math.random();
+    if (roll < 0.30) u = rand(0, 0.42); else u = 0.42 + Math.pow(Math.random(), 0.8) * 0.58;
+    const p = profile(u);
+    const th = Math.random() * Math.PI * 2;
+    const rJit = rand(0.97, 1.03);
+    pts.push({
+      x: Math.cos(th) * p.r * rJit,
+      y: p.y + rand(-0.012, 0.012),
+      z: Math.sin(th) * p.r * rJit,
+      part: p.part,
+      size: rand(0.7, 1.9),
+      // ember params
+      dir: null, delay: 0, swirl: 0, speed: 0, flick: Math.random() * Math.PI * 2,
+      orbiter: false
+    });
+  }
+
+  // assign colors per part: felt red, darker band, brim slightly deeper
+  function hatColor(p, light) {
+    if (p.part === 1) {
+      const r = 40 + light * 45, g = 8 + light * 12, b = 14 + light * 16;
+      return [r, g, b];
+    }
+    const l = 0.35 + light * 0.65;
+    return [175 * l + 20, 32 * l + 6, 34 * l + 8];
+  }
+
+  // particles that keep orbiting after reformation
+  const ORBIT_N = Math.floor(COUNT * 0.018);
+  const shuffled = pts.slice();
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  for (let i = 0; i < ORBIT_N; i++) {
+    const p = shuffled[i];
+    p.orbiter = true;
+    p.orbR = rand(0.9, 2.1);
+    p.orbY = rand(-0.2, 1.5);
+    p.orbSp = rand(0.25, 0.7) * (Math.random() < 0.5 ? 1 : -1);
+    p.orbTilt = rand(-0.5, 0.5);
+    p.trail = [];
+  }
+
+  // ---------- State machine ----------
+  // phase: 'idle' | 'out' | 'swirl' | 'back'
+  let phase = 'idle', phaseT = 0, spin = 0, spinSpeed = 0.55;
+  const DUR_OUT = 1.1, DUR_SWIRL = 1.6, DUR_BACK = 1.4;
+
+  function trigger() {
+    if (reduced) return;
+    if (phase !== 'idle') return;
+    phase = 'out'; phaseT = 0;
+    hint.style.opacity = '0';
+    for (const p of pts) {
+      const len = Math.hypot(p.x, p.y - 0.5, p.z) || 1;
+      const jitter = rand(0.5, 1.6);
+      p.dir = [p.x / len * jitter + rand(-0.3, 0.3),
+               p.y / len * jitter * 0.6 + rand(0.05, 0.55),
+               p.z / len * jitter + rand(-0.3, 0.3)];
+      p.delay = Math.random() * 0.35;
+      p.swirl = rand(-1, 1);
+      p.speed = rand(1.6, 3.4);
+      if (p.trail) p.trail.length = 0;
+    }
+  }
+  scene.addEventListener('pointerenter', trigger);
+  scene.addEventListener('pointerdown', trigger);
+
+  const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
+  const easeInOutQuint = t => t < 0.5 ? 16 * t ** 5 : 1 - Math.pow(-2 * t + 2, 5) / 2;
+
+  // ---------- Render ----------
+  let last = performance.now();
+  let hoverGlow = 0;
+
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    const t = now / 1000;
+
+    ctx.clearRect(0, 0, W, H);
+    const cx = W / 2, cy = H / 2 - H * 0.03;
+    const scale = Math.min(W, H) * 0.145;
+
+    // ---- animation state ----
+    let dissolve = 0; // 0 = hat, 1 = fully apart
+    if (!reduced) {
+      const targetSpeed = (phase !== 'idle') ? 0.10 : 0.55;
+      spinSpeed += (targetSpeed - spinSpeed) * Math.min(1, dt * 3);
+      spin += spinSpeed * dt;
+      if (phase !== 'idle') {
+        phaseT += dt;
+        if (phase === 'out') {
+          dissolve = easeOutCubic(Math.min(1, phaseT / DUR_OUT));
+          if (phaseT >= DUR_OUT) { phase = 'swirl'; phaseT = 0; }
+        } else if (phase === 'swirl') {
+          dissolve = 1;
+          if (phaseT >= DUR_SWIRL) { phase = 'back'; phaseT = 0; }
+        } else if (phase === 'back') {
+          dissolve = 1 - easeInOutQuint(Math.min(1, phaseT / DUR_BACK));
+          if (phaseT >= DUR_BACK) { phase = 'idle'; phaseT = 0; }
+        }
+      }
+    }
+
+    const tilt = 0.42; // camera pitch so we see the crown
+    const cosT = Math.cos(tilt), sinT = Math.sin(tilt);
+    const sinS = Math.sin(spin), cosS = Math.cos(spin);
+
+    // ---- ground shadow ----
+    const shadowSquash = 1 + dissolve * 1.6;
+    const shadowAlpha = 0.38 * (1 - dissolve * 0.75);
+    const sg = ctx.createRadialGradient(cx, cy + scale * 2.15, 0, cx, cy + scale * 2.15, scale * 2.4 * shadowSquash);
+    sg.addColorStop(0, `rgba(0,0,0,${shadowAlpha})`);
+    sg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.save();
+    ctx.translate(cx, cy + scale * 2.15);
+    ctx.scale(1.25 * shadowSquash, 0.28);
+    ctx.translate(-cx, -(cy + scale * 2.15));
+    ctx.fillStyle = sg;
+    ctx.beginPath();
+    ctx.arc(cx, cy + scale * 2.15, scale * 2.4 * shadowSquash, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // soft ambient glow behind the hat, stronger while dissolving
+    const glowR = scale * (3.2 + dissolve * 1.5);
+    const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
+    const gi = 0.05 + dissolve * 0.16 + hoverGlow * 0.04;
+    bg.addColorStop(0, `rgba(214,80,50,${gi})`);
+    bg.addColorStop(1, 'rgba(214,80,50,0)');
+    ctx.fillStyle = bg;
+    ctx.beginPath(); ctx.arc(cx, cy, glowR, 0, Math.PI * 2); ctx.fill();
+
+    // ---- particles ----
+    const render = [];
+    for (const p of pts) {
+      let x = p.x, y = p.y, z = p.z;
+      let heat = 0;
+
+      if (dissolve > 0 && p.dir) {
+        const local = Math.max(0, Math.min(1, (dissolve - p.delay * 0.4) / (1 - p.delay * 0.4 + 0.0001)));
+        const e = easeOutCubic(local);
+        // swirl + rise, drifting like embers
+        const ang = p.swirl * 2.4 + t * p.speed * Math.sign(p.swirl || 1);
+        const wob = Math.sin(t * p.speed + p.flick) * 0.22;
+        const rad = e * (1.5 + 0.9 * Math.abs(Math.sin(p.flick)));
+        const ex = p.dir[0] * e * (2.4 + wob) + Math.cos(ang) * rad * e;
+        const ey = p.dir[1] * e * (2.4 + wob) + Math.sin(t * 0.8 + p.flick) * 0.35 * e + e * 0.5;
+        const ez = p.dir[2] * e * (2.4 + wob) + Math.sin(ang) * rad * e;
+        x = p.x + ex; y = p.y + ey; z = p.z + ez;
+        heat = e * (0.75 + 0.25 * Math.sin(t * 6 + p.flick));
+      }
+
+      // orbiters (after first dissolution completes at least once)
+      if (p.orbiter && p.orbT !== undefined && (phase === 'idle') && hint.style.opacity === '0') {
+        const ot = t * p.orbSp;
+        const ox = Math.cos(ot) * p.orbR;
+        const oz = Math.sin(ot) * p.orbR;
+        const oy = p.orbY + Math.sin(ot * 1.7) * 0.25 + p.orbTilt;
+        x += ox * 0.5; y += oy * 0.35 - p.y * 0.6 + 0.4; z += oz * 0.5;
+        x = Math.cos(ot) * p.orbR; z = Math.sin(ot) * p.orbR;
+        y = p.orbY + Math.sin(ot * 1.7) * 0.3;
+        heat = Math.max(heat, 0.55);
+        // trail
+        p.trail.push([x, y, z]);
+        if (p.trail.length > 14) p.trail.shift();
+      }
+
+      // rotate around Y then pitch camera
+      const rx = x * cosS - z * sinS;
+      const rz = x * sinS + z * cosS;
+      const ry = y * cosT - rz * sinT;
+      const rz2 = y * sinT + rz * cosT;
+
+      const persp = 3.4 / (3.4 + rz2);
+      const sx = cx + rx * scale * persp;
+      const sy = cy - ry * scale * persp;
+      render.push({ sx, sy, persp, rz: rz2, part: p.part, size: p.size, heat, trail: p.trail });
+    }
+
+    render.sort((a, b) => b.rz - a.rz);
+
+    // draw trails first (faint)
+    if (dissolve === 0 || phase === 'idle') {
+      for (const r of render) {
+        if (!r.trail || r.trail.length < 3) continue;
+        ctx.beginPath();
+        for (let i = 0; i < r.trail.length; i++) {
+          const q = r.trail[i];
+          const qx = q[0] * cosS - q[2] * sinS;
+          const qz = q[0] * sinS + q[2] * cosS;
+          const qy = q[1] * cosT - qz * sinT;
+          const qz2 = q[1] * sinT + qz * cosT;
+          const pp = 3.4 / (3.4 + qz2);
+          const px = cx + qx * scale * pp, py = cy - qy * scale * pp;
+          i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+        }
+        ctx.strokeStyle = 'rgba(255,150,90,0.10)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    }
+
+    for (const r of render) {
+      // depth-based light: nearer & higher = brighter
+      const depth = Math.max(0, Math.min(1, (r.rz + 2.2) / 4.4));
+      let [cr, cg, cb] = hatColor(r, depth);
+      let alpha = 0.5 + depth * 0.5;
+      if (r.heat > 0) {
+        const h = r.heat;
+        cr = Math.min(255, cr * (1 - h) + 255 * h);
+        cg = cg * (1 - h) + 140 * h;
+        cb = cb * (1 - h) + 60 * h;
+        alpha = Math.min(1, alpha + h * 0.4);
+      }
+      const sz = r.size * r.persp * (1 + r.heat * 0.8);
+      if (r.heat > 0.25 && Math.random() < 0.5) {
+        ctx.shadowColor = `rgba(255,140,70,${0.5 * r.heat})`;
+        ctx.shadowBlur = 6 * r.heat;
+      } else {
+        ctx.shadowBlur = 0;
+      }
+      ctx.fillStyle = `rgba(${cr | 0},${cg | 0},${cb | 0},${alpha})`;
+      ctx.beginPath();
+      ctx.arc(r.sx, r.sy, sz, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.shadowBlur = 0;
+
+    // gentle hover glow when idle
+    hoverGlow += (((phase !== 'idle') ? 1 : 0) - hoverGlow) * Math.min(1, dt * 2);
+
+    requestAnimationFrame(frame);
+  }
+
+  if (reduced) {
+    // render one static, elegant frame
+    spin = 0.6;
+    frame(performance.now());
+    hint.textContent = 'at rest';
+  } else {
+    requestAnimationFrame(frame);
+  }
+})();
+</script>
+</body>
+</html>

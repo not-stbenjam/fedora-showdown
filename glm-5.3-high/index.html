@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fedora — embers</title>
+<style>
+  :root{
+    --ink:#cfd6e4;
+    --muted:#69748a;
+    --glow:0;
+  }
+  *{ box-sizing:border-box; margin:0; }
+  html,body{ height:100%; }
+  body{
+    min-height:100svh;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:clamp(18px, 4vmin, 44px);
+    padding:24px;
+    background:radial-gradient(120% 90% at 50% 36%, #0c0f16 0%, #070910 55%, #04050a 100%);
+    color:var(--ink);
+    font-family:ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  .stage{
+    position:relative;
+    width:min(76vmin, 620px);
+    aspect-ratio:1 / 1;
+    flex:none;
+    outline:none;
+  }
+  canvas{
+    position:absolute; inset:0;
+    width:100%; height:100%;
+    display:block;
+  }
+  .floor{
+    position:absolute; left:50%; top:80%;
+    width:62%; height:11%;
+    transform:translate(-50%,-50%);
+    background:radial-gradient(closest-side, rgba(0,0,0,.6), rgba(0,0,0,0) 72%);
+    filter:blur(6px);
+    opacity:.85;
+    pointer-events:none;
+  }
+  .floorglow{
+    position:absolute; left:50%; top:80%;
+    width:52%; height:9%;
+    transform:translate(-50%,-50%);
+    background:radial-gradient(closest-side, rgba(255,116,52,.38), rgba(255,60,20,0) 72%);
+    filter:blur(10px);
+    opacity:calc(var(--glow) * .9);
+    pointer-events:none;
+  }
+  .vignette{
+    position:absolute; inset:-6%;
+    background:radial-gradient(ellipse at 50% 46%, rgba(0,0,0,0) 52%, rgba(0,0,0,.55) 100%);
+    pointer-events:none;
+  }
+  .fallback{ position:absolute; inset:0; width:100%; height:100%; }
+  .caption{ text-align:center; user-select:none; -webkit-user-select:none; }
+  .caption h1{
+    font-size:clamp(13px, 2vmin, 16px);
+    font-weight:500;
+    letter-spacing:.55em; text-indent:.55em;
+    text-transform:uppercase;
+  }
+  .caption p{
+    margin-top:10px;
+    font-size:clamp(11px, 1.6vmin, 13px);
+    letter-spacing:.14em;
+    color:var(--muted);
+  }
+  @media (prefers-reduced-motion: no-preference){
+    .stage{ cursor:pointer; }
+  }
+  @media (prefers-reduced-motion: reduce){
+    *{ transition:none !important; animation:none !important; }
+  }
+</style>
+</head>
+<body>
+
+<figure class="stage" id="stage" tabindex="0" role="img"
+  aria-label="A red fedora hat spinning slowly in the dark. On hover it dissolves into thousands of glowing embers that swirl, then flow back together and reform the hat, leaving a few sparks orbiting with faint trails.">
+  <canvas id="c" aria-hidden="true"></canvas>
+  <div class="floor" aria-hidden="true"></div>
+  <div class="floorglow" aria-hidden="true"></div>
+  <div class="vignette" aria-hidden="true"></div>
+  <svg class="fallback" id="fallback" viewBox="0 0 220 170" aria-hidden="true">
+    <ellipse cx="110" cy="118" rx="80" ry="17" fill="#9e1219"/>
+    <path d="M76 118 C76 88 82 64 97 56 C98 47 105 42 110 42 C115 42 122 47 123 56 C138 64 144 88 144 118 Z" fill="#9e1219"/>
+    <path d="M77 96 C96 91 124 91 143 96 L143 106 C124 101 96 101 77 106 Z" fill="#5d0a0f"/>
+  </svg>
+</figure>
+
+<div class="caption">
+  <h1>Fedora</h1>
+  <p id="hint">hover or tap — scatter into embers, then return</p>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+const canvas  = document.getElementById('c');
+const stage   = document.getElementById('stage');
+const hint    = document.getElementById('hint');
+const fallback= document.getElementById('fallback');
+const root    = document.documentElement;
+const mql     = matchMedia('(prefers-reduced-motion: reduce)');
+let reduced   = mql.matches;
+
+const HINT_MOTION = 'hover or tap — scatter into embers, then return';
+const HINT_STILL  = 'a red fedora, at rest';
+if (reduced) hint.textContent = HINT_STILL;
+
+const gl = canvas.getContext('webgl', {
+  alpha:true, premultipliedAlpha:true, antialias:false, depth:false, stencil:false,
+  powerPreference:'high-performance'
+});
+if (!gl){
+  canvas.style.display = 'none';
+  return; // static SVG fallback + caption remain
+}
+fallback.style.display = 'none';
+
+/* ------------------------------------------------------------------ */
+/* Shaders                                                             */
+/* ------------------------------------------------------------------ */
+
+const VERT = `
+attribute vec3 aTarget;
+attribute vec3 aNormal;
+attribute vec4 aSeed;
+attribute vec2 aInfo;   // x: size, y: material
+attribute float aGhost; // 0 = body, j>0 = j-th trail ghost of an orbiter
+
+uniform mat4 uVP;
+uniform float uTime;
+uniform float uT0;
+uniform float uA;   // "energy": 0 -> 1 on first burst, latched at 1
+uniform float uR;   // "reformness": 1 = formed, 0 = scattered
+uniform float uAngle;
+uniform float uPointScale;
+
+varying vec3 vColor;
+
+const float PI = 3.14159265;
+
+void main(){
+  float s1 = aSeed.x, s2 = aSeed.y, s3 = aSeed.z, s4 = aSeed.w;
+  bool isOrb = s4 > 0.999;
+  float tu = uTime - aGhost * 0.055;   // trail ghosts sample the past
+
+  /* ---- free (ember) position, in hat model space ---- */
+  vec3 fp;
+  if (isOrb){
+    vec3 ax = normalize(vec3(s1 - 0.5, 0.45 + 0.55 * s2, s3 - 0.5) + vec3(1e-4, 0.0, 1e-4));
+    vec3 e1 = normalize(cross(ax, vec3(0.0, 1.0, 0.0)));
+    vec3 e2 = cross(ax, e1);
+    float w  = 0.35 + 0.90 * fract(s1 * 7.31);
+    float ph = s2 * 6.2831853;
+    float R  = 1.10 + 0.80 * fract(s3 * 5.13);
+    fp = vec3(0.0, 0.35, 0.0) + R * (cos(w * tu + ph) * e1 + sin(w * tu + ph) * e2);
+    fp.y += 0.10 * sin(tu * 1.4 + s3 * 19.0);
+  } else {
+    float t   = tu - uT0;
+    float rad = length(aTarget.xz) + 0.55 + 1.90 * fract(s1 * 13.77);
+    rad *= 1.0 + 0.16 * sin(tu * 0.9 + s2 * 12.0);
+    float a2 = atan(aTarget.z, aTarget.x + 1e-5) + (0.35 + 0.70 * fract(s2 * 9.91)) * t;
+    float y  = aTarget.y + 0.55 + 1.50 * fract(s3 * 4.71) + 0.20 * sin(tu * (1.2 + s1) + s2 * 31.0);
+    fp = vec3(cos(a2) * rad, y, sin(a2) * rad);
+  }
+
+  /* ---- blend factor: orbiters leave forever after the first burst ---- */
+  float m = isOrb ? uA : uA * (1.0 - uR);
+  m = clamp(m * 1.4 - s3 * 0.4, 0.0, 1.0);   // per-particle stagger, ends exact
+  m = m * m * (3.0 - 2.0 * m);
+
+  /* ---- polar interpolation hat -> ember (exact at both ends) ---- */
+  float angP = atan(aTarget.z, aTarget.x + 1e-5);
+  float rP   = length(aTarget.xz);
+  float angF = atan(fp.z, fp.x + 1e-5);
+  float rF   = length(fp.xz);
+  float dA = mod(angF - angP + PI, 2.0 * PI) - PI;
+  dA += (1.0 - 2.0 * fract(s2 * 3.3)) * 2.4 * m * (1.0 - m);  // mid-flight swirl
+  float r = mix(rP, rF, m) + sin(m * PI) * 0.35 * fract(s3 * 8.8);
+  float y = mix(aTarget.y, fp.y, m) + sin(m * PI) * 0.22 * fract(s1 * 6.6);
+  vec3 p = vec3(cos(angP + dA * m) * r, y, sin(angP + dA * m) * r);
+  p.y += 0.03 * sin(uTime * 0.7);   // gentle float
+
+  /* ---- spin around the hat axis, then a fixed presentation tilt ---- */
+  float ca = cos(uAngle), sa = sin(uAngle);
+  p = vec3(ca * p.x + sa * p.z, p.y, -sa * p.x + ca * p.z);
+  vec3 n = vec3(ca * aNormal.x + sa * aNormal.z, aNormal.y, -sa * aNormal.x + ca * aNormal.z);
+
+  float cx = cos(0.34), sx = sin(0.34);
+  p = vec3(p.x, cx * p.y - sx * p.z, sx * p.y + cx * p.z);
+  n = vec3(n.x, cx * n.y - sx * n.z, sx * n.y + cx * n.z);
+  float cz = cos(-0.38), sz = sin(-0.38);
+  p = vec3(cz * p.x - sz * p.y, sz * p.x + cz * p.y, p.z);
+  n = vec3(cz * n.x - sz * n.y, sz * n.x + cz * n.y, n.z);
+
+  gl_Position = uVP * vec4(p, 1.0);
+
+  /* ---- soft lighting: warm key, cool fill, faint rim ---- */
+  vec3 V  = normalize(vec3(0.0, 0.12, 4.4) - p);
+  vec3 L1 = normalize(vec3(-0.5, 0.85, 0.55));
+  vec3 L2 = normalize(vec3(0.7, 0.15, 0.45));
+  float d1 = max(dot(n, L1), 0.0);
+  float d2 = max(dot(n, L2), 0.0);
+  float rim = pow(1.0 - abs(dot(n, V)), 3.0);
+
+  float mat = aInfo.y;
+  vec3 alb = vec3(0.80, 0.10, 0.11);                       // felt
+  if (mat > 2.5)      alb = vec3(0.92, 0.17, 0.13);        // brim edge
+  else if (mat > 1.5) alb = vec3(0.32, 0.05, 0.07);        // underside
+  else if (mat > 0.5) alb = vec3(0.36, 0.055, 0.075);      // band
+
+  // felt sheen: speckle + a rotating angular band so the spin reads
+  float b0 = (0.82 + 0.36 * fract(s1 * 17.0)) * (0.90 + 0.18 * sin(angP * 7.0 + 1.3));
+  vec3 lit = alb * (vec3(0.16, 0.17, 0.20)
+          + vec3(1.00, 0.90, 0.82) * (1.12 * d1)
+          + vec3(0.55, 0.65, 0.90) * (0.30 * d2));
+  lit *= b0;
+  lit += vec3(1.0, 0.55, 0.45) * rim * 0.30 * max(dot(n, vec3(0.0, 0.0, 1.0)), 0.0);
+
+  float flick = 0.7 + 0.45 * sin(tu * (2.5 + 3.5 * s2) + s1 * 40.0);
+  vec3 ember = mix(vec3(1.0, 0.30, 0.10), vec3(1.0, 0.62, 0.22), fract(s3 * 3.7))
+             * (0.9 + 0.7 * flick);
+
+  vec3 col = mix(lit, ember, m);
+
+  float ghost = aGhost;
+  if (ghost > 0.5) col *= exp(-ghost * 0.38) * 0.9;
+
+  float sz = aInfo.x * mix(0.0125, 0.024, m);
+  float w  = gl_Position.w;
+  gl_PointSize = clamp(sz * uPointScale / w, 1.0, 60.0);
+
+  float fog = 1.0 - 0.35 * smoothstep(4.4, 5.9, w);   // subtle depth cue
+  vColor = col * fog * 0.8;
+}
+`;
+
+const FRAG = `
+precision mediump float;
+varying vec3 vColor;
+void main(){
+  vec2 q = gl_PointCoord * 2.0 - 1.0;
+  float d2 = dot(q, q);
+  float fall = exp(-d2 * 4.0) * (1.0 - smoothstep(0.55, 1.0, sqrt(d2)));
+  gl_FragColor = vec4(vColor * fall, fall);
+}
+`;
+
+function compile(type, src){
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+function link(vs, fs){
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  return p;
+}
+
+let prog, U, ATTRS;
+try{
+  prog = link(VERT, FRAG);
+}catch(e){
+  canvas.style.display = 'none';
+  fallback.style.display = '';
+  return;
+}
+U = {
+  vp:    gl.getUniformLocation(prog, 'uVP'),
+  time:  gl.getUniformLocation(prog, 'uTime'),
+  t0:    gl.getUniformLocation(prog, 'uT0'),
+  a:     gl.getUniformLocation(prog, 'uA'),
+  r:     gl.getUniformLocation(prog, 'uR'),
+  angle: gl.getUniformLocation(prog, 'uAngle'),
+  pscale:gl.getUniformLocation(prog, 'uPointScale'),
+};
+ATTRS = {
+  aTarget: gl.getAttribLocation(prog, 'aTarget'),
+  aNormal: gl.getAttribLocation(prog, 'aNormal'),
+  aSeed:   gl.getAttribLocation(prog, 'aSeed'),
+  aInfo:   gl.getAttribLocation(prog, 'aInfo'),
+  aGhost:  gl.getAttribLocation(prog, 'aGhost'),
+};
+
+/* ------------------------------------------------------------------ */
+/* Geometry: fedora as a dense surface-of-revolution particle shell    */
+/* profile = [radius, height], sampled with arc-length weighting       */
+/* ------------------------------------------------------------------ */
+
+const prof = [
+  // crown top (with a center crease that rises to a ridge)
+  [0.00, 0.66],[0.10, 0.74],[0.22, 0.88],[0.30, 0.945],[0.38, 0.87],[0.44, 0.68],[0.485,0.56],[0.51, 0.47],
+  // band
+  [0.515,0.455],[0.55, 0.40],[0.555,0.31],[0.55, 0.26],
+  // brim top, drooping outward
+  [0.585,0.225],[0.72, 0.185],[0.92, 0.135],[1.10, 0.09],[1.26, 0.035],[1.34,-0.015],
+  // brim edge (rolled)
+  [1.375,-0.05],[1.355,-0.10],[1.28,-0.135],
+  // brim underside
+  [1.10,-0.105],[0.90,-0.078],[0.72,-0.052],[0.585,-0.032],
+  // inner crown (barely seen)
+  [0.52, 0.00],[0.505,0.10],[0.50, 0.20]
+];
+// 0 crown, 1 band, 2 brim top, 3 edge, 4 underside
+const regionArr = [0,0,0,0,0,0,0,0, 1,1,1,1, 2,2,2,2,2,2, 3,3,3, 4,4,4,4, 4,4,4];
+const matOf = r => r === 1 ? 1 : r === 3 ? 3 : r === 4 ? 2 : 0;
+
+const segLen = [], cum = [0];
+for (let i = 0; i < prof.length - 1; i++){
+  segLen.push(Math.hypot(prof[i+1][0]-prof[i][0], prof[i+1][1]-prof[i][1]));
+  cum.push(cum[i] + segLen[i]);
+}
+const total = cum[cum.length - 1];
+
+function sampleProfile(u){
+  let lo = 0, hi = segLen.length - 1;
+  while (lo < hi){
+    const mid = (lo + hi) >> 1;
+    if (cum[mid + 1] <= u) lo = mid + 1; else hi = mid;
+  }
+  const k = lo, t = (u - cum[k]) / segLen[k];
+  const dx = prof[k+1][0] - prof[k][0], dy = prof[k+1][1] - prof[k][1];
+  let nx = -dy, ny = dx;                    // outward normal in profile plane
+  const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;
+  return {
+    r:  prof[k][0] + dx * t,
+    y:  prof[k][1] + dy * t,
+    nx, ny,
+    region: regionArr[k]
+  };
+}
+
+const N = 17000, GHOSTS = 8, ORB_P = 0.0055;
+const data = [];
+const gauss = () => (Math.random() + Math.random() + Math.random() - 1.5) / 1.5;
+
+for (let i = 0; i < N; i++){
+  const s  = sampleProfile(((i + Math.random()) / N) * total);
+  const th = Math.random() * Math.PI * 2;
+  const wave = 1 + 0.028 * Math.sin(3 * th + 0.7) + 0.014 * Math.sin(5 * th + 2.1);
+  const dent = s.region === 0
+    ? 0.10 * Math.exp(-((s.r - 0.30) ** 2) / (2 * 0.09 * 0.09)) * Math.abs(Math.sin(th)) ** 8
+    : 0;
+  const fz = gauss() * 0.011;               // felt fuzz along the normal
+  const r  = s.r * wave + s.nx * fz;
+  const y  = s.y - dent + s.ny * fz;
+  const ct = Math.cos(th), st = Math.sin(th);
+  const tx = r * ct, tz = r * st;
+  const nx3 = s.nx * ct, ny3 = s.ny, nz3 = s.nx * st;
+  const mat  = matOf(s.region);
+  const size = 0.7 + Math.random() ** 2 * 1.2;
+  const s1 = Math.random(), s2 = Math.random(), s3 = Math.random();
+  const orb = Math.random() < ORB_P;
+  const s4 = orb ? 1 : Math.random() * 0.98;
+  const push = g => data.push(tx, y, tz, nx3, ny3, nz3, s1, s2, s3, s4, size, mat, g);
+  push(0);
+  if (orb) for (let j = 1; j <= GHOSTS; j++) push(j);   // trail ghosts
+}
+
+const floats = new Float32Array(data);
+const COUNT  = floats.length / 13;
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, floats, gl.STATIC_DRAW);
+
+/* ------------------------------------------------------------------ */
+/* Camera / resize                                                     */
+/* ------------------------------------------------------------------ */
+
+const FOVY = 0.576, NEAR = 0.1, FAR = 20;
+let vp = new Float32Array(16), pointScale = 1;
+
+function mul(a, b){
+  const o = new Array(16);
+  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++){
+    let s = 0;
+    for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
+    o[c * 4 + r] = s;
+  }
+  return o;
+}
+
+function resize(){
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const w = Math.max(1, Math.round(canvas.clientWidth  * dpr));
+  const h = Math.max(1, Math.round(canvas.clientHeight * dpr));
+  if (canvas.width !== w || canvas.height !== h){ canvas.width = w; canvas.height = h; }
+  gl.viewport(0, 0, w, h);
+
+  const f = 1 / Math.tan(FOVY / 2), nf = 1 / (NEAR - FAR);
+  const proj = [
+    f * (h / w), 0, 0, 0,
+    0, f, 0, 0,
+    0, 0, (FAR + NEAR) * nf, -1,
+    0, 0, 2 * FAR * NEAR * nf, 0
+  ];
+  const view = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0, -0.12, -4.4, 1];
+  vp = new Float32Array(mul(proj, view));
+  pointScale = h / (2 * Math.tan(FOVY / 2));
+  if (reduced) render(0, 0.55);
+}
+
+/* ------------------------------------------------------------------ */
+/* Render                                                              */
+/* ------------------------------------------------------------------ */
+
+gl.disable(gl.DEPTH_TEST);
+gl.clearColor(0, 0, 0, 0);
+
+function render(t, angle){
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.useProgram(prog);
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  const S = 52;
+  gl.enableVertexAttribArray(ATTRS.aTarget);
+  gl.vertexAttribPointer(ATTRS.aTarget, 3, gl.FLOAT, false, S, 0);
+  gl.enableVertexAttribArray(ATTRS.aNormal);
+  gl.vertexAttribPointer(ATTRS.aNormal, 3, gl.FLOAT, false, S, 12);
+  gl.enableVertexAttribArray(ATTRS.aSeed);
+  gl.vertexAttribPointer(ATTRS.aSeed, 4, gl.FLOAT, false, S, 24);
+  gl.enableVertexAttribArray(ATTRS.aInfo);
+  gl.vertexAttribPointer(ATTRS.aInfo, 2, gl.FLOAT, false, S, 40);
+  gl.enableVertexAttribArray(ATTRS.aGhost);
+  gl.vertexAttribPointer(ATTRS.aGhost, 1, gl.FLOAT, false, S, 48);
+
+  gl.uniformMatrix4fv(U.vp, false, vp);
+  gl.uniform1f(U.time, t);
+  gl.uniform1f(U.t0, uT0);
+  gl.uniform1f(U.a, uA);
+  gl.uniform1f(U.r, uR);
+  gl.uniform1f(U.angle, angle);
+  gl.uniform1f(U.pscale, pointScale);
+
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE);   // additive glow
+  gl.drawArrays(gl.POINTS, 0, COUNT);
+  gl.disable(gl.BLEND);
+}
+
+/* ------------------------------------------------------------------ */
+/* State machine: idle -> burst(out / hold / back) -> idle             */
+/* ------------------------------------------------------------------ */
+
+const OUT = 1.25, HOLD = 2.1, BACK = 1.7;
+let state = 'idle', t0 = 0, lastEnd = -10;
+let uA = 0, uR = 1, uT0 = 0, latched = false;
+let angle = 0.55, spd = 0.55, last = performance.now() / 1000, raf = 0;
+
+const easeOut   = t => 1 - Math.pow(1 - t, 3);
+const easeInOut = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+function trigger(){
+  if (reduced || state !== 'idle') return;
+  const now = performance.now() / 1000;
+  if (now - lastEnd < 0.35) return;
+  state = 'burst'; t0 = now; uT0 = now;
+}
+
+function frame(nowMs){
+  const now = nowMs / 1000;
+  const dt = Math.min(0.05, Math.max(0, now - last));
+  last = now;
+
+  if (state === 'burst'){
+    const p = now - t0;
+    if (p < OUT){
+      uR = 1 - easeInOut(p / OUT);
+      if (!latched) uA = easeOut(p / OUT);
+    } else if (p < OUT + HOLD){
+      uA = 1; uR = 0; latched = true;
+    } else if (p < OUT + HOLD + BACK){
+      uA = 1; uR = easeInOut((p - OUT - HOLD) / BACK);
+    } else {
+      uA = 1; uR = 1; latched = true;
+      state = 'idle'; lastEnd = now;
+    }
+  }
+
+  const target = state === 'burst' ? 0.06 : 0.55;   // spin slows while dissolving
+  spd += (target - spd) * (1 - Math.exp(-dt * 3));
+  angle += spd * dt;
+
+  const g = uA * (1 - uR);
+  root.style.setProperty('--glow', g.toFixed(3));
+
+  render(now, angle);
+  raf = requestAnimationFrame(frame);
+}
+
+stage.addEventListener('pointerenter', trigger);
+stage.addEventListener('pointerdown', trigger);
+stage.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); trigger(); }
+});
+
+mql.addEventListener && mql.addEventListener('change', e => {
+  reduced = e.matches;
+  if (reduced){
+    cancelAnimationFrame(raf);
+    state = 'idle'; uA = 0; uR = 1; angle = 0.55;
+    root.style.setProperty('--glow', '0');
+    hint.textContent = HINT_STILL;
+    render(0, angle);
+  } else {
+    hint.textContent = HINT_MOTION;
+    last = performance.now() / 1000;
+    raf = requestAnimationFrame(frame);
+  }
+});
+
+canvas.addEventListener('webglcontextlost', e => { e.preventDefault(); cancelAnimationFrame(raf); });
+canvas.addEventListener('webglcontextrestored', () => location.reload());
+
+window.addEventListener('resize', resize);
+resize();
+
+if (!reduced) raf = requestAnimationFrame(frame);
+else render(0, angle);
+
+})();
+</script>
+</body>
+</html>
