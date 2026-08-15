@@ -1295,12 +1295,26 @@ And respect reduced motion. Return only the finished HTML file.</div>
   const navOrder = [];    // position -> model index
   const navButtons = [];  // position -> button element
   const headerAt = [];    // position -> group header element, if first under one
-  const sections = [];    // { header, positions, familyGroups } per sidebar group
+  const sections = [];    // { header, positions, familyGroups, isNew } per sidebar group
   const familyGroups = []; // disclosure controls for multi-variant families
   const gridVisible = new Set();
   let voteData = {};
   let gridCustomized = false;
   let filterEmptyState = null;
+
+  const VARIANT_PRIORITY = {
+    Ultracode: 100,
+    Ultra: 90,
+    Max: 80,
+    XHigh: 70,
+    High: 60,
+    Medium: 50,
+    Low: 40,
+    Minimal: 30,
+    None: 20,
+    Off: 20,
+    Default: 10,
+  };
 
   function formatModelName(m) {
     const badge = m.badge || (m.name.endsWith(" Ultracode") ? "Ultracode" : "");
@@ -1324,6 +1338,10 @@ And respect reduced motion. Return only the finished HTML file.</div>
 
   function getFamilyId(m) {
     return m.family || null;
+  }
+
+  function variantPriority(m) {
+    return VARIANT_PRIORITY[m.badge || "Default"] || 0;
   }
 
   function familyMemberIndices(family) {
@@ -1382,7 +1400,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
       header.className = "group-header";
       header.textContent = label;
       modelList.appendChild(header);
-      sections.push({ header, positions: [], familyGroups: [] });
+      sections.push({ header, positions: [], familyGroups: [], isNew: label === "New" });
       headerAt[navOrder.length] = header;
     }
 
@@ -1417,7 +1435,9 @@ And respect reduced motion. Return only the finished HTML file.</div>
         if (emitted.has(i)) continue;
         const m = MODELS[i];
         const family = getFamilyId(m);
-        const members = indices.filter(idx => getFamilyId(MODELS[idx]) === family && !emitted.has(idx));
+        const members = indices
+          .filter(idx => getFamilyId(MODELS[idx]) === family && !emitted.has(idx))
+          .sort((a, b) => variantPriority(MODELS[b]) - variantPriority(MODELS[a]));
         if (family && members.length >= 2) {
           const wrap = document.createElement("div");
           wrap.className = "family-group";
@@ -1832,6 +1852,12 @@ And respect reduced motion. Return only the finished HTML file.</div>
       }
     });
     sections.forEach(s => {
+      if (hasFilters && s.isNew) {
+        s.positions.forEach(pos => { navButtons[pos].style.display = "none"; });
+        s.familyGroups.forEach(group => { group.wrap.style.display = "none"; });
+        s.header.style.display = "none";
+        return;
+      }
       const hasVisibleButton = s.positions.some(p => navButtons[p].style.display !== "none");
       const hasVisibleFamily = s.familyGroups.some(g => g.wrap.style.display !== "none");
       s.header.style.display = (hasVisibleButton || hasVisibleFamily) ? "" : "none";

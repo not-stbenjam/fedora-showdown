@@ -80,6 +80,18 @@ class ModelFamiliesTest(unittest.TestCase):
             ],
         )
 
+    def test_family_variants_are_sorted_highest_effort_first(self):
+        models = [
+            {"id": "a-minimal", "name": "Model A", "family": "model-a", "badge": "Minimal"},
+            {"id": "a-low", "name": "Model A", "family": "model-a", "badge": "Low"},
+            {"id": "a-xhigh", "name": "Model A", "family": "model-a", "badge": "XHigh"},
+            {"id": "a-ultra", "name": "Model A", "family": "model-a", "badge": "Ultra"},
+        ]
+
+        entries = group_section_indices(models, range(len(models)))
+
+        self.assertEqual(entries[0]["indices"], [3, 2, 1, 0])
+
     def test_does_not_group_singleton_or_missing_family(self):
         models = [
             {"id": "solo", "name": "Solo", "family": "only-one"},
@@ -207,6 +219,11 @@ class ModelFamiliesTest(unittest.TestCase):
             'toggle.setAttribute("aria-label", m.name + ", " + members.length + " variants");',
             self.index_html,
         )
+
+    def test_active_filters_hide_duplicate_new_section(self):
+        self.assertIn('isNew: label === "New"', self.index_html)
+        self.assertIn("if (hasFilters && s.isNew)", self.index_html)
+        self.assertIn('s.header.style.display = "none";', self.index_html)
 
     def test_viewer_exposes_harness_without_crowding_sidebar(self):
         self.assertIn("function getHarness(m)", self.index_html)
