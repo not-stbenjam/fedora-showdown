@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fedora</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background:
+      radial-gradient(120% 80% at 50% 42%, rgba(122, 22, 22, 0.22) 0%, rgba(122, 22, 22, 0) 55%),
+      radial-gradient(150% 110% at 50% 48%, #15121b 0%, #0b0b10 55%, #050508 100%);
+    color: #e8dccb;
+  }
+  #scene {
+    position: fixed;
+    inset: 0;
+    display: block;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .caption {
+    position: fixed;
+    left: 0; right: 0;
+    bottom: 7vh;
+    text-align: center;
+    pointer-events: none;
+    z-index: 2;
+    opacity: 0;
+    animation: fadeUp 1.6s ease 0.9s forwards;
+  }
+  .word {
+    font-size: clamp(1.35rem, 3.2vw, 2.3rem);
+    font-weight: 300;
+    letter-spacing: 0.42em;
+    text-indent: 0.42em;
+    color: #efe4d3;
+    text-shadow: 0 0 26px rgba(255, 120, 90, 0.28);
+  }
+  .sub {
+    margin-top: 0.7rem;
+    font-size: clamp(0.72rem, 1.6vw, 0.92rem);
+    letter-spacing: 0.28em;
+    text-indent: 0.28em;
+    text-transform: uppercase;
+    color: #9a8f84;
+  }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+<div class="caption">
+  <div class="word">FEDORA</div>
+  <div class="sub">the timeless silhouette</div>
+</div>
+<script>
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("scene");
+  var ctx = canvas.getContext("2d");
+
+  // ---------------------------------------------------------------------
+  // Tunables
+  // ---------------------------------------------------------------------
+  var tilt = 0.40;          // view tilt (look down at the hat)
+  var roll = -0.05;         // subtle roll for depth
+  var centerY = -0.47;      // shift so the hat sits centred on screen
+  var f = 6.5, camZ = 6.5;  // perspective
+
+  var IDLE_SPIN = 0.9;      // rad/s — calm, elegant rotation
+  var SLOW_SPIN = 0.05;
+  var PARTICLE_COUNT = 2600;
+
+  var D1 = 0.9;  // dissolve
+  var D2 = 1.7;  // swirl
+  var D3 = 1.5;  // reform
+
+  // Light directions (pre-normalised)
+  var LX = -0.376, LY = 0.799, LZ = 0.470;   // key light
+  var FX = 0.714,  FY = 0.260, FZ = -0.649;  // fill light
+  var AMB = 0.40, DIFF = 0.62, FILL = 0.15;
+
+  // ---------------------------------------------------------------------
+  // State
+  // ---------------------------------------------------------------------
+  var W = 1, H = 1, units = 1, cxScreen = 0, cyScreen = 0;
+  var spinAngle = 0.4, spinSpeed = IDLE_SPIN, spinTarget = IDLE_SPIN;
+  var hovered = false;
+
+  var phase = "idle";       // idle | dissolve | swirl | reform
+  var phaseTime = 0;
+  var meshAlpha = 1;
+  var introT = 0;
+  var orbiterBoost = 0;
+
+  var reducedMotion = window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var glowPulse = 0;
+
+  var tiltC = Math.cos(tilt), tiltS = Math.sin(tilt);
+  var rollC = Math.cos(roll), rollS = Math.sin(roll);
+
+  // ---------------------------------------------------------------------
+  // Small math helpers
+  // ---------------------------------------------------------------------
+  function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+  function cross(a, b) {
+    return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  }
+  function triArea(a, b, c) {
+    var cr = cross(sub(b, a), sub(c, a));
+    return Math.hypot(cr[0], cr[1], cr[2]) / 2;
+  }
+  function vert3(v, i) { return [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]]; }
+  function ease(t) { return t * t * (3 - 2 * t); }
+
+  function transformPoint(x, y, z, out) {
+    var c = Math.cos(spinAngle), s = Math.sin(spinAngle);
+    var x1 = x * c + z * s, z1 = -x * s + z * c, y1 = y + centerY;
+    var y2 = y1 * tiltC - z1 * tiltS, z2 = y1 * tiltS + z1 * tiltC;
+    out[0] = x1 * rollC - y2 * rollS;
+    out[1] = x1 * rollS + y2 * rollC;
+    out[2] = z2;
+    return out;
+  }
+  function transformNormal(x, y, z, out) {
+    var c = Math.cos(spinAngle), s = Math.sin(spinAngle);
+    var x1 = x * c + z * s, z1 = -x * s + z * c, y1 = y;
+    var y2 = y1 * tiltC - z1 * tiltS, z2 = y1 * tiltS + z1 * tiltC;
+    out[0] = x1 * rollC - y2 * rollS;
+    out[1] = x1 * rollS + y2 * rollC;
+    out[2] = z2;
+    return out;
+  }
+  function project3(p) {
+    var sc = f / (camZ - p[2]);
+    return { x: cxScreen + p[0] * sc * units, y: cyScreen - p[1] * sc * units, scale: sc };
+  }
+
+  // ---------------------------------------------------------------------
+  // Build the fedora mesh
+  // ---------------------------------------------------------------------
+  function buildHat() {
+    var verts = [];
+    var faces = [];
+    var N = 64;
+
+    function V(x, y, z) { verts.push(x, y, z); return verts.length / 3 - 1; }
+    function ring(r, y) {
+      var a = [];
+      for (var i = 0; i < N; i++) {
+        var t = i / N * Math.PI * 2;
+        a.push(V(Math.cos(t) * r, y, Math.sin(t) * r));
+      }
+      return a;
+    }
+
+    // Crown profile rings: [radius, height]
+    var crownProfile = [
+      [0.66, 0.10],
+      [0.645, 0.30],
+      [0.63, 0.52],
+      [0.58, 0.72],
+      [0.46, 0.86],
+      [0.26, 0.94]
+    ];
+    var cr = crownProfile.map(function (p) { return ring(p[0], p[1]); });
+    var topC = V(0, 0.97, 0);
+
+    // Crown side
+    for (var k = 0; k < cr.length - 1; k++) {
+      var A = cr[k], B = cr[k + 1];
+      for (var i = 0; i < N; i++) {
+        var j = (i + 1) % N;
+        faces.push({ v: [A[i], A[j], B[i]], mat: "crown" });
+        faces.push({ v: [B[i], A[j], B[j]], mat: "crown" });
+      }
+    }
+    // Crown top cap
+    var topRing = cr[cr.length - 1];
+    for (var i2 = 0; i2 < N; i2++) {
+      var j2 = (i2 + 1) % N;
+      faces.push({ v: [topRing[i2], topRing[j2], topC], mat: "top" });
+    }
+
+    // Hat band (ribbon)
+    var bandBot = ring(0.70, 0.10);
+    var bandTop = ring(0.685, 0.32);
+    for (var i3 = 0; i3 < N; i3++) {
+      var j3 = (i3 + 1) % N;
+      faces.push({ v: [bandBot[i3], bandBot[j3], bandTop[i3]], mat: "band" });
+      faces.push({ v: [bandTop[i3], bandBot[j3], bandTop[j3]], mat: "band" });
+    }
+
+    // Brim top
+    var brimTopIn = ring(0.72, 0.07);
+    var brimTopOut = ring(1.78, -0.04);
+    for (var i4 = 0; i4 < N; i4++) {
+      var j4 = (i4 + 1) % N;
+      faces.push({ v: [brimTopIn[i4], brimTopIn[j4], brimTopOut[i4]], mat: "brimTop" });
+      faces.push({ v: [brimTopOut[i4], brimTopIn[j4], brimTopOut[j4]], mat: "brimTop" });
+    }
+
+    // Brim bottom
+    var brimBotIn = ring(0.72, 0.05);
+    var brimBotOut = ring(1.78, -0.06);
+    for (var i5 = 0; i5 < N; i5++) {
+      var j5 = (i5 + 1) % N;
+      faces.push({ v: [brimBotIn[i5], brimBotOut[i5], brimBotIn[j5]], mat: "brimBottom" });
+      faces.push({ v: [brimBotOut[i5], brimBotOut[j5], brimBotIn[j5]], mat: "brimBottom" });
+    }
+
+    // Brim outer edge
+    for (var i6 = 0; i6 < N; i6++) {
+      var j6 = (i6 + 1) % N;
+      faces.push({ v: [brimTopOut[i6], brimTopOut[j6], brimBotOut[i6]], mat: "edge" });
+      faces.push({ v: [brimBotOut[i6], brimTopOut[j6], brimBotOut[j6]], mat: "edge" });
+    }
+
+    var mat = {
+      crown:     { base: [0.78, 0.06, 0.06], spec: 0.30 },
+      top:       { base: [0.80, 0.07, 0.07], spec: 0.30 },
+      brimTop:   { base: [0.85, 0.08, 0.08], spec: 0.42 },
+      brimBottom:{ base: [0.33, 0.03, 0.03], spec: 0.10 },
+      band:      { base: [0.13, 0.015, 0.015], spec: 0.78 },
+      edge:      { base: [0.40, 0.04, 0.04], spec: 0.18 }
+    };
+
+    for (var fi = 0; fi < faces.length; fi++) {
+      var fc = faces[fi];
+      var p0 = vert3(verts, fc.v[0]), p1 = vert3(verts, fc.v[1]), p2 = vert3(verts, fc.v[2]);
+      var n = cross(sub(p1, p0), sub(p2, p0));
+      var len = Math.hypot(n[0], n[1], n[2]) || 1;
+      n = [n[0] / len, n[1] / len, n[2] / len];
+
+      var cx = (p0[0] + p1[0] + p2[0]) / 3;
+      var cy = (p0[1] + p1[1] + p2[1]) / 3;
+      var cz = (p0[2] + p1[2] + p2[2]) / 3;
+      var rad = Math.hypot(cx, cz);
+
+      var o;
+      if (fc.mat === "brimTop" || fc.mat === "top") o = [0, 1, 0];
+      else if (fc.mat === "brimBottom") o = [0, -1, 0];
+      else o = rad > 1e-6 ? [cx / rad, 0, cz / rad] : [0, 1, 0];
+
+      if (n[0] * o[0] + n[1] * o[1] + n[2] * o[2] < 0) n = [-n[0], -n[1], -n[2]];
+
+      fc.n = n;
+      fc.base = mat[fc.mat].base;
+      fc.spec = mat[fc.mat].spec;
+      fc.area = triArea(p0, p1, p2);
+    }
+
+    return { verts: verts, faces: faces, count: verts.length / 3 };
+  }
+
+  var hat = buildHat();
+  var verts = hat.verts, faces = hat.faces, vcount = hat.count;
+
+  // Per-frame scratch arrays
+  var sx = new Float32Array(vcount), sy = new Float32Array(vcount), sc = new Float32Array(vcount);
+  var wx = new Float32Array(vcount), wy = new Float32Array(vcount), wz = new Float32Array(vcount);
+  var order = new Array(faces.length);
+  var depth = new Float32Array(faces.length);
+  for (var oi = 0; oi < faces.length; oi++) order[oi] = oi;
+
+  // ---------------------------------------------------------------------
+  // Particles (sampled from the visible surface)
+  // ---------------------------------------------------------------------
+  var visibleFaces = faces.filter(function (fc) { return fc.mat !== "brimBottom"; });
+
+  function sampleSurface() {
+    var areas = [], total = 0;
+    for (var i = 0; i < visibleFaces.length; i++) {
+      total += visibleFaces[i].area;
+      areas.push(total);
+    }
+    var pts = [];
+    for (var p = 0; p < PARTICLE_COUNT; p++) {
+      var r = Math.random() * total;
+      var lo = 0, hi = visibleFaces.length - 1;
+      while (lo < hi) {
+        var mid = (lo + hi) >> 1;
+        if (areas[mid] < r) lo = mid + 1; else hi = mid;
+      }
+      var fc = visibleFaces[lo];
+      var p0 = vert3(verts, fc.v[0]), p1 = vert3(verts, fc.v[1]), p2 = vert3(verts, fc.v[2]);
+      var u = Math.random(), v = Math.random();
+      if (u + v > 1) { u = 1 - u; v = 1 - v; }
+      var w = 1 - u - v;
+      pts.push({
+        home: [p0[0] * u + p1[0] * v + p2[0] * w,
+               p0[1] * u + p1[1] * v + p2[1] * w,
+               p0[2] * u + p1[2] * v + p2[2] * w],
+        n: fc.n.slice(),
+        pos: [0, 0, 0],
+        vel: [0, 0, 0],
+        sprite: (Math.random() * 3) | 0,
+        baseA: 0.5 + Math.random() * 0.5
+      });
+    }
+    return pts;
+  }
+
+  var particles = sampleSurface();
+  var tmpN = [0, 0, 0], tmpH = [0, 0, 0], tmpS = [0, 0, 0];
+
+  function placeParticlesAtHome() {
+    for (var i = 0; i < particles.length; i++) {
+      var p = particles[i];
+      transformPoint(p.home[0], p.home[1], p.home[2], p.pos);
+      p.vel[0] = p.vel[1] = p.vel[2] = 0;
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Orbiters (a few embers that keep circling)
+  // ---------------------------------------------------------------------
+  var ORBITER_COUNT = 14;
+  var orbiters = [];
+  for (var oc = 0; oc < ORBITER_COUNT; oc++) {
+    orbiters.push({
+      r: 1.4 + Math.random() * 1.0,
+      h: -0.42 + Math.random() * 0.95,
+      speed: (0.25 + Math.random() * 0.45) * (Math.random() < 0.5 ? 1 : -1),
+      theta: Math.random() * Math.PI * 2,
+      base: 0.10 + Math.random() * 0.08,
+      intensity: 0.5 + Math.random() * 0.5,
+      pos: [0, 0, 0],
+      trail: []
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Glow sprites
+  // ---------------------------------------------------------------------
+  function makeSprite(inner, mid) {
+    var c = document.createElement("canvas");
+    c.width = c.height = 64;
+    var g = c.getContext("2d");
+    var h = 32;
+    var gr = g.createRadialGradient(h, h, 0, h, h, h);
+    gr.addColorStop(0, "rgba(255,255,255,0.95)");
+    gr.addColorStop(0.2, inner);
+    gr.addColorStop(0.55, mid);
+    gr.addColorStop(1, "rgba(0,0,0,0)");
+    g.fillStyle = gr;
+    g.fillRect(0, 0, 64, 64);
+    return c;
+  }
+  var sprites = [
+    makeSprite("rgba(255,170,95,0.9)", "rgba(255,70,40,0.34)"),
+    makeSprite("rgba(255,120,70,0.9)", "rgba(230,40,30,0.30)"),
+    makeSprite("rgba(255,220,170,0.95)", "rgba(255,150,90,0.38)")
+  ];
+  var spriteBright = makeSprite("rgba(255,230,190,0.95)", "rgba(255,170,110,0.4)");
+
+  // ---------------------------------------------------------------------
+  // Interaction
+  // ---------------------------------------------------------------------
+  function trigger() {
+    if (reducedMotion) {
+      glowPulse = 1;
+      return;
+    }
+    if (phase !== "idle") return;
+    phase = "dissolve";
+    phaseTime = 0;
+    spinTarget = 0;
+    placeParticlesAtHome();
+  }
+
+  canvas.addEventListener("pointerenter", function () {
+    hovered = true;
+    trigger();
+  });
+  canvas.addEventListener("pointerleave", function () {
+    hovered = false;
+    if (phase === "idle" && !reducedMotion) spinTarget = IDLE_SPIN;
+  });
+  canvas.addEventListener("pointerdown", trigger);
+
+  if (window.matchMedia) {
+    window.matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", function (e) {
+      reducedMotion = e.matches;
+      if (reducedMotion) {
+        phase = "idle";
+        meshAlpha = 1;
+        spinTarget = 0;
+        spinSpeed = 0;
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Update
+  // ---------------------------------------------------------------------
+  function updateParticles(dt) {
+    for (var i = 0; i < particles.length; i++) {
+      var p = particles[i];
+      var ax = 0, ay = 0, az = 0;
+
+      if (phase === "dissolve") {
+        var k = Math.min(1, phaseTime / D1);
+        transformNormal(p.n[0], p.n[1], p.n[2], tmpN);
+        var push = 2.3 * (0.5 + 0.7 * k);
+        ax += tmpN[0] * push + (Math.random() * 2 - 1) * 2.4 * k;
+        ay += tmpN[1] * push + 1.7 + (Math.random() * 2 - 1) * 1.7 * k;
+        az += tmpN[2] * push + (Math.random() * 2 - 1) * 2.4 * k;
+        var rx0 = p.pos[0], rz0 = p.pos[2];
+        var d0 = Math.hypot(rx0, rz0) + 1e-3;
+        ax += (rz0 / d0) * 1.0 * k;
+        az += (-rx0 / d0) * 1.0 * k;
+      } else if (phase === "swirl") {
+        var rx = p.pos[0], rz = p.pos[2];
+        var d = Math.hypot(rx, rz) + 1e-3;
+        var tx = rz / d, tz = -rx / d;
+        var pull = (1.55 - d) * 0.7;
+        ax += tx * 2.0 + (rx / d) * pull + (Math.random() * 2 - 1) * 1.25;
+        ay += 0.55 + (Math.random() * 2 - 1) * 0.9;
+        az += tz * 2.0 + (rz / d) * pull + (Math.random() * 2 - 1) * 1.25;
+      } else { // reform
+        transformPoint(p.home[0], p.home[1], p.home[2], tmpH);
+        var dx = tmpH[0] - p.pos[0], dy = tmpH[1] - p.pos[1], dz = tmpH[2] - p.pos[2];
+        ax += dx * 9.0 - p.vel[0] * 3.0 + (Math.random() * 2 - 1) * 0.3;
+        ay += dy * 9.0 - p.vel[1] * 3.0 + (Math.random() * 2 - 1) * 0.3;
+        az += dz * 9.0 - p.vel[2] * 3.0 + (Math.random() * 2 - 1) * 0.3;
+      }
+
+      p.vel[0] += ax * dt; p.vel[1] += ay * dt; p.vel[2] += az * dt;
+      if (phase === "dissolve" || phase === "swirl") {
+        var damp = 1 - Math.min(0.9, 1.2 * dt);
+        p.vel[0] *= damp; p.vel[1] *= damp; p.vel[2] *= damp;
+      }
+      p.pos[0] += p.vel[0] * dt;
+      p.pos[1] += p.vel[1] * dt;
+      p.pos[2] += p.vel[2] * dt;
+    }
+  }
+
+  function updateOrbiters(dt) {
+    for (var i = 0; i < orbiters.length; i++) {
+      var o = orbiters[i];
+      o.theta += o.speed * dt;
+      o.pos[0] = Math.cos(o.theta) * o.r;
+      o.pos[1] = o.h;
+      o.pos[2] = Math.sin(o.theta) * o.r;
+      o.trail.push([o.pos[0], o.pos[1], o.pos[2]]);
+      if (o.trail.length > 14) o.trail.shift();
+    }
+    orbiterBoost *= Math.max(0, 1 - 0.5 * dt);
+  }
+
+  function update(dt) {
+    // Spin
+    if (reducedMotion) {
+      spinSpeed = 0;
+    } else {
+      spinSpeed += (spinTarget - spinSpeed) * Math.min(1, dt * 6);
+      spinAngle += spinSpeed * dt;
+    }
+
+    // Phase machine
+    if (phase !== "idle") {
+      phaseTime += dt;
+      if (phase === "dissolve" && phaseTime >= D1) { phase = "swirl"; phaseTime = 0; }
+      else if (phase === "swirl" && phaseTime >= D2) { phase = "reform"; phaseTime = 0; }
+      else if (phase === "reform" && phaseTime >= D3) {
+        phase = "idle";
+        placeParticlesAtHome();
+        orbiterBoost = 1;
+        spinTarget = hovered ? SLOW_SPIN : IDLE_SPIN;
+      }
+    }
+
+    // Mesh / particle crossfade
+    if (phase === "dissolve") meshAlpha = 1 - ease(Math.min(1, phaseTime / D1));
+    else if (phase === "swirl") meshAlpha = 0;
+    else if (phase === "reform") meshAlpha = ease(Math.min(1, phaseTime / D3));
+    else meshAlpha = 1;
+
+    if (phase !== "idle") updateParticles(dt);
+    if (!reducedMotion) updateOrbiters(dt);
+
+    introT = Math.min(1, introT + dt / 1.2);
+    if (glowPulse > 0) glowPulse = Math.max(0, glowPulse - dt * 1.1);
+  }
+
+  // ---------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------
+  function shadeRGB(base, n, spec, alpha) {
+    var d = Math.max(0, n[0] * LX + n[1] * LY + n[2] * LZ);
+    var f2 = Math.max(0, n[0] * FX + n[1] * FY + n[2] * FZ);
+    var k = AMB + DIFF * d + FILL * f2;
+    var sp = Math.pow(d, 12) * spec;
+    var r = base[0] * k + sp, g = base[1] * k + sp, b = base[2] * k + sp;
+    r = r > 1 ? 1 : r; g = g > 1 ? 1 : g; b = b > 1 ? 1 : b;
+    return "rgba(" + ((r * 255) | 0) + "," + ((g * 255) | 0) + "," + ((b * 255) | 0) + "," + alpha + ")";
+  }
+
+  function renderMesh(alpha) {
+    for (var i = 0; i < vcount; i++) {
+      var x = verts[i * 3], y = verts[i * 3 + 1], z = verts[i * 3 + 2];
+      var c = Math.cos(spinAngle), s = Math.sin(spinAngle);
+      var x1 = x * c + z * s, z1 = -x * s + z * c, y1 = y + centerY;
+      var y2 = y1 * tiltC - z1 * tiltS, z2 = y1 * tiltS + z1 * tiltC;
+      var wxv = x1 * rollC - y2 * rollS;
+      var wyv = x1 * rollS + y2 * rollC;
+      var scv = f / (camZ - z2);
+      sx[i] = cxScreen + wxv * scv * units;
+      sy[i] = cyScreen - wyv * scv * units;
+      sc[i] = scv;
+      wx[i] = wxv; wy[i] = wyv; wz[i] = z2;
+    }
+
+    for (var fi = 0; fi < faces.length; fi++) {
+      var fc = faces[fi];
+      depth[fi] = (wz[fc.v[0]] + wz[fc.v[1]] + wz[fc.v[2]]) / 3;
+    }
+    order.sort(function (a, b) { return depth[a] - depth[b]; });
+
+    for (var k = 0; k < order.length; k++) {
+      var f = faces[order[k]];
+      transformNormal(f.n[0], f.n[1], f.n[2], tmpN);
+      ctx.fillStyle = shadeRGB(f.base, tmpN, f.spec, alpha);
+      ctx.beginPath();
+      ctx.moveTo(sx[f.v[0]], sy[f.v[0]]);
+      ctx.lineTo(sx[f.v[1]], sy[f.v[1]]);
+      ctx.lineTo(sx[f.v[2]], sy[f.v[2]]);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  function renderParticles() {
+    var vis = (1 - meshAlpha) * ease(introT);
+    if (vis <= 0.01) return;
+    ctx.globalCompositeOperation = "lighter";
+    for (var i = 0; i < particles.length; i++) {
+      var p = particles[i];
+      var pr = project3(p.pos);
+      var s = Math.max(2, pr.scale * units * 0.042);
+      ctx.globalAlpha = vis * p.baseA * (0.7 + 0.3 * Math.random());
+      ctx.drawImage(sprites[p.sprite], pr.x - s / 2, pr.y - s / 2, s, s);
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  function renderOrbiters() {
+    var a = ease(introT);
+    ctx.globalCompositeOperation = "lighter";
+    for (var i = 0; i < orbiters.length; i++) {
+      var o = orbiters[i];
+      var alpha = (o.base + orbiterBoost * 0.4 * o.intensity) * a;
+      var tr = o.trail;
+      for (var k = 0; k < tr.length; k++) {
+        var pr = project3(tr[k]);
+        var s = pr.scale * units * 0.026;
+        ctx.globalAlpha = (k / tr.length) * alpha * 0.5;
+        ctx.drawImage(spriteBright, pr.x - s / 2, pr.y - s / 2, s, s);
+      }
+      var ph = project3(o.pos);
+      var sh = ph.scale * units * 0.045;
+      ctx.globalAlpha = alpha;
+      ctx.drawImage(spriteBright, ph.x - sh / 2, ph.y - sh / 2, sh, sh);
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  function renderShadow() {
+    transformPoint(0, -0.05, 0, tmpS);
+    var pr = project3(tmpS);
+    var rx = 1.95 * pr.scale * units * 0.94;
+    var ry = rx * 0.34;
+    var grad = ctx.createRadialGradient(pr.x, pr.y, 0, pr.x, pr.y, rx);
+    grad.addColorStop(0, "rgba(0,0,0," + (0.42 * ease(introT)) + ")");
+    grad.addColorStop(0.6, "rgba(0,0,0," + (0.22 * ease(introT)) + ")");
+    grad.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.save();
+    ctx.translate(pr.x, pr.y);
+    ctx.scale(1, ry / rx);
+    ctx.translate(-pr.x, -pr.y);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(pr.x, pr.y, rx, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function renderGlowPulse() {
+    if (glowPulse <= 0) return;
+    var pr = project3([0, 0.05, 0]);
+    var R = units * 3.0;
+    var g = ctx.createRadialGradient(pr.x, pr.y, 0, pr.x, pr.y, R);
+    g.addColorStop(0, "rgba(255,70,45," + (0.32 * glowPulse) + ")");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // ---------------------------------------------------------------------
+  // Main loop
+  // ---------------------------------------------------------------------
+  var last = performance.now();
+  function frame(now) {
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+
+    update(dt);
+    ctx.clearRect(0, 0, W, H);
+    renderShadow();
+    renderGlowPulse();
+    if (meshAlpha > 0.01) renderMesh(meshAlpha * ease(introT));
+    if (phase !== "idle") renderParticles();
+    if (!reducedMotion) renderOrbiters();
+
+    requestAnimationFrame(frame);
+  }
+
+  function resize() {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    canvas.style.width = W + "px";
+    canvas.style.height = H + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    units = Math.min(W, H) * 0.20;
+    cxScreen = W / 2;
+    cyScreen = H * 0.43;
+  }
+
+  window.addEventListener("resize", resize);
+  resize();
+  placeParticlesAtHome();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
