@@ -14,7 +14,7 @@
     --muted: #6b7080;
     --accent: #ff5a4d;
     --accent-dim: rgba(255, 90, 77, 0.12);
-    --sidebar-w: 200px;
+    --sidebar-w: 220px;
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -93,11 +93,66 @@
   .sidebar .search-box input::placeholder { color: var(--muted); }
   .sidebar .search-box input:focus { border-color: var(--accent); }
 
+  .sidebar .filter-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 6px;
+    margin-top: 6px;
+  }
+  .sidebar .filter-row select {
+    width: 100%;
+    min-width: 0;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--muted);
+    font: inherit;
+    font-size: 11px;
+    padding: 5px 6px;
+    outline: none;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .sidebar .filter-row select:hover,
+  .sidebar .filter-row select:focus { color: var(--text); border-color: #34394c; }
+  .sidebar .filter-row select.active { color: var(--text); border-color: var(--border-active); }
+  .sidebar .filter-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 18px;
+    margin-top: 4px;
+    padding: 0 2px;
+    color: var(--muted);
+    font-size: 10px;
+  }
+  .sidebar .filter-clear {
+    appearance: none;
+    background: none;
+    border: 0;
+    color: var(--muted);
+    font: inherit;
+    font-size: 10px;
+    cursor: pointer;
+    padding: 1px 0 1px 8px;
+  }
+  .sidebar .filter-clear:hover { color: var(--accent); }
+  .sidebar .filter-clear[hidden] { display: none; }
+
   .sidebar .model-list {
     flex: 1;
     overflow-y: auto;
     padding: 8px 0;
   }
+
+  .sidebar .model-list .empty-state {
+    padding: 28px 16px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.5;
+    text-align: center;
+  }
+  .sidebar .model-list .empty-state[hidden] { display: none; }
 
   .sidebar .model-list .group-header {
     padding: 10px 16px 4px;
@@ -150,7 +205,10 @@
 
   .sidebar .bottom-actions {
     border-bottom: 1px solid var(--border);
-    padding: 10px 12px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    padding: 8px 12px;
   }
   .sidebar .bottom-actions button {
     width: 100%;
@@ -159,14 +217,13 @@
     border-radius: 6px;
     color: var(--muted);
     font: inherit;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 500;
-    padding: 7px 12px;
+    padding: 6px 4px;
     cursor: pointer;
     transition: color 0.15s, border-color 0.15s;
     user-select: none;
   }
-  .sidebar .bottom-actions button + button { margin-top: 6px; }
   .sidebar .bottom-actions button:hover { color: var(--text); border-color: #2a2e3e; }
 
   .sidebar .contribute-link {
@@ -174,12 +231,12 @@
     align-items: center;
     gap: 8px;
     justify-content: center;
-    margin-top: 6px;
-    padding: 7px 12px;
+    margin: 0;
+    padding: 6px 4px;
     border: 1px solid var(--border);
     border-radius: 6px;
     color: var(--muted);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 500;
     text-decoration: none;
     transition: color 0.15s, border-color 0.15s;
@@ -998,7 +1055,19 @@
     <button id="btn-grid">Grid</button>
   </div>
   <div class="search-box">
-    <input type="text" id="model-search" placeholder="Filter models…">
+    <input type="search" id="model-search" placeholder="Search models…" aria-label="Search models" autocomplete="off">
+    <div class="filter-row">
+      <select id="creator-filter" aria-label="Filter by model creator" title="Filter by model creator">
+        <option value="">Creator</option>
+      </select>
+      <select id="harness-filter" aria-label="Filter by harness" title="Filter by harness">
+        <option value="">Harness</option>
+      </select>
+    </div>
+    <div class="filter-meta">
+      <span id="filter-count" aria-live="polite"></span>
+      <button class="filter-clear" id="filter-clear" type="button" hidden>Clear</button>
+    </div>
   </div>
   <div class="model-list" id="model-list"></div>
   <div class="grid-hint" id="grid-hint">Max 4 selected</div>
@@ -1211,6 +1280,11 @@ And respect reduced motion. Return only the finished HTML file.</div>
 
   const viewer = document.getElementById("viewer");
   const modelList = document.getElementById("model-list");
+  const modelSearch = document.getElementById("model-search");
+  const creatorFilter = document.getElementById("creator-filter");
+  const harnessFilter = document.getElementById("harness-filter");
+  const filterCount = document.getElementById("filter-count");
+  const filterClear = document.getElementById("filter-clear");
   let activeIdx = 0;   // model index of the selected model (drives hash + iframes)
   let activePos = 0;   // sidebar position of the selected button (drives prev/next)
   let mode = "single";
@@ -1226,6 +1300,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
   const gridVisible = new Set();
   let voteData = {};
   let gridCustomized = false;
+  let filterEmptyState = null;
 
   function formatModelName(m) {
     const badge = m.badge || (m.name.endsWith(" Ultracode") ? "Ultracode" : "");
@@ -1260,7 +1335,23 @@ And respect reduced motion. Return only the finished HTML file.</div>
   }
 
   function modelSearchText(m) {
-    return [m.name, m.group, m.badge, m.id, m.family].filter(Boolean).join(" ").toLowerCase();
+    return [m.name, m.group, m.badge, m.id, m.family, getHarness(m)].filter(Boolean).join(" ").toLowerCase();
+  }
+
+  function modelMatchesFilters(m) {
+    const q = modelSearch.value.toLowerCase().trim();
+    return (!q || modelSearchText(m).includes(q))
+      && (!creatorFilter.value || m.group === creatorFilter.value)
+      && (!harnessFilter.value || getHarness(m) === harnessFilter.value);
+  }
+
+  function addFilterOptions(select, values) {
+    values.forEach(value => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = value;
+      select.appendChild(option);
+    });
   }
 
   function setFamilyExpanded(group, expanded) {
@@ -1282,6 +1373,9 @@ And respect reduced motion. Return only the finished HTML file.</div>
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const isNew = MODELS.map(m => m.dateAdded > sevenDaysAgo);
     let familyPanelSeq = 0;
+
+    addFilterOptions(creatorFilter, [...new Set(MODELS.map(m => m.group))].sort((a, b) => a.localeCompare(b)));
+    addFilterOptions(harnessFilter, [...new Set(MODELS.map(getHarness))].sort((a, b) => a.localeCompare(b)));
 
     function addHeader(label) {
       const header = document.createElement("div");
@@ -1433,6 +1527,12 @@ And respect reduced motion. Return only the finished HTML file.</div>
       addGroupedEntries(bucket.indices, false);
     }
 
+    filterEmptyState = document.createElement("div");
+    filterEmptyState.className = "empty-state";
+    filterEmptyState.textContent = "No models match those filters.";
+    filterEmptyState.hidden = true;
+    modelList.appendChild(filterEmptyState);
+
     for (let i = 0; i < MODELS.length; i++) {
       const m = MODELS[i];
       const url = m.id + "/index.html";
@@ -1555,6 +1655,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
         container.scrollTop += et.top - ct.top - 8;
       }
     });
+    applyModelFilters();
   }
 
   function handleTabClick(pos) {
@@ -1671,7 +1772,15 @@ And respect reduced motion. Return only the finished HTML file.</div>
   document.getElementById("btn-grid").addEventListener("click", () => { setMode("grid"); history.replaceState(null, "", "#grid"); });
 
   function stepModel(delta) {
-    selectTab((activePos + delta + navOrder.length) % navOrder.length);
+    const visiblePositions = navButtons
+      .map((btn, pos) => btn.style.display === "none" ? -1 : pos)
+      .filter(pos => pos >= 0);
+    if (!visiblePositions.length) return;
+    const current = visiblePositions.indexOf(activePos);
+    const next = current < 0
+      ? (delta > 0 ? 0 : visiblePositions.length - 1)
+      : (current + delta + visiblePositions.length) % visiblePositions.length;
+    selectTab(visiblePositions[next]);
   }
 
   document.getElementById("nav-prev").addEventListener("click", () => stepModel(-1));
@@ -1707,30 +1816,17 @@ And respect reduced motion. Return only the finished HTML file.</div>
     });
   });
 
-  document.getElementById("model-search").addEventListener("input", (e) => {
-    const q = e.target.value.toLowerCase().trim();
+  function applyModelFilters() {
+    const hasFilters = Boolean(modelSearch.value.trim() || creatorFilter.value || harnessFilter.value);
     navButtons.forEach((btn, pos) => {
       const m = MODELS[navOrder[pos]];
-      const match = !q || modelSearchText(m).includes(q);
-      btn.style.display = match ? "" : "none";
+      btn.style.display = modelMatchesFilters(m) ? "" : "none";
     });
     familyGroups.forEach(group => {
       const visiblePositions = group.positions.filter(pos => navButtons[pos].style.display !== "none");
-      const familyNameMatch = !q || group.family.toLowerCase().includes(q)
-        || (MODELS[navOrder[group.positions[0]]] && modelSearchText(MODELS[navOrder[group.positions[0]]]).includes(q));
-      if (!q) {
-        group.wrap.style.display = "";
-        // Leave expansion state alone when clearing search.
-        return;
-      }
       if (visiblePositions.length) {
         group.wrap.style.display = "";
-        setFamilyExpanded(group, true);
-      } else if (familyNameMatch) {
-        // Family name matched but no variant text did — still reveal members.
-        group.positions.forEach(pos => { navButtons[pos].style.display = ""; });
-        group.wrap.style.display = "";
-        setFamilyExpanded(group, true);
+        if (hasFilters) setFamilyExpanded(group, true);
       } else {
         group.wrap.style.display = "none";
       }
@@ -1740,6 +1836,24 @@ And respect reduced motion. Return only the finished HTML file.</div>
       const hasVisibleFamily = s.familyGroups.some(g => g.wrap.style.display !== "none");
       s.header.style.display = (hasVisibleButton || hasVisibleFamily) ? "" : "none";
     });
+
+    const matchCount = MODELS.reduce((count, model) => count + (modelMatchesFilters(model) ? 1 : 0), 0);
+    filterCount.textContent = matchCount + (matchCount === 1 ? " model" : " models");
+    filterClear.hidden = !hasFilters;
+    creatorFilter.classList.toggle("active", Boolean(creatorFilter.value));
+    harnessFilter.classList.toggle("active", Boolean(harnessFilter.value));
+    if (filterEmptyState) filterEmptyState.hidden = matchCount !== 0;
+  }
+
+  modelSearch.addEventListener("input", applyModelFilters);
+  creatorFilter.addEventListener("change", applyModelFilters);
+  harnessFilter.addEventListener("change", applyModelFilters);
+  filterClear.addEventListener("click", () => {
+    modelSearch.value = "";
+    creatorFilter.value = "";
+    harnessFilter.value = "";
+    applyModelFilters();
+    modelSearch.focus();
   });
 
   const gridHint = document.getElementById("grid-hint");
@@ -1748,6 +1862,7 @@ And respect reduced motion. Return only the finished HTML file.</div>
   }
 
   document.addEventListener("keydown", (e) => {
+    if (e.target.closest("input, select, textarea, button")) return;
     if (e.key === "ArrowRight" || e.key === "ArrowDown") {
       e.preventDefault();
       stepModel(1);
