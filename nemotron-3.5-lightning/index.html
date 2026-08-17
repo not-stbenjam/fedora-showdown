@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fedora Spinner</title>
+<style>
+  body{
+    margin:0;
+    min-height:100vh;
+    background:#0d0d0d;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-family:system-ui,sans-serif;
+  }
+  .hero{
+    position:relative;
+    width:90%;
+    max-width:960px;
+  }
+  .hat-wrapper{
+    perspective:800px;
+    width:340px;
+    height:340px;
+    margin:auto;
+    position:relative;
+  }
+  .hat{
+    width:100%;
+    height:100%;
+    transform-style:preserve-3d;
+    position:relative;
+    /* continuous 3‑D spin */
+    animation:spin 20s linear infinite;
+  }
+  @keyframes spin{
+    from{transform:rotateY(0) rotateX(30deg);}
+    to{transform:rotateY(360deg) rotateX(30deg);}
+  }
+  .hat:hover{
+    /* we override this with JS – the hover state only matters for touch devices */
+    animation-play-state:paused;
+  }
+  .caption{
+    position:absolute;
+    bottom:20px;
+    width:100%;
+    text-align:center;
+    font-size:1.2rem;
+    color:#aaa;
+  }
+  .particles{
+    position:absolute;
+    inset:0;
+    pointer-events:none;
+  }
+  .particle{
+    position:absolute;
+    width:4px;
+    height:4px;
+    background:rgba(255,191,0,0.9);
+    border-radius:50%;
+    box-shadow:0 0 8px rgba(255,191,0,0.6);
+    opacity:0;
+    transition:transform .6s cubic-bezier(.25,.46,.45,.94),
+                opacity .6s;
+  }
+  /* respect reduced‑motion */
+  @media (prefers-reduced-motion:reduce){
+    .hat{animation:none;transform:none;}
+    .particle{display:none;}
+  }
+</style>
+</head>
+<body>
+<div class="hero">
+  <div class="hat-wrapper" id="wrapper">
+    <div class="hat" id="hat">
+      <svg viewBox="0 0 200 200" width="100%" height="100%">
+        <path d="M 60 180 Q 100 140 140 180 L 140 200 Q 100 240 60 200 Z"
+              fill="#e0e0e0"/>
+      </svg>
+    </div>
+  </div>
+  <div class="caption">Red Hat Fedora</div>
+</div>
+<div class="particles" id="particles"></div>
+
+<script>
+  (() => {
+    // ---------- reduced‑motion check ----------
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    const hat   = document.getElementById('hat');
+    const wrapper = document.getElementById('wrapper');
+    const particlesContainer = document.getElementById('particles');
+    const hatElem = document.getElementById('hat');
+
+    // ---------- create particles ----------
+    const particleCount = 100;
+    for (let i = 0; i < particleCount; i++) {
+      const p = document.createElement('div');
+      p.className = 'particle';
+      p.style.left = '50%';
+      p.style.top  = '50%';
+      p.style.margin = '-2px';               // half of 4 px
+      p.style.opacity = '0';
+      particlesContainer.appendChild(p);
+    }
+
+    // ---------- 3‑D spin state ----------
+    let angle = 0;
+    const baseSpeed = 2;                     // deg per animation frame
+    let speed = baseSpeed;
+
+    function rotateHat(){
+      angle += speed;
+      hat.style.transform = `rotateY(${angle}deg) rotateX(30deg)`;
+      requestAnimationFrame(rotateHat);
+    }
+    rotateHat();
+
+    // ---------- hover / tap handling ----------
+    let hovering = false;
+
+    hatElem.addEventListener('mouseenter', () => {
+      hovering = true;
+      speed = 0.3;                     // slow the spin
+      if (!reduced) triggerDissolve();
+    });
+    hatElem.addEventListener('mouseleave', () => {
+      hovering = false;
+      speed = baseSpeed;               // restore normal speed
+    });
+
+    // touch support
+    hatElem.addEventListener('touchstart', e => {
+      e.preventDefault();
+      hovering = true;
+      speed = 0.3;
+      if (!reduced) triggerDissolve();
+    });
+    hatElem.addEventListener('touchend', () => {
+      hovering = false;
+      speed = baseSpeed;
+    });
+
+    // ---------- particle dissolve / reform effect ----------
+    function triggerDissolve(){
+      const particles = particlesContainer.querySelectorAll('.particle');
+      const rect      = wrapper.getBoundingClientRect();
+      const centerX   = rect.left + rect.width  / 2;
+      const centerY   = rect.top  + rect.height / 2;
+
+      // 1️⃣ scatter particles outward
+      particles.forEach((p, i) => {
+        p.style.opacity = '1';
+        const hero = document.querySelector('.hero');
+        const hr   = hero.getBoundingClientRect();
+        const targetX = hr.left + Math.random() * hr.width;
+        const targetY = hr.top  + Math.random() * hr.height;
+
+        p.setAttribute('data-orig-left', p.style.left);
+        p.setAttribute('data-orig-top',  p.style.top);
+
+        p.style.transition = 'transform .9s cubic-bezier(.25,.46,.45,.94), opacity .9s';
+        p.style.transform = `translate(${targetX - centerX}px, ${targetY - centerY}px)`;
+      });
+
+      // 2️⃣ after the explosion, bring them back and reform the hat
+      setTimeout(() => {
+        particles.forEach(p => {
+          p.style.transition = 'transform 1s cubic-bezier(.23,1,.32,1), opacity 1s';
+          p.style.left = `${centerX - 2}px`;
+          p.style.top  = `${centerY - 2}px`;
+          p.style.opacity = '0';
+        });
+
+        // show the hat again
+        hat.style.display = 'block';
+
+        // 3️⃣ a few particles keep orbiting
+        startOrbit(particles);
+      }, 1100);
+    }
+
+    // ---------- orbit a few particles ----------
+    const orbitData = [];
+    function startOrbit(particles){
+      // pick 5 random indices
+      const count = 5;
+      const indices = new Set();
+      while (indices.size < count){
+        indices.add(Math.floor(Math.random() * particles.length));
+      }
+
+      particles.forEach((p, i) => {
+        if (indices.has(i)){
+          p.style.left = `${wrapper.offsetLeft + wrapper.offsetWidth/2 - 2}px`;
+          p.style.top  = `${wrapper.offsetTop  + wrapper.offsetHeight/2 - 2}px`;
+          p.style.transition = 'none';          // we’ll set transform each frame
+          orbitData.push({el:p, angle:0});
+        }
+      });
+
+      function orbitFrame(){
+        orbitData.forEach(item => {
+          item.angle += 0.4;
+          const x = Math.cos(item.angle) * 70;
+          const y = Math.sin(item.angle) * 70;
+          item.el.style.transform = `translate(${x}px, ${y}px)`;
+        });
+        requestAnimationFrame(orbitFrame);
+      }
+      orbitFrame();
+    }
+
+    // ---------- respect reduced‑motion on load ----------
+    if (reduced){
+      hat.style.animation = 'none';
+      hat.style.transform = 'none';
+      particlesContainer.style.display = 'none';
+    }
+  })();
+</script>
+</body>
+</html>
