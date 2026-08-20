@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Red Hat — in embers</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #060609;
+  }
+  #stage {
+    position: fixed;
+    inset: 0;
+    display: block;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .caption {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 9vh;
+    margin: 0;
+    text-align: center;
+    padding: 0 20px;
+    font: 400 11px/1.9 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    letter-spacing: .32em;
+    text-transform: uppercase;
+    color: rgba(255, 232, 220, .34);
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  @media (max-width: 560px) {
+    .caption {
+      font-size: 9.5px;
+      letter-spacing: .22em;
+      bottom: 7vh;
+    }
+  }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<p class="caption">hover or tap &middot; it scatters into embers, then remembers its shape</p>
+
+<script>
+(() => {
+'use strict';
+
+const cv  = document.getElementById('stage');
+const ctx = cv.getContext('2d');
+const rm  = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ------------------------------------------------------------------ *
+ *  The hat — drawn once to an offscreen canvas, then sampled into
+ *  particle "home" positions. Stylized Red Hat fedora, ~512 units.
+ * ------------------------------------------------------------------ */
+const S = 512, LOGOCX = 256, LOGOCY = 234;
+
+const hat = document.createElement('canvas');
+hat.width = hat.height = S;
+(function drawLogo() {
+  const c = hat.getContext('2d');
+  let g;
+
+  // Brim
+  g = c.createLinearGradient(0, 244, 0, 360);
+  g.addColorStop(0, '#e5181d');
+  g.addColorStop(1, '#7c070c');
+  c.fillStyle = g;
+  c.beginPath();
+  c.ellipse(256, 300, 206, 58, 0, 0, Math.PI * 2);
+  c.fill();
+
+  // Soft contact shadow where the crown meets the brim
+  g = c.createRadialGradient(256, 296, 10, 256, 296, 122);
+  g.addColorStop(0, 'rgba(40,0,0,.5)');
+  g.addColorStop(1, 'rgba(40,0,0,0)');
+  c.fillStyle = g;
+  c.beginPath();
+  c.ellipse(256, 296, 122, 34, 0, 0, Math.PI * 2);
+  c.fill();
+
+  // Crown with the classic center pinch
+  g = c.createLinearGradient(0, 108, 0, 304);
+  g.addColorStop(0,    '#ff5340');
+  g.addColorStop(.55,  '#e0141c');
+  g.addColorStop(1,    '#8c0810');
+  c.fillStyle = g;
+  c.beginPath();
+  c.moveTo(152, 302);
+  c.bezierCurveTo(148, 212, 158, 158, 174, 140);
+  c.bezierCurveTo(198, 106, 238, 118, 256, 156);
+  c.bezierCurveTo(274, 118, 314, 106, 338, 140);
+  c.bezierCurveTo(354, 158, 364, 212, 360, 302);
+  c.closePath();
+  c.fill();
+
+  // Hat band
+  g = c.createLinearGradient(0, 258, 0, 300);
+  g.addColorStop(0, '#5f0509');
+  g.addColorStop(1, '#3f0305');
+  c.fillStyle = g;
+  c.beginPath();
+  c.moveTo(154, 262);
+  c.lineTo(358, 262);
+  c.lineTo(356, 300);
+  c.lineTo(156, 300);
+  c.closePath();
+  c.fill();
+
+  // Gentle top sheen for a hint of soft lighting
+  g = c.createLinearGradient(0, 108, 0, 230);
+  g.addColorStop(0, 'rgba(255,255,255,.18)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  c.globalCompositeOperation = 'source-atop';
+  c.fillStyle = g;
+  c.fillRect(0, 0, S, S);
+  c.globalCompositeOperation = 'source-over';
+})();
+
+/* ------------------------------------------------------------------ *
+ *  Sample logo pixels -> particle home positions
+ * ------------------------------------------------------------------ */
+const flat = [];
+{
+  const d = hat.getContext('2d').getImageData(0, 0, S, S).data;
+  for (let y = 0; y < S; y += 2)
+    for (let x = 0; x < S; x += 2)
+      if (d[(y * S + x) * 4 + 3] > 120) flat.push(x, y);
+}
+
+const N = 4200;
+const order = [];
+for (let i = 0; i < flat.length / 2; i++) order.push(i);
+for (let i = order.length - 1; i > 0; i--) {
+  const j = (Math.random() * (i + 1)) | 0;
+  const t = order[i]; order[i] = order[j]; order[j] = t;
+}
+
+const ORBITERS = 14;
+const P = [];
+for (let i = 0; i < N; i++) {
+  const j = order[i % order.length];
+  const p = {
+    hx: flat[j * 2]     + (Math.random() - .5) * 2 - LOGOCX,
+    hy: flat[j * 2 + 1] + (Math.random() - .5) * 2 - LOGOCY,
+    hz: (Math.random() - .5) * 10,
+    sz: 1.5 + Math.random() * 1.3,
+    spr: (Math.random() * 3) | 0,
+    delay: Math.random(),
+    fk: Math.random() * Math.PI * 2,
+    ey: (Math.random() - .5) * 360,
+    eR: 170 + Math.random() * 130,
+    ep: Math.random() * Math.PI * 2,
+    es: (Math.random() < .5 ? -1 : 1) * (.35 + Math.random() * .55),
+    orb: false, oR: 0, oY: 0, op: 0, os: 0, hist: null
+  };
+  if (i >= N - ORBITERS) {
+    p.orb = true;
+    p.oR  = 300 + Math.random() * 80;
+    p.oY  = (Math.random() - .5) * 110;
+    p.op  = Math.random() * Math.PI * 2;
+    p.os  = (Math.random() < .5 ? -1 : 1) * (.35 + Math.random() * .35);
+    p.hist = [];
+  }
+  P.push(p);
+}
+
+/* Glowing point sprites (pre-rendered radial gradients) */
+function makeSprite(r, g, b) {
+  const s = document.createElement('canvas');
+  s.width = s.height = 64;
+  const c = s.getContext('2d');
+  const gr = c.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0,    'rgba(255,255,255,.9)');
+  gr.addColorStop(0.25, `rgba(${r},${g},${b},.55)`);
+  gr.addColorStop(1,    `rgba(${r},${g},${b},0)`);
+  c.fillStyle = gr;
+  c.fillRect(0, 0, 64, 64);
+  return s;
+}
+const SPRITES = [makeSprite(255, 74, 48), makeSprite(255, 142, 62), makeSprite(222, 40, 44)];
+
+/* Ambient dust for depth */
+const DUST = [];
+for (let i = 0; i < 90; i++) DUST.push({
+  x: Math.random() * 2 - 1,
+  y: Math.random() * 2 - 1,
+  a: .03 + Math.random() * .08,
+  ph: Math.random() * Math.PI * 2,
+  par: .2 + Math.random() * .8,
+  s: .5 + Math.random() * 1.2
+});
+
+/* ------------------------------------------------------------------ *
+ *  Layout / background
+ * ------------------------------------------------------------------ */
+let W, H, DPR, cx, cy, H0, rs;
+const bg = document.createElement('canvas');
+
+function renderBG() {
+  bg.width  = cv.width;
+  bg.height = cv.height;
+  const b = bg.getContext('2d');
+  b.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  b.fillStyle = '#060609';
+  b.fillRect(0, 0, W, H);
+
+  // Warm key light, upper-left
+  let g = b.createRadialGradient(cx - W * .12, cy - H * .2, 0,
+                                 cx - W * .12, cy - H * .2, Math.max(W, H) * .8);
+  g.addColorStop(0,   'rgba(255,84,52,.10)');
+  g.addColorStop(.5,  'rgba(130,22,32,.05)');
+  g.addColorStop(1,   'rgba(0,0,0,0)');
+  b.fillStyle = g;
+  b.fillRect(0, 0, W, H);
+
+  // Cool fill, lower-right — very quiet
+  g = b.createRadialGradient(cx + W * .3, cy + H * .4, 0,
+                             cx + W * .3, cy + H * .4, Math.max(W, H) * .9);
+  g.addColorStop(0, 'rgba(70,100,190,.05)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  b.fillStyle = g;
+  b.fillRect(0, 0, W, H);
+
+  // Floor shadow + faint red bounce light
+  const fy = cy + H0 * .68;
+  b.save();
+  b.translate(cx, fy);
+  b.scale(1, .2);
+  g = b.createRadialGradient(0, 0, 0, 0, 0, H0 * .55);
+  g.addColorStop(0,   'rgba(0,0,0,.62)');
+  g.addColorStop(.7,  'rgba(0,0,0,.25)');
+  g.addColorStop(1,   'rgba(0,0,0,0)');
+  b.fillStyle = g;
+  b.fillRect(-H0, -H0, H0 * 2, H0 * 2);
+  b.restore();
+
+  g = b.createRadialGradient(cx, fy - 14, 0, cx, fy - 14, H0 * .4);
+  g.addColorStop(0, 'rgba(255,60,40,.05)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  b.fillStyle = g;
+  b.fillRect(cx - H0, fy - H0, H0 * 2, H0 * 2);
+
+  // Vignette
+  g = b.createRadialGradient(cx, H * .46, Math.min(W, H) * .35,
+                             cx, H * .46, Math.max(W, H) * .78);
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(1, 'rgba(0,0,0,.55)');
+  b.fillStyle = g;
+  b.fillRect(0, 0, W, H);
+}
+
+function resize() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  W = window.innerWidth;
+  H = window.innerHeight;
+  cv.width  = Math.round(W * DPR);
+  cv.height = Math.round(H * DPR);
+  cv.style.width  = W + 'px';
+  cv.style.height = H + 'px';
+  cx = W / 2;
+  cy = H * .44;
+  H0 = Math.min(W, H) * .56;
+  rs = H0 / S;
+  renderBG();
+  if (rm) staticFrame();
+}
+window.addEventListener('resize', resize);
+
+/* ------------------------------------------------------------------ *
+ *  Reduced motion: one calm, static frame. No spin, no particles.
+ * ------------------------------------------------------------------ */
+function staticFrame() {
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.drawImage(bg, 0, 0, W, H);
+  ctx.fillStyle = 'rgba(255,210,180,.5)';
+  for (const d of DUST) {
+    ctx.globalAlpha = d.a;
+    ctx.fillRect(cx + d.x * W * .5, cy + d.y * H * .5, d.s, d.s);
+  }
+  ctx.globalAlpha = 1;
+  ctx.drawImage(hat, cx - LOGOCX * rs, cy - LOGOCY * rs, S * rs, S * rs);
+}
+
+/* ------------------------------------------------------------------ *
+ *  Interaction + state machine
+ * ------------------------------------------------------------------ */
+const T_DISS = 1.1, T_SWIRL = 2.0, T_REFORM = 1.5;
+let state = 'idle';        // idle | dissolve | swirl | reform
+let stT = 0;
+let theta = .6, spin = .55, tSpin = .55;
+let tau = 0, scatter = 0, last = 0;
+let ptrIn = false;
+
+function startDissolve() {
+  if (state !== 'idle') return;
+  state = 'dissolve';
+  stT = 0;
+}
+
+if (!rm) {
+  cv.addEventListener('pointerenter', e => {
+    ptrIn = true;
+    if (e.pointerType !== 'touch') startDissolve();
+  });
+  cv.addEventListener('pointerleave', () => { ptrIn = false; });
+  cv.addEventListener('pointerdown',  () => { ptrIn = true; startDissolve(); });
+}
+
+/* ------------------------------------------------------------------ *
+ *  Main loop
+ * ------------------------------------------------------------------ */
+const F = 900; // focal length (world units)
+const smooth = u => u * u * (3 - 2 * u);
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(.05, (now - last) / 1000) || 0;
+  last = now;
+  tau += dt;
+  stT += dt;
+
+  switch (state) {
+    case 'dissolve':
+      tSpin = .10;
+      if (stT >= T_DISS) { state = 'swirl';  stT = 0; }
+      break;
+    case 'swirl':
+      tSpin = .05;
+      if (stT > (ptrIn ? T_SWIRL : .9)) { state = 'reform'; stT = 0; }
+      break;
+    case 'reform':
+      tSpin = .55;
+      if (stT >= T_REFORM) { state = 'idle'; stT = 0; }
+      break;
+    default:
+      tSpin = .55;
+  }
+  if (state === 'dissolve' || state === 'swirl') scatter += dt;
+  else scatter = Math.max(0, scatter - dt * 2);
+
+  spin  += (tSpin - spin) * (1 - Math.exp(-dt * 3));
+  theta += spin * dt;
+
+  const co = Math.cos(theta), si = Math.sin(theta);
+  const grow = smooth(Math.min(scatter / 1.8, 1));
+
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.drawImage(bg, 0, 0, W, H);
+
+  // Dust
+  for (const d of DUST) {
+    ctx.globalAlpha = d.a;
+    ctx.fillStyle = 'rgb(255,205,175)';
+    const px = cx + d.x * W * .5 + Math.sin(tau * .07 + d.ph) * 9 * d.par;
+    const py = cy + d.y * H * .5 + Math.cos(tau * .05 + d.ph) * 6 * d.par;
+    ctx.fillRect(px, py, d.s, d.s);
+  }
+  ctx.globalAlpha = 1;
+
+  // Particles
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < N; i++) {
+    const p = P[i];
+
+    let u;
+    if (state === 'dissolve') {
+      u = (stT / T_DISS - p.delay * .5) / .5;
+      u = u < 0 ? 0 : u > 1 ? 1 : u;
+      u = smooth(u);
+    } else if (state === 'swirl') {
+      u = 1;
+    } else if (state === 'reform') {
+      u = (stT / T_REFORM - p.delay * .5) / .5;
+      u = u < 0 ? 0 : u > 1 ? 1 : u;
+      u = 1 - smooth(u);
+    } else u = 0;
+
+    let bx, by, bz;
+    if (p.orb) {
+      const oa = p.op + tau * p.os;
+      bx = Math.cos(oa) * p.oR;
+      bz = Math.sin(oa) * p.oR;
+      by = p.oY + Math.sin(tau * 1.1 + p.op * 2) * 14;
+    } else {
+      bx = p.hx; by = p.hy; bz = p.hz;
+    }
+
+    const ea = p.ep + tau * p.es;
+    const R  = p.eR * (.45 + .55 * grow);
+    const ex = Math.cos(ea) * R;
+    const ez = Math.sin(ea) * R;
+    const ey = p.ey + Math.sin(tau * .8 + p.ep) * 16;
+
+    let x = bx + (ex - bx) * u;
+    let y = by + (ey - by) * u;
+    let z = bz + (ez - bz) * u;
+
+    const x2 = x * co + z * si;
+    const z2 = z * co - x * si;
+    const pr = F / (F + z2);
+    const px = cx + x2 * rs * pr;
+    const py = cy + y *  rs * pr;
+
+    if (p.orb) {
+      p.hist.push(px, py);
+      if (p.hist.length > 36) p.hist.splice(0, 2);
+    }
+
+    const a = (0.5 + 0.5 * u) * (0.82 + 0.18 * Math.sin(tau * 4 + p.fk));
+    ctx.globalAlpha = a;
+    const sz = p.sz * rs * pr * (1 + 1.1 * u) * 2.4;
+    ctx.drawImage(SPRITES[p.spr], px - sz / 2, py - sz / 2, sz, sz);
+  }
+
+  // Orbiter trails
+  ctx.lineWidth = 1.4;
+  ctx.lineCap = 'round';
+  for (let i = 0; i < N; i++) {
+    const p = P[i];
+    if (!p.orb) continue;
+    const h = p.hist, n = h.length / 2;
+    for (let k = 1; k < n; k++) {
+      const f = k / n;
+      ctx.globalAlpha = f * f * .26;
+      ctx.strokeStyle = 'rgb(255,146,84)';
+      ctx.beginPath();
+      ctx.moveTo(h[(k - 1) * 2], h[(k - 1) * 2 + 1]);
+      ctx.lineTo(h[k * 2], h[k * 2 + 1]);
+      ctx.stroke();
+    }
+  }
+
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+/* ------------------------------------------------------------------ */
+resize();
+if (rm) {
+  staticFrame();
+} else {
+  last = performance.now();
+  requestAnimationFrame(frame);
+}
+
+})();
+</script>
+</body>
+</html>
