@@ -54,6 +54,14 @@ class ModelDiscoveryTest(unittest.TestCase):
         self.assertTrue(discover_models.should_include(glimmer, float("inf")))
         self.assertFalse(discover_models.should_include(spark, float("inf")))
 
+    def test_includes_stealth_models(self):
+        provider_groups = json.loads(discover_models.GROUPS_FILE.read_text())
+        model = model_metadata()
+        model["id"] = "stealth/ox-alpha"
+
+        self.assertEqual("Stealth", provider_groups["stealth"])
+        self.assertTrue(discover_models.should_include(model, float("inf")))
+
     def test_uses_only_advertised_efforts_in_canonical_order(self):
         model = model_metadata({
             "supported_efforts": ["low", "max", "medium"],
