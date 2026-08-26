@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fedora — an emblem in embers</title>
+<style>
+  :root{
+    --ink:#cfc4c6;
+    --ink-dim:#8a7d80;
+    --bg0:#0b0a0d;
+    --bg1:#161115;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    background:
+      radial-gradient(120% 90% at 50% 38%, var(--bg1) 0%, var(--bg0) 58%, #060509 100%);
+    color:var(--ink);
+    font-family:"Avenir Next","Segoe UI",system-ui,-apple-system,sans-serif;
+    overflow:hidden;
+    display:flex;align-items:center;justify-content:center;
+  }
+  /* subtle vignette */
+  body::after{
+    content:"";position:fixed;inset:0;pointer-events:none;
+    background:radial-gradient(90% 90% at 50% 45%, transparent 55%, rgba(0,0,0,.55) 100%);
+  }
+  #stage{
+    position:relative;
+    width:100%;height:100%;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    cursor:pointer;
+    outline:none;
+    -webkit-tap-highlight-color:transparent;
+    touch-action:manipulation;
+  }
+  #stage:focus-visible{cursor:pointer}
+  #stage:focus-visible .frame{border-color:rgba(255,120,110,.35)}
+  canvas{
+    position:absolute;inset:0;width:100%;height:100%;
+    display:block;
+  }
+  .frame{
+    position:absolute;
+    inset:min(6vh,48px) min(7vw,64px);
+    border:1px solid rgba(255,255,255,.055);
+    border-radius:4px;
+    pointer-events:none;
+    transition:border-color .4s ease;
+  }
+  .titles{
+    position:absolute;
+    left:0;right:0;bottom:max(7vh,42px);
+    padding-bottom:env(safe-area-inset-bottom);
+    text-align:center;
+    pointer-events:none;
+    user-select:none;
+  }
+  .rule{
+    width:min(220px,46vw);height:1px;margin:0 auto 18px;
+    background:linear-gradient(90deg,transparent,rgba(230,120,110,.5),transparent);
+  }
+  .wordmark{
+    font-size:clamp(15px,2.4vw,22px);
+    font-weight:300;
+    letter-spacing:.55em;
+    text-indent:.55em;
+    color:#e6dad9;
+    text-transform:uppercase;
+    margin-bottom:10px;
+  }
+  .caption{
+    font-size:clamp(11px,1.6vw,13.5px);
+    font-weight:400;
+    letter-spacing:.12em;
+    color:var(--ink-dim);
+    font-style:italic;
+    max-width:34em;
+    margin:0 auto;
+    padding:0 20px;
+  }
+  @media (prefers-reduced-motion: reduce){
+    *{transition:none !important;animation:none !important}
+  }
+</style>
+</head>
+<body>
+<div id="stage" tabindex="0" role="img"
+     aria-label="A red fedora spinning slowly in a dark room. Hover or tap and it dissolves into glowing embers, swirls, then reforms itself.">
+  <canvas id="gl"></canvas>
+  <div class="frame"></div>
+  <div class="titles">
+    <div class="rule"></div>
+    <div class="wordmark">Fedora</div>
+    <p class="caption">hover or tap — it scatters like embers, swirls, and finds its way home</p>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* ============================== setup ============================== */
+const canvas = document.getElementById('gl');
+const gl = canvas.getContext('webgl',{antialias:false,alpha:true,premultipliedAlpha:true});
+if(!gl){
+  document.querySelector('.caption').textContent =
+    'This scene needs WebGL, which your browser could not provide.';
+  return;
+}
+
+let reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+try{
+  matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change',e=>{reduced=e.matches;});
+}catch(_){ try{
+  matchMedia('(prefers-reduced-motion: reduce)').addListener(e=>{reduced=e.matches;});
+}catch(_2){} }
+
+/* deterministic RNG */
+function mulberry32(seed){return function(){seed|=0;seed=seed+0x6D2B79F5|0;
+  let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;
+  return ((t^t>>>14)>>>0)/4294967296;};}
+const R = mulberry32(20771);
+const ss=(a,b,x)=>{x=Math.min(1,Math.max(0,(x-a)/(b-a)));return x*x*(3-2*x);};
+
+/* ========================= tiny matrix utils ======================= */
+function perspective(fov,aspect,near,far){
+  const f=1/Math.tan(fov/2), nf=1/(near-far);
+  return new Float32Array([f/aspect,0,0,0, 0,f,0,0, 0,0,(far+near)*nf,-1, 0,0,2*far*near*nf,0]);
+}
+function lookAt(ex,ey,ez,tx,ty,tz){
+  let zx=ex-tx,zy=ey-ty,zz=ez-tz;
+  let l=Math.hypot(zx,zy,zz); zx/=l;zy/=l;zz/=l;
+  // right = up × z
+  let rx=(0*zz-1*zy), ry=(1*zx-0*zz), rz=(0*zy-0*zx);
+  l=Math.hypot(rx,ry,rz)||1; rx/=l;ry/=l;rz/=l;
+  // true up = z × x
+  const ux=zy*rz-zz*ry, uy=zz*rx-zx*rz, uz=zx*ry-zy*rx;
+  return new Float32Array([
+    rx,ux,zx,0, ry,uy,zy,0, rz,uz,zz,0,
+    -(rx*ex+ry*ey+rz*ez), -(ux*ex+uy*ey+uz*ez), -(zx*ex+zy*ey+zz*ez), 1]);
+}
+function mul(a,b){ // column-major a*b
+  const o=new Float32Array(16);
+  for(let c=0;c<4;c++)for(let r=0;r<4;r++){
+    let s=0;for(let k=0;k<4;k++)s+=a[k*4+r]*b[c*4+k];
+    o[c*4+r]=s;}
+  return o;
+}
+function rotY3(c,s){return new Float32Array([c,0,-s, 0,1,0, s,0,c]);}
+
+/* ============================ shaders ============================= */
+const HAT_VS = `
+precision highp float;
+attribute vec3 aPos; attribute vec3 aNrm; attribute vec3 aCol;
+attribute float aAO; attribute float aSz;
+attribute vec3 aDir; attribute vec4 aRnd;
+uniform mat4 uVP; uniform mat3 uVN;
+uniform float uCos,uSin,uProg,uTime,uEmber,uSwirl,uBob,uScale,uFocal;
+varying vec3 vCol;
+void main(){
+  float ph = clamp(uProg,0.,1.);
+  float rise = smoothstep(0.,.16,ph);
+  float fall = 1.-smoothstep(.68,1.,ph);
+  float env = rise*fall;
+  float sw = sin(ph*3.14159);
+  mat3 ry = mat3(uCos,0.,-uSin, 0.,1.,0., uSin,0.,uCos);
+  vec3 wp = ry*aPos;
+  vec3 n  = ry*aNrm;
+  vec3 tang = normalize(vec3(-wp.z,0.,wp.x)+vec3(1e-4,0.,1e-4));
+  vec3 disp = aDir*(env*uEmber);
+  disp += tang*(sw*uSwirl*(aRnd.y*2.-1.)*1.15);
+  disp.y += sin(uTime*(1.+2.*aRnd.x)+aRnd.y*43.7)*env*uEmber*.10;
+  disp.y += sw*sw*uSwirl*(aRnd.w-.5)*.36;
+  disp += vec3(sin(uTime*7.+aRnd.x*91.),cos(uTime*6.3+aRnd.y*77.),sin(uTime*8.1+aRnd.z*63.))*.013*env;
+  wp += disp;
+  wp.y += sin(uTime*.7)*.035*uBob;
+  wp *= uScale;
+  vec4 vp = uVP*vec4(wp,1.);
+  gl_Position = vp;
+  gl_PointSize = clamp(aSz*uFocal*uScale*(1.+.85*env)/max(vp.w,.001), 1., 64.);
+  vec3 nv = normalize(uVN*n);
+  vec3 L1 = normalize(vec3(.42,.75,.6));
+  vec3 L2 = normalize(vec3(-.62,.15,.4));
+  vec3 V  = normalize(-vp.xyz);
+  float d1 = max(dot(nv,L1),0.);
+  float d2 = max(dot(nv,L2),0.)*.28;
+  float sp = pow(max(dot(nv,normalize(L1+V)),0.),30.)*(.28+.3*aRnd.x);
+  float rim = pow(1.-max(dot(nv,V),0.),3.)*.16;
+  vec3 col = aCol*aAO*(.30+.80*d1) + aCol*d2 + vec3(sp) + vec3(.7,.8,1.)*rim;
+  col = mix(col, col*vec3(1.35,1.02,.78)+vec3(.30,.09,.02), env*.85);
+  vCol = col;
+}`;
+const HAT_FS = `
+precision mediump float;
+varying vec3 vCol;
+void main(){
+  vec2 q = gl_PointCoord*2.-1.;
+  float r = dot(q,q);
+  if(r>1.) discard;
+  float a = pow(1.-r,1.8);
+  gl_FragColor = vec4(vCol*a, a*.8);
+}`;
+
+const FLAT_VS = `
+precision highp float;
+attribute vec3 aP; attribute vec4 aC; attribute float aSz;
+uniform mat4 uVP; uniform float uWScale,uFocal;
+varying vec4 vC;
+void main(){
+  vec3 p = aP*uWScale;
+  gl_Position = uVP*vec4(p,1.);
+  gl_PointSize = clamp(aSz*uFocal*uWScale/max(gl_Position.w,.001), 1., 40.);
+  vC = aC;
+}`;
+const FLAT_FS = `
+precision mediump float;
+varying vec4 vC;
+void main(){
+  vec2 q = gl_PointCoord*2.-1.;
+  float r = dot(q,q);
+  if(r>1.) discard;
+  float a = pow(max(1.-r,0.),2.)*vC.a;
+  gl_FragColor = vec4(vC.rgb*a, a);
+}`;
+
+const DISC_VS = `
+precision highp float;
+attribute vec2 aXY;
+uniform mat4 uVP; uniform vec3 uSPos; uniform vec2 uSRad; uniform float uScale;
+varying vec2 vUV;
+void main(){
+  vUV = aXY;
+  vec3 p = uSPos + vec3(aXY.x*uSRad.x,0.,aXY.y*uSRad.y);
+  p *= uScale;
+  gl_Position = uVP*vec4(p,1.);
+}`;
+const DISC_FS = `
+precision mediump float;
+varying vec2 vUV;
+uniform vec4 uDCol;
+void main(){
+  float r = length(vUV);
+  float a = pow(max(1.-r,0.),2.3)*uDCol.a;
+  gl_FragColor = vec4(uDCol.rgb*a, a);
+}`;
+
+function mkProg(vs,fs){
+  const p=gl.createProgram();
+  const c=(t,s)=>{const sh=gl.createShader(t);gl.shaderSource(sh,s);gl.compileShader(sh);
+    if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS))throw gl.getShaderInfoLog(sh);
+    gl.attachShader(p,sh);};
+  c(gl.VERTEX_SHADER,vs); c(gl.FRAGMENT_SHADER,fs);
+  gl.linkProgram(p);
+  if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw gl.getProgramInfoLog(p);
+  return p;
+}
+let pHat,pFlat,pDisc, loc={};
+try{
+  pHat=mkProg(HAT_VS,HAT_FS);
+  pFlat=mkProg(FLAT_VS,FLAT_FS);
+  pDisc=mkProg(DISC_VS,DISC_FS);
+}catch(e){
+  document.querySelector('.caption').textContent='The scene failed to initialise on this device.';
+  throw e;
+}
+function uniforms(prog,names){const o={};names.forEach(n=>o[n]=gl.getUniformLocation(prog,n));return o;}
+const uHat=uniforms(pHat,['uVP','uVN','uCos','uSin','uProg','uTime','uEmber','uSwirl','uBob','uScale','uFocal']);
+const uFlat=uniforms(pFlat,['uVP','uWScale','uFocal']);
+const uDisc=uniforms(pDisc,['uVP','uSPos','uSRad','uScale','uDCol']);
+const A=p=>n=>gl.getAttribLocation(p,n);
+const aHat=A(pHat), aFlat=A(pFlat), aDisc=A(pDisc);
+
+/* =========================== geometry ============================= */
+/* fedora local space: brim plane y=0, crown up to y=0.92; offset applied later */
+const RIN=.50, ROUT=1.32, DROP=.17, CH=.92;
+const IS_MOBILE = Math.min(screen.width,screen.height)<700 || innerWidth<700;
+const NTOT = IS_MOBILE?3800:6000;
+const GY=-0.42;
+
+const crownR = t => .74 - .09*Math.pow(t,1.4) - .17*ss(.55,1,t);
+const sx = t => 1+.07*ss(.45,1,t);
+const sz_ = t => 1-.10*ss(.4,1,t);
+const pin=(th,t)=>1-.06*ss(.5,1,t)*Math.pow((Math.cos(th)+1)/2,2);
+function crownPt(th,t,off){
+  const r=crownR(t)*pin(th,t)+ (off||0);
+  return [r*sx(t)*Math.cos(th), t*CH, r*sz_(t)*Math.sin(th)];
+}
+function crownNrm(th,t){
+  const e=.01, p=crownPt(th,t), pu=crownPt(th,Math.min(1,t+e)), pt=crownPt(th+e,t);
+  const du=[pu[0]-p[0],pu[1]-p[1],pu[2]-p[2]], dt=[pt[0]-p[0],pt[1]-p[1],pt[2]-p[2]];
+  let nx=du[1]*dt[2]-du[2]*dt[1], ny=du[2]*dt[0]-du[0]*dt[2], nz=du[0]*dt[1]-du[1]*dt[0];
+  const l=Math.hypot(nx,ny,nz)||1;
+  return [nx/l,ny/l,nz/l];
+}
+function topPt(rx,rz,phi){ // elliptical top disc with creases
+  const x=rx*Math.cos(phi), z=rz*Math.sin(phi);
+  const rho=Math.hypot(x/.51,z/.43);
+  let y=CH + .05*(1-Math.min(rho,1)*rho) - .10*Math.exp(-Math.pow(z/.16,2))
+        - .05*Math.exp(-(rho*rho)*9.);
+  return [x,y,z];
+}
+
+const P=[],NR=[],CO=[],AO=[],SZ=[],DR=[],RD=[];
+function push(pt,n,col,ao,size){
+  P.push(pt[0],pt[1]+GY,pt[2]);
+  NR.push(n[0],n[1],n[2]);
+  CO.push(col[0],col[1],col[2]);
+  AO.push(ao); SZ.push(size);
+  const hx=pt[0],hz=pt[2],hl=Math.hypot(hx,hz)||1;
+  const m1=.45+1.35*R(), m2=.3+1.1*R();
+  DR.push(hx/hl*m1+(R()-.5)*.5, m2, hz/hl*m1+(R()-.5)*.5);
+  RD.push(R(),R(),R(),R());
+}
+const RED=[.79,.075,.105];
+const jitter=()=> .93+.14*R();
+
+/* --- brim --- */
+const NB=Math.round(NTOT*.449);
+for(let i=0;i<NB;i++){
+  const u=R(), th=R()*Math.PI*2;
+  const r=Math.sqrt(RIN*RIN+(ROUT*ROUT-RIN*RIN)*u);
+  const t=(r-RIN)/(ROUT-RIN);
+  const y=-DROP*t*t;
+  const dd=2*DROP*t/(ROUT-RIN);
+  let nx=-dd*Math.cos(th), ny=1, nz=-dd*Math.sin(th);
+  const l=Math.hypot(nx,ny,nz); 
+  const ao=ss(.15,.62,t)*.5+.5;
+  const b=jitter();
+  push([r*Math.cos(th),y,r*Math.sin(th)],[nx/l,ny/l,nz/l],
+       [RED[0]*b*(0.8+0.25*t),RED[1]*b,RED[2]*b],ao,1.35+.5*R());
+}
+/* --- crown --- */
+const NC=Math.round(NTOT*.369);
+for(let i=0;i<NC;i++){
+  const th=R()*Math.PI*2, t=R();
+  const n=crownNrm(Math.min(t,.98));
+  const b=jitter(), sh=.72+.45*t;
+  const ao=ss(0,.3,t)*.47+.53;
+  push(crownPt(th,t),n,[RED[0]*sh*b,RED[1]*sh*b,RED[2]*sh*b],ao,1.3+.5*R());
+}
+/* --- band --- */
+const ND=Math.round(NTOT*.10);
+for(let i=0;i<ND;i++){
+  const th=R()*Math.PI*2, t=.03+R()*.21;
+  const n=crownNrm(Math.min(t,.98));
+  const sheen=.9+1.3*Math.pow(Math.max(0,Math.cos(th-.6)),3);
+  push(crownPt(th,t,.014),n,[.13*sheen*jitter(),.028*sheen,.045*sheen+jitter()*.01],.85,1.45+.4*R());
+}
+/* --- top --- */
+const NP=Math.round(NTOT*.082);
+for(let i=0;i<NP;i++){
+  const rr=Math.sqrt(R()), phi=R()*Math.PI*2;
+  const p=topPt(rr*.51,rr*.43,phi);
+  const e=.012, px=topPt(rr*.51+e,rr*.43,phi), pz=topPt(rr*.51,rr*.43+e,phi);
+  let nx=-(px[1]-p[1]), ny=1, nz=-(pz[1]-p[1]);
+  const l=Math.hypot(nx,ny,nz)||1;
+  const b=jitter();
+  push(p,[nx/l,ny/l,nz/l],[RED[0]*(0.98*b),RED[1]*b,RED[2]*b],.92,1.4+.5*R());
+}
+
+/* interleave */
+const STRIDE=17;
+const hatData=new Float32Array(NTOT*STRIDE);
+for(let i=0;i<NTOT;i++){
+  let o=i*STRIDE, j=i*3;
+  hatData[o++]=P[j];hatData[o++]=P[j+1];hatData[o++]=P[j+2];
+  hatData[o++]=NR[j];hatData[o++]=NR[j+1];hatData[o++]=NR[j+2];
+  hatData[o++]=CO[j];hatData[o++]=CO[j+1];hatData[o++]=CO[j+2];
+  hatData[o++]=AO[i]; hatData[o++]=SZ[i]*0.0045;
+  hatData[o++]=DR[j];hatData[o++]=DR[j+1];hatData[o++]=DR[j+2];
+  hatData[o++]=RD[i*4];hatData[o++]=RD[i*4+1];hatData[o++]=RD[i*4+2];hatData[o]=RD[i*4+3];
+}
+const hatBuf=gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER,hatBuf);
+gl.bufferData(gl.ARRAY_BUFFER,hatData,gl.STATIC_DRAW);
+
+/* --- ambient dust (world-space, unscaled) --- */
+const NDUST=110;
+const dustPos=new Float32Array(NDUST*8);
+const dustBase=new Float32Array(NDUST), dustPh=new Float32Array(NDUST);
+for(let i=0;i<NDUST;i++){
+  const th=R()*Math.PI*2, yy=(R()*2-1), rr=3.6+R()*2.6, cxz=Math.sqrt(1-yy*yy)*rr;
+  dustPos.set([Math.cos(th)*cxz, yy*2.4+.2, Math.sin(th)*cxz, .55,.62,.75, .05+.1*R(), .006+.008*R()],i*8);
+  dustBase[i]=dustPos[i*8+6]; dustPh[i]=R()*6.283;
+}
+const dustBuf=gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER,dustBuf);
+gl.bufferData(gl.ARRAY_BUFFER,dustPos,gl.DYNAMIC_DRAW);
+
+/* --- shadow disc mesh --- */
+const discVerts=[]; discVerts.push(0,0);
+for(let k=0;k<=36;k++){const a=k/36*Math.PI*2;discVerts.push(Math.cos(a),Math.sin(a));}
+const discBuf=gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER,discBuf);
+gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(discVerts),gl.STATIC_DRAW);
+
+/* --- orbiters --- */
+const NORB = reduced?0:Math.min(30,Math.max(14,Math.floor(NTOT*.005)));
+const GHOST=13;
+const orbs=[];
+for(let i=0;i<NORB;i++){
+  const idx=Math.floor(R()*NTOT);
+  orbs.push({
+    hx:P[idx*3],hy:P[idx*3+1],hz:P[idx*3+2],
+    fx:0,fy:0,fz:0,           // frozen home (filled at activation)
+    a0:R()*Math.PI*2,
+    spd:(.7+.9*R())*(R()<.5?-1:1),
+    R:.95+R()*.6,
+    y0:-.2+R()*.75,
+    tx:(R()-.5)*.6, tz:(R()-.5)*.6,
+    b0:R()*6.283,
+    hue:[1,.55+R()*.15,.3]
+  });
+}
+const trailStride=8;
+const trailData=new Float32Array(NORB*GHOST*trailStride);
+const trailBuf=gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER,trailBuf);
+gl.bufferData(gl.ARRAY_BUFFER,trailData,gl.DYNAMIC_DRAW);
+
+/* ====================== interaction timeline ====================== */
+const CYCLE_FULL=4300, CYCLE_RED=2600;
+const state={mode:'idle',t0:0,prog:0,orb:0,orbOn:false};
+const stage=document.getElementById('stage');
+function trigger(){
+  if(state.mode!=='idle')return;
+  state.mode='run'; state.t0=performance.now(); state.prog=0;
+  state.orb=0; state.orbOn=false;
+}
+stage.addEventListener('pointerenter',trigger);
+stage.addEventListener('pointerdown',e=>{e.preventDefault();trigger();});
+stage.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();trigger();}});
+
+function orbiterPos(o,tms,e,out){
+  const t=tms/1000;
+  const ang=o.a0+o.spd*t;
+  const bx=Math.cos(ang)*o.R, bz=Math.sin(ang)*o.R;
+  const ctx=Math.cos(o.tx),stx=Math.sin(o.tx);
+  let x=bx, y=-bz*stx, z=bz*ctx;
+  const ctz=Math.cos(o.tz),stz=Math.sin(o.tz);
+  let x2=x*ctz-y*stz, y2=x*stz+y*ctz; z=z;
+  x=x2;y=y2;
+  y += Math.sin(ang*2+o.b0)*.13;
+  out[0]=(x)*e+o.fx*(1-e);
+  out[1]=(y+o.y0+.18)*e+o.fy*(1-e);
+  out[2]=(z)*e+o.fz*(1-e);
+}
+const tmp=[0,0,0];
+
+/* ============================ resize ============================== */
+let W=0,H=0,DPR=1,PV=null,VN=null,FOCAL=1,FIT=1;
+const EYE=[0,.78,4.05], TGT=[0,-.06,0], FOV=33*Math.PI/180;
+function resize(){
+  DPR=Math.min(devicePixelRatio||1,2);
+  W=canvas.clientWidth*DPR; H=canvas.clientHeight*DPR;
+  if(W===0)return;
+  canvas.width=W; canvas.height=H;
+  gl.viewport(0,0,W,H);
+  const proj=perspective(FOV,W/H,.1,40);
+  const view=lookAt(EYE[0],EYE[1],EYE[2],TGT[0],TGT[1],TGT[2]);
+  PV=mul(proj,view);
+  VN=new Float32Array([view[0],view[1],view[2], view[4],view[5],view[6], view[8],view[9],view[10]]);
+  FOCAL=H*.5/Math.tan(FOV/2);
+  const cw=innerWidth,chh=innerHeight;
+  const visW=2*Math.tan(FOV/2)*Math.hypot(...EYE.map((v,i)=>v-TGT[i]))*cw/chh;
+  FIT=Math.min(1,visW/3.6, chh/2400*3.2);
+  FIT=Math.max(.42,FIT);
+}
+addEventListener('resize',resize);
+resize();
+
+/* ============================ render ============================== */
+gl.enable(gl.BLEND);
+gl.disable(gl.DEPTH_TEST);
+gl.clearColor(0,0,0,0);
+
+let last=performance.now(), spin=0, curSpd=reduced?0:0.5;
+
+function bindHatAttribs(){
+  const st=STRIDE*4;
+  gl.bindBuffer(gl.ARRAY_BUFFER,hatBuf);
+  let ptr=gl.getAttribLocation(pHat,'aPos');
+  gl.enableVertexAttribArray(ptr);gl.vertexAttribPointer(ptr,3,gl.FLOAT,false,st,0);
+  ptr=gl.getAttribLocation(pHat,'aNrm');
+  gl.enableVertexAttribArray(ptr);gl.vertexAttribPointer(ptr,3,gl.FLOAT,false,st,12);
+  ptr=gl.getAttribLocation(pHat,'aCol');
+  gl.enableVertexAttribArray(ptr);gl.vertexAttribPointer(ptr,3,gl.FLOAT,false,st,24);
+  ptr=gl.getAttribLocation(pHat,'aAO');
+  gl.enableVertexAttribArray(ptr);gl.vertexAttribPointer(ptr,1,gl.FLOAT,false,st,36);
+  ptr=gl.getAttribLocation(pHat,'aSz');
+  gl.enableVertexAttribArray(ptr);gl.vertexAttribPointer(ptr,1,gl.FLOAT,false,st,40);
+  ptr=gl.getAttribLocation(pHat,'aDir');
+  gl.enableVertexAttribArray(ptr);gl.vertexAttribPointer(ptr,3,gl.FLOAT,false,st,44);
+  ptr=gl.getAttribLocation(pHat,'aRnd');
+  gl.enableVertexAttribArray(ptr);gl.vertexAttribPointer(ptr,4,gl.FLOAT,false,st,56);
+}
+
+function frame(now){
+  requestAnimationFrame(frame);
+  const dt=Math.min((now-last)/1000,.05); last=now;
+  if(!PV)return;
+  const cyc=reduced?CYCLE_RED:CYCLE_FULL;
+
+  /* timeline */
+  if(state.mode==='run'){
+    state.prog=Math.min(1,(now-state.t0)/cyc);
+    if(state.prog>=1){
+      state.mode='linger';
+      if(!reduced&&!state.orbOn){
+        state.orbOn=true;
+        const c=Math.cos(spin),s=Math.sin(spin);
+        orbs.forEach(o=>{
+          o.fx=c*o.hx+s*o.hz; o.fy=o.hy; o.fz=-s*o.hx+c*o.hz;
+          o.fx*=FIT;o.fy*=FIT;o.fz*=FIT;
+        });
+      }
+    }
+  }
+  if(state.orbOn && state.mode==='linger')
+    state.orb=Math.min(1,state.orb+dt/0.9);
+  if(state.orbOn && state.mode==='idle')
+    state.orb=Math.max(0,state.orb-dt/0.7);
+
+  /* spin eases down while dissolving */
+  const envJS=(()=>{
+    const p=state.prog;
+    return p<=0?0:ss(0,.16,p)*(1-ss(.68,1,p));
+  })();
+  const idleSpd=reduced?.035:.5;
+  const tgt=idleSpd*(1-.88*envJS)+(reduced?0:0);
+  curSpd+= (tgt-curSpd)*Math.min(1,dt*5);
+  spin+=curSpd*dt;
+
+  const t=now/1000;
+  const ember=reduced?.22:1;
+  const swirl=reduced?0:1;
+  const bob=reduced?0:1;
+
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  /* ---- shadow (premult normal blend) ---- */
+  gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
+  gl.useProgram(pDisc);
+  gl.uniformMatrix4fv(uDisc.uVP,false,PV);
+  gl.uniform1f(uDisc.uScale,FIT);
+  gl.uniform3f(uDisc.uSPos,0,GY-0.155,0);
+  gl.uniform2f(uDisc.uSRad,1.55,1.12);
+  const sa=(.5+.28*envJS);
+  gl.uniform4f(uDisc.uDCol,.005,.002,.008,sa);
+  let ptr=aDisc('aXY');
+  gl.bindBuffer(gl.ARRAY_BUFFER,discBuf);
+  gl.enableVertexAttribArray(ptr);gl.vertexAttribPointer(ptr,2,gl.FLOAT,false,0,0);
+  gl.drawArrays(gl.TRIANGLE_FAN,0,38);
+  /* warm ember pool glows while scattered */
+  gl.blendFunc(gl.ONE,gl.ONE);
+  gl.uniform2f(uDisc.uSRad,1.35,.95);
+  gl.uniform4f(uDisc.uDCol,.5,.10,.05,.10+.55*envJS*(reduced?.3:1));
+  gl.drawArrays(gl.TRIANGLE_FAN,0,38);
+  gl.disableVertexAttribArray(ptr);
+
+  /* ---- dust (flat additive, unscaled) ---- */
+  gl.useProgram(pFlat);
+  gl.uniformMatrix4fv(uFlat.uVP,false,PV);
+  gl.uniform1f(uFlat.uWScale,1);
+  gl.uniform1f(uFlat.uFocal,FOCAL);
+  gl.bindBuffer(gl.ARRAY_BUFFER,dustBuf);
+  for(let i=0;i<NDUST;i++)
+    dustPos[i*8+6]=dustBase[i]*(reduced?.6:.8+.25*Math.sin(t*.7+dustPh[i]));
+  gl.bufferSubData(gl.ARRAY_BUFFER,0,dustPos);
+  const ds=8*4;
+  ptr=gl.getAttribLocation(pFlat,'aP');
+  gl.enableVertexAttribArray(ptr);gl.vertexAttribPointer(ptr,3,gl.FLOAT,false,ds,0);
+  ptr=gl.getAttribLocation(pFlat,'aC');
+  gl.enableVertexAttribArray(ptr);gl.vertexAttribPointer(ptr,4,gl.FLOAT,false,ds,12);
+  ptr=gl.getAttribLocation(pFlat,'aSz');
+  gl.enableVertexAttribArray(ptr);gl.vertexAttribPointer(ptr,1,gl.FLOAT,false,ds,28);
+  gl.drawArrays(gl.POINTS,0,NDUST);
+
+  /* ---- hat ---- */
+  gl.useProgram(pHat);
+  gl.uniformMatrix4fv(uHat.uVP,false,PV);
+  gl.uniformMatrix3fv(uHat.uVN,false,VN);
+  gl.uniform1f(uHat.uCos,Math.cos(spin));
+  gl.uniform1f(uHat.uSin,Math.sin(spin));
+  gl.uniform1f(uHat.uProg,state.prog);
+  gl.uniform1f(uHat.uTime,t);
+  gl.uniform1f(uHat.uEmber,ember);
+  gl.uniform1f(uHat.uSwirl,swirl);
+  gl.uniform1f(uHat.uBob,bob);
+  gl.uniform1f(uHat.uScale,FIT);
+  gl.uniform1f(uHat.uFocal,FOCAL);
+  bindHatAttribs();
+  gl.drawArrays(gl.POINTS,0,NTOT);
+
+  /* ---- orbiters + trails ---- */
+  if(state.orb>0.001 && NORB>0){
+    gl.useProgram(pFlat);
+    gl.uniform1f(uFlat.uWScale,1); /* positions already FIT-scaled */
+    const e=state.orb*state.orb*(3-2*state.orb);
+    const DT=.045;
+    let w=0;
+    for(let i=0;i<NORB;i++){
+      const o=orbs[i];
+      for(let g=GHOST-1;g>=0;g--){
+        const tt=now-g*DT*1000;
+        orbiterPos(o,tt,e,tmp);
+        const f=1-g/GHOST;
+        const a=f*f*.5*e;
+        const r0=o.hue[0],g0=o.hue[1],b0=o.hue[2];
+        trailData[w++]=tmp[0];trailData[w++]=tmp[1];trailData[w++]=tmp[2];
+        trailData[w++]=r0;trailData[w++]=g0;trailData[w++]=b0;
+        trailData[w++]=a;
+        trailData[w++]=(.0016+.0045*f)*FIT;
+      }
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER,trailBuf);
+    gl.bufferSubData(gl.ARRAY_BUFFER,0,trailData.subarray(0,w));
+    ptr=gl.getAttribLocation(pFlat,'aP');
+    gl.enableVertexAttribArray(ptr);gl.vertexAttribPointer(ptr,3,gl.FLOAT,false,32,0);
+    ptr=gl.getAttribLocation(pFlat,'aC');
+    gl.enableVertexAttribArray(ptr);gl.vertexAttribPointer(ptr,4,gl.FLOAT,false,32,12);
+    ptr=gl.getAttribLocation(pFlat,'aSz');
+    gl.enableVertexAttribArray(ptr);gl.vertexAttribPointer(ptr,1,gl.FLOAT,false,32,28);
+    gl.drawArrays(gl.POINTS,0,NORB*GHOST);
+  }
+
+  /* idle again once orb has had its life */
+  if(state.mode==='linger' && (!state.orbOn || reduced)) state.mode='idle';
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
