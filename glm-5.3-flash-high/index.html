@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The Red Fedora</title>
+<meta name="description" content="A glowing red fedora spinning in the dark — hover or tap and it scatters into embers, then reforms.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%3E%3Ccircle%20cx='8'%20cy='8'%20r='6.5'%20fill='%23b3202a'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --ink:#e9e4da;
+    --ink-dim:#8f887c;
+    --ink-faint:#5f594f;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{
+    margin:0;
+    overflow:hidden;
+    background:#060607;
+    color:var(--ink);
+    font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+
+  #stage{
+    position:fixed; inset:0;
+    background:radial-gradient(120% 90% at 50% 36%, #15151b 0%, #0c0c11 42%, #07070a 72%, #050506 100%);
+    touch-action:none;
+  }
+
+  canvas#scene{
+    position:absolute; inset:0;
+    width:100%; height:100%;
+    display:block;
+    cursor:pointer;
+  }
+
+  .vignette{
+    position:absolute; inset:0;
+    pointer-events:none;
+    background:
+      radial-gradient(115% 100% at 50% 44%, transparent 55%, rgba(0,0,0,.34) 82%, rgba(0,0,0,.6) 100%);
+  }
+
+  .caption{
+    position:absolute;
+    left:0; right:0;
+    bottom:clamp(26px, 7vh, 68px);
+    text-align:center;
+    pointer-events:none;
+    padding:0 24px;
+  }
+  .kicker{
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
+    font-size:10px;
+    font-weight:600;
+    letter-spacing:.46em;
+    text-indent:.46em;
+    text-transform:uppercase;
+    color:var(--ink-faint);
+  }
+  h1{
+    margin:.45em 0 .3em;
+    font-weight:500;
+    font-size:clamp(26px, 4.4vw, 42px);
+    letter-spacing:.14em;
+    text-indent:.14em;
+    text-transform:uppercase;
+    color:var(--ink);
+    text-shadow:0 1px 30px rgba(0,0,0,.9);
+  }
+  .sub{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:16px;
+    font-style:italic;
+    font-size:clamp(12px, 1.4vw, 15px);
+    color:var(--ink-dim);
+    white-space:nowrap;
+  }
+  .sub::before,.sub::after{
+    content:"";
+    width:min(9vw, 64px);
+    height:1px;
+    flex:none;
+  }
+  .sub::before{ background:linear-gradient(90deg, transparent, rgba(143,136,124,.55)); }
+  .sub::after { background:linear-gradient(270deg, transparent, rgba(143,136,124,.55)); }
+
+  .hint{
+    display:block;
+    margin-top:1.5em;
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
+    font-size:10px;
+    letter-spacing:.32em;
+    text-indent:.32em;
+    text-transform:uppercase;
+    color:var(--ink-faint);
+    opacity:.85;
+    transition:opacity .8s ease;
+  }
+  .hint.used{ opacity:.5; }
+
+  @media (max-height:520px){
+    .caption{ bottom:14px; }
+    .hint{ margin-top:.9em; }
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ animation:none !important; transition:none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div id="stage" role="img" aria-label="A red fedora hat made of glowing particles, spinning slowly in the dark. Hovering or tapping makes it dissolve into embers that swirl apart and drift back together, reforming the hat.">
+  <canvas id="scene"></canvas>
+  <div class="vignette"></div>
+  <div class="caption">
+    <div class="kicker">Est. In the Dark</div>
+    <h1>The Red Fedora</h1>
+    <div class="sub">an icon in three acts</div>
+    <span class="hint" id="hint">hover&nbsp;&middot;&nbsp;tap &mdash; let it scatter</span>
+  </div>
+</div>
+
+<noscript><p style="position:fixed;top:50%;left:0;right:0;text-align:center;color:#8f887c;">This scene needs JavaScript.</p></noscript>
+
+<script>
+(function(){
+"use strict";
+
+/* ============================================================
+   Setup
+============================================================ */
+const TAU = Math.PI*2;
+
+const canvas = document.getElementById("scene");
+const ctx    = canvas.getContext("2d");
+const hintEl = document.getElementById("hint");
+
+let W=0,H=0,CXs=0,CYs=0,S=90,DPR=1;
+
+const clamp=(v,a,b)=> v<a?a : v>b?b : v;
+const lerp =(a,b,t)=> a+(b-a)*t;
+const rnd  = Math.random;
+const smooth=t=>{ t=clamp(t,0,1); return t*t*(3-2*t); };
+const easeOutBack=t=>{ const c1=1.25,c3=c1+1; return 1+c3*Math.pow(t-1,3)+c1*Math.pow(t-1,2); };
+
+function resize(){
+  W=window.innerWidth; H=window.innerHeight;
+  DPR=clamp(window.devicePixelRatio||1,1,1.75);
+  canvas.width=Math.round(W*DPR);
+  canvas.height=Math.round(H*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  CXs=W*0.5; CYs=H*0.46;
+  S=clamp(Math.min(W,H)*0.215,78,260);
+}
+window.addEventListener("resize", resize);
+
+/* ============================================================
+   Glow sprites (pre-rendered radial gradients)
+============================================================ */
+function makeSprite(core,mid,edgeStop){
+  const s=96, c=document.createElement("canvas");
+  c.width=c.height=s;
+  const g=c.getContext("2d");
+  const grad=g.createRadialGradient(s/2,s/2,0,s/2,s/2,s/2);
+  grad.addColorStop(0,core);
+  grad.addColorStop(0.28,mid);
+  grad.addColorStop(edgeStop,"rgba(0,0,0,0)");
+  g.fillStyle=grad;
+  g.fillRect(0,0,s,s);
+  return c;
+}
+const SPR={
+  red : makeSprite("rgba(255,236,222,0.95)","rgba(235,52,38,0.55)",0.58),
+  hot : makeSprite("rgba(255,255,248,1)","rgba(255,176,102,0.5)",0.60),
+  cool: makeSprite("rgba(168,178,206,0.65)","rgba(70,76,100,0.28)",0.55),
+  dust: makeSprite("rgba(232,196,160,0.5)","rgba(150,110,80,0.16)",0.50)
+};
+
+/* ============================================================
+   Fedora geometry — a sampled point cloud with true normals.
+   Model space: y up, origin at the crown base.
+============================================================ */
+function crownPoint(u,s,out){
+  const a=s*Math.PI*0.52, ca=Math.cos(a);
+  const r=0.80*Math.pow(Math.max(ca,0),0.92);
+  let y=-0.26+0.92*Math.sin(a);
+  const x=Math.cos(u)*r, z=Math.sin(u)*r;
+  // lengthwise crease along x on top
+  const cr=Math.exp(-Math.pow(x/0.36,2))*smooth((s-0.42)/0.5);
+  y-=0.22*Math.pow(cr,1.5);
+  out[0]=x; out[1]=y; out[2]=z;
+  return out;
+}
+function brimPoint(u,t,out){                 // t: 0 root → 1 edge
+  const r=Math.sqrt(lerp(0.76*0.76, 1.47*1.47, t));
+  let y=-0.35-0.12*t+0.30*Math.pow(t,2.4)+t*0.05*Math.sin(3*u);
+  out[0]=Math.cos(u)*r; out[1]=y; out[2]=Math.sin(u)*r;
+  return out;
+}
+function bandPoint(u,v,out){                 // v: 0 bottom → 1 top
+  const r=0.83-0.02*v;
+  out[0]=Math.cos(u)*r; out[1]=-0.27+0.25*v; out[2]=Math.sin(u)*r;
+  return out;
+}
+/* numeric normal from a parametric surface */
+function surfaceNormal(f,u,s){
+  const e=0.012, p=f(u,s,[0,0,0]);
+  const pu=f(Math.min(u+e,TAU),s,[0,0,0]);
+  const ps=f(u,Math.min(s+e,1.02),[0,0,0]);
+  const ax=pu[0]-p[0], ay=pu[1]-p[1], az=pu[2]-p[2];
+  const bx=ps[0]-p[0], by=ps[1]-p[1], bz=ps[2]-p[2];
+  let nx=ay*bz-az*by, ny=az*bx-ax*bz, nz=ax*by-ay*bx;
+  const il=1/(Math.hypot(nx,ny,nz)||1); nx*=il; ny*=il; nz*=il;
+  if(nx*Math.cos(u)+nz*Math.sin(u)+ny*0.4<0){ nx=-nx; ny=-ny; nz=-nz; }
+  return [nx,ny,nz];
+}
+
+/* ============================================================
+   Particles
+============================================================ */
+const smallScreen=Math.min(window.innerWidth,window.innerHeight)<540;
+const Q=smallScreen?0.6:1;
+const N_CROWN=Math.round(2050*Q),
+      N_BRIM =Math.round(1250*Q),
+      N_UNDER=Math.round(430*Q),
+      N_BAND =Math.round(310*Q);
+
+const particles=[];
+
+function addParticle(x,y,z,nx,ny,nz,opt){
+  const p={
+    hx:x, hy:y, hz:z,
+    nx:nx!==undefined?nx:0, ny:ny!==undefined?ny:1, nz:nz!==undefined?nz:0,
+    rad:opt.rad,
+    lum:(0.75+rnd()*0.5)*(opt.lumMul||1),
+    baseA:opt.baseA,
+    spr:opt.spr,
+    orbFlag:rnd()<0.013,          // candidates for post-reform orbiters
+    hot:rnd()<0.09,               // may flash white-hot while scattering
+    tw:2+rnd()*4.5, ph:rnd()*TAU,
+    // ember scratch (filled at burst time)
+    sx:0,sy:0,sz:0, dx:0,dy:1,dz:0, kmag:0, buoy:0, swirlA:0,
+    w1:0,w2:0,w3:0, ph1:0,ph2:0,ph3:0, stag:0,
+    ex:0,ey:0,ez:0,
+    hidden:false
+  };
+  particles.push(p);
+  return p;
+}
+
+const tmp=[0,0,0];
+for(let i=0;i<N_CROWN;i++){
+  const u=rnd()*TAU, s=0.14+0.86*Math.pow(rnd(),0.9);
+  crownPoint(u,s,tmp);
+  const n=surfaceNormal(crownPoint,u,s);
+  addParticle(tmp[0],tmp[1],tmp[2],n[0],n[1],n[2],{rad:0.034,baseA:0.5,spr:SPR.red});
+}
+for(let i=0;i<N_BRIM;i++){
+  const u=rnd()*TAU, t=Math.sqrt(rnd());
+  brimPoint(u,t,tmp);
+  const n=surfaceNormal(brimPoint,u,t);
+  const spr=(t>0.84&&rnd()<0.15)?SPR.hot:SPR.red;
+  addParticle(tmp[0],tmp[1],tmp[2],n[0],n[1],n[2],{rad:0.031,baseA:0.48,spr:spr});
+}
+for(let i=0;i<N_UNDER;i++){                  // underside sheen — fakes thickness
+  const u=rnd()*TAU, t=0.5+0.5*rnd();
+  brimPoint(u,t,tmp);
+  addParticle(tmp[0],tmp[1]-0.05,tmp[2],Math.cos(u),-0.85,Math.sin(u),
+    {rad:0.027,baseA:0.30,spr:SPR.red,lumMul:0.55});
+}
+for(let i=0;i<N_BAND;i++){
+  const u=rnd()*TAU, v=rnd();
+  bandPoint(u,v,tmp);
+  addParticle(tmp[0],tmp[1],tmp[2],Math.cos(u),0.05,Math.sin(u),
+    {rad:0.033,baseA:0.42,spr:SPR.cool});
+}
+
+/* ambient dust motes for depth */
+const dust=[];
+for(let i=0;i<90;i++){
+  dust.push({x:rnd(),y:rnd(),z:0.35+rnd()*0.65,tw:0.4+rnd()*1.6,ph:rnd()*TAU,sp:0.008+rnd()*0.02});
+}
+
+/* fixed stage light in model space (nearly top-down, slightly left-front) */
+const LX=-0.42, LY=0.78, LZ=0.46;
+
+/* ============================================================
+   Camera / projection
+============================================================ */
+const RXA=0.47, CPX=Math.cos(RXA), SPX=Math.sin(RXA), FL=3.6;
+
+let yaw=0.7, cw=Math.cos(yaw), sw=Math.sin(yaw);
+let bobY=0, simT=0;
+
+const P={x:0,y:0,p:1,zv:0};
+function project(x,y,z){
+  const xr= x*cw+z*sw;              // yaw about Y
+  const zr=-x*sw+z*cw;
+  const yv= y*CPX-zr*SPX;           // pitch about X
+  const zv= zr*SPX+y*CPX;
+  const per=FL/(FL-zv);
+  P.x=CXs+xr*per*S;
+  P.y=CYs-yv*per*S;
+  P.p=per; P.zv=zv;
+  return P;
+}
+
+/* ============================================================
+   Lifecycle state machine
+============================================================ */
+const OMEGA_HI=0.55, OMEGA_LO=0.17;
+const ENGAGE_T=0.5, BURST_T=3.1, REFORM_T=1.25, STAG_MAX=0.85;
+const KICK_DECAY=1.6;
+
+let state="idle", stT=0, omega=OMEGA_HI, omegaT=OMEGA_HI;
+let integ=1, cooldownUntil=0, hovered=false;
+
+const V={x:0,y:0,z:0}, V2={x:0,y:0,z:0};
+function worldHome(p,o){
+  o.x=p.hx*cw+p.hz*sw;
+  o.y=p.hy+bobY;
+  o.z=-p.hx*sw+p.hz*cw;
+  return o;
+}
+function emberPos(p,T,o){
+  const k=p.kmag*(1-Math.exp(-T*KICK_DECAY))/KICK_DECAY;
+  const sa=p.swirlA*smooth(T/2.2), ca=Math.cos(sa), sn=Math.sin(sa);
+  let x=p.sx*ca-p.sz*sn;
+  let z=p.sx*sn+p.sz*ca;
+  let y=p.sy;
+  x+=p.dx*k; y+=p.dy*k+p.buoy*T*T; z+=p.dz*k;
+  y+=p.w1*Math.sin(T*2.1+p.ph1);
+  x+=p.w2*Math.sin(T*1.6+p.ph2);
+  z+=p.w3*Math.cos(T*1.8+p.ph3);
+  o.x=x; o.y=y; o.z=z;
+  return o;
+}
+
+function startBurst(){
+  state="burst"; stT=0;
+  for(const p of particles){
+    worldHome(p,V);
+    p.sx=V.x; p.sy=V.y; p.sz=V.z;
+    // kick direction: outward + upward + tangential swirl
+    const rl=Math.hypot(V.x,V.z)||0.001;
+    let dx=V.x/rl, dz=V.z/rl, dy=0.35+rnd()*0.7;
+    dx+=-dz*(rnd()<0.5?-1:1)*0.45*rnd();
+    dz+= dx*(rnd()<0.5?-1:1)*0.45*rnd();
+    const il=1/Math.hypot(dx,dy,dz); dx*=il; dy*=il; dz*=il;
+    p.dx=dx; p.dy=dy; p.dz=dz;
+    p.kmag=0.45+rnd()*1.05;
+    p.buoy=0.028+rnd()*0.075;
+    p.swirlA=(rnd()<0.5?-1:1)*(0.55+rnd()*0.95);
+    p.w1=0.04+rnd()*0.06; p.ph1=rnd()*TAU;
+    p.w2=0.04+rnd()*0.06; p.ph2=rnd()*TAU;
+    p.w3=0.04+rnd()*0.06; p.ph3=rnd()*TAU;
+  }
+}
+function snapshotReform(){
+  for(const p of particles){
+    emberPos(p,BURST_T,V);
+    p.ex=V.x; p.ey=V.y; p.ez=V.z;
+    p.stag=Math.pow(rnd(),1.25)*STAG_MAX;
+    p.hidden=false;
+  }
+}
+
+/* ---- orbiters ---------------------------------------------------- */
+const orbiters=[];
+function spawnOrbiters(){
+  orbiters.length=0;
+  cooldownUntil=simT+0.9;
+  for(const p of particles){
+    if(!p.orbFlag) continue;
+    worldHome(p,V);
+    p.hidden=true;
+    // tilted orbital plane: normal n from inclination + azimuth
+    const inc=0.18+rnd()*0.42, az=rnd()*TAU;
+    const nxv=Math.sin(inc)*Math.cos(az), nyv=Math.cos(inc), nzv=Math.sin(inc)*Math.sin(az);
+    // basis vectors on that plane
+    const c1=cross3([nxv,nyv,nzv],[0,1,0]);
+    const e1x=c1[0], e1y=c1[1], e1z=c1[2];
+    const e2={x:nyv*e1z-nzv*e1y, y:nzv*e1x-nxv*e1z, z:nxv*e1y-nyv*e1x};
+    const relx=V.x, rely=V.y-0.08, relz=V.z;                    // home relative to orbit centre
+    const proj1=relx*e1x+rely*e1y+relz*e1z;
+    const proj2=relx*e2.x+rely*e2.y+relz*e2.z;
+    orbiters.push({
+      p, hx:V.x, hy:V.y, hz:V.z,
+      R:1.75+rnd()*0.62,
+      w:(rnd()<0.5?-1:1)*(0.45+rnd()*0.55),
+      ang0:Math.atan2(proj2,proj1),
+      e1:[e1x,e1y,e1z], e2:[e2.x,e2.y,e2.z],
+      t:0, life:3.5+rnd()*3, ret:-1,
+      hist:[]
+    });
+  }
+}
+/* cross-product helper */
+function cross3(a,b){
+  return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+}
+function updateOrbiters(dt){
+  for(let i=orbiters.length-1;i>=0;i--){
+    const o=orbiters[i];
+    o.t+=dt;
+    let tx,ty,tz;
+    if(o.ret<0 && o.t>o.life){                 // leave the track exactly where it orbits
+      const ang=o.ang0+o.w*o.t, ca=Math.cos(ang), sa2=Math.sin(ang);
+      o.ex=(o.e1[0]*ca+o.e2[0]*sa2)*o.R;
+      o.ey=(o.e1[1]*ca+o.e2[1]*sa2)*o.R+0.08;
+      o.ez=(o.e1[2]*ca+o.e2[2]*sa2)*o.R;
+      o.ret=0;
+    }
+    if(o.ret<0){
+      const b=smooth(o.t/0.9);                                  // glide onto the track
+      const ang=o.ang0+o.w*o.t, ca=Math.cos(ang), sa2=Math.sin(ang);
+      tx=lerp(o.hx,(o.e1[0]*ca+o.e2[0]*sa2)*o.R,b);
+      ty=lerp(o.hy,(o.e1[1]*ca+o.e2[1]*sa2)*o.R+0.08,b)+bobY;
+      tz=lerp(o.hz,(o.e1[2]*ca+o.e2[2]*sa2)*o.R,b);
+    }else{
+      o.ret+=dt;
+      const b=easeOutBack(clamp(o.ret/1.15,0,1));
+      worldHome(o.p,V2);
+      tx=lerp(o.ex,V2.x,b);
+      ty=lerp(o.ey,V2.y,b);
+      tz=lerp(o.ez,V2.z,b);
+      if(o.ret>=1.15){
+        o.p.hidden=false;
+        orbiters.splice(i,1);
+        continue;
+      }
+    }
+    o.wx=tx; o.wy=ty; o.wz=tz;
+  }
+}
+
+
+/* ============================================================
+   Update
+============================================================ */
+function update(dt){
+  simT+=dt; stT+=dt;
+  bobY=0.028*Math.sin(simT*0.6);
+
+  switch(state){
+    case "idle":   omegaT=hovered?OMEGA_LO:OMEGA_HI; break;
+    case "engage": omegaT=OMEGA_LO; break;
+    case "burst":  omegaT=0; break;
+    case "reform": omegaT=stT>REFORM_T*0.55+STAG_MAX*0.4 ? OMEGA_LO : 0; break;
+  }
+  omega+=(omegaT-omega)*clamp(dt*2.2,0,1);
+  if(state!=="burst") yaw=(yaw+omega*dt)%TAU;
+  cw=Math.cos(yaw); sw=Math.sin(yaw);
+
+  switch(state){
+    case "engage":
+      if(stT>ENGAGE_T) startBurst();
+      break;
+    case "burst":
+      integ=lerp(integ,0.22,clamp(dt*2.4,0,1));
+      if(stT>BURST_T){ snapshotReform(); state="reform"; stT=0; }
+      break;
+    case "reform":
+      {
+        const prog=clamp(stT/(REFORM_T+STAG_MAX),0,1);
+        integ=lerp(integ,0.22+0.78*prog,clamp(dt*3,0,1));
+        if(stT>REFORM_T+STAG_MAX){ spawnOrbiters(); state="idle"; stT=0; integ=1; }
+      }
+      break;
+    default:
+      if(state==="idle"){
+        integ=lerp(integ,1,clamp(dt*4,0,1));
+      }
+  }
+
+  updateOrbiters(dt);
+}
+
+/* ============================================================
+   Render
+============================================================ */
+function drawPool(){
+  const a=integ*0.34;
+  if(a<=0.01) return;
+  const pr=project(0,-0.92,0);
+  const rx=S*1.6*pr.p, ry=rx*0.3;
+  const g=ctx.createRadialGradient(pr.x,pr.y,0,pr.x,pr.y,rx);
+  g.addColorStop(0,`rgba(150,26,20,${a})`);
+  g.addColorStop(0.55,`rgba(110,20,18,${a*0.45})`);
+  g.addColorStop(1,"rgba(0,0,0,0)");
+  ctx.save();
+  ctx.translate(pr.x,pr.y); ctx.scale(1,ry/rx); ctx.translate(-pr.x,-pr.y);
+  ctx.fillStyle=g;
+  ctx.beginPath(); ctx.arc(pr.x,pr.y,rx,0,TAU); ctx.fill();
+  ctx.restore();
+}
+
+function drawDust(){
+  ctx.globalCompositeOperation="lighter";
+  for(const d of dust){
+    const yy=((d.y - simT*d.sp)%1+1)%1;
+    const px=d.x*W;
+    const py=H-40-yy*(H-120);
+    ctx.globalAlpha=(0.05+0.09*Math.max(0,Math.sin(simT*d.tw+d.ph)))*d.z;
+    const sz=1.1+d.z*2.2;
+    ctx.drawImage(SPR.dust, px-sz, py-sz, sz*2, sz*2);
+  }
+  ctx.globalAlpha=1;
+  ctx.globalCompositeOperation="source-over";
+}
+
+function render(){
+  ctx.globalCompositeOperation="source-over";
+  ctx.clearRect(0,0,W,H);
+
+  drawDust();
+  drawPool();
+
+  ctx.globalCompositeOperation="lighter";
+
+  /* -- ember trails ------------------------------------------------ */
+  for(const o of orbiters){
+    const pr=project(o.wx,o.wy,o.wz);
+    o.hist.unshift({x:pr.x,y:pr.y});
+    if(o.hist.length>15) o.hist.pop();
+    for(let k=1;k<o.hist.length;k++){
+      const q=o.hist[k], f=1-k/o.hist.length;
+      ctx.globalAlpha=0.11*f*f;
+      const sz=(2.4+k*0.22)*pr.p;
+      ctx.drawImage(SPR.hot, q.x-sz, q.y-sz, sz*2, sz*2);
+    }
+  }
+
+  /* -- the hat ------------------------------------------------------ */
+  const burst=state==="burst", reform=state==="reform", T=stT;
+  for(const p of particles){
+    if(p.hidden) continue;
+
+    let wx,wy,wz, glow=1;
+    if(burst){
+      emberPos(p,T,V);
+      wx=V.x; wy=V.y; wz=V.z;
+      glow=(1-0.22*smooth(T/BURST_T))*(1+0.45*Math.exp(-T*3));
+    }else if(reform){
+      const tt=clamp((T-p.stag)/REFORM_T,0,1);
+      const e=easeOutBack(tt);
+      worldHome(p,V2);
+      wx=lerp(p.ex,V2.x,e);
+      wy=lerp(p.ey,V2.y,e);
+      wz=lerp(p.ez,V2.z,e);
+      glow=tt>=1?1:0.96;
+    }else{
+      worldHome(p,V);
+      wx=V.x; wy=V.y; wz=V.z;
+    }
+
+    const pr=project(wx,wy,wz);
+
+    /* shading: fixed model-space light rotated with the hat */
+    const nwx=p.nx*cw+p.nz*sw, nwz=-p.nx*sw+p.nz*cw;
+    const diff=Math.max(0, nwx*LX+p.ny*LY+nwz*LZ);
+    const dn=clamp((pr.zv+1.15)/2.3,0,1);          // depth cue: near = bright
+    let shade=(0.36+0.64*diff)*(0.3+0.7*dn);
+
+    const fl=burst||reform
+      ? 0.8+0.28*Math.sin(simT*p.tw*2.2+p.ph)
+      : 0.87+0.13*Math.sin(simT*p.tw+p.ph);
+
+    let spr=p.spr, boost=1;
+    if(burst&&T<1.15&&p.hot){ spr=SPR.hot; boost=1.35; }   // white-hot flash
+
+    const a=p.baseA*p.lum*shade*fl*glow*boost;
+    if(a<=0.008) continue;
+    ctx.globalAlpha=clamp(a,0,1);
+
+    const sz=p.rad*2*S*pr.p*(0.85+0.3*dn);
+    ctx.drawImage(spr, pr.x-sz/2, pr.y-sz/2, sz, sz);
+  }
+
+  ctx.globalAlpha=1;
+  ctx.globalCompositeOperation="source-over";
+}
+
+/* ============================================================
+   Reduced-motion mode — static frame, brightness-only feedback
+============================================================ */
+let mql=window.matchMedia("(prefers-reduced-motion: reduce)");
+let RM=mql.matches, staticBoost=1;
+
+function drawPoolStatic(){
+  const pr=project(0,-0.92,0);
+  const rx=S*1.6*pr.p, ry=rx*0.3;
+  const g=ctx.createRadialGradient(pr.x,pr.y,0,pr.x,pr.y,rx);
+  g.addColorStop(0,"rgba(150,26,20,0.3)");
+  g.addColorStop(1,"rgba(0,0,0,0)");
+  ctx.save();
+  ctx.translate(pr.x,pr.y); ctx.scale(1,ry/rx); ctx.translate(-pr.x,-pr.y);
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(pr.x,pr.y,rx,0,TAU); ctx.fill();
+  ctx.restore();
+}
+function drawDustStatic(){
+  ctx.globalCompositeOperation="lighter";
+  for(const d of dust){
+    ctx.globalAlpha=(0.05+0.08*d.z)*staticBoost;
+    const sz=1.2+d.z*2.2;
+    ctx.drawImage(SPR.dust, d.x*W-sz, d.y*(H-120)-sz, sz*2, sz*2);
+  }
+  ctx.globalAlpha=1;
+  ctx.globalCompositeOperation="source-over";
+}
+function renderStatic(){
+  yaw=0.7; cw=Math.cos(yaw); sw=Math.sin(yaw); bobY=0;
+  ctx.globalCompositeOperation="source-over";
+  ctx.clearRect(0,0,W,H);
+  drawDustStatic();
+  drawPoolStatic();
+  ctx.globalCompositeOperation="lighter";
+  for(const p of particles){
+    worldHome(p,V);
+    const pr=project(V.x,V.y,V.z);
+    const nwx=p.nx*cw+p.nz*sw, nwz=-p.nx*sw+p.nz*cw;
+    const diff=Math.max(0,nwx*LX+p.ny*LY+nwz*LZ);
+    const shade=(0.36+0.64*diff)*(0.3+0.7*clamp((pr.zv+1.15)/2.3,0,1));
+    const a=clamp(p.baseA*p.lum*shade*staticBoost,0,1);
+    ctx.globalAlpha=a;
+    const sz=p.rad*2*S*pr.p;
+    ctx.drawImage(p.spr, pr.x-sz/2, pr.y-sz/2, sz, sz);
+  }
+  ctx.globalAlpha=1;
+  ctx.globalCompositeOperation="source-over";
+}
+
+/* ============================================================
+   Main loop / boot
+============================================================ */
+let last=performance.now(), running=false;
+function frame(now){
+  if(RM){ running=false; return; }
+  const dt=Math.min(0.05,(now-last)/1000);
+  last=now;
+  update(dt);
+  render();
+  requestAnimationFrame(frame);
+}
+function startLoop(){
+  if(!running&&!RM){ running=true; last=performance.now(); requestAnimationFrame(frame); }
+}
+
+resize();
+
+/* ---- interaction --------------------------------------------------- */
+function beginSequence(){
+  hintEl.classList.add("used");
+  hintEl.innerHTML="&hellip;and it always comes home";
+  if(state!=="idle"||orbiters.length||simT<cooldownUntil) return;
+  state="engage"; stT=0;
+}
+canvas.addEventListener("pointerenter",()=>{
+  hovered=true;
+  if(RM){ staticBoost=1.35; renderStatic(); } else beginSequence();
+});
+canvas.addEventListener("pointerleave",()=>{
+  hovered=false;
+  if(RM){ staticBoost=1; renderStatic(); }
+});
+canvas.addEventListener("pointerdown",()=>{
+  if(RM){
+    staticBoost=1.35; renderStatic();
+    setTimeout(()=>{ staticBoost=1; renderStatic(); },900);
+  } else beginSequence();
+});
+
+document.addEventListener("visibilitychange",()=>{ if(!document.hidden) last=performance.now(); });
+
+function onMQ(e){
+  RM=e.matches;
+  if(!RM){ startLoop(); }
+  else{
+    running=false;
+    orbiters.length=0;
+    state="idle"; hovered=false; staticBoost=1;
+    for(const p of particles) p.hidden=false;
+    renderStatic();
+  }
+}
+if(mql.addEventListener) mql.addEventListener("change",onMQ);
+else if(mql.addListener) mql.addListener(onMQ);
+
+/* go */
+if(RM) renderStatic(); else startLoop();
+
+})();
+</script>
+</body>
+</html>
