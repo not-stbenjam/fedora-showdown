@@ -1,0 +1,598 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>fedora — a hat made of light</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;
+    min-height:100svh;
+    display:grid;
+    place-items:center;
+    overflow:hidden;
+    color:#eef0f6;
+    background-color:#07080b;
+    background-image:
+      radial-gradient(80% 52% at 50% -14%, rgba(118,152,214,.20) 0%, rgba(118,152,214,0) 62%),
+      radial-gradient(60% 45% at 50% 104%, rgba(255,86,42,.13) 0%, rgba(255,86,42,0) 70%),
+      linear-gradient(180deg,#10131c 0%,#0a0c12 46%,#06070a 100%);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    padding:clamp(14px,4vh,44px) clamp(14px,5vw,44px);
+  }
+  body::after{ /* vignette */
+    content:"";position:fixed;inset:0;pointer-events:none;
+    background:radial-gradient(120% 100% at 50% 42%, rgba(0,0,0,0) 42%, rgba(0,0,0,.58) 100%);
+  }
+
+  .hero{display:grid;justify-items:center;gap:clamp(12px,3.2vh,28px);width:100%;max-width:840px;position:relative;z-index:1;margin:0}
+
+  .scene{
+    position:relative;
+    width:min(88vw,58svh,560px);
+    aspect-ratio:1/1;
+    outline:none;
+    -webkit-tap-highlight-color:transparent;
+    touch-action:manipulation;
+    cursor:pointer;
+  }
+  .ring{position:absolute;inset:-7%;border:1px solid rgba(255,255,255,.20);border-radius:50%;
+        opacity:0;transition:opacity .25s ease;pointer-events:none}
+  .scene:focus-visible .ring{opacity:1}
+
+  .floor{ /* soft contact shadow */
+    position:absolute;left:50%;top:79%;width:56%;height:7%;
+    transform:translate(-50%,-50%) scaleX(var(--fscale,1));
+    background:radial-gradient(ellipse at center, rgba(0,0,0,.78) 0%, rgba(0,0,0,.38) 45%, rgba(0,0,0,0) 72%);
+    filter:blur(15px);opacity:var(--fop,1);pointer-events:none;
+  }
+  .bloom{ /* ambient swell while the hat is apart */
+    position:absolute;left:50%;top:47%;width:96%;height:96%;transform:translate(-50%,-50%);
+    background:radial-gradient(circle at 50% 50%, rgba(255,112,52,.28) 0%, rgba(255,80,30,.10) 34%, rgba(255,80,30,0) 68%);
+    filter:blur(20px);opacity:var(--bop,.25);pointer-events:none;
+  }
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+  .hint{
+    position:absolute;left:50%;bottom:-1%;transform:translateX(-50%);
+    font-size:10px;letter-spacing:.34em;text-transform:uppercase;white-space:nowrap;
+    color:rgba(226,230,245,.45);pointer-events:none;
+    animation:pulse 3.6s ease-in-out infinite;transition:opacity .9s ease;
+  }
+  @keyframes pulse{0%,100%{opacity:.32}50%{opacity:.85}}
+  .scene.touched .hint{opacity:0;animation:none}
+
+  .cap{text-align:center;display:grid;gap:9px}
+  .mark{font-size:clamp(15px,2.4vw,20px);letter-spacing:.52em;text-transform:uppercase;
+        color:#e9ecf5;font-weight:600;text-indent:.52em;text-shadow:0 0 26px rgba(255,110,60,.22)}
+  .sub{font-size:clamp(11.5px,1.5vw,13.5px);letter-spacing:.045em;line-height:1.7;
+       color:rgba(150,157,177,.95);max-width:48ch;margin:0}
+  .sub b{color:rgba(216,222,238,.96);font-weight:600}
+
+  .nogl{display:none;font-size:13px;color:#98a0b4;text-align:center;padding:16px}
+  body.failed .nogl{display:block}
+  body.failed .scene{display:none}
+
+  @media (max-height:600px){ .scene{width:min(70vw,40svh,400px)} }
+  @media (prefers-reduced-motion:reduce){ .hint{animation:none;opacity:.6} }
+</style>
+</head>
+<body>
+  <figure class="hero">
+    <div class="scene" id="stage" tabindex="0" role="img"
+         aria-label="A fedora hat built from thousands of glowing points of light, turning slowly in the dark. Hovering, tapping or pressing space dissolves it into embers that drift apart and re-form the hat.">
+      <div class="bloom" id="bloom"></div>
+      <div class="floor" id="floor"></div>
+      <canvas id="cv"></canvas>
+      <div class="ring"></div>
+      <span class="hint" id="hint">hover &nbsp;·&nbsp; tap</span>
+    </div>
+
+    <figcaption class="cap">
+      <span class="mark">fedora</span>
+      <p class="sub" id="sub"><b>A hat made of light.</b> Nudge it — it comes apart into embers, drifts a while, then remembers its shape.</p>
+    </figcaption>
+
+    <p class="nogl">This browser could not open a WebGL context, so the hat is resting.</p>
+  </figure>
+
+<script>
+(function(){
+"use strict";
+
+/* ════════════════ small math ════════════════ */
+var TAU = Math.PI*2;
+function clamp(x,a,b){ a=(a===undefined)?0:a; b=(b===undefined)?1:b; return x<a?a:(x>b?b:x); }
+function lerp(a,b,t){ return a+(b-a)*t; }
+function ss(e0,e1,x){ var t=clamp((x-e0)/(e1-e0)); return t*t*(3-2*t); }
+function gauss(a,w){ return Math.exp(-(a*a)/(2*w*w)); }
+function angDiff(a,b){ var d=(a-b)%TAU; if(d>Math.PI)d-=TAU; if(d<-Math.PI)d+=TAU; return d; }
+function sub(a,b){ return [a[0]-b[0],a[1]-b[1],a[2]-b[2]]; }
+function cross(a,b){ return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]; }
+function dot(a,b){ return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
+function norm(a){ var l=Math.hypot(a[0],a[1],a[2])||1; return [a[0]/l,a[1]/l,a[2]/l]; }
+function rs(){ return Math.random()*2-1; }
+function lerp2(a,b,t){ return [lerp(a[0],b[0],t), lerp(a[1],b[1],t), lerp(a[2],b[2],t)]; }
+function shade(c,k){ return [c[0]*k,c[1]*k,c[2]*k]; }
+function jitter(c){ return shade(c, 0.88+Math.random()*0.26); }
+
+/* ════════════════ the hat ════════════════
+   y is up, the front of the hat faces +z. Every surface is a stratified
+   2-D grid sample, so the point cloud reads as an even woven surface. */
+var R_IN = 0.60, R_OUT = 1.00, CH = 0.62;
+function brimS(r){ return (r-R_IN)/(R_OUT-R_IN); }
+function brimY(th,r){ var s=brimS(r);
+  return 0.012 + 0.100*s*s*s - 0.062*Math.cos(th)*s*s*(0.35+0.65*s); }
+function brimT(r){ return 0.052 - 0.019*brimS(r); }
+
+function crownPoint(t,th){
+  var r = lerp(0.604, 0.452, Math.pow(t,1.12));
+  var up = ss(0.42,1.0,t);
+  var dent =
+      -0.086*gauss(angDiff(th, 0.66),0.33)*up
+      -0.086*gauss(angDiff(th,-0.66),0.33)*up
+      -0.052*gauss(angDiff(th, Math.PI),0.46)*ss(0.55,1.0,t);
+  var y = lerp(0.020, CH, t) + dent;
+  r += dent*0.42;
+  return [Math.sin(th)*r, y, Math.cos(th)*r];
+}
+
+var RED=[0.815,0.075,0.062], REDHI=[0.930,0.170,0.095],
+    DARK=[0.230,0.045,0.055], BAND=[0.245,0.225,0.250];
+var BAND_T = 0.205;   /* how far up the crown the hat band reaches */
+
+var parts = [];
+function radialHint(p){ var l=Math.hypot(p[0],p[2])||1; return [p[0]/l,0,p[2]/l]; }
+
+function addSurf(n, sampler, colorFn, hintFn){
+  var cols = Math.max(8, Math.round(Math.sqrt(n*1.7)));
+  var rows = Math.ceil(n/cols), made = 0, e = 0.0022;
+  for(var j=0;j<rows && made<n;j++){
+    for(var i=0;i<cols && made<n;i++,made++){
+      var u=(i+Math.random())/cols, v=(j+Math.random())/rows;
+      var p = sampler(u,v);
+      var pu = sampler(u+e, v);
+      var v2 = (v+e<=1) ? v+e : v-e;
+      var pv = sampler(u, v2);
+      var N = norm(cross(sub(pu,p), sub(pv,p)));
+      if(dot(N, hintFn(p,u,v)) < 0) N=[-N[0],-N[1],-N[2]];
+      parts.push({p:p, n:N, c:colorFn(p,u,v)});
+    }
+  }
+}
+
+/* brim — top */
+addSurf(3500, function(u,v){
+  var th=u*TAU, r=Math.sqrt(lerp(R_IN*R_IN, R_OUT*R_OUT, v));
+  return [Math.sin(th)*r, brimY(th,r), Math.cos(th)*r];
+}, function(p,u,v){
+  return jitter(lerp2(shade(RED,0.94), shade(REDHI,1.06), v*0.55));
+}, function(){ return [0,1,0]; });
+
+/* brim — underside */
+addSurf(1300, function(u,v){
+  var th=u*TAU, r=Math.sqrt(lerp(R_IN*R_IN, R_OUT*R_OUT, v));
+  return [Math.sin(th)*r, brimY(th,r)-brimT(r), Math.cos(th)*r];
+}, function(){ return jitter(DARK); }, function(){ return [0,-1,0]; });
+
+/* brim — rolled edge */
+addSurf(900, function(u,v){
+  var th=u*TAU, r=R_OUT+0.020*Math.pow(Math.sin(Math.PI*v),0.7);
+  var y = brimY(th,R_OUT)+0.004 - v*(brimT(R_OUT)+0.008);
+  return [Math.sin(th)*r, y, Math.cos(th)*r];
+}, function(p,u,v){ return jitter(v<0.5 ? shade(REDHI,0.95) : shade(DARK,1.7)); }, radialHint);
+
+/* crown side (above the band) */
+addSurf(3100, function(u,v){ return crownPoint(lerp(BAND_T+0.005,1.0,v), u*TAU); },
+  function(p,u,v){ var t=lerp(BAND_T+0.005,1.0,v);
+    return jitter(lerp2(shade(RED,0.86), shade(REDHI,1.06), t*t)); }, radialHint);
+
+/* crown top, with the centre crease */
+addSurf(1350, function(u,v){
+  var th=u*TAU, rim=crownPoint(1,th), q=Math.sqrt(v);
+  var x=rim[0]*q, z=rim[2]*q;
+  var crease = -0.062*gauss(x,0.145)*(1-Math.pow(q,3)*0.8);
+  return [x, rim[1]+0.006+crease-0.030*q*q, z];
+}, function(p,u,v){
+  return jitter(lerp2(shade(REDHI,1.0), shade(RED,0.60), clamp((0.665-p[1])/0.10)));
+}, function(){ return [0,1,0]; });
+
+/* hat band */
+addSurf(1150, function(u,v){
+  var th=u*TAU, p=crownPoint(BAND_T*v, th), h=radialHint(p);
+  return [p[0]+h[0]*0.019, p[1], p[2]+h[2]*0.019];
+}, function(p,u,v){ return jitter(shade(BAND, 1.15+0.75*Math.sin(v*3.1416))); }, radialHint);
+
+/* band bow, left side */
+(function addBow(n){
+  var th=-Math.PI*0.5, cx=Math.sin(th)*0.635, cz=Math.cos(th)*0.635;
+  var loops=[ {c:[cx,0.115,cz], s:[0.050,0.060,0.030], k:0.35},
+              {c:[cx,0.035,cz], s:[0.050,0.060,0.030], k:0.35},
+              {c:[cx*1.02,0.075,cz*1.02], s:[0.030,0.030,0.026], k:0.30} ];
+  for(var L=0;L<loops.length;L++){
+    var lp=loops[L], count=Math.round(n*lp.k);
+    for(var i=0;i<count;i++){
+      var y=1-2*(i+0.5)/count, rr=Math.sqrt(Math.max(0,1-y*y)), phi=i*2.39996323;
+      var d=[Math.cos(phi)*rr, y, Math.sin(phi)*rr];
+      parts.push({
+        p:[lp.c[0]+d[0]*lp.s[0], lp.c[1]+d[1]*lp.s[1], lp.c[2]+d[2]*lp.s[2]],
+        n:norm([d[0]/lp.s[0], d[1]/lp.s[1], d[2]/lp.s[2]]),
+        c:jitter(shade(BAND,1.4))
+      });
+    }
+  }
+})(300);
+
+/* squash front-to-back for a teardrop silhouette */
+for(var i0=0;i0<parts.length;i0++){
+  parts[i0].p[2] *= 0.93; parts[i0].n[2] *= 0.93; parts[i0].n = norm(parts[i0].n);
+}
+var N_MAIN = parts.length;
+
+/* a few embers that stay behind and orbit, each with a faint trail */
+var N_ORB = 16, TRAIL = 14, N_ORB_TOT = N_ORB*TRAIL;
+var orbs = [];
+for(var o0=0;o0<N_ORB;o0++){
+  orbs.push({ rad:1.02+Math.random()*0.30, phase:Math.random()*TAU,
+              speed:(0.34+Math.random()*0.46)*(Math.random()<0.5?-1:1),
+              tiltX:rs()*0.55, tiltZ:rs()*0.45, yb:rs()*0.18,
+              wob:0.06+Math.random()*0.13, rand:Math.random() });
+}
+
+/* ════════════════ vertex data ════════════════
+   a0 = base.xyz, speed rand   a1 = normal.xyz, stagger delay
+   a2 = colour.rgb, trail t    a3 = emission dir.xyz, isOrbiter */
+var STRIDE = 16, TOTAL = N_MAIN + N_ORB_TOT;
+var DATA = new Float32Array(TOTAL*STRIDE);
+for(var i1=0;i1<N_MAIN;i1++){
+  var P = parts[i1], off = i1*STRIDE;
+  var d = norm([ P.n[0]*1.15 + rs()*0.55,
+                 P.n[1]*1.15 + rs()*0.55 + 0.18,
+                 P.n[2]*1.15 + rs()*0.55 ]);
+  DATA[off+0]=P.p[0]; DATA[off+1]=P.p[1]; DATA[off+2]=P.p[2]; DATA[off+3]=Math.random();
+  DATA[off+4]=P.n[0]; DATA[off+5]=P.n[1]; DATA[off+6]=P.n[2]; DATA[off+7]=Math.random();
+  DATA[off+8]=P.c[0]; DATA[off+9]=P.c[1]; DATA[off+10]=P.c[2]; DATA[off+11]=Math.random();
+  DATA[off+12]=d[0];  DATA[off+13]=d[1];  DATA[off+14]=d[2];   DATA[off+15]=0;
+}
+var orbStart = N_MAIN*STRIDE;
+var orbView  = DATA.subarray(orbStart, orbStart + N_ORB_TOT*STRIDE);
+for(var t1=0;t1<N_ORB_TOT;t1++){
+  var oo = t1*STRIDE;
+  orbView[oo+3] = orbs[(t1/TRAIL)|0].rand;
+  orbView[oo+7] = 0;
+  orbView[oo+11]= (t1%TRAIL)/(TRAIL-1);
+  orbView[oo+15]= 1;
+}
+
+/* ════════════════ webgl ════════════════ */
+var cv = document.getElementById('cv');
+var gl = cv.getContext('webgl', {alpha:true, antialias:true, depth:true, premultipliedAlpha:true,
+                                 preserveDrawingBuffer:false, powerPreference:'high-performance'})
+      || cv.getContext('experimental-webgl', {alpha:true, antialias:true});
+if(!gl){ document.body.classList.add('failed'); return; }
+
+var VS = [
+'precision highp float;',
+'attribute vec4 a0; attribute vec4 a1; attribute vec4 a2; attribute vec4 a3;',
+'uniform mat4 uP; uniform mat4 uMV; uniform mat3 uNM;',
+'uniform float uTime, uDiss, uSwirl, uOrbit, uPass, uWorld, uScale;',
+'varying vec4 vC;',
+'float sst(vec2 e, float x){ float t = clamp((x-e.x)/(e.y-e.x), 0.0, 1.0); return t*t*(3.0-2.0*t); }',
+'vec3 rotY(vec3 p, float a){ float c = cos(a), s = sin(a); return vec3(c*p.x + s*p.z, p.y, -s*p.x + c*p.z); }',
+'void main(){',
+'  float orb  = a3.w;',
+'  float diss = uDiss;',
+'  float pl   = 0.0;',
+'  vec3  pos  = a0.xyz;',
+'  float nz   = 1.0;',
+'  if(orb > 0.5){',
+'    pos = a0.xyz;',
+'  } else {',
+'    pl = clamp((diss - a1.w*0.42)/0.58, 0.0, 1.0);',
+'    pl = pl*pl*(3.0 - 2.0*pl);',
+'    vec3 N0 = a1.xyz;',
+'    vec3 p  = a0.xyz;',
+'    if(uPass < 0.5) p -= N0*0.009;',
+'    float sp  = 0.35 + a0.w*0.85;',
+'    vec3  off = a3.xyz*(0.40*pl*pow(pl,0.42)*sp);',
+'    off.y *= 0.50;',
+'    off.y += pl*(0.02 + a0.w*0.09) + pl*pl*0.08;',
+'    off += vec3(sin(uTime*1.90 + a2.w*41.0), sin(uTime*1.35 + a2.w*23.0), cos(uTime*1.60 + a2.w*33.0)) * 0.10 * pl * uSwirl;',
+'    off = rotY(off, pl*2.10*(a0.w>0.5?1.0:-1.0) + uTime*0.42*uSwirl);',
+'    pos = p + off*sst(vec2(0.0,0.75), pl);',
+'    nz = (uNM*N0).z;',
+'  }',
+'  vec4 vp = uMV*vec4(pos, 1.0);',
+'  gl_Position = uP*vp;',
+'  vec3 col; float alpha; float sizeMul = 1.0;',
+'  if(orb > 0.5){',
+'    col = mix(vec3(1.0,0.86,0.60), vec3(1.0,0.34,0.08), a2.w*a2.w);',
+'    alpha = uOrbit*(1.0 - a2.w*a2.w*0.92)*(uPass>1.5 ? 0.22 : 0.72);',
+'    sizeMul = (uPass>1.5 ? 3.2 : 1.0)*(1.0 - a2.w*0.55);',
+'  } else {',
+'    vec3 N = uNM*a1.xyz;',
+'    vec3 V = normalize(-vp.xyz);',
+'    vec3 L = normalize(vec3(-0.30, 0.62, 0.72));',
+'    float diff = max(dot(N,L), 0.0);',
+'    float fres = pow(1.0 - min(max(dot(N,V),0.0),1.0), 3.0);',
+'    float spec = pow(max(dot(N, normalize(L+V)), 0.0), 26.0);',
+'    float vis  = sst(vec2(-0.34, 0.10), nz);',
+'    col = a2.xyz*(0.20 + 0.95*pow(diff,1.3) + 0.18*diff)',
+'        + vec3(1.0,0.50,0.24)*fres*0.42',
+'        + vec3(1.0,0.94,0.88)*spec*0.60;',
+'    col = mix(col, vec3(1.0,0.40,0.10)*1.10 + col*0.28, pl*0.58);',
+'    alpha = mix(vis*0.92, 1.0, sst(vec2(0.0,0.28), diss)) * mix(0.90, 1.16, a0.w) * mix(1.0, 0.78, pl);',
+'    if(uPass > 1.5){',
+'      float on = step(a0.w, 0.30 + 0.45*pl);',
+'      alpha *= on*0.10*(0.55 + 0.65*pl);',
+'      sizeMul *= 1.0 + pl*1.35;',
+'    } else if(uPass < 0.5){',
+'      col = (a2.xyz*0.55 + vec3(0.022,0.009,0.018))*(0.16 + 0.84*diff);',
+'      alpha = (1.0 - pl)*0.92*sst(vec2(-0.02, 0.12), nz);',
+'    } else {',
+'      sizeMul *= 1.0 + pl*0.55;',
+'    }',
+'  }',
+'  float mn = (uPass < 0.5) ? 2.2 : ((uPass > 1.5) ? 5.0 : 2.8);',
+'  gl_PointSize = max(mn, clamp(uWorld*uScale/max(0.30, -vp.z)*sizeMul, 0.0, 96.0));',
+'  vC = vec4(col, alpha);',
+'  if(alpha <= 0.003){ gl_Position = vec4(3.0,3.0,3.0,1.0); gl_PointSize = 0.0; }',
+'}'
+].join('\n');
+
+var FS = [
+'precision highp float;',
+'uniform float uPass;',
+'varying vec4 vC;',
+'void main(){',
+'  vec2 d = gl_PointCoord - vec2(0.5);',
+'  float r = length(d);',
+'  float a = (uPass > 1.5) ? exp(-r*r*11.0)*smoothstep(0.5,0.30,r) : smoothstep(0.50,0.06,r);',
+'  float al = a*vC.a;',
+'  if(al < 0.012) discard;',
+'  gl_FragColor = vec4(vC.rgb*al, al);',
+'}'
+].join('\n');
+
+function mkShader(type, src){
+  var s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)){ console.error(gl.getShaderInfoLog(s)); return null; }
+  return s;
+}
+var vs = mkShader(gl.VERTEX_SHADER, VS), fs = mkShader(gl.FRAGMENT_SHADER, FS);
+if(!vs || !fs){ document.body.classList.add('failed'); return; }
+var prog = gl.createProgram();
+gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog);
+if(!gl.getProgramParameter(prog, gl.LINK_STATUS)){
+  console.error(gl.getProgramInfoLog(prog)); document.body.classList.add('failed'); return;
+}
+gl.useProgram(prog);
+
+var buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, DATA, gl.DYNAMIC_DRAW);
+var A = {};
+['a0','a1','a2','a3'].forEach(function(k, idx){
+  A[k] = gl.getAttribLocation(prog, k);
+  gl.enableVertexAttribArray(A[k]);
+  gl.vertexAttribPointer(A[k], 4, gl.FLOAT, false, STRIDE*4, idx*16);
+});
+var U = {};
+['uP','uMV','uNM','uTime','uDiss','uSwirl','uOrbit','uPass','uWorld','uScale'].forEach(function(k){
+  U[k] = gl.getUniformLocation(prog, k);
+});
+gl.enable(gl.DEPTH_TEST);
+gl.depthFunc(gl.LEQUAL);
+gl.clearColor(0,0,0,0);
+
+/* ════════════════ matrices (column major) ════════════════ */
+function mul(a,b){
+  var o = new Array(16);
+  for(var c=0;c<4;c++) for(var r=0;r<4;r++)
+    o[c*4+r] = a[r]*b[c*4] + a[4+r]*b[c*4+1] + a[8+r]*b[c*4+2] + a[12+r]*b[c*4+3];
+  return o;
+}
+function tr(x,y,z){ return [1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1]; }
+function rotx(a){ var c=Math.cos(a), s=Math.sin(a); return [1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]; }
+function roty(a){ var c=Math.cos(a), s=Math.sin(a); return [c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1]; }
+function persp(fov,asp,n,f){
+  var t = 1/Math.tan(fov/2), nf = 1/(n-f);
+  return [t/asp,0,0,0, 0,t,0,0, 0,0,(f+n)*nf,-1, 0,0,2*f*n*nf,0];
+}
+var M4 = new Float32Array(16), P4 = new Float32Array(16), NM = new Float32Array(9);
+function setNM(m){ NM[0]=m[0];NM[1]=m[1];NM[2]=m[2]; NM[3]=m[4];NM[4]=m[5];NM[5]=m[6]; NM[6]=m[8];NM[7]=m[9];NM[8]=m[10]; }
+
+/* ════════════════ timeline ════════════════ */
+var T_DISS  = [[0,0],[0.40,0],[1.72,1],[2.92,1],[4.32,0],[5.05,0]];
+var T_RATE  = [[0,1],[0.45,0.12],[3.25,0.12],[4.62,1.00],[5.05,1.00]];
+var T_SWIRL = [[0,0],[0.80,0.35],[1.72,1],[3.10,1],[4.30,0.12],[5.05,0]];
+var T_ORBIT = [[0,0],[2.85,0],[3.75,1],[5.05,1]];
+var DUR = 5.05;
+function track(t,k){
+  if(t<=k[0][0]) return k[0][1];
+  for(var i=1;i<k.length;i++){
+    if(t<=k[i][0]){
+      var a=k[i-1], b=k[i], p=(t-a[0])/(b[0]-a[0]);
+      return a[1]+(b[1]-a[1])*p*p*(3-2*p);
+    }
+  }
+  return k[k.length-1][1];
+}
+
+/* ════════════════ state ════════════════ */
+var reduce = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+var reduced = !!(reduce && reduce.matches);
+var angle = 0.52, time = 0, seqT = -1, orbitEver = false, pending = false;
+var S = {diss:0, rate:1, swirl:0, orbit:0};
+var FOV = 30*Math.PI/180, dist = 5.2, uScalePx = 1200, raf = 0, last = 0;
+var stage = document.getElementById('stage'), hint = document.getElementById('hint');
+var floorEl = document.getElementById('floor'), bloomEl = document.getElementById('bloom');
+
+/* ════════════════ sizing ════════════════ */
+var lastW=0, lastH=0, lastD=0;
+function doResize(){
+  var r = cv.getBoundingClientRect();
+  var dpr = Math.min(1.75, window.devicePixelRatio || 1);
+  var w = Math.max(2, Math.round(r.width*dpr)), h = Math.max(2, Math.round(r.height*dpr));
+  cv.width = w; cv.height = h;
+  gl.viewport(0,0,w,h);
+  var pxPerUnit = 0.36*w;
+  dist = clamp((h*0.5)/(Math.tan(FOV/2)*pxPerUnit), 3.8, 12.0);
+  P4.set(persp(FOV, w/h, 0.2, 60));
+  uScalePx = (h*0.5)/Math.tan(FOV/2);
+  lastW = Math.round(r.width); lastH = Math.round(r.height); lastD = Math.round(window.devicePixelRatio||1);
+}
+function checkResize(){
+  var r = cv.getBoundingClientRect();
+  if(Math.round(r.width)!==lastW || Math.round(r.height)!==lastH ||
+     Math.round(window.devicePixelRatio||1)!==lastD) doResize();
+}
+
+/* ════════════════ orbiters ════════════════ */
+function updateOrbits(){
+  if(S.orbit <= 0.002) return;
+  var TS = 0.022;
+  for(var i=0;i<N_ORB;i++){
+    var ob = orbs[i];
+    var cx=Math.cos(ob.tiltX), sx=Math.sin(ob.tiltX), cz=Math.cos(ob.tiltZ), sz=Math.sin(ob.tiltZ);
+    for(var j=0;j<TRAIL;j++){
+      var tt = time - j*TS, a = ob.phase + ob.speed*tt;
+      var x = Math.cos(a)*ob.rad, z = Math.sin(a)*ob.rad*0.92;
+      var y = ob.yb + Math.sin(a*2.0+ob.phase)*ob.wob;
+      var y2 = y*cx - z*sx, z2 = y*sx + z*cx;
+      var o = (i*TRAIL+j)*STRIDE;
+      orbView[o]   = x*cz - y2*sz;
+      orbView[o+1] = x*sz + y2*cz;
+      orbView[o+2] = z2;
+    }
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferSubData(gl.ARRAY_BUFFER, orbStart*4, orbView);
+}
+
+/* ════════════════ draw ════════════════ */
+function draw(){
+  var tilt = reduced ? 0.34 : 0.34 + Math.sin(time*0.43)*0.024;
+  var bob  = reduced ? 0    : Math.sin(time*0.61)*0.017;
+  var mv = mul(mul(mul(tr(0,0,-dist), rotx(tilt)), roty(angle)), tr(0,-0.30+bob,0));
+  M4.set(mv); setNM(mv);
+
+  gl.useProgram(prog);
+  gl.uniformMatrix4fv(U.uP, false, P4);
+  gl.uniformMatrix4fv(U.uMV, false, M4);
+  gl.uniformMatrix3fv(U.uNM, false, NM);
+  gl.uniform1f(U.uTime, time);
+  gl.uniform1f(U.uDiss, S.diss);
+  gl.uniform1f(U.uSwirl, S.swirl);
+  gl.uniform1f(U.uOrbit, S.orbit);
+  gl.uniform1f(U.uScale, uScalePx);
+
+  gl.enable(gl.BLEND);
+  gl.disable(gl.CULL_FACE);
+  gl.depthMask(true);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+  gl.uniform1f(U.uPass, 0); gl.uniform1f(U.uWorld, 0.0080);   /* shaded body */
+  gl.drawArrays(gl.POINTS, 0, TOTAL);
+  gl.uniform1f(U.uPass, 1); gl.uniform1f(U.uWorld, 0.0115);   /* lit points  */
+  gl.drawArrays(gl.POINTS, 0, TOTAL);
+
+  gl.depthMask(false);                                        /* additive halos */
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+  gl.uniform1f(U.uPass, 2); gl.uniform1f(U.uWorld, 0.030);
+  gl.drawArrays(gl.POINTS, 0, TOTAL);
+  gl.depthMask(true);
+
+  var d = S.diss;
+  floorEl.style.setProperty('--fop', (1-d*0.70).toFixed(3));
+  floorEl.style.setProperty('--fscale', (1+d*0.34).toFixed(3));
+  bloomEl.style.setProperty('--bop', (0.22 + d*0.80 + S.orbit*0.07).toFixed(3));
+}
+
+/* ════════════════ interaction ════════════════ */
+function trigger(){
+  if(reduced) return;
+  stage.classList.add('touched');
+  if(seqT < 0){ seqT = 0; orbitEver = true; }
+  else if(S.diss > 0.55){ pending = true; }
+  else { seqT = 0; }
+}
+stage.addEventListener('pointerenter', function(e){ if(e.pointerType !== 'touch') trigger(); });
+stage.addEventListener('pointerdown', trigger);
+stage.addEventListener('keydown', function(e){
+  if(e.key===' ' || e.key==='Enter' || e.key==='Spacebar'){ e.preventDefault(); trigger(); }
+});
+
+function update(dt){
+  if(seqT >= 0){
+    seqT += dt;
+    if(seqT >= DUR){
+      seqT = -1; S.diss = 0; S.swirl = 0; S.rate = 1; S.orbit = 1;
+      if(pending){ pending = false; seqT = 0; }
+    } else {
+      S.diss  = track(seqT, T_DISS);
+      S.rate  = track(seqT, T_RATE);
+      S.swirl = track(seqT, T_SWIRL);
+      S.orbit = track(seqT, T_ORBIT);
+    }
+  } else {
+    S.diss = 0; S.swirl = 0; S.rate = 1; S.orbit = orbitEver ? 1 : 0;
+  }
+  angle += dt*0.62*S.rate;
+  if(angle > TAU) angle -= TAU;
+}
+
+function render(){
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  checkResize();
+  updateOrbits();
+  draw();
+}
+function frame(now){
+  raf = requestAnimationFrame(frame);
+  var dt = Math.min(0.05, (now - last)/1000 || 0.016);
+  last = now; time += dt;
+  update(dt);
+  render();
+}
+function still(){ time = 0; update(0); render(); }
+
+function start(){
+  cancelAnimationFrame(raf); raf = 0;
+  doResize();
+  if(reduced){
+    document.getElementById('sub').innerHTML =
+      '<b>A hat made of light.</b> Motion is reduced, so it simply holds still — and looks good doing it.';
+    hint.textContent = 'motion reduced';
+    still();
+  } else {
+    hint.innerHTML = 'hover &nbsp;·&nbsp; tap';
+    last = performance.now();
+    raf = requestAnimationFrame(frame);
+  }
+}
+
+if(reduce && reduce.addEventListener){
+  reduce.addEventListener('change', function(e){
+    reduced = e.matches;
+    orbitEver = false; pending = false; seqT = -1; S.orbit = 0; S.diss = 0; S.swirl = 0; S.rate = 1;
+    stage.classList.remove('touched');
+    start();
+  });
+}
+document.addEventListener('visibilitychange', function(){
+  if(document.hidden){ cancelAnimationFrame(raf); raf = 0; }
+  else if(!reduced && !raf){ last = performance.now(); raf = requestAnimationFrame(frame); }
+});
+window.addEventListener('resize', function(){ if(reduced) still(); }, {passive:true});
+
+start();
+})();
+</script>
+</body>
+</html>
