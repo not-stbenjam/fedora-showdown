@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#07080b">
+<title>Fedora</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:#07080b;color:#ece8e1;overflow:hidden;
+    font-family:"Red Hat Display","Red Hat Text",Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent;
+  }
+  .bg{position:fixed;inset:0;background:radial-gradient(120% 90% at 50% 30%,#1c1e27 0%,#10111a 45%,#07080b 100%)}
+  #stage{position:fixed;inset:0;outline:none;touch-action:manipulation;user-select:none;-webkit-user-select:none}
+  #stage:focus-visible::after{content:"";position:absolute;inset:14px;border-radius:24px;box-shadow:0 0 0 1px rgba(255,255,255,.16);pointer-events:none}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  .vignette{position:fixed;inset:0;pointer-events:none;background:radial-gradient(90% 90% at 50% 50%,transparent 48%,rgba(0,0,0,.62) 100%)}
+  .caption{
+    position:fixed;left:0;right:0;padding:0 24px;text-align:center;pointer-events:none;
+    bottom:calc(clamp(28px,9vh,84px) + env(safe-area-inset-bottom,0px));
+    animation:rise 1.4s cubic-bezier(.2,.7,.2,1) both;
+  }
+  .caption::before{content:"";display:block;width:34px;height:1px;margin:0 auto 20px;background:linear-gradient(90deg,transparent,rgba(238,0,0,.9),transparent)}
+  .caption h1{margin:0;font-weight:500;font-size:clamp(13px,1.5vw,17px);letter-spacing:.36em;text-indent:.36em;text-transform:uppercase;color:#f4f0ea}
+  .caption p{margin:.75em 0 0;font-size:clamp(12px,1.15vw,14px);letter-spacing:.03em;color:#858a96}
+  @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion:reduce){.caption{animation:none}}
+</style>
+</head>
+<body>
+<div class="bg"></div>
+<main id="stage" tabindex="0" role="button" aria-label="A spinning red fedora. Hover, tap, or press Enter to scatter it into embers.">
+  <canvas id="c" aria-hidden="true"></canvas>
+</main>
+<div class="vignette"></div>
+<div class="caption">
+  <h1>Fedora</h1>
+  <p id="hint">Hover or tap to scatter the embers</p>
+</div>
+<script>
+'use strict';
+/* ---------- helpers ---------- */
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const stage = document.getElementById('stage');
+const hint = document.getElementById('hint');
+const TAU = Math.PI * 2;
+const clamp = (x, a, b) => x < a ? a : x > b ? b : x;
+const easeIO = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+const rnd = (lo, hi) => lo + Math.random() * (hi - lo);
+
+/* ---------- hat geometry (model space, y up, front = +z) ---------- */
+const SEG = 72;            // segments around
+const H = 0.66;            // crown height
+const D = 0.14;            // depth of the centre crease
+const YC = 0.27;           // vertical centre of the hat (for centring on screen)
+const Rc = th => 0.56 + 0.05 * Math.cos(th) ** 2;   // crown base radius (slightly oval)
+const Rb = th => 0.98 + 0.12 * Math.cos(th) ** 2;   // brim outer radius
+
+function crownPt(v, th, rs) {                       // side wall, v 0..1 base->top
+  const c = Math.cos(th), s = Math.sin(th);
+  const pinch = 1 - 0.20 * v * v * Math.max(0, c) ** 3;          // teardrop pinch at the front
+  const r = Rc(th) * (1 - 0.05 * v - 0.13 * v * v) * pinch * rs;
+  return [r * s, v * H - D * c * c * v ** 3, r * c];
+}
+function capPt(rn, th) {                            // crown top, rn 1..0 rim->centre
+  const s = Math.sin(th), top = crownPt(1, th, 1);
+  const r = rn * Math.hypot(top[0], top[2]);
+  return [r * s, H - D * (1 - rn * rn * s * s), r * Math.cos(th)];
+}
+function brimPt(sp, th) {                           // brim, sp 0..1 crown->edge
+  const c = Math.cos(th), s = Math.sin(th);
+  const r = Rc(th) + sp * (Rb(th) - Rc(th));
+  const y = Math.pow(sp, 1.7) * (0.17 * s * s - 0.09 * Math.pow(Math.max(0, c), 1.5) + 0.05 * Math.max(0, -c));
+  return [r * s, y, r * c];
+}
+
+const V = [];                 // model vertices, flat xyz
+const quads = [];             // {i:[a,b,c,d], mat, dbl}
+function addStrip(rows, mats, refs, dbl) {
+  const base = V.length / 3;
+  for (const f of rows) for (let j = 0; j < SEG; j++) { const p = f(j / SEG * TAU); V.push(p[0], p[1], p[2]); }
+  for (let r = 0; r < rows.length - 1; r++) for (let j = 0; j < SEG; j++) {
+    const j1 = (j + 1) % SEG;
+    const a = base + r * SEG + j, b = base + r * SEG + j1, c = base + (r + 1) * SEG + j1, d = base + (r + 1) * SEG + j;
+    quads.push({ i: [a, b, c, d], mat: mats[r], ref: refs[r], dbl });
+  }
+}
+// crown wall: duplicated rows with a radius bump form the raised band and its lips
+const crownRows = [[0, 1], [0.035, 1], [0.035, 1.035], [0.19, 1.035], [0.19, 1], [0.34, 1], [0.5, 1], [0.66, 1], [0.8, 1], [0.91, 1], [1, 1]];
+addStrip(crownRows.map(([v, rs]) => th => crownPt(v, th, rs)),
+  [0, 1, 1, 1, 0, 0, 0, 0, 0, 0], ['r', 'd', 'r', 'u', 'r', 'r', 'r', 'r', 'r', 'r'], false);
+addStrip([1, 0.78, 0.55, 0.3, 0].map(rn => th => capPt(rn, th)), [0, 0, 0, 0], ['u', 'u', 'u', 'u'], false);
+addStrip([0, 0.18, 0.36, 0.54, 0.72, 0.87, 1].map(sp => th => brimPt(sp, th)), [0, 0, 0, 0, 0, 0], ['u', 'u', 'u', 'u', 'u', 'u'], true);
+
+const NV = V.length / 3, NQ = quads.length;
+const QI = new Int32Array(NQ * 4), QN = new Float32Array(NQ * 3), QC = new Float32Array(NQ * 3);
+const QM = new Uint8Array(NQ), QD = new Uint8Array(NQ), QJ = new Float32Array(NQ), QA = new Float32Array(NQ);
+let yTop = -1e9, yBot = 1e9;
+for (let i = 0; i < NV; i++) { yTop = Math.max(yTop, V[3 * i + 1]); yBot = Math.min(yBot, V[3 * i + 1]); }
+quads.forEach((q, k) => {
+  let [a, b, c, d] = q.i;
+  const P = idx => [V[3 * idx], V[3 * idx + 1], V[3 * idx + 2]];
+  let pa = P(a), pb = P(b), pc = P(c), pd = P(d);
+  const e1 = [pc[0] - pa[0], pc[1] - pa[1], pc[2] - pa[2]], e2 = [pd[0] - pb[0], pd[1] - pb[1], pd[2] - pb[2]];
+  let n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+  const len = Math.hypot(n[0], n[1], n[2]) || 1;
+  const cx = (pa[0] + pb[0] + pc[0] + pd[0]) / 4, cy = (pa[1] + pb[1] + pc[1] + pd[1]) / 4, cz = (pa[2] + pb[2] + pc[2] + pd[2]) / 4;
+  const ref = q.ref === 'u' ? [0, 1, 0] : q.ref === 'd' ? [0, -1, 0] : [cx, 0, cz];
+  if (n[0] * ref[0] + n[1] * ref[1] + n[2] * ref[2] < 0) { n = n.map(x => -x); [b, d] = [d, b]; }
+  QI.set([a, b, c, d], k * 4);
+  QN.set([n[0] / len, n[1] / len, n[2] / len], k * 3);
+  QC.set([cx, cy, cz], k * 3);
+  QM[k] = q.mat; QD[k] = q.dbl ? 1 : 0; QJ[k] = rnd(-0.04, 0.04); QA[k] = len / 2;
+});
+/* ---------- camera, lighting, mesh rendering ---------- */
+const CD = 5.2;                                   // camera distance (units)
+const TILT = 0.42;                                // camera looks down at the hat
+const cT = Math.cos(TILT), sT = Math.sin(TILT);
+let vw = 0, vh = 0, unit = 100, cx = 0, cy = 0;   // viewport, px-per-unit, hat centre on screen
+let angle = -0.6, cA = Math.cos(angle), sA = Math.sin(angle);
+
+const TX = new Float32Array(NV), TY = new Float32Array(NV), TZ = new Float32Array(NV);
+const PX = new Float32Array(NV), PY = new Float32Array(NV);
+const QZ = new Float32Array(NQ), QNX = new Float32Array(NQ), QNY = new Float32Array(NQ), QNZ = new Float32Array(NQ);
+const QF = new Uint8Array(NQ), order = new Int32Array(NQ);
+
+const norm = v => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+const KEY = norm([-0.55, 0.72, 0.5]), FILL = norm([0.7, 0.15, 0.35]);
+const HALF = norm([KEY[0], KEY[1], KEY[2] + 1]);              // Blinn half-vector (view dir ~ +z)
+const MATS = [
+  { base: [0.93, 0.06, 0.05], amb: 0.30, kd: 0.76, kf: 0.22, ks: 0.14, shin: 14, spec: [1, 0.72, 0.66] },  // red felt
+  { base: [0.11, 0.10, 0.12], amb: 0.34, kd: 0.66, kf: 0.24, ks: 0.42, shin: 34, spec: [1, 0.92, 0.90] },  // dark satin band
+];
+
+function setAngle(a) { angle = a; cA = Math.cos(a); sA = Math.sin(a); }
+// model -> view (spin about y, then camera tilt about x), hat centred on YC
+function toView(x, y, z, out) {
+  y -= YC;
+  const x1 = x * cA + z * sA, z1 = -x * sA + z * cA;
+  out[0] = x1; out[1] = y * cT - z1 * sT; out[2] = y * sT + z1 * cT;
+}
+const persp = z => unit * CD / (CD - z);          // px per unit at view depth z
+
+function shade(m, nx, ny, nz, under, emis) {
+  const M = MATS[m];
+  let nl = nx * KEY[0] + ny * KEY[1] + nz * KEY[2]; if (nl < 0) nl = 0;
+  let nf = nx * FILL[0] + ny * FILL[1] + nz * FILL[2]; if (nf < 0) nf = 0;
+  let nh = nx * HALF[0] + ny * HALF[1] + nz * HALF[2]; if (nh < 0) nh = 0;
+  const diff = (M.amb + M.kd * nl + M.kf * nf) * (under ? 0.55 : 1);
+  const fres = 0.10 * Math.pow(1 - Math.max(0, nz), 3);        // soft sheen on the silhouette
+  const sp = M.ks * Math.pow(nh, M.shin) + fres;
+  const r = 255 * Math.min(1, M.base[0] * diff + sp * M.spec[0] + emis * 0.35);
+  const g = 255 * Math.min(1, M.base[1] * diff + sp * M.spec[1] + emis * 0.12);
+  const b = 255 * Math.min(1, M.base[2] * diff + sp * M.spec[2] + emis * 0.05);
+  return `rgb(${r | 0},${g | 0},${b | 0})`;
+}
+
+// alpha: overall opacity; front: y of the dissolve front (or null); emis: emissive glow 0..1
+function drawMesh(alpha, front, emis) {
+  if (alpha <= 0.002) return;
+  for (let i = 0; i < NV; i++) {
+    const x = V[3 * i], y = V[3 * i + 1] - YC, z = V[3 * i + 2];
+    const x1 = x * cA + z * sA, z1 = -x * sA + z * cA;
+    const y2 = y * cT - z1 * sT, z2 = y * sT + z1 * cT;
+    TX[i] = x1; TY[i] = y2; TZ[i] = z2;
+    const k = unit * CD / (CD - z2);
+    PX[i] = cx + x1 * k; PY[i] = cy - y2 * k;
+  }
+  let cnt = 0;
+  for (let k = 0; k < NQ; k++) {
+    const a = QI[4 * k], b = QI[4 * k + 1], c = QI[4 * k + 2], d = QI[4 * k + 3];
+    const nx = QN[3 * k], ny = QN[3 * k + 1], nz = QN[3 * k + 2];
+    const n1x = nx * cA + nz * sA, n1z = -nx * sA + nz * cA;
+    let vnx = n1x, vny = ny * cT - n1z * sT, vnz = ny * sT + n1z * cT;
+    const ccx = (TX[a] + TX[b] + TX[c] + TX[d]) * .25, ccy = (TY[a] + TY[b] + TY[c] + TY[d]) * .25, ccz = (TZ[a] + TZ[b] + TZ[c] + TZ[d]) * .25;
+    const facing = vnx * -ccx + vny * -ccy + vnz * (CD - ccz);
+    let under = 0;
+    if (facing < 0) { if (!QD[k]) continue; vnx = -vnx; vny = -vny; vnz = -vnz; under = 1; }
+    QNX[k] = vnx; QNY[k] = vny; QNZ[k] = vnz; QF[k] = under; QZ[k] = ccz;
+    order[cnt++] = k;
+  }
+  const vis = order.subarray(0, cnt);
+  vis.sort((p, q) => QZ[p] - QZ[q]);                          // painter's algorithm, far -> near
+  ctx.globalCompositeOperation = 'source-over';
+  for (let q = 0; q < cnt; q++) {
+    const k = vis[q];
+    let a = alpha;
+    if (front !== null) { a *= clamp((front - (QC[3 * k + 1] + QJ[k])) / 0.06, 0, 1); if (a < 0.01) continue; }
+    ctx.globalAlpha = a;
+    ctx.fillStyle = shade(QM[k], QNX[k], QNY[k], QNZ[k], QF[k], emis);
+    const i0 = QI[4 * k], i1 = QI[4 * k + 1], i2 = QI[4 * k + 2], i3 = QI[4 * k + 3];
+    const mx = (PX[i0] + PX[i1] + PX[i2] + PX[i3]) * .25, my = (PY[i0] + PY[i1] + PY[i2] + PY[i3]) * .25;
+    ctx.beginPath();
+    for (let e = 0; e < 4; e++) {                              // nudge outward 0.6px to hide AA seams
+      const i = QI[4 * k + e];
+      const dx = PX[i] - mx, dy = PY[i] - my, l = Math.hypot(dx, dy) || 1;
+      const px = PX[i] + dx / l * 0.6, py = PY[i] + dy / l * 0.6;
+      e ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+    }
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* ---------- floor: soft light pool + contact shadow ---------- */
+const tmp = [0, 0, 0];
+function drawFloor(vis) {
+  toView(0, yBot - 0.02, 0, tmp);
+  const k = persp(tmp[2]);
+  const fx = cx + tmp[0] * k, fy = cy - tmp[1] * k;
+  const rx = 1.14 * k, ry = rx * sT;                            // brim ellipse foreshortened by the tilt
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.save();
+  ctx.translate(fx, fy); ctx.scale(1, ry / rx);
+  let g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx * 2.6);
+  g.addColorStop(0, 'rgba(255,80,60,0.085)'); g.addColorStop(0.45, 'rgba(255,70,50,0.03)'); g.addColorStop(1, 'rgba(255,70,50,0)');
+  ctx.fillStyle = g; ctx.fillRect(-rx * 2.6, -rx * 2.6, rx * 5.2, rx * 5.2);
+  if (vis > 0.002) {
+    ctx.translate(rx * 0.10, 0);
+    g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+    g.addColorStop(0, `rgba(0,0,0,${(0.66 * vis).toFixed(3)})`);
+    g.addColorStop(0.55, `rgba(0,0,0,${(0.36 * vis).toFixed(3)})`);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(-rx, -rx, rx * 2, rx * 2);
+  }
+  ctx.restore();
+}
+/* ---------- ember sprites ---------- */
+function makeSprite(rgb) {
+  const s = 32, c = document.createElement('canvas'); c.width = c.height = s;
+  const g = c.getContext('2d'), r = s / 2, grad = g.createRadialGradient(r, r, 0, r, r, r);
+  const col = a => `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${a})`;
+  grad.addColorStop(0, 'rgba(255,246,232,1)'); grad.addColorStop(0.16, col(0.95));
+  grad.addColorStop(0.42, col(0.28)); grad.addColorStop(1, col(0));
+  g.fillStyle = grad; g.fillRect(0, 0, s, s);
+  return { img: c, rgb };
+}
+const SPR = [[255, 120, 60], [255, 64, 34], [236, 34, 24], [255, 186, 96], [255, 226, 200]].map(makeSprite);
+const pickSprite = mat => {
+  const r = Math.random();
+  if (mat === 1) return r < 0.7 ? 3 : 4;                          // band: amber embers + rare white sparks
+  return r < 0.42 ? 1 : r < 0.72 ? 2 : r < 0.93 ? 0 : 3;         // felt: red -> orange, a little amber
+};
+
+/* ---------- particles (one cloud sampled over the hat's surface) ---------- */
+const TARGET = 4200;
+let totalArea = 0; for (let k = 0; k < NQ; k++) totalArea += QA[k];
+const seeds = [];
+for (let k = 0; k < NQ; k++) {
+  let n = Math.floor(QA[k] * TARGET / totalArea + Math.random());
+  const a = QI[4 * k], b = QI[4 * k + 1], c = QI[4 * k + 2], d = QI[4 * k + 3];
+  while (n-- > 0) {
+    const u = Math.random(), v = Math.random(), p = [0, 0, 0];
+    for (let e = 0; e < 3; e++) p[e] = (1 - v) * ((1 - u) * V[3 * a + e] + u * V[3 * b + e]) + v * ((1 - u) * V[3 * d + e] + u * V[3 * c + e]);
+    seeds.push({ p, k });
+  }
+}
+const NP = seeds.length;
+const HX = new Float32Array(NP), HY = new Float32Array(NP), HZ = new Float32Array(NP);      // home (on the hat)
+const NXp = new Float32Array(NP), NYp = new Float32Array(NP), NZp = new Float32Array(NP);   // surface normal
+const PXp = new Float32Array(NP), PYp = new Float32Array(NP), PZp = new Float32Array(NP);   // position
+const VX = new Float32Array(NP), VY = new Float32Array(NP), VZ = new Float32Array(NP);      // velocity
+const FX = new Float32Array(NP), FY = new Float32Array(NP), FZ = new Float32Array(NP);      // reform start
+const SX = new Float32Array(NP), SZ = new Float32Array(NP);                                 // reform arc direction
+const REL = new Float32Array(NP), DEL = new Float32Array(NP), ARC = new Float32Array(NP);
+const SEED = new Float32Array(NP), SIZE = new Float32Array(NP), REQ = new Float32Array(NP), YEQ = new Float32Array(NP);
+const SPRI = new Uint8Array(NP), ORB = new Uint8Array(NP), LIVE = new Uint8Array(NP);
+let pStep = 1;                                                    // becomes 2 on slow devices (half the embers)
+const SCX = new Float32Array(NP), SCY = new Float32Array(NP), SCS = new Float32Array(NP), SCZ = new Float32Array(NP), ALP = new Float32Array(NP);
+
+const DISS = 0.6, DRIFT = 2.3, RDUR = 1.15, RDEL = 0.35, REFORM = RDUR + RDEL + 0.3;
+const FT = yTop + 0.1, FB = yBot - 0.1;                          // dissolve front travels FT -> FB
+seeds.forEach((s, i) => {
+  const k = s.k;
+  HX[i] = s.p[0]; HY[i] = s.p[1]; HZ[i] = s.p[2];
+  NXp[i] = QN[3 * k]; NYp[i] = QN[3 * k + 1]; NZp[i] = QN[3 * k + 2];
+  REL[i] = clamp((FT - (HY[i] + QJ[k])) / (FT - FB), 0, 1) * DISS;         // released as the front passes
+  SEED[i] = Math.random(); SIZE[i] = rnd(1.1, 2.6) * (Math.random() < 0.08 ? 1.7 : 1);
+  REQ[i] = rnd(0.95, 1.8); YEQ[i] = rnd(-0.05, 1.05);
+  SPRI[i] = pickSprite(QM[k]);
+});
+
+function releaseParticle(i) {
+  const r = Math.hypot(HX[i], HZ[i]) || 1, spd = 0.45 + 0.6 * SEED[i];
+  PXp[i] = HX[i]; PYp[i] = HY[i]; PZp[i] = HZ[i];
+  VX[i] = NXp[i] * spd - HZ[i] / r * 0.35 + rnd(-.15, .15);
+  VY[i] = NYp[i] * spd + 0.25 + rnd(0, .35);
+  VZ[i] = NZp[i] * spd + HX[i] / r * 0.35 + rnd(-.15, .15);
+  LIVE[i] = 1;
+}
+function driftParticle(i, dt, t) {
+  const x = PXp[i], y = PYp[i], z = PZp[i], s = SEED[i];
+  const r = Math.hypot(x, z) || 1e-3, ux = x / r, uz = z / r;
+  const swirl = 1.9 / (0.5 + r), pull = -1.3 * (r - REQ[i]);
+  const ax = -uz * swirl + pull * ux + 1.4 * Math.sin(2.3 * y + 1.7 * t + s * 6.28);
+  const az = ux * swirl + pull * uz + 1.4 * Math.sin(2.1 * x + 1.3 * t + s * 9.4);
+  const ay = -1.0 * (y - YEQ[i]) + 0.15 + 1.0 * Math.sin(1.9 * z + 1.5 * t + s * 4.7);
+  const damp = Math.exp(-1.8 * dt);
+  VX[i] = (VX[i] + ax * dt) * damp; VY[i] = (VY[i] + ay * dt) * damp; VZ[i] = (VZ[i] + az * dt) * damp;
+  PXp[i] += VX[i] * dt; PYp[i] += VY[i] * dt; PZp[i] += VZ[i] * dt;
+}
+
+/* ---------- a few embers that stay in orbit ---------- */
+const MAX_ORB = 11;
+const orbiters = [];
+function makeOrbiter(i) {
+  ORB[i] = 1;
+  orbiters.push({
+    fx: PXp[i], fy: PYp[i], fz: PZp[i], x: PXp[i], y: PYp[i], z: PZp[i], blend: 0,
+    a: rnd(1.05, 1.55), e: rnd(0.55, 0.95), tilt: rnd(-0.6, 0.6), roll: rnd(0, TAU),
+    w: rnd(0.5, 0.95) * (Math.random() < 0.5 ? -1 : 1), ph: rnd(0, TAU), yc: rnd(0.1, 0.55),
+    rgb: SPR[SPRI[i]].rgb, spr: SPRI[i], size: SIZE[i] * 1.15 + 0.6, seed: SEED[i], trail: [],
+  });
+}
+function updateOrbiters(dt) {
+  for (const o of orbiters) {
+    o.ph += o.w * dt; o.blend = Math.min(1, o.blend + dt / 1.5);
+    const ox = o.a * Math.cos(o.ph), oz = o.a * o.e * Math.sin(o.ph);
+    const cr = Math.cos(o.roll), sr = Math.sin(o.roll), x1 = ox * cr + oz * sr, z1 = -ox * sr + oz * cr;
+    const ct = Math.cos(o.tilt), stt = Math.sin(o.tilt), tx = x1, ty = -z1 * stt + o.yc, tz = z1 * ct;
+    const e = easeIO(o.blend);
+    o.x = o.fx + (tx - o.fx) * e; o.y = o.fy + (ty - o.fy) * e; o.z = o.fz + (tz - o.fz) * e;
+  }
+}
+function drawOrbiters(pass, t) {
+  ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
+  const sc = Math.pow(unit / 320, 0.6);
+  for (const o of orbiters) {
+    toView(o.x, o.y, o.z, tmp);
+    const k = persp(tmp[2]), x = cx + tmp[0] * k, y = cy - tmp[1] * k;
+    if (pass === 0) { o.trail.unshift(x, y); if (o.trail.length > 36) o.trail.length = 36; o.sx = x; o.sy = y; o.sz = tmp[2]; }
+    if ((o.sz < -0.12) !== (pass === 0)) continue;
+    const depth = 0.6 + 0.4 * clamp((tmp[2] + 1.6) / 3.2, 0, 1), flick = 0.82 + 0.18 * Math.sin(t * 7 + o.seed * 40);
+    const tr = o.trail, n = tr.length / 2;
+    for (let j = 1; j < n; j++) {                                // fading trail of light
+      const f = 1 - j / n;
+      ctx.globalAlpha = f * f * 0.5 * depth;
+      ctx.strokeStyle = `rgb(${o.rgb[0]},${o.rgb[1]},${o.rgb[2]})`;
+      ctx.lineWidth = (0.35 + 1.5 * f) * sc;
+      ctx.beginPath(); ctx.moveTo(tr[2 * j - 2], tr[2 * j - 1]); ctx.lineTo(tr[2 * j], tr[2 * j + 1]); ctx.stroke();
+    }
+    const d = o.size * 3.4 * sc * k / unit;
+    ctx.globalAlpha = 0.95 * depth * flick;
+    ctx.drawImage(SPR[o.spr].img, o.sx - d / 2, o.sy - d / 2, d, d);
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* ---------- particle drawing ---------- */
+function projectParticles() {
+  for (let i = 0; i < NP; i += pStep) {
+    if (!LIVE[i] || ORB[i]) continue;
+    toView(PXp[i], PYp[i], PZp[i], tmp);
+    const k = persp(tmp[2]);
+    SCX[i] = cx + tmp[0] * k; SCY[i] = cy - tmp[1] * k; SCS[i] = k / unit; SCZ[i] = tmp[2];
+  }
+}
+function drawParticles(pass, t) {
+  ctx.globalCompositeOperation = 'lighter';
+  const sc = Math.pow(unit / 320, 0.6);
+  for (let i = 0; i < NP; i += pStep) {
+    if (!LIVE[i] || ORB[i] || (SCZ[i] < -0.12) !== (pass === 0)) continue;
+    const a = ALP[i]; if (a <= 0.005) continue;
+    const depth = 0.55 + 0.45 * clamp((SCZ[i] + 1.6) / 3.2, 0, 1);
+    const flick = 0.72 + 0.28 * Math.sin(t * (5 + SEED[i] * 6) + SEED[i] * 60);
+    const d = SIZE[i] * 3.2 * sc * SCS[i];
+    ctx.globalAlpha = a * depth * flick * 0.9;
+    ctx.drawImage(SPR[SPRI[i]].img, SCX[i] - d / 2, SCY[i] - d / 2, d, d);
+  }
+  ctx.globalAlpha = 1;
+}
+/* ---------- state machine ---------- */
+const SPIN_NORMAL = 0.55, SPIN_SLOW = 0.1;
+let state = 'solid', st = 0, tNow = 0, spin = SPIN_NORMAL, spinTarget = SPIN_NORMAL;
+let meshAlpha = 1, front = null, emis = 0, pulse = -1;          // pulse: reduced-motion glow timer
+const mq = matchMedia('(prefers-reduced-motion: reduce)');
+let reduced = mq.matches;
+
+function trigger() {
+  if (reduced) { if (pulse < 0) { pulse = 0; kick(); } return; } // no scatter: a soft, motionless glow instead
+  if (state !== 'solid') return;
+  state = 'dissolve'; st = 0; spinTarget = SPIN_SLOW; LIVE.fill(0);
+}
+function recruitOrbiters() {
+  for (let g = 0; g < 4000 && orbiters.length < MAX_ORB; g++) {
+    const i = (Math.random() * NP) | 0;
+    if (!ORB[i] && LIVE[i] && Math.hypot(PXp[i], PZp[i]) > 1.0) makeOrbiter(i);
+  }
+  for (let i = 0; i < NP; i++) { DEL[i] = rnd(0, RDEL); ARC[i] = rnd(0.08, 0.4); }
+}
+
+function update(dt) {
+  tNow += dt;
+  spin += (spinTarget - spin) * (1 - Math.exp(-dt * 2.2));
+  front = null; emis = 0;
+  if (reduced) {
+    meshAlpha = 1;
+    if (pulse >= 0) { pulse += dt; const p = pulse / 1.8; if (p >= 1) pulse = -1; else emis = Math.pow(Math.sin(Math.PI * p), 1.5) * 0.9; }
+    return;
+  }
+  setAngle(angle + spin * dt);
+  st += dt;
+  if (state === 'dissolve') {
+    front = FT - clamp(st / DISS, 0, 1) * (FT - FB); meshAlpha = 1;
+    for (let i = 0; i < NP; i += pStep) {
+      if (ORB[i]) continue;
+      if (!LIVE[i]) { if (st >= REL[i]) releaseParticle(i); else continue; }
+      driftParticle(i, dt, tNow); ALP[i] = clamp((st - REL[i]) / 0.15, 0, 1);
+    }
+    if (st >= DISS) { state = 'drift'; st = 0; for (let i = 0; i < NP; i += pStep) if (!ORB[i] && !LIVE[i]) releaseParticle(i); }
+  } else if (state === 'drift') {
+    meshAlpha = 0;
+    for (let i = 0; i < NP; i += pStep) if (!ORB[i]) { driftParticle(i, dt, tNow); ALP[i] = clamp((DISS + st - REL[i]) / 0.15, 0, 1); }
+    if (st >= DRIFT) { recruitOrbiters(); state = 'reform'; st = 0; }
+  } else if (state === 'reform') {
+    meshAlpha = clamp((st - RDUR - 0.05) / 0.3, 0, 1);
+    for (let i = 0; i < NP; i += pStep) {
+      if (ORB[i]) continue;
+      if (st < DEL[i]) {                                          // keep drifting until it's this ember's turn
+        driftParticle(i, dt, tNow); FX[i] = PXp[i]; FY[i] = PYp[i]; FZ[i] = PZp[i]; ALP[i] = 1; continue;
+      }
+      const dx = HX[i] - FX[i], dz = HZ[i] - FZ[i], l = Math.hypot(dx, dz) || 1, sg = SEED[i] < 0.5 ? 1 : -1;
+      const e = easeIO(clamp((st - DEL[i]) / RDUR, 0, 1)), w = Math.sin(Math.PI * e) * ARC[i];
+      PXp[i] = FX[i] + dx * e - dz / l * sg * w;                  // curved streams flowing home
+      PYp[i] = FY[i] + (HY[i] - FY[i]) * e + 0.5 * w * (SEED[i] - 0.5);
+      PZp[i] = FZ[i] + dz * e + dx / l * sg * w;
+      ALP[i] = 1 - clamp((st - DEL[i] - RDUR) / 0.25, 0, 1);
+    }
+    if (st >= REFORM) { state = 'solid'; st = 0; spinTarget = SPIN_NORMAL; LIVE.fill(0); }
+  } else meshAlpha = 1;
+  updateOrbiters(dt);
+}
+
+/* ---------- frame ---------- */
+let DPR = 1, raf = 0, last = 0, dtAvg = 1 / 60;
+function drawHalo(a) {
+  if (a <= 0.002) return;
+  toView(0, 0.35, 0, tmp); const k = persp(tmp[2]), hx = cx + tmp[0] * k, hy = cy - tmp[1] * k, r = unit * 1.5;
+  const g = ctx.createRadialGradient(hx, hy, 0, hx, hy, r);
+  g.addColorStop(0, `rgba(255,90,60,${(0.16 * a).toFixed(3)})`); g.addColorStop(0.5, `rgba(255,60,40,${(0.05 * a).toFixed(3)})`); g.addColorStop(1, 'rgba(255,60,40,0)');
+  ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = g; ctx.fillRect(hx - r, hy - r, r * 2, r * 2);
+}
+function render() {
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.clearRect(0, 0, vw, vh);
+  const remain = front === null ? meshAlpha : clamp((front - yBot) / (yTop - yBot), 0, 1);
+  drawFloor(remain);
+  drawHalo(reduced ? emis : (1 - remain) * 0.6);
+  if (!reduced) { projectParticles(); drawParticles(0, tNow); drawOrbiters(0, tNow); }
+  drawMesh(meshAlpha, front, emis);
+  if (!reduced) { drawParticles(1, tNow); drawOrbiters(1, tNow); }
+  ctx.globalCompositeOperation = 'source-over';
+}
+function frame(ts) {
+  raf = 0;
+  const dt = Math.min(0.05, last ? (ts - last) / 1000 : 1 / 60); last = ts;
+  if (state !== 'solid') { dtAvg += (dt - dtAvg) * 0.1; if (dtAvg > 0.03) pStep = 2; }  // struggling? thin the cloud
+  update(dt); render();
+  if (!reduced || pulse >= 0) raf = requestAnimationFrame(frame);
+}
+function kick() { if (!raf && !document.hidden) { last = 0; raf = requestAnimationFrame(frame); } }
+
+function resize() {
+  vw = innerWidth; vh = innerHeight; DPR = Math.min(2, devicePixelRatio || 1);
+  canvas.width = Math.round(vw * DPR); canvas.height = Math.round(vh * DPR);
+  unit = Math.min(vw * 0.36, vh * 0.30); cx = vw / 2; cy = vh * 0.47;
+  for (const o of orbiters) o.trail.length = 0;
+  kick();
+}
+function applyMode() {
+  hint.textContent = reduced ? 'Hover or tap to make it glow' : 'Hover or tap to scatter the embers';
+  state = 'solid'; st = 0; meshAlpha = 1; front = null; pulse = -1;
+  LIVE.fill(0); ORB.fill(0); orbiters.length = 0; spin = spinTarget = SPIN_NORMAL;
+  if (reduced) setAngle(-0.6);
+  kick();
+}
+
+/* ---------- input ---------- */
+let inside = false;
+const hitHat = (x, y) => { const dx = (x - cx) / (unit * 1.3), dy = (y - cy) / (unit * 0.95); return dx * dx + dy * dy <= 1; };
+stage.addEventListener('pointermove', e => {
+  const h = hitHat(e.clientX, e.clientY);
+  stage.style.cursor = h ? 'pointer' : '';
+  if (h && !inside) trigger();
+  inside = h;
+});
+stage.addEventListener('pointerdown', e => { if (hitHat(e.clientX, e.clientY)) trigger(); });
+stage.addEventListener('pointerleave', () => { inside = false; stage.style.cursor = ''; });
+stage.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); trigger(); } });
+const onMq = e => { reduced = e.matches; applyMode(); };
+mq.addEventListener ? mq.addEventListener('change', onMq) : mq.addListener(onMq);
+document.addEventListener('visibilitychange', () => { if (document.hidden) { if (raf) cancelAnimationFrame(raf); raf = 0; } else kick(); });
+addEventListener('resize', resize);
+
+resize();
+applyMode();
+</script>
+</body>
+</html>
