@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fedora Hero</title>
+    <style>
+        :root {
+            --bg: #0f0f12;
+            --fg: #f0f0f0;
+            --accent: #ff2a2a;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: var(--bg);
+            color: var(--fg);
+            font-family: system-ui, -apple-system, sans-serif;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            perspective: 1000px;
+        }
+        #stage {
+            position: relative;
+            width: 100%;
+            height: 50vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            perspective: 1200px;
+        }
+        .logo-container {
+            position: relative;
+            width: 200px;
+            height: 200px;
+            transform-style: preserve-3d;
+            transition: transform 0.3s ease-out;
+        }
+        #fedora-svg {
+            width: 100%;
+            height: 100%;
+            filter: drop-shadow(0 10px 20px rgba(0,0,0,0.6));
+            transition: opacity 0.5s ease;
+        }
+        .caption {
+            position: absolute;
+            bottom: 10%;
+            font-weight: 300;
+            letter-spacing: 0.1em;
+            opacity: 0.8;
+            font-size: 1rem;
+            transition: opacity 0.5s ease;
+        }
+        .canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            mix-blend-mode: screen;
+            z-index: 10;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .logo-container { animation: none !important; }
+            #fedora-svg { transition: none !important; }
+        }
+    </style>
+</head>
+<body>
+    <div id="stage">
+        <div class="logo-container" id="logo">
+            <svg id="fedora-svg" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                    <radialGradient id="g" cx="50%" cy="50%" r="70%">
+                        <stop offset="0%" stop-color="#fff"/>
+                        <stop offset="100%" stop-color="#e00"/>
+                    </radialGradient>
+                </defs>
+                <path d="M10,55 Q15,70 50,70 Q85,70 90,55 L50,55 Z" fill="url(#g)" opacity="0.9"/>
+                <ellipse cx="50" cy="45" rx="30" ry="12" fill="none" stroke="url(#g)" stroke-width="2" opacity="0.8"/>
+                <path d="M20,45 Q50,30 80,45" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" opacity="0.6"/>
+            </svg>
+        </div>
+    </div>
+    <div class="caption">Hover or tap to disperse</div>
+    <canvas class="canvas-container" id="p"></canvas>
+
+    <script>
+        const p = document.getElementById('p');
+        const ctx = p.getContext('2d');
+        const logo = document.getElementById('logo');
+        const svg = document.getElementById('fedora-svg');
+        let W, H;
+        let active = false;
+        let particles = [];
+        let orbiters = [];
+        let t = 0;
+        let angle = 0;
+        let speed = 0.01;
+        const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        function resize() {
+            W = p.width = innerWidth;
+            H = p.height = innerHeight;
+        }
+        addEventListener('resize', resize);
+        resize();
+
+        function getPoints() {
+            if (!svg) return [];
+            const data = svg.toBlob(b => {
+                const img = new Image();
+                img.onload = () => {
+                    const c = document.createElement('canvas');
+                    c.width = 100; c.height = 100;
+                    const cx = c.getContext('2d');
+                    cx.drawImage(img, 0, 0, 100, 100);
+                    const d = cx.getImageData(0, 0, 100, 100).data;
+                    const pts = [];
+                    for (let i = 0; i < d.length; i += 4) {
+                        if (d[i+3] > 100) {
+                            const x = (i / 4) % 100;
+                            const y = Math.floor((i / 4) / 100);
+                            pts.push({x, y, ox: x, oy: y});
+                        }
+                    }
+                    return pts;
+                };
+                img.src = URL.createObjectURL(b);
+            });
+            return [];
+        }
+
+        function createParticles() {
+            const c = document.createElement('canvas');
+            c.width = 200; c.height = 200;
+            const cx = c.getContext('2d');
+            const svgBlob = svg.outerHTML;
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(svgBlob, 'image/svg+xml');
+            const img = new Image();
+            img.onload = () => {
+                cx.drawImage(img, 0, 0);
+                const d = cx.getImageData(0, 0, 200, 200).data;
+                const pts = [];
+                for (let i = 0; i < d.length; i += 4) {
+                    if (d[i+3] > 128) {
+                        pts.push({
+                            x: (i / 4) % 200,
+                            y: Math.floor((i / 4) / 200),
+                            ox: (i / 4) % 200,
+                            oy: Math.floor((i / 4) / 200),
+                            vx: 0, vy: 0
+                        });
+                    }
+                }
+                particles = pts.map(p => ({
+                    x: p.x + Math.random() * 10 - 5,
+                    y: p.y + Math.random() * 10 - 5,
+                    ox: p.ox, oy: p.oy,
+                    vx: (Math.random() - 0.5) * 2,
+                    vy: (Math.random() - 0.5) * 2,
+                    life: 1,
+                    orbit: Math.random() < 0.05
+                }));
+                orbiters = particles.filter(p => p.orbit);
+                svg.style.opacity = 0;
+                active = true;
+            };
+            img.src = 'data:image/svg+xml;base64,' + btoa(svg.outerHTML);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (reduced) return;
+            t += 0.01;
+            if (active && particles.length) {
+                ctx.clearRect(0, 0, W, H);
+                ctx.fillStyle = '#ff4a4a';
+                particles.forEach((p, i) => {
+                    if (p.orbit) {
+                        const ox = W / 2 + Math.cos(t * 0.5 + i) * 100;
+                        const oy = H / 2 + Math.sin(t * 0.5 + i) * 50;
+                        ctx.beginPath();
+                        ctx.arc(ox, oy, 1.5, 0, Math.PI * 2);
+                        ctx.fill();
+                    } else {
+                        const dx = p.ox - p.x;
+                        const dy = p.oy - p.y;
+                        p.vx += dx * 0.001;
+                        p.vy += dy * 0.001;
+                        p.vx *= 0.95;
+                        p.vy *= 0.95;
+                        p.x += p.vx;
+                        p.y += p.vy;
+                        ctx.beginPath();
+                        ctx.arc(p.x + W / 2 - 100, p.y + H / 2 - 100, 1, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                });
+            } else {
+                angle += speed;
+                logo.style.transform = `rotateY(${angle}deg) scale(1.1)`;
+                ctx.clearRect(0, 0, W, H);
+            }
+        }
+
+        if (!reduced) {
+            ['mouseenter', 'touchstart'].forEach(e => {
+                logo.addEventListener(e, () => {
+                    if (!active) createParticles();
+                    speed = 0.001;
+                });
+            });
+            ['mouseleave', 'touchend'].forEach(e => {
+                logo.addEventListener(e, () => {
+                    active = false;
+                    svg.style.opacity = 1;
+                    speed = 0.01;
+                });
+            });
+            animate();
+        }
+    </script>
+</body>
+</html>
