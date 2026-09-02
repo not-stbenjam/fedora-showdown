@@ -1,0 +1,1579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Red Hat Fedora 3D Embers</title>
+  <style>
+    /* Reset & CSS Custom Properties */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg-color: #070709;
+      --card-bg: rgba(18, 18, 22, 0.52);
+      --red-primary: #ee0000;
+      --red-ember: #ff381e;
+      --gold-spark: #ffb833;
+      --text-main: #f2f3f7;
+      --text-muted: #888d9c;
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--bg-color);
+      font-family: var(--font-family);
+      color: var(--text-main);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    /* Scene Container */
+    .hero-scene {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      padding: clamp(1.2rem, 3vh, 2.5rem) clamp(1rem, 3vw, 2.5rem);
+      background:
+        radial-gradient(ellipse 65% 55% at 50% 48%, rgba(220, 20, 30, 0.09) 0%, transparent 72%),
+        radial-gradient(circle at 50% 50%, #111216 0%, #070709 72%, #030304 100%);
+      overflow: hidden;
+    }
+
+    /* Brand Header */
+    .brand-header {
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      max-width: 1100px;
+      pointer-events: auto;
+    }
+
+    .brand-mark {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.65rem;
+      text-decoration: none;
+      color: var(--text-main);
+    }
+
+    .brand-badge {
+      width: 12px;
+      height: 12px;
+      background: linear-gradient(135deg, var(--red-ember), var(--red-primary));
+      border-radius: 2.5px;
+      box-shadow: 0 0 10px rgba(238, 0, 0, 0.5);
+    }
+
+    .brand-title {
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.92);
+    }
+
+    .motion-toggle {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-subtle);
+      border-radius: 20px;
+      padding: 0.35rem 0.75rem;
+      color: var(--text-muted);
+      font-size: 0.72rem;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      cursor: pointer;
+      transition: all 0.25s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+    }
+
+    .motion-toggle:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-main);
+      border-color: rgba(255, 255, 255, 0.16);
+    }
+
+    .motion-toggle.active {
+      background: rgba(238, 0, 0, 0.12);
+      border-color: rgba(238, 0, 0, 0.35);
+      color: #ff8888;
+    }
+
+    /* Central Interactive Stage */
+    .viewport-container {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      cursor: pointer;
+      touch-action: none;
+    }
+
+    canvas#webgl-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* Bottom Caption & Controls */
+    .caption-container {
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.55rem;
+      pointer-events: none;
+      margin-bottom: clamp(0.5rem, 2vh, 1.2rem);
+    }
+
+    .caption-pill {
+      pointer-events: auto;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.65rem;
+      background: var(--card-bg);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid var(--border-subtle);
+      border-radius: 9999px;
+      padding: 0.55rem 1.15rem;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .caption-pill:hover {
+      border-color: rgba(255, 255, 255, 0.2);
+      background: rgba(26, 26, 32, 0.65);
+      transform: translateY(-1px);
+    }
+
+    .status-dot {
+      position: relative;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--red-ember);
+      box-shadow: 0 0 8px var(--red-ember);
+      transition: background 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .status-dot::after {
+      content: "";
+      position: absolute;
+      inset: -3px;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 56, 30, 0.45);
+      animation: pulse-ring 2.2s infinite ease-out;
+    }
+
+    @keyframes pulse-ring {
+      0% { transform: scale(0.7); opacity: 0.9; }
+      100% { transform: scale(2.2); opacity: 0; }
+    }
+
+    .caption-label {
+      font-size: 0.76rem;
+      font-weight: 500;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.88);
+      transition: color 0.3s ease;
+    }
+
+    .caption-subtext {
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
+      color: var(--text-muted);
+      opacity: 0.78;
+      text-align: center;
+    }
+
+    .state-dissolving .status-dot {
+      background: var(--gold-spark);
+      box-shadow: 0 0 12px var(--gold-spark);
+    }
+
+    .state-dissolving .status-dot::after {
+      border-color: rgba(255, 184, 51, 0.6);
+      animation-duration: 0.8s;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .status-dot::after {
+        animation: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="hero-scene">
+    <!-- Brand Header -->
+    <header class="brand-header">
+      <div class="brand-mark">
+        <div class="brand-badge" aria-hidden="true"></div>
+        <span class="brand-title">Red Hat Fedora</span>
+      </div>
+      <button class="motion-toggle" id="motion-toggle" type="button" aria-pressed="false" title="Toggle reduced motion preference">
+        <span aria-hidden="true">✦</span>
+        <span id="motion-text">Reduced Motion</span>
+      </button>
+    </header>
+
+    <!-- 3D WebGL Canvas Layer -->
+    <div class="viewport-container" id="stage" role="region" aria-label="Interactive 3D Fedora Logo">
+      <canvas id="webgl-canvas"></canvas>
+    </div>
+
+    <!-- Small Caption Underneath -->
+    <footer class="caption-container">
+      <div class="caption-pill" id="action-trigger" role="button" tabindex="0" aria-label="Dissolve fedora into embers">
+        <div class="status-dot" id="status-dot" aria-hidden="true"></div>
+        <span class="caption-label" id="caption-text">Hover or tap to dissolve</span>
+      </div>
+      <p class="caption-subtext" id="caption-hint">Smooth 3D · Particle Dissolution · Persistent Embers</p>
+    </footer>
+  </main>
+
+  <script>
+  (function () {
+    'use strict';
+
+    // --- State & Accessibility Setup ---
+    const canvas = document.getElementById('webgl-canvas');
+    const stage = document.getElementById('stage');
+    const actionTrigger = document.getElementById('action-trigger');
+    const captionText = document.getElementById('caption-text');
+    const captionContainer = document.querySelector('.caption-container');
+    const motionToggle = document.getElementById('motion-toggle');
+    const motionText = document.getElementById('motion-text');
+
+    const mqlReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let reducedMotion = mqlReducedMotion.matches;
+
+    function updateMotionUI() {
+      motionToggle.classList.toggle('active', reducedMotion);
+      motionToggle.setAttribute('aria-pressed', reducedMotion ? 'true' : 'false');
+      motionText.textContent = reducedMotion ? 'Reduced Motion: ON' : 'Reduced Motion';
+    }
+    updateMotionUI();
+
+    motionToggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      reducedMotion = !reducedMotion;
+      updateMotionUI();
+    });
+
+    mqlReducedMotion.addEventListener('change', (e) => {
+      reducedMotion = e.matches;
+      updateMotionUI();
+    });
+
+    // --- WebGL Context Initialization ---
+    const gl = canvas.getContext('webgl', {
+      alpha: true,
+      antialias: true,
+      depth: true,
+      powerPreference: 'high-performance'
+    });
+
+    if (!gl) {
+      document.body.innerHTML = '<div style="padding:4rem;color:#eee;text-align:center;">WebGL is required to view this 3D scene.</div>';
+      return;
+    }
+
+    // --- Matrix Math Helpers ---
+    function mat4Create() {
+      return new Float32Array(16);
+    }
+
+    function mat4Identity(out) {
+      for (let i = 0; i < 16; i++) out[i] = (i % 5 === 0) ? 1 : 0;
+      return out;
+    }
+
+    function mat4Perspective(out, fovY, aspect, near, far) {
+      const f = 1.0 / Math.tan(fovY / 2);
+      const nf = 1 / (near - far);
+      out.fill(0);
+      out[0] = f / aspect;
+      out[5] = f;
+      out[10] = (far + near) * nf;
+      out[11] = -1;
+      out[14] = (2 * far * near) * nf;
+      return out;
+    }
+
+    function mat4LookAt(out, eye, center, up) {
+      let z0 = eye[0] - center[0], z1 = eye[1] - center[1], z2 = eye[2] - center[2];
+      let len = Math.hypot(z0, z1, z2) || 1;
+      z0 /= len; z1 /= len; z2 /= len;
+
+      let x0 = up[1] * z2 - up[2] * z1;
+      let x1 = up[2] * z0 - up[0] * z2;
+      let x2 = up[0] * z1 - up[1] * z0;
+      len = Math.hypot(x0, x1, x2) || 1;
+      x0 /= len; x1 /= len; x2 /= len;
+
+      let y0 = z1 * x2 - z2 * x1;
+      let y1 = z2 * x0 - z0 * x2;
+      let y2 = z0 * x1 - z1 * x0;
+
+      out[0] = x0; out[1] = y0; out[2] = z0; out[3] = 0;
+      out[4] = x1; out[5] = y1; out[6] = z1; out[7] = 0;
+      out[8] = x2; out[9] = y2; out[10] = z2; out[11] = 0;
+      out[12] = -(x0 * eye[0] + x1 * eye[1] + x2 * eye[2]);
+      out[13] = -(y0 * eye[0] + y1 * eye[1] + y2 * eye[2]);
+      out[14] = -(z0 * eye[0] + z1 * eye[1] + z2 * eye[2]);
+      out[15] = 1;
+      return out;
+    }
+
+    function mat4Multiply(out, a, b) {
+      for (let r = 0; r < 4; r++) {
+        for (let c = 0; c < 4; c++) {
+          out[c * 4 + r] =
+            a[r] * b[c * 4] +
+            a[4 + r] * b[c * 4 + 1] +
+            a[8 + r] * b[c * 4 + 2] +
+            a[12 + r] * b[c * 4 + 3];
+        }
+      }
+      return out;
+    }
+
+    function mat4RotateX(out, a, rad) {
+      const s = Math.sin(rad), c = Math.cos(rad);
+      const a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+      const a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+      if (out !== a) {
+        out[0] = a[0]; out[1] = a[1]; out[2] = a[2]; out[3] = a[3];
+        out[12] = a[12]; out[13] = a[13]; out[14] = a[14]; out[15] = a[15];
+      }
+      out[4] = a10 * c + a20 * s;
+      out[5] = a11 * c + a21 * s;
+      out[6] = a12 * c + a22 * s;
+      out[7] = a13 * c + a23 * s;
+      out[8] = a20 * c - a10 * s;
+      out[9] = a21 * c - a11 * s;
+      out[10] = a22 * c - a12 * s;
+      out[11] = a23 * c - a13 * s;
+      return out;
+    }
+
+    function mat4RotateY(out, a, rad) {
+      const s = Math.sin(rad), c = Math.cos(rad);
+      const a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+      const a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+      if (out !== a) {
+        out[4] = a[4]; out[5] = a[5]; out[6] = a[6]; out[7] = a[7];
+        out[12] = a[12]; out[13] = a[13]; out[14] = a[14]; out[15] = a[15];
+      }
+      out[0] = a00 * c - a20 * s;
+      out[1] = a01 * c - a21 * s;
+      out[2] = a02 * c - a22 * s;
+      out[3] = a03 * c - a23 * s;
+      out[8] = a00 * s + a20 * c;
+      out[9] = a01 * s + a21 * c;
+      out[10] = a02 * s + a22 * c;
+      out[11] = a03 * s + a23 * c;
+      return out;
+    }
+
+    function mat4RotateZ(out, a, rad) {
+      const s = Math.sin(rad), c = Math.cos(rad);
+      const a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+      const a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+      if (out !== a) {
+        out[8] = a[8]; out[9] = a[9]; out[10] = a[10]; out[11] = a[11];
+        out[12] = a[12]; out[13] = a[13]; out[14] = a[14]; out[15] = a[15];
+      }
+      out[0] = a00 * c + a10 * s;
+      out[1] = a01 * c + a11 * s;
+      out[2] = a02 * c + a12 * s;
+      out[3] = a03 * c + a13 * s;
+      out[4] = a10 * c - a00 * s;
+      out[5] = a11 * c - a01 * s;
+      out[6] = a12 * c - a02 * s;
+      out[7] = a13 * c - a03 * s;
+      return out;
+    }
+
+    function mat3FromMat4(out, m) {
+      out[0] = m[0]; out[1] = m[1]; out[2] = m[2];
+      out[3] = m[4]; out[4] = m[5]; out[5] = m[6];
+      out[6] = m[8]; out[7] = m[9]; out[8] = m[10];
+      return out;
+    }
+
+    function mat3InvertTranspose(out, a) {
+      const a00 = a[0], a01 = a[1], a02 = a[2];
+      const a10 = a[3], a11 = a[4], a12 = a[5];
+      const a20 = a[6], a21 = a[7], a22 = a[8];
+
+      const b01 = a22 * a11 - a12 * a21;
+      const b11 = -a22 * a10 + a12 * a20;
+      const b21 = a21 * a10 - a11 * a20;
+
+      let det = a00 * b01 + a01 * b11 + a02 * b21;
+      if (!det) return null;
+      det = 1.0 / det;
+
+      out[0] = b01 * det;
+      out[1] = (-a22 * a01 + a02 * a21) * det;
+      out[2] = (a12 * a01 - a02 * a11) * det;
+      out[3] = b11 * det;
+      out[4] = (a22 * a00 - a02 * a20) * det;
+      out[5] = (-a12 * a00 + a02 * a10) * det;
+      out[6] = b21 * det;
+      out[7] = (-a21 * a00 + a01 * a20) * det;
+      out[8] = (a11 * a00 - a01 * a10) * det;
+      return out;
+    }
+
+    function transformVec3(out, v, m) {
+      const x = v[0], y = v[1], z = v[2];
+      const w = m[3] * x + m[7] * y + m[11] * z + m[15] || 1.0;
+      out[0] = (m[0] * x + m[4] * y + m[8] * z + m[12]) / w;
+      out[1] = (m[1] * x + m[5] * y + m[9] * z + m[13]) / w;
+      out[2] = (m[2] * x + m[6] * y + m[10] * z + m[14]) / w;
+      return out;
+    }
+
+    // --- Shader Compilation Helper ---
+    function createShader(gl, type, source) {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+      }
+      return shader;
+    }
+
+    function createProgram(gl, vsSource, fsSource) {
+      const vs = createShader(gl, gl.VERTEX_SHADER, vsSource);
+      const fs = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+      const program = gl.createProgram();
+      gl.attachShader(program, vs);
+      gl.attachShader(program, fs);
+      gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.error(gl.getProgramInfoLog(program));
+        return null;
+      }
+      return program;
+    }
+
+    // --- Shaders: Solid Hat ---
+    const hatVS = `
+      attribute vec3 a_pos;
+      attribute vec3 a_norm;
+      attribute vec4 a_color;
+      attribute float a_ao;
+
+      uniform mat4 u_mvp;
+      uniform mat4 u_model;
+      uniform mat3 u_normalMat;
+
+      varying vec3 v_worldPos;
+      varying vec3 v_normal;
+      varying vec4 v_color;
+      varying float v_ao;
+      varying float v_dissolveKey;
+
+      void main() {
+        vec4 wPos = u_model * vec4(a_pos, 1.0);
+        v_worldPos = wPos.xyz;
+        v_normal = normalize(u_normalMat * a_norm);
+        v_color = a_color;
+        v_ao = a_ao;
+
+        // Wave dissolve pattern based on height, radial distance, and harmonic variation
+        v_dissolveKey = a_pos.y * 0.85 + length(a_pos.xz) * 0.35 + sin(a_pos.x * 4.5 + a_pos.z * 3.5) * 0.18;
+
+        gl_Position = u_mvp * vec4(a_pos, 1.0);
+      }
+    `;
+
+    const hatFS = `
+      precision mediump float;
+
+      varying vec3 v_worldPos;
+      varying vec3 v_normal;
+      varying vec4 v_color;
+      varying float v_ao;
+      varying float v_dissolveKey;
+
+      uniform vec3 u_camPos;
+      uniform float u_dissolve;
+
+      void main() {
+        if (u_dissolve > 0.0) {
+          float threshold = u_dissolve * 2.5 - 0.6;
+          float diff = v_dissolveKey - threshold;
+          if (diff < 0.0) {
+            discard;
+          }
+
+          // Molten incandescent ember burn front
+          if (diff < 0.22) {
+            float edge = 1.0 - (diff / 0.22);
+            vec3 emberCore = vec3(1.0, 0.82, 0.3);
+            vec3 emberRed = vec3(1.0, 0.22, 0.06);
+            vec3 burnCol = mix(emberRed, emberCore, edge * edge);
+            gl_FragColor = vec4(burnCol, 1.0);
+            return;
+          }
+        }
+
+        vec3 N = normalize(v_normal);
+        vec3 V = normalize(u_camPos - v_worldPos);
+
+        float isBand = step(0.5, v_color.w);
+
+        // 1. Key directional light (warm white/gold from top-front-right)
+        vec3 L1 = normalize(vec3(0.85, 1.1, 0.75));
+        float NdotL1 = max(dot(N, L1), 0.0);
+
+        // 2. Overhead skylight (brings out brim roll, crease highlights & top dome)
+        vec3 L_top = normalize(vec3(-0.2, 1.6, 0.3));
+        float NdotTop = max(dot(N, L_top), 0.0);
+
+        // 3. Cool fill light (from lower left)
+        vec3 L2 = normalize(vec3(-0.9, 0.1, -0.3));
+        float NdotL2 = max(dot(N, L2), 0.0) * 0.25;
+
+        // Blinn-Phong Specular from Key and Top lights
+        vec3 H1 = normalize(L1 + V);
+        vec3 H_top = normalize(L_top + V);
+        float shininess = mix(14.0, 42.0, isBand);
+        float specKey = pow(max(dot(N, H1), 0.0), shininess);
+        float specTop = pow(max(dot(N, H_top), 0.0), shininess * 0.7);
+        float specStrength = mix(0.18, 0.52, isBand);
+        vec3 specColor = vec3(1.0, 0.95, 0.88) * ((specKey + specTop * 0.6) * specStrength);
+
+        // Rim / Fresnel Lighting for crisp 3D edge definition
+        float fresnel = pow(1.0 - max(dot(N, V), 0.0), 3.0);
+        vec3 rimCol = mix(vec3(1.0, 0.28, 0.18), vec3(0.65, 0.72, 0.85), isBand);
+        vec3 rim = rimCol * (fresnel * 0.38);
+
+        // Soft velvet backscatter
+        float velvet = pow(1.0 - max(dot(N, V), 0.0), 1.6) * (1.0 - isBand) * 0.16;
+
+        vec3 ambient = mix(vec3(0.08, 0.01, 0.015), vec3(0.02, 0.02, 0.025), isBand);
+        vec3 diffuse = v_color.rgb * (NdotL1 * 0.45 + NdotTop * 0.35 + NdotL2 + velvet);
+
+        vec3 finalColor = (ambient + diffuse + specColor + rim) * v_ao;
+        gl_FragColor = vec4(finalColor, 1.0);
+      }
+`;
+
+    // --- Shaders: Ground Contact Shadow Quad ---
+    const shadowVS = `
+      attribute vec3 a_pos;
+      uniform mat4 u_mvp;
+      varying vec2 v_uv;
+      void main() {
+        v_uv = a_pos.xz;
+        gl_Position = u_mvp * vec4(a_pos, 1.0);
+      }
+    `;
+
+    const shadowFS = `
+      precision mediump float;
+      varying vec2 v_uv;
+      uniform float u_shadowAlpha;
+
+      void main() {
+        vec2 p = v_uv;
+        p.x *= 1.15; // Elliptical adjustment matching fedora aspect
+        float d = length(p);
+        if (d > 1.0) discard;
+
+        float core = exp(-d * d * 4.8);
+        float penumbra = exp(-d * d * 2.0);
+        float shadow = mix(penumbra * 0.45, core, 0.75) * 0.88 * u_shadowAlpha;
+
+        gl_FragColor = vec4(0.0, 0.0, 0.0, shadow);
+      }
+    `;
+
+    // --- Shaders: Embers / Particles ---
+    const particleVS = `
+      attribute vec3 a_pos;
+      attribute vec4 a_color;
+      attribute float a_size;
+
+      uniform mat4 u_mvp;
+      uniform float u_dpr;
+
+      varying vec4 v_color;
+
+      void main() {
+        v_color = a_color;
+        vec4 clipPos = u_mvp * vec4(a_pos, 1.0);
+        gl_Position = clipPos;
+
+        // Size attenuation with perspective depth
+        float pSize = (a_size * u_dpr * 75.0) / max(clipPos.w, 0.25);
+        gl_PointSize = clamp(pSize, 1.2, 8.5);
+      }
+    `;
+
+    const particleFS = `
+      precision mediump float;
+      varying vec4 v_color;
+
+      void main() {
+        vec2 uv = gl_PointCoord - vec2(0.5);
+        float dist = length(uv);
+        if (dist > 0.5) discard;
+
+        // Luminous radial falloff with warm incandescent center
+        float halo = smoothstep(0.5, 0.05, dist);
+        float core = smoothstep(0.2, 0.0, dist);
+
+        vec3 col = v_color.rgb + vec3(0.55, 0.42, 0.15) * core;
+        float alpha = halo * v_color.a;
+
+        gl_FragColor = vec4(col, alpha);
+      }
+    `;
+
+    // --- Shaders: Faint Light Trails ---
+    const trailVS = `
+      attribute vec3 a_pos;
+      attribute vec4 a_color;
+      uniform mat4 u_mvp;
+      varying vec4 v_color;
+      void main() {
+        v_color = a_color;
+        gl_Position = u_mvp * vec4(a_pos, 1.0);
+      }
+    `;
+
+    const trailFS = `
+      precision mediump float;
+      varying vec4 v_color;
+      void main() {
+        gl_FragColor = v_color;
+      }
+    `;
+
+    // Compile programs
+    const hatProgram = createProgram(gl, hatVS, hatFS);
+    const shadowProgram = createProgram(gl, shadowVS, shadowFS);
+    const particleProgram = createProgram(gl, particleVS, particleFS);
+    const trailProgram = createProgram(gl, trailVS, trailFS);
+
+    // --- Fedora 3D Geometry Generation (Refined Proportions) ---
+    function evaluateFedoraPosition(theta, v, part) {
+      const sinT = Math.sin(theta);
+      const cosT = Math.cos(theta);
+
+            if (part === 'brim') {
+        const rInX = 0.92, rInZ = 1.12;
+        const rOutX = 1.82, rOutZ = 2.12;
+        const rx = rInX + (rOutX - rInX) * v;
+        const rz = rInZ + (rOutZ - rInZ) * v;
+        const x = rx * sinT;
+        const z = rz * cosT;
+
+        // Pronounced fedora brim roll:
+        // Inner brim slopes gently, outer brim rolls up dramatically at sides and back
+        const edgeFactor = Math.max(0.0, (v - 0.45) / 0.55);
+        const sideCurl = (Math.pow(v, 1.6) * 0.18 + Math.pow(edgeFactor, 1.8) * 0.42) * Math.pow(sinT, 2);
+        const frontDip = (cosT > 0) ? -Math.pow(v, 1.3) * 0.32 * Math.pow(cosT, 1.3) : 0;
+        const backCurl = (cosT < 0) ? (Math.pow(v, 1.6) * 0.15 + Math.pow(edgeFactor, 1.8) * 0.38) * Math.pow(-cosT, 1.3) : 0;
+        const y = sideCurl + frontDip + backCurl - 0.04;
+        return [x, y, z];
+      } else if (part === 'band') {
+        const h = 0.015 + v * 0.22;
+        const rX = 0.932 * (1.0 - 0.02 * v);
+        const rZ = 1.132 * (1.0 - 0.02 * v);
+        return [rX * sinT, h, rZ * cosT];
+      } else if (part === 'crown_wall') {
+        const h = v * 1.12; // Prominent, authentic crown
+        const taper = 1.0 - 0.14 * Math.pow(v, 1.1);
+        let rX = 0.92 * taper;
+        let rZ = 1.12 * taper;
+
+        // Front pinches at +-38 degrees
+        const pTheta1 = 0.66;
+        const pTheta2 = Math.PI * 2 - 0.66;
+        const d1 = Math.min(Math.abs(theta - pTheta1), Math.PI * 2 - Math.abs(theta - pTheta1));
+        const d2 = Math.min(Math.abs(theta - pTheta2), Math.PI * 2 - Math.abs(theta - pTheta2));
+        const pinchAngle = Math.exp(-Math.pow(d1 / 0.38, 2)) + Math.exp(-Math.pow(d2 / 0.38, 2));
+
+        const pinchProg = Math.max(0.0, (v - 0.2) / 0.8);
+        const pinchH = Math.sin(pinchProg * Math.PI * 0.5);
+        const pinchDepth = 0.22 * pinchAngle * pinchH;
+        return [(rX - pinchDepth) * sinT, h, (rZ - pinchDepth * 0.75) * cosT];
+      } else if (part === 'crown_top') {
+        const shoulderTaper = 1.0 - 0.14;
+        const pTheta1 = 0.66;
+        const pTheta2 = Math.PI * 2 - 0.66;
+        const d1 = Math.min(Math.abs(theta - pTheta1), Math.PI * 2 - Math.abs(theta - pTheta1));
+        const d2 = Math.min(Math.abs(theta - pTheta2), Math.PI * 2 - Math.abs(theta - pTheta2));
+        const pinchAngle = Math.exp(-Math.pow(d1 / 0.38, 2)) + Math.exp(-Math.pow(d2 / 0.38, 2));
+        const pinchDepth = 0.22 * pinchAngle * (1.0 - v * 0.4);
+
+        const rX0 = (0.92 * shoulderTaper - pinchDepth);
+        const rZ0 = (1.12 * shoulderTaper - pinchDepth * 0.75);
+
+        // v from 0 (shoulder rim) to 1 (center)
+        const radFactor = (1.0 - v);
+        const x = rX0 * sinT * radFactor;
+        const z = rZ0 * cosT * radFactor;
+
+        // Smooth dome rising from shoulder (matches 1.12 at v=0)
+        const baseH = 1.12;
+        const dome = baseH + 0.14 * Math.sin(v * Math.PI * 0.5);
+
+        // Fedora center crease running front-to-back along spine (zero at rim v=0)
+        const creaseWidth = 0.34;
+        const creaseAlongX = Math.exp(-Math.pow(x / creaseWidth, 2));
+        const creaseZEnvelope = Math.max(0, 1.0 - Math.pow(z / 0.95, 2));
+        const creaseDepth = 0.22 * creaseAlongX * creaseZEnvelope * Math.sin(v * Math.PI * 0.5);
+
+        const y = dome - creaseDepth;
+        return [x, y, z];
+      }
+      return [0, 0, 0];
+    }
+
+    // Grid Builder with exact outward/upward surface normal winding
+    function buildGridMesh(part, uSteps, vSteps, isBand, flipWinding, yOffset) {
+      const verts = [], cols = [], aos = [], idxs = [];
+      const grid = [];
+
+      for (let j = 0; j <= vSteps; j++) {
+        const v = j / vSteps;
+        const row = [];
+        for (let i = 0; i <= uSteps; i++) {
+          const u = i / uSteps;
+          const theta = u * Math.PI * 2;
+          const p = evaluateFedoraPosition(theta, v, part);
+          p[1] += yOffset;
+
+          row.push(verts.length / 3);
+          verts.push(p[0], p[1], p[2]);
+
+          if (isBand) {
+            cols.push(0.08, 0.08, 0.09, 1.0); // Black satin ribbon
+            aos.push(0.92);
+          } else {
+            cols.push(0.80, 0.04, 0.06, 0.0); // Red Hat crimson felt
+            let aoVal = 1.0;
+            if (part === 'brim') {
+              aoVal = 0.62 + 0.38 * Math.pow(v, 0.8);
+            } else if (part === 'crown_top') {
+              const xDist = Math.abs(p[0]);
+              aoVal = Math.min(1.0, 0.78 + xDist * 0.65);
+            } else if (flipWinding) {
+              aoVal = 0.70; // Under brim
+            }
+            aos.push(aoVal);
+          }
+        }
+        grid.push(row);
+      }
+
+      for (let j = 0; j < vSteps; j++) {
+        for (let i = 0; i < uSteps; i++) {
+          const a = grid[j][i], b = grid[j + 1][i], c = grid[j + 1][i + 1], d = grid[j][i + 1];
+          // Correct winding for outward/upward surface normal vectors
+          if (flipWinding) {
+            idxs.push(a, c, b, a, d, c);
+          } else {
+            idxs.push(a, b, c, a, c, d);
+          }
+        }
+      }
+      return { verts, cols, aos, idxs };
+    }
+
+    // Build all fedora surface components
+    // brimTop: flipWinding = false (ABC -> Normal points UP +Y)
+    // brimBottom: flipWinding = true (ACB -> Normal points DOWN -Y)
+    // band: flipWinding = true (ACB -> Normal points OUTWARD)
+    // crownWall: flipWinding = true (ACB -> Normal points OUTWARD)
+    // crownTop: flipWinding = true (ACB -> Normal points UP +Y)
+    const brimTop = buildGridMesh('brim', 64, 22, false, false, 0.005);
+    const brimBottom = buildGridMesh('brim', 64, 22, false, true, -0.005);
+    const band = buildGridMesh('band', 64, 10, true, true, 0);
+    const crownWall = buildGridMesh('crown_wall', 64, 22, false, true, 0);
+    const crownTop = buildGridMesh('crown_top', 64, 18, false, true, 0);
+
+    const hatPositions = [];
+    const hatColors = [];
+    const hatAOs = [];
+    const hatIndices = [];
+
+    function mergeSubmesh(sub) {
+      const offset = hatPositions.length / 3;
+      hatPositions.push(...sub.verts);
+      hatColors.push(...sub.cols);
+      hatAOs.push(...sub.aos);
+      for (let i = 0; i < sub.idxs.length; i++) {
+        hatIndices.push(sub.idxs[i] + offset);
+      }
+    }
+
+    mergeSubmesh(brimTop);
+    mergeSubmesh(brimBottom);
+    mergeSubmesh(band);
+    mergeSubmesh(crownWall);
+    mergeSubmesh(crownTop);
+
+    // Center vertical origin
+    const Y_CENTER_OFFSET = -0.52;
+    for (let i = 1; i < hatPositions.length; i += 3) {
+      hatPositions[i] += Y_CENTER_OFFSET;
+    }
+
+    // Accumulate smooth surface normals mathematically across all faces
+    const hatNormals = new Float32Array(hatPositions.length);
+    for (let i = 0; i < hatIndices.length; i += 3) {
+      const i0 = hatIndices[i] * 3;
+      const i1 = hatIndices[i + 1] * 3;
+      const i2 = hatIndices[i + 2] * 3;
+
+      const ax = hatPositions[i0], ay = hatPositions[i0 + 1], az = hatPositions[i0 + 2];
+      const bx = hatPositions[i1], by = hatPositions[i1 + 1], bz = hatPositions[i1 + 2];
+      const cx = hatPositions[i2], cy = hatPositions[i2 + 1], cz = hatPositions[i2 + 2];
+
+      const v1x = bx - ax, v1y = by - ay, v1z = bz - az;
+      const v2x = cx - ax, v2y = cy - ay, v2z = cz - az;
+
+      const fnx = v1y * v2z - v1z * v2y;
+      const fny = v1z * v2x - v1x * v2z;
+      const fnz = v1x * v2y - v1y * v2x;
+
+      hatNormals[i0] += fnx; hatNormals[i0 + 1] += fny; hatNormals[i0 + 2] += fnz;
+      hatNormals[i1] += fnx; hatNormals[i1 + 1] += fny; hatNormals[i1 + 2] += fnz;
+      hatNormals[i2] += fnx; hatNormals[i2 + 1] += fny; hatNormals[i2 + 2] += fnz;
+    }
+
+    for (let i = 0; i < hatNormals.length; i += 3) {
+      const nx = hatNormals[i], ny = hatNormals[i + 1], nz = hatNormals[i + 2];
+      const len = Math.hypot(nx, ny, nz) || 1;
+      hatNormals[i] = nx / len;
+      hatNormals[i + 1] = ny / len;
+      hatNormals[i + 2] = nz / len;
+    }
+
+    // Upload Hat WebGL Buffers
+    const hatPosBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, hatPosBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(hatPositions), gl.STATIC_DRAW);
+
+    const hatNormBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, hatNormBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, hatNormals, gl.STATIC_DRAW);
+
+    const hatColBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, hatColBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(hatColors), gl.STATIC_DRAW);
+
+    const hatAOBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, hatAOBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(hatAOs), gl.STATIC_DRAW);
+
+    const hatIndexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, hatIndexBuffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(hatIndices), gl.STATIC_DRAW);
+
+    // --- Ground Contact Shadow Quad ---
+    const groundY = -0.65;
+    const groundQuad = new Float32Array([
+      -2.6, groundY, -2.6,
+       2.6, groundY, -2.6,
+       2.6, groundY,  2.6,
+      -2.6, groundY, -2.6,
+       2.6, groundY,  2.6,
+      -2.6, groundY,  2.6
+    ]);
+    const groundBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, groundBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, groundQuad, gl.STATIC_DRAW);
+
+    // --- Particle System Generation (~14,500 Embers) ---
+    const TOTAL_PARTICLES = 14500;
+    const ORBITING_PERSISTENT_COUNT = 36; // Embers that remain in orbit afterward
+
+    const particleBasePositions = new Float32Array(TOTAL_PARTICLES * 3);
+    const particleCurrentPositions = new Float32Array(TOTAL_PARTICLES * 3);
+    const particleVelocities = new Float32Array(TOTAL_PARTICLES * 3);
+    const particleColors = new Float32Array(TOTAL_PARTICLES * 4);
+    const particleSizes = new Float32Array(TOTAL_PARTICLES);
+    const particlePhases = new Float32Array(TOTAL_PARTICLES);
+
+    const brimCount = Math.floor(TOTAL_PARTICLES * 0.46);
+    const wallCount = Math.floor(TOTAL_PARTICLES * 0.25);
+    const topCount = Math.floor(TOTAL_PARTICLES * 0.18);
+    const bandCount = TOTAL_PARTICLES - (brimCount + wallCount + topCount);
+
+    let pIdx = 0;
+    function addParticleSample(part, u, v, type) {
+      const theta = u * Math.PI * 2;
+      const p = evaluateFedoraPosition(theta, v, part);
+      p[1] += Y_CENTER_OFFSET;
+
+      const jitter = 0.012;
+      p[0] += (Math.random() - 0.5) * jitter;
+      p[1] += (Math.random() - 0.5) * jitter;
+      p[2] += (Math.random() - 0.5) * jitter;
+
+      const idx3 = pIdx * 3;
+      particleBasePositions[idx3] = p[0];
+      particleBasePositions[idx3 + 1] = p[1];
+      particleBasePositions[idx3 + 2] = p[2];
+
+      particleCurrentPositions[idx3] = p[0];
+      particleCurrentPositions[idx3 + 1] = p[1];
+      particleCurrentPositions[idx3 + 2] = p[2];
+
+      particlePhases[pIdx] = Math.random() * Math.PI * 2;
+      particleSizes[pIdx] = 1.4 + Math.random() * 2.2;
+
+      const idx4 = pIdx * 4;
+      if (type === 1) {
+        // Ribbon band embers: charcoal with soft warm ember glow
+        if (Math.random() < 0.25) {
+          particleColors[idx4] = 0.95;
+          particleColors[idx4 + 1] = 0.40;
+          particleColors[idx4 + 2] = 0.10;
+          particleColors[idx4 + 3] = 0.28;
+        } else {
+          particleColors[idx4] = 0.25;
+          particleColors[idx4 + 1] = 0.25;
+          particleColors[idx4 + 2] = 0.30;
+          particleColors[idx4 + 3] = 0.18;
+        }
+      } else {
+        // Red felt embers: tasteful crimson & amber sparks
+        const spark = Math.random();
+        if (spark < 0.15) {
+          // Warm gold spark
+          particleColors[idx4] = 1.0;
+          particleColors[idx4 + 1] = 0.72;
+          particleColors[idx4 + 2] = 0.20;
+          particleColors[idx4 + 3] = 0.35;
+        } else if (spark < 0.50) {
+          // Glowing vermilion ember
+          particleColors[idx4] = 1.0;
+          particleColors[idx4 + 1] = 0.22;
+          particleColors[idx4 + 2] = 0.08;
+          particleColors[idx4 + 3] = 0.28;
+        } else {
+          // Deep crimson ember
+          particleColors[idx4] = 0.92;
+          particleColors[idx4 + 1] = 0.05;
+          particleColors[idx4 + 2] = 0.08;
+          particleColors[idx4 + 3] = 0.22;
+        }
+      }
+      pIdx++;
+    }
+
+    for (let i = 0; i < brimCount; i++) {
+      addParticleSample('brim', Math.random(), Math.sqrt(Math.random()), 0);
+    }
+    for (let i = 0; i < bandCount; i++) {
+      addParticleSample('band', Math.random(), Math.random(), 1);
+    }
+    for (let i = 0; i < wallCount; i++) {
+      addParticleSample('crown_wall', Math.random(), Math.random(), 0);
+    }
+    for (let i = 0; i < topCount; i++) {
+      addParticleSample('crown_top', Math.random(), 1.0 - Math.sqrt(Math.random()), 0);
+    }
+
+    const particlePosBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, particlePosBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, particleCurrentPositions, gl.DYNAMIC_DRAW);
+
+    const particleColBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, particleColBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, particleColors, gl.DYNAMIC_DRAW);
+
+    const particleSizeBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, particleSizeBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, particleSizes, gl.STATIC_DRAW);
+
+    // --- Orbiting Light Trails ---
+    const TRAIL_LENGTH = 14;
+    const orbitParams = [];
+    const orbitHistory = [];
+
+    for (let i = 0; i < ORBITING_PERSISTENT_COUNT; i++) {
+      const radius = 2.4 + Math.random() * 1.1;
+      const speed = (0.75 + Math.random() * 0.85) * (Math.random() < 0.35 ? -1 : 1);
+      const phase = Math.random() * Math.PI * 2;
+      const inclination = (Math.random() - 0.5) * 0.5;
+      const tiltZ = (Math.random() - 0.5) * 0.4;
+      const heightOffset = (Math.random() - 0.5) * 0.8;
+      const bobSpeed = 1.1 + Math.random() * 1.4;
+      const bobAmp = 0.12 + Math.random() * 0.16;
+
+      orbitParams.push({
+        radius, speed, phase, inclination, tiltZ, heightOffset, bobSpeed, bobAmp
+      });
+
+      const initX = radius * Math.cos(phase);
+      const initZ = radius * Math.sin(phase);
+      const initY = heightOffset + initX * inclination + initZ * tiltZ;
+
+      const hist = [];
+      for (let j = 0; j < TRAIL_LENGTH; j++) {
+        hist.push([initX, initY, initZ]);
+      }
+      orbitHistory.push(hist);
+    }
+
+    const TOTAL_TRAIL_VERTS = ORBITING_PERSISTENT_COUNT * (TRAIL_LENGTH - 1) * 2;
+    const trailPositions = new Float32Array(TOTAL_TRAIL_VERTS * 3);
+    const trailColors = new Float32Array(TOTAL_TRAIL_VERTS * 4);
+
+    const trailPosBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, trailPosBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, trailPositions, gl.DYNAMIC_DRAW);
+
+    const trailColBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, trailColBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, trailColors, gl.DYNAMIC_DRAW);
+
+    // --- State Machine & Interaction Logic ---
+    let spinAngle = 0.45;
+    let targetSpinSpeed = 0.65;
+    let currentSpinSpeed = 0.65;
+    const DEFAULT_SPIN_SPEED = 0.65;
+    const SLOW_SPIN_SPEED = 0.12;
+
+    let systemState = 'IDLE'; // IDLE, DISSOLVING, SWIRLING, REFORMING
+    let stateTimer = 0.0;
+    let dissolveUniform = 0.0;
+    let hasReformedOnce = false; // Persistent embers orbit ONLY after reforming
+    let isHovered = false;
+
+    function triggerDissolve() {
+      if (systemState === 'IDLE') {
+        systemState = 'DISSOLVING';
+        stateTimer = 0.0;
+        targetSpinSpeed = SLOW_SPIN_SPEED;
+        captionContainer.classList.add('state-dissolving');
+        captionText.textContent = 'Dissolving into embers…';
+      }
+    }
+
+    stage.addEventListener('pointerenter', () => {
+      isHovered = true;
+      triggerDissolve();
+    });
+
+    stage.addEventListener('pointerleave', () => {
+      isHovered = false;
+      if (systemState === 'IDLE' && !reducedMotion) {
+        targetSpinSpeed = DEFAULT_SPIN_SPEED;
+      }
+    });
+
+    stage.addEventListener('pointerdown', (e) => {
+      triggerDissolve();
+    });
+
+    actionTrigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      triggerDissolve();
+    });
+
+    actionTrigger.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        triggerDissolve();
+      }
+    });
+
+    let mouseParallaxX = 0, mouseParallaxY = 0;
+    let targetParallaxX = 0, targetParallaxY = 0;
+
+    window.addEventListener('pointermove', (e) => {
+      if (reducedMotion) {
+        targetParallaxX = 0;
+        targetParallaxY = 0;
+        return;
+      }
+      const nx = (e.clientX / window.innerWidth) * 2 - 1;
+      const ny = (e.clientY / window.innerHeight) * 2 - 1;
+      targetParallaxX = nx * 0.18;
+      targetParallaxY = -ny * 0.12;
+    });
+
+    // Viewport Resizing
+    let viewportWidth = 0, viewportHeight = 0, dpr = 1.0;
+    function resize() {
+      const rect = stage.getBoundingClientRect();
+      dpr = Math.min(window.devicePixelRatio || 1, 2.0);
+      viewportWidth = Math.floor(rect.width * dpr);
+      viewportHeight = Math.floor(rect.height * dpr);
+      if (canvas.width !== viewportWidth || canvas.height !== viewportHeight) {
+        canvas.width = viewportWidth;
+        canvas.height = viewportHeight;
+      }
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // Reusable Matrices
+    const projMatrix = mat4Create();
+    const viewMatrix = mat4Create();
+    const modelMatrix = mat4Create();
+    const mvpMatrix = mat4Create();
+    const viewProjMatrix = mat4Create();
+    const normalMatrix = new Float32Array(9);
+    const cameraPosition = new Float32Array([0.0, 1.45, 6.2]);
+    const cameraTarget = new Float32Array([0.0, 0.05, 0.0]);
+    const upVector = new Float32Array([0.0, 1.0, 0.0]);
+    const tempP = [0, 0, 0];
+
+    // --- Main Simulation & Render Loop ---
+    let lastTimestamp = performance.now();
+
+    function render(timestamp) {
+      requestAnimationFrame(render);
+
+      const rawDt = (timestamp - lastTimestamp) * 0.001;
+      lastTimestamp = timestamp;
+      const dt = Math.min(rawDt, 0.06);
+
+      mouseParallaxX += (targetParallaxX - mouseParallaxX) * 0.06;
+      mouseParallaxY += (targetParallaxY - mouseParallaxY) * 0.06;
+
+      if (reducedMotion) {
+        targetSpinSpeed = 0.0;
+        currentSpinSpeed = 0.0;
+        spinAngle = 0.65;
+      } else {
+        currentSpinSpeed += (targetSpinSpeed - currentSpinSpeed) * 0.06;
+        spinAngle += currentSpinSpeed * dt;
+      }
+
+      stateTimer += dt;
+
+      // State Transitions
+      if (systemState === 'DISSOLVING') {
+        const DISSOLVE_DURATION = 0.95;
+        const progress = Math.min(stateTimer / DISSOLVE_DURATION, 1.0);
+        dissolveUniform = progress;
+
+        if (stateTimer <= dt * 1.5) {
+          for (let i = 0; i < TOTAL_PARTICLES; i++) {
+            const idx3 = i * 3;
+            const bx = particleBasePositions[idx3];
+            const by = particleBasePositions[idx3 + 1];
+            const bz = particleBasePositions[idx3 + 2];
+
+            // Tangential spin velocity
+            const tangX = -bz * (currentSpinSpeed + 0.2);
+            const tangZ = bx * (currentSpinSpeed + 0.2);
+
+            // Radial outward dispersion
+            const rDist = Math.hypot(bx, by, bz) || 1.0;
+            const radKick = 0.6 + Math.random() * 0.8;
+            const rx = (bx / rDist) * radKick;
+            const ry = (by / rDist) * radKick * 0.5 + (0.15 + Math.random() * 0.35);
+            const rz = (bz / rDist) * radKick;
+
+            particleVelocities[idx3] = tangX + rx + (Math.random() - 0.5) * 0.3;
+            particleVelocities[idx3 + 1] = ry + (Math.random() - 0.5) * 0.2;
+            particleVelocities[idx3 + 2] = tangZ + rz + (Math.random() - 0.5) * 0.3;
+          }
+        }
+
+        if (progress >= 1.0) {
+          systemState = 'SWIRLING';
+          stateTimer = 0.0;
+          captionText.textContent = 'Embers swirling in vortex…';
+        }
+      } else if (systemState === 'SWIRLING') {
+        dissolveUniform = 1.0;
+        const SWIRL_DURATION = 2.1;
+
+        if (stateTimer >= SWIRL_DURATION) {
+          systemState = 'REFORMING';
+          stateTimer = 0.0;
+          captionText.textContent = 'Reforming fedora…';
+        }
+      } else if (systemState === 'REFORMING') {
+        const REFORM_DURATION = 1.75;
+        const progress = Math.min(stateTimer / REFORM_DURATION, 1.0);
+
+        if (progress > 0.45) {
+          dissolveUniform = 1.0 - ((progress - 0.45) / 0.55);
+        } else {
+          dissolveUniform = 1.0;
+        }
+
+        if (progress >= 1.0) {
+          systemState = 'IDLE';
+          stateTimer = 0.0;
+          dissolveUniform = 0.0;
+          hasReformedOnce = true;
+          captionContainer.classList.remove('state-dissolving');
+
+          // Initialize history for persistent orbiters to current positions
+          for (let i = 0; i < ORBITING_PERSISTENT_COUNT; i++) {
+            const curX = particleCurrentPositions[i * 3];
+            const curY = particleCurrentPositions[i * 3 + 1];
+            const curZ = particleCurrentPositions[i * 3 + 2];
+            for (let j = 0; j < TRAIL_LENGTH; j++) {
+              orbitHistory[i][j][0] = curX;
+              orbitHistory[i][j][1] = curY;
+              orbitHistory[i][j][2] = curZ;
+            }
+          }
+
+          if (!isHovered && !reducedMotion) {
+            targetSpinSpeed = DEFAULT_SPIN_SPEED;
+          }
+
+          captionText.textContent = 'Hover or tap to dissolve';
+          document.getElementById('caption-hint').textContent = 'Reformed perfectly · Persistent embers in orbit';
+        }
+      }
+
+      // --- Fedora Model Matrix ---
+      mat4Identity(modelMatrix);
+      mat4RotateX(modelMatrix, modelMatrix, 0.16 + mouseParallaxY);
+      mat4RotateZ(modelMatrix, modelMatrix, -0.06 + mouseParallaxX);
+      mat4RotateY(modelMatrix, modelMatrix, spinAngle);
+
+      mat3FromMat4(normalMatrix, modelMatrix);
+
+      // --- Particle Physics in World Space ---
+      const activeInSwirl = (systemState === 'DISSOLVING' || systemState === 'SWIRLING' || systemState === 'REFORMING');
+
+      if (activeInSwirl) {
+        const t = timestamp * 0.001;
+        const isReforming = (systemState === 'REFORMING');
+        const reformProgress = isReforming ? Math.min(stateTimer / 1.75, 1.0) : 0.0;
+        const reformEase = reformProgress * reformProgress * (3.0 - 2.0 * reformProgress);
+
+        for (let i = 0; i < TOTAL_PARTICLES; i++) {
+          const idx3 = i * 3;
+          const idx4 = i * 4;
+
+          tempP[0] = particleBasePositions[idx3];
+          tempP[1] = particleBasePositions[idx3 + 1];
+          tempP[2] = particleBasePositions[idx3 + 2];
+          transformVec3(tempP, tempP, modelMatrix);
+          const homeX = tempP[0], homeY = tempP[1], homeZ = tempP[2];
+
+          if (isReforming) {
+            const curX = particleCurrentPositions[idx3];
+            const curY = particleCurrentPositions[idx3 + 1];
+            const curZ = particleCurrentPositions[idx3 + 2];
+
+            const dx = homeX - curX;
+            const dy = homeY - curY;
+            const dz = homeZ - curZ;
+
+            const pullStrength = 5.5 + reformEase * 18.0;
+            particleVelocities[idx3] += (dx * pullStrength - particleVelocities[idx3] * 6.5) * dt;
+            particleVelocities[idx3 + 1] += (dy * pullStrength - particleVelocities[idx3 + 1] * 6.5) * dt;
+            particleVelocities[idx3 + 2] += (dz * pullStrength - particleVelocities[idx3 + 2] * 6.5) * dt;
+
+            particleCurrentPositions[idx3] += particleVelocities[idx3] * dt;
+            particleCurrentPositions[idx3 + 1] += particleVelocities[idx3 + 1] * dt;
+            particleCurrentPositions[idx3 + 2] += particleVelocities[idx3 + 2] * dt;
+
+            if (reformProgress > 0.85) {
+              particleCurrentPositions[idx3] += (homeX - particleCurrentPositions[idx3]) * 0.35;
+              particleCurrentPositions[idx3 + 1] += (homeY - particleCurrentPositions[idx3 + 1]) * 0.35;
+              particleCurrentPositions[idx3 + 2] += (homeZ - particleCurrentPositions[idx3 + 2]) * 0.35;
+            }
+          } else {
+            const px = particleCurrentPositions[idx3];
+            const py = particleCurrentPositions[idx3 + 1];
+            const pz = particleCurrentPositions[idx3 + 2];
+
+            const rXZ = Math.hypot(px, pz) || 1.0;
+            const vortexForce = Math.min(1.8 / rXZ, 2.5);
+            particleVelocities[idx3] += (-pz / rXZ) * vortexForce * dt * 2.2;
+            particleVelocities[idx3 + 2] += (px / rXZ) * vortexForce * dt * 2.2;
+
+            const turbX = Math.sin(py * 2.1 + t * 1.8) * 0.8;
+            const turbY = Math.cos(px * 1.9 - t * 1.4) * 0.6 + 0.35;
+            const turbZ = Math.sin(pz * 2.0 + t * 1.6) * 0.8;
+
+            let containX = 0, containY = 0, containZ = 0;
+            if (rXZ > 3.6) {
+              containX = -px * 1.8;
+              containZ = -pz * 1.8;
+            }
+            if (py > 2.6) containY = -1.8;
+            if (py < -1.4) containY = 1.8;
+
+            particleVelocities[idx3] += (turbX + containX) * dt;
+            particleVelocities[idx3 + 1] += (turbY + containY) * dt;
+            particleVelocities[idx3 + 2] += (turbZ + containZ) * dt;
+
+            particleVelocities[idx3] *= 0.965;
+            particleVelocities[idx3 + 1] *= 0.965;
+            particleVelocities[idx3 + 2] *= 0.965;
+
+            particleCurrentPositions[idx3] += particleVelocities[idx3] * dt;
+            particleCurrentPositions[idx3 + 1] += particleVelocities[idx3 + 1] * dt;
+            particleCurrentPositions[idx3 + 2] += particleVelocities[idx3 + 2] * dt;
+          }
+
+          const flicker = Math.sin(t * 8.0 + particlePhases[i]) * 0.15;
+          particleColors[idx4 + 3] = Math.max(0.05, Math.min(0.42, particleColors[idx4 + 3] + flicker * 0.05));
+        }
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, particlePosBuffer);
+        gl.bufferSubData(gl.ARRAY_BUFFER, 0, particleCurrentPositions);
+        gl.bindBuffer(gl.ARRAY_BUFFER, particleColBuffer);
+        gl.bufferSubData(gl.ARRAY_BUFFER, 0, particleColors);
+      }
+
+      // --- Persistent Orbiting Embers & Faint Light Trails ---
+      // ONLY active after the hat has dissolved and reformed once!
+      const showOrbiters = hasReformedOnce && !reducedMotion;
+      if (showOrbiters && !activeInSwirl) {
+        const t = timestamp * 0.001;
+        let trailVertIdx = 0;
+
+        for (let i = 0; i < ORBITING_PERSISTENT_COUNT; i++) {
+          const p = orbitParams[i];
+          const angle = p.phase + t * p.speed;
+          const r = p.radius + Math.sin(t * 0.7 + i) * 0.18;
+          const bob = Math.sin(t * p.bobSpeed + p.phase) * p.bobAmp + p.heightOffset;
+
+          const ox = r * Math.cos(angle);
+          const oz = r * Math.sin(angle);
+          const oy = bob + ox * p.inclination + oz * p.tiltZ;
+
+          const hist = orbitHistory[i];
+          hist.pop();
+          hist.unshift([ox, oy, oz]);
+
+          const pIdx3 = i * 3;
+          const pIdx4 = i * 4;
+
+          particleCurrentPositions[pIdx3] = ox;
+          particleCurrentPositions[pIdx3 + 1] = oy;
+          particleCurrentPositions[pIdx3 + 2] = oz;
+
+          particleColors[pIdx4] = 1.0;
+          particleColors[pIdx4 + 1] = 0.72;
+          particleColors[pIdx4 + 2] = 0.22;
+          particleColors[pIdx4 + 3] = 0.75;
+
+          for (let s = 0; s < TRAIL_LENGTH - 1; s++) {
+            const pA = hist[s];
+            const pB = hist[s + 1];
+
+            const alphaA = Math.pow(1.0 - (s / TRAIL_LENGTH), 2.0) * 0.38;
+            const alphaB = Math.pow(1.0 - ((s + 1) / TRAIL_LENGTH), 2.0) * 0.38;
+
+            trailPositions[trailVertIdx * 3] = pA[0];
+            trailPositions[trailVertIdx * 3 + 1] = pA[1];
+            trailPositions[trailVertIdx * 3 + 2] = pA[2];
+
+            trailColors[trailVertIdx * 4] = 1.0;
+            trailColors[trailVertIdx * 4 + 1] = 0.52;
+            trailColors[trailVertIdx * 4 + 2] = 0.15;
+            trailColors[trailVertIdx * 4 + 3] = alphaA;
+            trailVertIdx++;
+
+            trailPositions[trailVertIdx * 3] = pB[0];
+            trailPositions[trailVertIdx * 3 + 1] = pB[1];
+            trailPositions[trailVertIdx * 3 + 2] = pB[2];
+
+            trailColors[trailVertIdx * 4] = 1.0;
+            trailColors[trailVertIdx * 4 + 1] = 0.32;
+            trailColors[trailVertIdx * 4 + 2] = 0.08;
+            trailColors[trailVertIdx * 4 + 3] = alphaB;
+            trailVertIdx++;
+          }
+        }
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, trailPosBuffer);
+        gl.bufferSubData(gl.ARRAY_BUFFER, 0, trailPositions);
+        gl.bindBuffer(gl.ARRAY_BUFFER, trailColBuffer);
+        gl.bufferSubData(gl.ARRAY_BUFFER, 0, trailColors);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, particlePosBuffer);
+        gl.bufferSubData(gl.ARRAY_BUFFER, 0, particleCurrentPositions.subarray(0, ORBITING_PERSISTENT_COUNT * 3));
+        gl.bindBuffer(gl.ARRAY_BUFFER, particleColBuffer);
+        gl.bufferSubData(gl.ARRAY_BUFFER, 0, particleColors.subarray(0, ORBITING_PERSISTENT_COUNT * 4));
+      }
+
+      // --- Camera & Projection Matrices ---
+      const aspect = viewportWidth / Math.max(viewportHeight, 1);
+      mat4Perspective(projMatrix, 42 * (Math.PI / 180), aspect, 0.1, 100.0);
+      mat4LookAt(viewMatrix, cameraPosition, cameraTarget, upVector);
+      mat4Multiply(viewProjMatrix, projMatrix, viewMatrix);
+
+      // --- WebGL Render Passes ---
+      gl.viewport(0, 0, viewportWidth, viewportHeight);
+      gl.clearColor(0.0, 0.0, 0.0, 0.0);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+      // 1. Ground Contact Shadow
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.depthMask(false);
+      gl.disable(gl.DEPTH_TEST);
+
+      gl.useProgram(shadowProgram);
+      mat4Multiply(mvpMatrix, viewProjMatrix, mat4Identity(mat4Create()));
+      gl.uniformMatrix4fv(gl.getUniformLocation(shadowProgram, 'u_mvp'), false, mvpMatrix);
+      const shadowAlpha = 1.0 - dissolveUniform * 0.65;
+      gl.uniform1f(gl.getUniformLocation(shadowProgram, 'u_shadowAlpha'), shadowAlpha);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, groundBuffer);
+      const sPosLoc = gl.getAttribLocation(shadowProgram, 'a_pos');
+      gl.enableVertexAttribArray(sPosLoc);
+      gl.vertexAttribPointer(sPosLoc, 3, gl.FLOAT, false, 0, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      gl.disableVertexAttribArray(sPosLoc);
+
+      // 2. Solid Fedora Mesh (when visible)
+      if (dissolveUniform < 0.999) {
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthMask(true);
+        gl.disable(gl.BLEND);
+
+        gl.useProgram(hatProgram);
+        mat4Multiply(mvpMatrix, viewProjMatrix, modelMatrix);
+        gl.uniformMatrix4fv(gl.getUniformLocation(hatProgram, 'u_mvp'), false, mvpMatrix);
+        gl.uniformMatrix4fv(gl.getUniformLocation(hatProgram, 'u_model'), false, modelMatrix);
+        gl.uniformMatrix3fv(gl.getUniformLocation(hatProgram, 'u_normalMat'), false, normalMatrix);
+        gl.uniform3fv(gl.getUniformLocation(hatProgram, 'u_camPos'), cameraPosition);
+        gl.uniform1f(gl.getUniformLocation(hatProgram, 'u_dissolve'), dissolveUniform);
+
+        const hPosLoc = gl.getAttribLocation(hatProgram, 'a_pos');
+        gl.bindBuffer(gl.ARRAY_BUFFER, hatPosBuffer);
+        gl.enableVertexAttribArray(hPosLoc);
+        gl.vertexAttribPointer(hPosLoc, 3, gl.FLOAT, false, 0, 0);
+
+        const hNormLoc = gl.getAttribLocation(hatProgram, 'a_norm');
+        gl.bindBuffer(gl.ARRAY_BUFFER, hatNormBuffer);
+        gl.enableVertexAttribArray(hNormLoc);
+        gl.vertexAttribPointer(hNormLoc, 3, gl.FLOAT, false, 0, 0);
+
+        const hColLoc = gl.getAttribLocation(hatProgram, 'a_color');
+        gl.bindBuffer(gl.ARRAY_BUFFER, hatColBuffer);
+        gl.enableVertexAttribArray(hColLoc);
+        gl.vertexAttribPointer(hColLoc, 4, gl.FLOAT, false, 0, 0);
+
+        const hAOLoc = gl.getAttribLocation(hatProgram, 'a_ao');
+        gl.bindBuffer(gl.ARRAY_BUFFER, hatAOBuffer);
+        gl.enableVertexAttribArray(hAOLoc);
+        gl.vertexAttribPointer(hAOLoc, 1, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, hatIndexBuffer);
+        gl.drawElements(gl.TRIANGLES, hatIndices.length, gl.UNSIGNED_SHORT, 0);
+
+        gl.disableVertexAttribArray(hPosLoc);
+        gl.disableVertexAttribArray(hNormLoc);
+        gl.disableVertexAttribArray(hColLoc);
+        gl.disableVertexAttribArray(hAOLoc);
+      }
+
+      // 3. Orbiting Particle Light Trails (Additive Blending)
+      if (showOrbiters && !activeInSwirl) {
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+        gl.depthMask(false);
+        gl.disable(gl.DEPTH_TEST);
+
+        gl.useProgram(trailProgram);
+        mat4Multiply(mvpMatrix, viewProjMatrix, mat4Identity(mat4Create()));
+        gl.uniformMatrix4fv(gl.getUniformLocation(trailProgram, 'u_mvp'), false, mvpMatrix);
+
+        const tPosLoc = gl.getAttribLocation(trailProgram, 'a_pos');
+        gl.bindBuffer(gl.ARRAY_BUFFER, trailPosBuffer);
+        gl.enableVertexAttribArray(tPosLoc);
+        gl.vertexAttribPointer(tPosLoc, 3, gl.FLOAT, false, 0, 0);
+
+        const tColLoc = gl.getAttribLocation(trailProgram, 'a_color');
+        gl.bindBuffer(gl.ARRAY_BUFFER, trailColBuffer);
+        gl.enableVertexAttribArray(tColLoc);
+        gl.vertexAttribPointer(tColLoc, 4, gl.FLOAT, false, 0, 0);
+
+        gl.drawArrays(gl.LINES, 0, TOTAL_TRAIL_VERTS);
+
+        gl.disableVertexAttribArray(tPosLoc);
+        gl.disableVertexAttribArray(tColLoc);
+      }
+
+      // 4. Glowing Embers / Particles (Additive Blending)
+      const shouldDrawParticles = activeInSwirl || showOrbiters;
+      if (shouldDrawParticles) {
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+        gl.depthMask(false);
+        gl.disable(gl.DEPTH_TEST);
+
+        gl.useProgram(particleProgram);
+        mat4Multiply(mvpMatrix, viewProjMatrix, mat4Identity(mat4Create()));
+        gl.uniformMatrix4fv(gl.getUniformLocation(particleProgram, 'u_mvp'), false, mvpMatrix);
+        gl.uniform1f(gl.getUniformLocation(particleProgram, 'u_dpr'), dpr);
+
+        const pPosLoc = gl.getAttribLocation(particleProgram, 'a_pos');
+        gl.bindBuffer(gl.ARRAY_BUFFER, particlePosBuffer);
+        gl.enableVertexAttribArray(pPosLoc);
+        gl.vertexAttribPointer(pPosLoc, 3, gl.FLOAT, false, 0, 0);
+
+        const pColLoc = gl.getAttribLocation(particleProgram, 'a_color');
+        gl.bindBuffer(gl.ARRAY_BUFFER, particleColBuffer);
+        gl.enableVertexAttribArray(pColLoc);
+        gl.vertexAttribPointer(pColLoc, 4, gl.FLOAT, false, 0, 0);
+
+        const pSizeLoc = gl.getAttribLocation(particleProgram, 'a_size');
+        gl.bindBuffer(gl.ARRAY_BUFFER, particleSizeBuffer);
+        gl.enableVertexAttribArray(pSizeLoc);
+        gl.vertexAttribPointer(pSizeLoc, 1, gl.FLOAT, false, 0, 0);
+
+        const drawCount = activeInSwirl ? TOTAL_PARTICLES : ORBITING_PERSISTENT_COUNT;
+        gl.drawArrays(gl.POINTS, 0, drawCount);
+
+        gl.disableVertexAttribArray(pPosLoc);
+        gl.disableVertexAttribArray(pColLoc);
+        gl.disableVertexAttribArray(pSizeLoc);
+      }
+    }
+
+    requestAnimationFrame(render);
+  })();
+  </script>
+</body>
+</html>
