@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Red Fedora — Dark Hero</title>
+<style>
+  :root{
+    --bg:#07080b;
+    --ink:#ece8e1;
+    --muted:#948e86;
+    --faint:#6b655e;
+    --red:#ee0000;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;
+    background:
+      radial-gradient(1100px 620px at 50% 38%, #1b1113 0%, #0d0b0e 46%, var(--bg) 78%),
+      var(--bg);
+    color:var(--ink);
+    font-family:ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  body::after{
+    content:"";
+    position:fixed; inset:0;
+    pointer-events:none;
+    background:radial-gradient(120% 90% at 50% 45%, transparent 55%, rgba(0,0,0,.55) 100%);
+  }
+  .hero{
+    min-height:100dvh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:clamp(16px,4vw,48px);
+  }
+  .stage{
+    width:min(94vw, 620px);
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:6px;
+    outline:none;
+  }
+  .canvas-wrap{
+    position:relative;
+    width:min(92vw, 560px, 62vh);
+    aspect-ratio:1/1;
+  }
+  canvas{
+    display:block;
+    width:100%;
+    height:100%;
+    border-radius:24px;
+  }
+  .floor-glow{
+    position:absolute;
+    left:50%; bottom:-4%;
+    width:72%; height:12%;
+    transform:translateX(-50%);
+    background:radial-gradient(50% 50% at 50% 50%, rgba(238,0,0,.14), rgba(238,0,0,0) 70%);
+    filter:blur(6px);
+    pointer-events:none;
+  }
+  figcaption{
+    text-align:center;
+    max-width:46ch;
+    line-height:1.5;
+  }
+  .title{
+    margin:10px 0 2px;
+    font-size:clamp(15px,2.4vw,18px);
+    font-weight:600;
+    letter-spacing:.01em;
+    color:var(--ink);
+  }
+  .sub{
+    margin:0;
+    font-size:13px;
+    color:var(--muted);
+  }
+  .hint{
+    margin:8px 0 0;
+    font-size:12px;
+    color:var(--faint);
+    transition:opacity .6s ease;
+  }
+  .stage.scattering .hint{opacity:.25}
+  @media (prefers-reduced-motion: reduce){
+    .hint{transition:none}
+  }
+</style>
+</head>
+<body>
+<main class="hero" id="hero">
+  <figure class="stage" id="stage" tabindex="0" role="button"
+    aria-label="Red fedora logo. Activate to scatter into embers and reform.">
+    <div class="canvas-wrap">
+      <canvas id="scene"></canvas>
+      <div class="floor-glow" aria-hidden="true"></div>
+    </div>
+    <figcaption>
+      <p class="title">The red fedora</p>
+      <p class="sub">Spinning softly in the dark.</p>
+      <p class="hint" id="hint">hover or tap to scatter into embers</p>
+    </figcaption>
+  </figure>
+</main>
+<script>
+(function(){
+  "use strict";
+  var canvas = document.getElementById('scene');
+  var stage = document.getElementById('stage');
+  var hint = document.getElementById('hint');
+  var ctx = canvas.getContext('2d');
+  var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var W=0, H=0, DPR=1, cx=0, cy=0, hatW=200;
+  var TAU = Math.PI*2;
+
+  function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+  function easeOutCubic(t){ return 1-Math.pow(1-t,3); }
+  function easeInOutCubic(t){ return t<0.5 ? 4*t*t*t : 1-Math.pow(-2*t+2,3)/2; }
+
+  function resize(){
+    var r = canvas.getBoundingClientRect();
+    DPR = Math.min(window.devicePixelRatio||1, 2);
+    W = Math.max(2, Math.round(r.width*DPR));
+    H = Math.max(2, Math.round(r.height*DPR));
+    canvas.width = W; canvas.height = H;
+    cx = W*0.5; cy = H*0.47;
+    hatW = Math.min(W,H)*0.60;
+    layoutHomes();
+  }
+
+  /* ---------- glow sprites (tasteful, pre-rendered) ---------- */
+  function makeSprite(rgb){
+    var c=document.createElement('canvas'); c.width=c.height=64;
+    var g=c.getContext('2d');
+    var grad=g.createRadialGradient(32,32,0,32,32,32);
+    grad.addColorStop(0,'rgba(255,244,230,1)');
+    grad.addColorStop(0.22,'rgba('+rgb+',0.85)');
+    grad.addColorStop(0.5,'rgba('+rgb+',0.28)');
+    grad.addColorStop(1,'rgba('+rgb+',0)');
+    g.fillStyle=grad; g.fillRect(0,0,64,64);
+    return c;
+  }
+  var sprites=[makeSprite('255,72,40'), makeSprite('238,20,20'), makeSprite('255,170,90')];
+
+  /* ---------- fedora vector (front view, centered at 0,0) ---------- */
+  function fedoraPath(c,w){
+    var brY=w*0.10, brRX=w*0.50, brRY=w*0.155;
+    // brim
+    c.beginPath();
+    c.ellipse(0,brY,brRX,brRY,0,0,TAU);
+    // crown
+    c.moveTo(-w*0.30, brY-2);
+    c.bezierCurveTo(-w*0.29, -w*0.12, -w*0.27, -w*0.24, -w*0.235, -w*0.315);
+    c.quadraticCurveTo(-w*0.19, -w*0.365, -w*0.12, -w*0.365);
+    c.quadraticCurveTo(-w*0.06, -w*0.365, -w*0.045, -w*0.335);
+    c.quadraticCurveTo(-w*0.02, -w*0.30, 0, -w*0.298);
+    c.quadraticCurveTo(w*0.02, -w*0.30, w*0.045, -w*0.335);
+    c.quadraticCurveTo(w*0.06, -w*0.365, w*0.12, -w*0.365);
+    c.quadraticCurveTo(w*0.19, -w*0.365, w*0.235, -w*0.315);
+    c.bezierCurveTo(w*0.27, -w*0.24, w*0.29, -w*0.12, w*0.30, brY-2);
+    c.quadraticCurveTo(0, brY+w*0.075, -w*0.30, brY-2);
+    c.closePath();
+  }
+  function paintFedora(c,w,squash,alpha,light){
+    c.save();
+    c.scale(squash,1);
+    c.globalAlpha=alpha;
+    // brim base
+    var brY=w*0.10;
+    var g1=c.createLinearGradient(-w*0.5,0,w*0.5,0);
+    var l=clamp(light,0,1.4);
+    g1.addColorStop(0,'rgb('+(120+l*40|0)+',0,0)');
+    g1.addColorStop(0.32,'rgb('+(225+l*25|0)+',22,22)');
+    g1.addColorStop(0.55,'rgb('+(250|0)+',45,45)');
+    g1.addColorStop(0.8,'rgb('+(170|0)+',8,8)');
+    g1.addColorStop(1,'rgb(96,0,0)');
+    c.beginPath();
+    c.ellipse(0,brY,w*0.50,w*0.155,0,0,TAU);
+    c.fillStyle=g1; c.fill();
+    // brim top sheen
+    c.beginPath();
+    c.ellipse(-w*0.06,brY-w*0.035,w*0.36,w*0.085,0,Math.PI,TAU);
+    c.fillStyle='rgba(255,120,110,'+(0.20+0.10*l).toFixed(3)+')';
+    c.fill();
+    // crown
+    var g2=c.createLinearGradient(0,-w*0.37,0,w*0.12);
+    g2.addColorStop(0,'rgb('+(255|0)+','+(70+l*22|0)+','+(66+l*20|0)+')');
+    g2.addColorStop(0.45,'rgb('+(226|0)+',26,26)');
+    g2.addColorStop(1,'rgb(128,2,2)');
+    c.beginPath();
+    c.moveTo(-w*0.30, brY-2);
+    c.bezierCurveTo(-w*0.29, -w*0.12, -w*0.27, -w*0.24, -w*0.235, -w*0.315);
+    c.quadraticCurveTo(-w*0.19, -w*0.365, -w*0.12, -w*0.365);
+    c.quadraticCurveTo(-w*0.06, -w*0.365, -w*0.045, -w*0.335);
+    c.quadraticCurveTo(-w*0.02, -w*0.30, 0, -w*0.298);
+    c.quadraticCurveTo(w*0.02, -w*0.30, w*0.045, -w*0.335);
+    c.quadraticCurveTo(w*0.06, -w*0.365, w*0.12, -w*0.365);
+    c.quadraticCurveTo(w*0.19, -w*0.365, w*0.235, -w*0.315);
+    c.bezierCurveTo(w*0.27, -w*0.24, w*0.29, -w*0.12, w*0.30, brY-2);
+    c.quadraticCurveTo(0, brY+w*0.075, -w*0.30, brY-2);
+    c.closePath();
+    c.fillStyle=g2; c.fill();
+    // pinch shadow (center dent)
+    var g3=c.createLinearGradient(-w*0.06,0,w*0.06,0);
+    g3.addColorStop(0,'rgba(60,0,0,0)');
+    g3.addColorStop(0.5,'rgba(60,0,0,0.42)');
+    g3.addColorStop(1,'rgba(60,0,0,0)');
+    c.fillStyle=g3;
+    c.fillRect(-w*0.06,-w*0.36,w*0.12,w*0.42);
+    // band
+    c.beginPath();
+    c.moveTo(-w*0.283, -w*0.045);
+    c.quadraticCurveTo(0, -w*0.005, w*0.283, -w*0.045);
+    c.lineTo(w*0.292, brY-2);
+    c.quadraticCurveTo(0, brY+w*0.06, -w*0.292, brY-2);
+    c.closePath();
+    c.fillStyle='rgba(10,10,12,0.96)'; c.fill();
+    c.beginPath();
+    c.moveTo(-w*0.283, -w*0.045);
+    c.quadraticCurveTo(0, -w*0.005, w*0.283, -w*0.045);
+    c.strokeStyle='rgba(255,90,80,0.35)'; c.lineWidth=Math.max(1,w*0.004); c.stroke();
+    // left key light
+    c.beginPath();
+    c.ellipse(-w*0.15,-w*0.14,w*0.055,w*0.13,-0.25,0,TAU);
+    c.fillStyle='rgba(255,200,190,'+(0.16+0.08*l).toFixed(3)+')';
+    c.fill();
+    // edge-on thickness hint
+    if(Math.abs(squash)<0.22){
+      c.fillStyle='rgba(255,120,110,'+(0.5*(1-Math.abs(squash)/0.22)).toFixed(3)+')';
+      c.fillRect(-w*0.008,-w*0.33,w*0.016,w*0.45);
+    }
+    c.restore();
+  }
+
+  /* ---------- particles sampled from the hat ---------- */
+  var parts=[], orbiters=[], dust=[];
+  var SMALL = (window.innerWidth||800) < 520;
+  var COUNT = SMALL ? 1700 : 3200;
+
+  function sampleHat(){
+    var S=360, off=document.createElement('canvas');
+    off.width=S; off.height=S;
+    var g=off.getContext('2d');
+    g.translate(S/2,S/2+10);
+    paintFedora(g,250,1,1,0.9);
+    var d=g.getImageData(0,0,S,S).data;
+    var pts=[];
+    for(var y=0;y<S;y+=1){
+      for(var x=0;x<S;x+=1){
+        var i=(y*S+x)*4;
+        var r=d[i],gg=d[i+1],b=d[i+2],a=d[i+3];
+        if(a>110 && r>70 && r>gg+12 && r>b){ pts.push([x,y]); }
+      }
+    }
+    return {pts:pts,S:S};
+  }
+  function buildParticles(){
+    parts=[]; orbiters=[]; dust=[];
+    var s=sampleHat(), pts=s.pts, S=s.S;
+    if(!pts.length) return;
+    for(var i=0;i<COUNT;i++){
+      var p=pts[(Math.random()*pts.length)|0];
+      var nx=(p[0]-S/2)/(S/2), ny=(p[1]-S/2-10)/(S/2);
+      var ember=Math.random();
+      parts.push({
+        nx:nx, ny:ny, hx:0, hy:0, x:0, y:0, sx:0, sy:0, ex:0, ey:0,
+        size:(0.7+Math.random()*1.7),
+        ci: ember<0.55?1 : (ember<0.85?0:2),
+        seed:Math.random()*TAU,
+        rad:0.5+Math.random(),
+        jr:(Math.random()-0.5),
+        tw:0.6+Math.random()*1.6
+      });
+    }
+    for(var k=0;k<70;k++){
+      dust.push({x:Math.random(),y:Math.random(),r:0.5+Math.random()*1.4,a:0.05+Math.random()*0.12,s:0.004+Math.random()*0.012,ph:Math.random()*TAU});
+    }
+    layoutHomes();
+  }
+  function layoutHomes(){
+    for(var i=0;i<parts.length;i++){
+      var p=parts[i];
+      p.hx=cx+p.nx*hatW*0.5;
+      p.hy=cy+p.ny*hatW*0.5;
+      if(state==='idle'){ p.x=p.hx; p.y=p.hy; }
+      else { // keep proportions on resize mid-flight
+        p.hx=cx+p.nx*hatW*0.5; p.hy=cy+p.ny*hatW*0.5;
+      }
+    }
+  }
+
+  /* ---------- state machine ---------- */
+  var state='idle', tState=0, time=0;
+  var angle=0.6, spin=0.55, spinTarget=0.55, frontAngle=0;
+  var solidAlpha=1, partAlpha=0;
+  var DUR={dissolve:1.5, swirl:2.4, ret:2.0, reform:0.8};
+  var swirlA=0, interacted=false, cooldown=0;
+
+  function trigger(){
+    if(reduced){ // gentle acknowledgement, no explosion
+      hint.style.opacity='0.35';
+      setTimeout(function(){ hint.style.opacity=''; },700);
+      return;
+    }
+    if(state!=='idle'||cooldown>0) return;
+    state='dissolve'; tState=0;
+    frontAngle=Math.round(angle/TAU)*TAU;
+    spinTarget=0;
+    stage.classList.add('scattering');
+    // exploded targets: radial push + ember lift + jitter
+    for(var i=0;i<parts.length;i++){
+      var p=parts[i];
+      var dx=p.hx-cx, dy=p.hy-cy;
+      var d=Math.sqrt(dx*dx+dy*dy)+0.001;
+      var push=(0.35+p.rad*0.75)*hatW*0.75;
+      var a=Math.atan2(dy,dx)+p.jr*0.9;
+      var lift=-(30+Math.random()*130)*(DPR);
+      p.ex=cx+Math.cos(a)*(d+push)+p.jr*46*DPR;
+      p.ey=cy+Math.sin(a)*(d+push)*0.9+lift;
+      p.sx=p.hx; p.sy=p.hy;
+    }
+  }
+
+  function setPhase(s){
+    state=s; tState=0;
+    if(s==='swirl'){ swirlA=0; for(var i=0;i<parts.length;i++){ parts[i].sx=parts[i].x; parts[i].sy=parts[i].y; } }
+    if(s==='return'){ for(var j=0;j<parts.length;j++){ parts[j].sx=parts[j].x; parts[j].sy=parts[j].y; } }
+    if(s==='reform'){ spinTarget=0.55; }
+    if(s==='idle'){
+      for(var k=0;k<parts.length;k++){ parts[k].x=parts[k].hx; parts[k].y=parts[k].hy; }
+      solidAlpha=1; partAlpha=0; spinTarget=0.55;
+      stage.classList.remove('scattering');
+      cooldown=1.0;
+      ensureOrbiters();
+    }
+  }
+  function ensureOrbiters(){
+    if(orbiters.length||reduced) return;
+    for(var i=0;i<16;i++){
+      orbiters.push({
+        r:(0.62+Math.random()*0.42), sp:(0.25+Math.random()*0.5)*(Math.random()<0.5?1:-1),
+        ph:Math.random()*TAU, sq:0.32+Math.random()*0.14,
+        size:0.8+Math.random()*1.3, ci:i%3, trail:[]
+      });
+    }
+    if(hint) hint.textContent='nice — a few embers stayed in orbit';
+  }
+
+  function step(dt){
+    time+=dt;
+    if(cooldown>0) cooldown-=dt;
+    tState+=dt;
+
+    // spin easing (slows into dissolve, resumes on reform)
+    spin += (spinTarget-spin)*Math.min(1,dt*(state==='dissolve'?2.2:1.6));
+    if(state==='dissolve'){
+      var k=easeOutCubic(clamp(tState/DUR.dissolve,0,1));
+      angle += spin*dt + (frontAngle-angle)*Math.min(1,dt*2.0)*k;
+      solidAlpha=1-k;
+      partAlpha=Math.min(1,k*1.6);
+      for(var i=0;i<parts.length;i++){
+        var p=parts[i];
+        var fl=Math.sin(time*9+p.seed*7)*3*DPR*k;
+        p.x=p.hx+(p.ex-p.hx)*k+fl*p.jr;
+        p.y=p.hy+(p.ey-p.hy)*k+Math.sin(time*7+p.seed*5)*3*DPR*k;
+      }
+      if(tState>=DUR.dissolve) setPhase('swirl');
+    }
+    else if(state==='swirl'){
+      var ks=clamp(tState/DUR.swirl,0,1);
+      swirlA+=dt*(1.1-0.4*ks);
+      angle+=(frontAngle-angle)*Math.min(1,dt*3);
+      solidAlpha=0; partAlpha=1;
+      for(var j=0;j<parts.length;j++){
+        var q=parts[j];
+        var bx=q.ex-cx, by=q.ey-cy;
+        var rr=Math.sqrt(bx*bx+by*by)+0.001;
+        var fall=clamp(140*DPR/rr,0.25,1.4);
+        var rot=swirlA*fall*(0.7+0.3*Math.sin(q.seed));
+        var co=Math.cos(rot), si=Math.sin(rot);
+        var rx=bx*co-by*si, ry=bx*si+by*co;
+        var bobY=Math.sin(time*1.7+q.seed*3)*14*DPR;
+        var bobX=Math.cos(time*1.3+q.seed*2)*14*DPR;
+        var rise=-Math.sin(ks*Math.PI)*24*DPR;
+        q.x=cx+rx+bobX;
+        q.y=cy+ry+bobY+rise;
+      }
+      if(tState>=DUR.swirl) setPhase('return');
+    }
+    else if(state==='return'){
+      var kr=easeInOutCubic(clamp(tState/DUR.ret,0,1));
+      solidAlpha=0; partAlpha=1;
+      for(var m=0;m<parts.length;m++){
+        var r=parts[m];
+        var bow=Math.sin(kr*Math.PI)*22*DPR*Math.sin(r.seed*3);
+        r.x=r.sx+(r.hx-r.sx)*kr+bow*Math.cos(r.seed);
+        r.y=r.sy+(r.hy-r.sy)*kr+bow*Math.sin(r.seed)*0.6;
+      }
+      if(tState>=DUR.ret) setPhase('reform');
+    }
+    else if(state==='reform'){
+      var kf=clamp(tState/DUR.reform,0,1);
+      solidAlpha=kf; partAlpha=1-kf;
+      angle+=spin*dt*kf;
+      for(var n=0;n<parts.length;n++){ parts[n].x=parts[n].hx; parts[n].y=parts[n].hy; }
+      if(tState>=DUR.reform) setPhase('idle');
+    }
+    else { angle+=spin*dt; }
+
+    // orbiters drift (idle + all phases, faint)
+    for(var o=0;o<orbiters.length;o++){
+      var ob=orbiters[o];
+      ob.ph+=ob.sp*dt;
+      var R=ob.r*hatW*0.62;
+      ob.x=cx+Math.cos(ob.ph)*R;
+      ob.y=cy+Math.sin(ob.ph)*R*ob.sq+Math.sin(time*0.9+o)*4*DPR;
+      ob.trail.push([ob.x,ob.y]);
+      if(ob.trail.length>14) ob.trail.shift();
+    }
+  }
+
+  function drawShadow(squash,bob){
+    var sw=hatW*(0.42+0.18*Math.abs(squash));
+    var sh=hatW*0.075;
+    var y=cy+hatW*0.30+bob*0.3;
+    var g=ctx.createRadialGradient(cx,y,0,cx,y,sw);
+    g.addColorStop(0,'rgba(0,0,0,0.62)');
+    g.addColorStop(0.6,'rgba(0,0,0,0.28)');
+    g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=g;
+    ctx.beginPath(); ctx.ellipse(cx,y,sw,sh,0,0,TAU); ctx.fill();
+    // faint red floor bounce
+    var g2=ctx.createRadialGradient(cx,y-6*DPR,0,cx,y-6*DPR,sw*0.7);
+    g2.addColorStop(0,'rgba(238,0,0,0.10)');
+    g2.addColorStop(1,'rgba(238,0,0,0)');
+    ctx.fillStyle=g2;
+    ctx.beginPath(); ctx.ellipse(cx,y-6*DPR,sw*0.7,sh*0.8,0,0,TAU); ctx.fill();
+  }
+
+  function render(){
+    ctx.clearRect(0,0,W,H);
+    var bob = reduced?0:Math.sin(time*0.9)*5*DPR;
+    var squash = reduced?1:Math.cos(angle);
+    // dust (depth, behind)
+    if(!reduced){
+      ctx.save();
+      for(var i=0;i<dust.length;i++){
+        var d=dust[i];
+        var dx=((d.x+time*d.s)%1)*W;
+        var dy=(d.y*H+Math.sin(time*0.4+d.ph)*8*DPR);
+        ctx.globalAlpha=d.a;
+        ctx.fillStyle='#cbbfae';
+        ctx.beginPath(); ctx.arc(dx,dy,d.r*DPR,0,TAU); ctx.fill();
+      }
+      ctx.restore();
+    }
+    drawShadow(squash,bob);
+    // ambient halo behind hat
+    var halo=ctx.createRadialGradient(cx,cy+bob,0,cx,cy+bob,hatW*0.85);
+    halo.addColorStop(0,'rgba(255,60,40,'+(0.10*solidAlpha+0.05*partAlpha).toFixed(3)+')');
+    halo.addColorStop(1,'rgba(255,60,40,0)');
+    ctx.fillStyle=halo;
+    ctx.fillRect(cx-hatW,cy-hatW+bob,hatW*2,hatW*2);
+
+    // solid hat
+    if(solidAlpha>0.003){
+      ctx.save();
+      ctx.translate(cx,cy+bob);
+      var light=0.7+0.5*Math.cos(angle+0.6);
+      paintFedora(ctx,hatW,squash,solidAlpha,light);
+      ctx.restore();
+    }
+    // particles (embers)
+    if(partAlpha>0.003){
+      ctx.save();
+      ctx.globalCompositeOperation='lighter';
+      for(var j=0;j<parts.length;j++){
+        var p=parts[j];
+        var tw=0.72+0.28*Math.sin(time*p.tw*4+p.seed*9);
+        var a=partAlpha*tw;
+        if(a<=0.01) continue;
+        var s=(p.size*DPR)*(3.2+1.6*Math.sin(p.seed*5+time*3));
+        ctx.globalAlpha=Math.min(1,a*0.85);
+        var sp=sprites[p.ci];
+        ctx.drawImage(sp,p.x-s,p.y-s,s*2,s*2);
+        ctx.globalAlpha=Math.min(1,a);
+        ctx.fillStyle='rgba(255,220,190,0.9)';
+        ctx.fillRect(p.x-0.6*DPR,p.y-0.6*DPR,1.2*DPR,1.2*DPR);
+      }
+      ctx.restore();
+      ctx.globalAlpha=1;
+    }
+    // orbiters + faint trails
+    if(orbiters.length){
+      ctx.save();
+      ctx.globalCompositeOperation='lighter';
+      for(var o=0;o<orbiters.length;o++){
+        var ob2=orbiters[o];
+        for(var t=0;t<ob2.trail.length;t++){
+          var f=t/ob2.trail.length;
+          ctx.globalAlpha=0.10*f*f+0.02;
+          ctx.fillStyle='#ff8a4d';
+          var tr=ob2.trail[t];
+          ctx.beginPath(); ctx.arc(tr[0],tr[1],ob2.size*DPR*(0.4+0.6*f),0,TAU); ctx.fill();
+        }
+        var gs=ob2.size*DPR*4;
+        ctx.globalAlpha=0.75;
+        ctx.drawImage(sprites[ob2.ci],ob2.x-gs,ob2.y-gs,gs*2,gs*2);
+      }
+      ctx.restore();
+      ctx.globalAlpha=1;
+    }
+  }
+
+  function frame(tms,last){
+    var dt=Math.min(0.05,(tms-last)/1000||0.016);
+    step(dt); render();
+    return tms;
+  }
+
+  /* ---------- boot ---------- */
+  buildParticles();
+  resize();
+  buildParticles();
+
+  if(reduced){
+    render();
+  } else {
+    var last=performance.now();
+    // gentle auto-demo once? No — stay calm until hover/tap.
+    (function loop(now){
+      last=frame(now,last);
+      requestAnimationFrame(loop);
+    })(last);
+    interacted=false;
+  }
+
+  var rt=null;
+  window.addEventListener('resize',function(){
+    if(rt) clearTimeout(rt);
+    rt=setTimeout(function(){ resize(); if(reduced) render(); },120);
+  });
+  // hover + tap + keyboard
+  var hoverArmed = window.matchMedia && window.matchMedia('(hover: hover)').matches;
+  if(hoverArmed) stage.addEventListener('pointerenter',trigger);
+  stage.addEventListener('pointerdown',trigger);
+  stage.addEventListener('keydown',function(e){
+    if(e.key==='Enter'||e.key===' '){ e.preventDefault(); trigger(); }
+  });
+  stage.addEventListener('focus',function(){ /* focus alone shouldn't fire; key does */ });
+})();
+</script>
+</body>
+</html>

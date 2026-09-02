@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Fedora — Dark Hero</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    background:#07080c;
+    color:#e8e6e3;
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  .stage{
+    position:fixed;inset:0;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:
+      radial-gradient(1100px 620px at 50% 38%, rgba(210,31,38,.16), transparent 60%),
+      radial-gradient(800px 500px at 50% 110%, rgba(255,90,60,.07), transparent 60%),
+      radial-gradient(1200px 900px at 50% 50%, #14161d 0%, #0a0b10 55%, #06070a 100%);
+  }
+  .stage::after{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(120% 90% at 50% 45%, transparent 55%, rgba(0,0,0,.55) 100%);
+  }
+  .eyebrow{
+    position:relative;z-index:3;
+    font-size:11px;letter-spacing:.34em;text-transform:uppercase;
+    color:#8b8f9c;margin-bottom:14px;user-select:none;
+  }
+  .eyebrow b{color:#c9ccd6;font-weight:600}
+  #scene{
+    position:relative;z-index:2;
+    width:min(92vw,760px);
+    height:min(58vh,520px);
+    display:block;cursor:pointer;
+    touch-action:manipulation;
+  }
+  .caption{
+    position:relative;z-index:3;text-align:center;
+    margin-top:6px;user-select:none;pointer-events:none;
+  }
+  .caption h1{
+    font-size:clamp(18px,3.4vw,26px);
+    font-weight:650;letter-spacing:.02em;color:#f2f0ec;
+  }
+  .caption h1 span{color:#ff4b3e}
+  .caption p{
+    margin-top:8px;font-size:12.5px;letter-spacing:.18em;text-transform:uppercase;
+    color:#7d8190;
+  }
+  .hint{
+    position:relative;z-index:3;margin-top:16px;
+    font-size:12px;letter-spacing:.08em;color:#5b5f6d;
+    border:1px solid rgba(255,255,255,.1);
+    padding:7px 14px;border-radius:999px;
+    background:rgba(255,255,255,.03);
+    user-select:none;
+  }
+  @media (max-height:560px){
+    .eyebrow{margin-bottom:6px}
+    #scene{height:min(52vh,420px)}
+    .hint{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <div class="eyebrow"><b>Dark</b> &nbsp;·&nbsp; Hero &nbsp;·&nbsp; Study</div>
+  <canvas id="scene"></canvas>
+  <div class="caption">
+    <h1>The <span>Fedora</span>, in embers</h1>
+    <p>hover or tap to disperse &amp; reform</p>
+  </div>
+  <div class="hint" id="hint">move over the hat — it will come back</div>
+</div>
+<script>
+(function(){
+  "use strict";
+  var canvas = document.getElementById('scene');
+  var stage = document.getElementById('stage');
+  var hint = document.getElementById('hint');
+  var ctx = canvas.getContext('2d');
+  var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var W=0,H=0,DPR=1,cx=0,cy=0,R=100;
+  var spin = 0.6, speed = reduced ? 0 : 0.55, baseSpeed = reduced ? 0 : 0.55;
+  var bob = 0;
+
+  // particle field
+  var N = 2600, parts = [], orbiters = [], hasOrbiters = false;
+  var state = 'idle', seqT = 0;
+  var SEQ_LEN = reduced ? 1.4 : 5.4;
+  var hatAlpha = 1, partAlpha = 0;
+
+  function resize(){
+    DPR = Math.min(window.devicePixelRatio||1, 2);
+    var r = canvas.getBoundingClientRect();
+    W = Math.max(50, r.width); H = Math.max(50, r.height);
+    canvas.width = Math.round(W*DPR); canvas.height = Math.round(H*DPR);
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    cx = W/2; cy = H/2 - H*0.03;
+    R = Math.min(W,H)*0.335;
+    if(parts.length===0) buildParticles();
+  }
+
+  // ---- crisp vector fedora, drawn in unit of R, spinX = cos(spin) for 3D turn ----
+  function drawHat(g, x, y, r, sx, alpha, light){
+    if(alpha<=0.001) return;
+    g.save();
+    g.translate(x, y + (reduced?0:Math.sin(bob)*7));
+    // floor shadow
+    g.save();
+    g.globalAlpha = 0.55*alpha;
+    var shw = Math.abs(sx)*0.85+0.35;
+    g.scale(shw,1);
+    var sh = g.createRadialGradient(0, r*0.95, r*0.1, 0, r*0.95, r*1.15);
+    sh.addColorStop(0,'rgba(0,0,0,0.65)');
+    sh.addColorStop(0.6,'rgba(0,0,0,0.28)');
+    sh.addColorStop(1,'rgba(0,0,0,0)');
+    g.fillStyle = sh;
+    g.beginPath(); g.ellipse(0, r*0.95, r*1.15, r*0.22, 0, 0, Math.PI*2); g.fill();
+    g.restore();
+    // soft red under-glow
+    g.save();
+    g.globalAlpha = 0.20*alpha;
+    g.scale(Math.abs(sx)*0.7+0.4,1);
+    var gl = g.createRadialGradient(0, r*0.5, 10, 0, r*0.5, r*1.5);
+    gl.addColorStop(0,'rgba(255,60,40,0.55)');
+    gl.addColorStop(1,'rgba(255,60,40,0)');
+    g.fillStyle = gl;
+    g.beginPath(); g.arc(0, r*0.4, r*1.5, 0, Math.PI*2); g.fill();
+    g.restore();
+
+    g.scale(sx,1);
+    g.globalAlpha = alpha;
+    var flip = sx<0?-1:1;
+
+    // brim (underside then top)
+    var brim = g.createLinearGradient(0,-r*0.1,0,r*0.6);
+    brim.addColorStop(0,'#f04438');
+    brim.addColorStop(0.45,'#c81e24');
+    brim.addColorStop(1,'#5e0a10');
+    g.fillStyle = brim;
+    g.beginPath();
+    g.ellipse(0, r*0.34, r*1.08, r*0.30, 0, 0, Math.PI*2);
+    g.fill();
+    // brim top shading toward back
+    g.fillStyle = 'rgba(0,0,0,0.22)';
+    g.beginPath();
+    g.ellipse(0, r*0.30, r*0.92, r*0.22, 0, 0, Math.PI*2);
+    g.fill();
+    // brim rim light
+    g.strokeStyle = 'rgba(255,150,130,0.55)';
+    g.lineWidth = Math.max(1, r*0.012);
+    g.beginPath();
+    g.ellipse(0, r*0.34, r*1.08, r*0.30, 0, Math.PI*1.05, Math.PI*1.95);
+    g.stroke();
+
+    // crown
+    var cg = g.createLinearGradient(-r*0.6,0,r*0.6,0);
+    var l = light; // 0..1
+    var hi = 'rgb('+(200+Math.round(55*l))+','+(40+Math.round(25*l))+','+(45+Math.round(20*l))+')';
+    cg.addColorStop(0,'#6d0d13');
+    cg.addColorStop(0.28,'#b81820');
+    cg.addColorStop(0.46,hi);
+    cg.addColorStop(0.62,'#c81e24');
+    cg.addColorStop(1,'#57090e');
+    g.fillStyle = cg;
+    g.beginPath();
+    g.moveTo(-r*0.58, r*0.34);
+    g.bezierCurveTo(-r*0.56, -r*0.25, -r*0.50, -r*0.52, -r*0.34, -r*0.60);
+    g.quadraticCurveTo(-r*0.12, -r*0.68, 0, -r*0.50);      // center dent
+    g.quadraticCurveTo(r*0.12, -r*0.68, r*0.34, -r*0.60);
+    g.bezierCurveTo(r*0.50, -r*0.52, r*0.56, -r*0.25, r*0.58, r*0.34);
+    g.quadraticCurveTo(0, r*0.50, -r*0.58, r*0.34);
+    g.closePath(); g.fill();
+    // crown side shading (pinch)
+    g.fillStyle = 'rgba(0,0,0,0.28)';
+    g.beginPath();
+    g.moveTo(-r*0.34,-r*0.60); g.quadraticCurveTo(-r*0.22,-r*0.30,-r*0.30,r*0.30);
+    g.lineTo(-r*0.12,r*0.34); g.quadraticCurveTo(-r*0.06,-r*0.28,-r*0.14,-r*0.62);
+    g.closePath(); g.fill();
+    g.beginPath();
+    g.moveTo(r*0.34,-r*0.60); g.quadraticCurveTo(r*0.22,-r*0.30,r*0.30,r*0.30);
+    g.lineTo(r*0.12,r*0.34); g.quadraticCurveTo(r*0.06,-r*0.28,r*0.14,-r*0.62);
+    g.closePath(); g.fill();
+    // dent shadow
+    g.fillStyle = 'rgba(0,0,0,0.30)';
+    g.beginPath();
+    g.ellipse(0, -r*0.50, r*0.20, r*0.075, 0, 0, Math.PI*2); g.fill();
+    // band
+    g.fillStyle = '#141318';
+    g.beginPath();
+    g.moveTo(-r*0.545, r*0.02); g.quadraticCurveTo(0, r*0.16, r*0.545, r*0.02);
+    g.lineTo(r*0.565, r*0.32); g.quadraticCurveTo(0, r*0.47, -r*0.565, r*0.32);
+    g.closePath(); g.fill();
+    g.fillStyle = 'rgba(255,255,255,0.10)';
+    g.fillRect(-r*0.545, r*0.02, r*1.09, r*0.035);
+    // small bow knot on side
+    g.fillStyle = '#1e1d23';
+    g.beginPath(); g.ellipse(flip*r*0.55, r*0.16, r*0.075, r*0.10, 0.4, 0, Math.PI*2); g.fill();
+    g.fillStyle = 'rgba(255,90,80,0.25)';
+    g.beginPath(); g.ellipse(flip*r*0.55, r*0.13, r*0.035, r*0.045, 0.4, 0, Math.PI*2); g.fill();
+    // crown highlight
+    g.save();
+    g.globalAlpha = 0.28*alpha;
+    g.fillStyle = '#ffffff';
+    g.beginPath();
+    g.ellipse(-r*0.28, -r*0.18, r*0.10, r*0.28, 0.25, 0, Math.PI*2); g.fill();
+    g.restore();
+    // key light wash
+    g.save();
+    g.globalAlpha = (0.10+0.12*l)*alpha;
+    g.fillStyle = '#ffd9c9';
+    g.beginPath();
+    g.ellipse(-r*0.2, -r*0.05, r*0.5, r*0.62, -0.15, 0, Math.PI*2); g.fill();
+    g.restore();
+
+    g.restore();
+  }
+
+  // ---- sample hat silhouette for particle home positions ----
+  function buildParticles(){
+    var s = 300;
+    var off = document.createElement('canvas'); off.width=s; off.height=s;
+    var g = off.getContext('2d');
+    g.clearRect(0,0,s,s);
+    // draw solid white hat mask using same proportions
+    var r = s*0.30, x=s/2, y=s/2 - s*0.02;
+    g.fillStyle='#fff';
+    g.beginPath(); g.ellipse(x, y+r*0.34, r*1.08, r*0.30, 0, 0, Math.PI*2); g.fill();
+    g.beginPath();
+    g.moveTo(x-r*0.58, y+r*0.34);
+    g.bezierCurveTo(x-r*0.56, y-r*0.25, x-r*0.50, y-r*0.52, x-r*0.34, y-r*0.60);
+    g.quadraticCurveTo(x-r*0.12, y-r*0.68, x, y-r*0.50);
+    g.quadraticCurveTo(x+r*0.12, y-r*0.68, x+r*0.34, y-r*0.60);
+    g.bezierCurveTo(x+r*0.50, y-r*0.52, x+r*0.56, y-r*0.25, x+r*0.58, y+r*0.34);
+    g.quadraticCurveTo(x, y+r*0.50, x-r*0.58, y+r*0.34);
+    g.closePath(); g.fill();
+    var data;
+    try{ data = g.getImageData(0,0,s,s).data; }catch(e){ data=null; }
+    parts = [];
+    var isSmall = Math.min(window.innerWidth,window.innerHeight)<560;
+    N = isSmall?1700:2600;
+    var tries=0;
+    // color palette: ember reds + rare gold
+    function pickColor(){
+      var v=Math.random();
+      if(v<0.55) return '255,'+(60+Math.random()*50|0)+','+(45+Math.random()*30|0);
+      if(v<0.85) return '255,'+(110+Math.random()*60|0)+','+(90+Math.random()*60|0);
+      if(v<0.95) return '255,'+(170+Math.random()*50|0)+','+(150+Math.random()*60|0);
+      return '255,210,160';
+    }
+    while(parts.length<N && tries<N*40){
+      tries++;
+      var px=Math.random()*s, py=Math.random()*s;
+      var a = data ? data[((py|0)*s+(px|0))*4+3] : 255;
+      if(a<100) continue;
+      var nx=(px-s/2)/s, ny=(py-(s/2 - s*0.02))/s; // normalized around center
+      var ang=Math.atan2(ny,nx)+ (Math.random()-0.5)*0.4;
+      var dist=(0.25+Math.pow(Math.random(),1.6)*0.9);
+      parts.push({
+        hx:nx, hy:ny,
+        ang:ang,
+        dist:dist,
+        spin2:Math.random()*Math.PI*2,
+        spd:0.5+Math.random()*1.4,
+        sz:0.7+Math.random()*1.9,
+        col:pickColor(),
+        tw:Math.random()*Math.PI*2,
+        rise:20+Math.random()*90,
+        delay:Math.random()*0.45
+      });
+    }
+    // choose orbiters
+    orbiters=[];
+    for(var i=0;i<26;i++){
+      var p=parts[(Math.random()*parts.length)|0];
+      if(p) orbiters.push({p:p, r:0.9+Math.random()*0.7, sp:(0.4+Math.random()*0.7)*(Math.random()<0.5?-1:1),
+        ph:Math.random()*Math.PI*2, tilt:0.35+Math.random()*0.4, trail:[]});
+    }
+  }
+
+  function trigger(){
+    if(reduced){
+      if(state!=='idle') return;
+      state='play'; seqT=0; hasOrbiters=false;
+      if(hint) hint.textContent='reforming…';
+      return;
+    }
+    if(state!=='idle') return;
+    state='play'; seqT=0;
+    if(hint) hint.textContent='scattered into embers — watch it come back';
+  }
+  stage.addEventListener('pointerenter', function(e){ if(e.pointerType==='mouse') trigger(); });
+  canvas.addEventListener('pointerdown', trigger);
+  stage.addEventListener('click', trigger);
+  canvas.addEventListener('touchstart', trigger, {passive:true});
+  window.addEventListener('keydown', function(e){ if(e.key===' '||e.key==='Enter') trigger(); });
+
+  function easeIO(t){ return t<0.5 ? 4*t*t*t : 1-Math.pow(-2*t+2,3)/2; }
+  function clamp01(t){ return t<0?0:t>1?1:t; }
+
+  var last=performance.now();
+  function frame(now){
+    var dt=Math.min(0.05,(now-last)/1000); last=now;
+    var t=now/1000;
+    if(!reduced) bob=t*0.9;
+
+    // spin slow-down / resume
+    var target = baseSpeed;
+    if(state==='play'){
+      seqT+=dt;
+      var k=seqT;
+      if(k<0.7) target=baseSpeed*(1-k/0.7);
+      else if(k<SEQ_LEN-0.9) target=0;
+      else target=baseSpeed*((k-(SEQ_LEN-0.9))/0.9);
+      if(seqT>=SEQ_LEN){
+        state='idle'; seqT=0; hasOrbiters=true;
+        if(hint) hint.textContent='move over the hat — it will come back';
+      }
+    }
+    speed += (target-speed)*Math.min(1,dt*4);
+    spin += speed*dt;
+
+    ctx.clearRect(0,0,W,H);
+    var sx=Math.cos(spin);
+    if(Math.abs(sx)<0.08) sx=sx<0?-0.08:0.08;
+    var light=0.5+0.5*Math.cos(spin+0.6);
+
+    // sequence envelopes
+    var scatter=0, swirl=0, back=1, pA=0, hA=1;
+    if(state==='play'){
+      var k2=seqT;
+      if(reduced){
+        hA = 1-Math.sin(Math.PI*clamp01(k2/SEQ_LEN))*0.85;
+        pA = Math.sin(Math.PI*clamp01(k2/SEQ_LEN));
+        scatter = Math.sin(Math.PI*clamp01(k2/SEQ_LEN))*0.15;
+        swirl = 0; back = 1;
+      }else{
+        hA = 1-easeIO(clamp01(k2/0.8));
+        pA = easeIO(clamp01(k2/0.7)) * (1-easeIO(clamp01((k2-(SEQ_LEN-1.0))/1.0)));
+        scatter = easeIO(clamp01((k2-0.55)/1.6));
+        swirl = clamp01((k2-1.6)/1.4) * (1-clamp01((k2-3.3)/1.2));
+        var ret = easeIO(clamp01((k2-3.1)/1.5));
+        back = 1-ret;
+        if(k2>SEQ_LEN-1.0){ hA = easeIO(clamp01((k2-(SEQ_LEN-1.0))/1.0)); pA = 1-hA; }
+      }
+    } else {
+      hA = 1; pA = hasOrbiters?0:0; back=1; scatter=0; swirl=0;
+    }
+
+    // crisp hat
+    drawHat(ctx, cx, cy, R, sx, hA, light);
+
+    // particles
+    if(pA>0.003 || (hasOrbiters && !reduced)){
+      ctx.save();
+      ctx.globalCompositeOperation='lighter';
+      var pxScale = R/ (300*0.30) * 300; // R per normalized unit ~ R/0.30/300*300 -> simply R/0.30 * norm
+      // main ember cloud
+      if(pA>0.003){
+        for(var i=0;i<parts.length;i++){
+          var p=parts[i];
+          var hx=p.hx*(R/0.30)*1.0, hy=p.hy*(R/0.30)*1.0;
+          // 3D spin squash of home while still formed
+          var formedX = hx*sx, formedY = hy;
+          var d = Math.max(0, scatter - p.delay*0.5);
+          d = clamp01(d*1.4);
+          var e = easeIO(d);
+          var rad = e * p.dist * R * 1.5;
+          var a = p.ang + swirl*2.2*p.spd + t*0.15*p.spd*swirl + p.spin2*0.1*e;
+          var ox = Math.cos(a)*rad, oy = Math.sin(a)*rad*0.8 - e*p.rise*(0.4+0.6*Math.sin(p.spin2));
+          // gentle turbulence
+          ox += Math.sin(t*1.7+p.spin2)*10*e;
+          oy += Math.cos(t*1.3+p.tw)*10*e;
+          // return path: pull back with slight overshoot curve
+          var bx = (formedX+ox)*(1-0), by=(formedY+oy);
+          var rr = 1-back; // 0 scattered -> 1 home ; back goes 1->0
+          // staggered return
+          var stag = clamp01((rr - p.delay*0.35)*1.5);
+          stag = easeIO(stag);
+          var X = cx + formedX*(stag) + (formedX+ox)*(1-stag);
+          var Y = cy + formedY*(stag) + (formedY+oy)*(1-stag) + (reduced?0:Math.sin(bob)*7*(1-stag));
+          // fade in/out + twinkle
+          var twk = 0.65+0.35*Math.sin(t*6+p.tw);
+          var alpha = pA*twk*(0.35+0.65*e*(1-stag*0.3)+0.35*(1-e));
+          if(alpha<0.02) continue;
+          var ssz = p.sz*(0.7+0.6*e)*(R/130);
+          ssz=Math.min(3.4,Math.max(0.6,ssz));
+          ctx.globalAlpha = Math.min(0.9,alpha);
+          ctx.fillStyle = 'rgba('+p.col+',1)';
+          ctx.beginPath(); ctx.arc(X,Y,ssz,0,Math.PI*2); ctx.fill();
+          // occasional soft halo (subset only, tasteful)
+          if((i%9)===0 && e>0.15){
+            ctx.globalAlpha = Math.min(0.16,alpha*0.25);
+            ctx.beginPath(); ctx.arc(X,Y,ssz*3.2,0,Math.PI*2); ctx.fill();
+          }
+        }
+      }
+      // lingering orbiters with faint trails
+      if(hasOrbiters && !reduced && state==='idle'){
+        for(var j=0;j<orbiters.length;j++){
+          var o=orbiters[j];
+          o.ph += o.sp*dt;
+          var orx = Math.cos(o.ph)*R*o.r;
+          var ory = Math.sin(o.ph)*R*o.r*o.tilt - R*0.05;
+          var OX = cx+orx, OY=cy+ory;
+          o.trail.push([OX,OY]);
+          if(o.trail.length>16) o.trail.shift();
+          for(var q=1;q<o.trail.length;q++){
+            ctx.globalAlpha = (q/o.trail.length)*0.35;
+            ctx.strokeStyle='rgba(255,120,90,1)';
+            ctx.lineWidth=1.1;
+            ctx.beginPath();
+            ctx.moveTo(o.trail[q-1][0],o.trail[q-1][1]);
+            ctx.lineTo(o.trail[q][0],o.trail[q][1]);
+            ctx.stroke();
+          }
+          ctx.globalAlpha=0.9;
+          ctx.fillStyle='rgba(255,180,140,1)';
+          ctx.beginPath(); ctx.arc(OX,OY,1.6,0,Math.PI*2); ctx.fill();
+        }
+      }
+      // during scatter, orbiters also visible as part of cloud (no trails)
+      ctx.restore();
+    }
+
+    requestAnimationFrame(frame);
+  }
+
+  window.addEventListener('resize', resize);
+  resize();
+  // after fonts/layout settle, re-fit once
+  setTimeout(resize, 60);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
