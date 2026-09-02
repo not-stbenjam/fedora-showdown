@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Red Hat Fedora</title>
+    <style>
+        :root {
+            --bg-color: #050507;
+            --text-color: #e0e0e0;
+        }
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--bg-color);
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        .caption {
+            position: absolute;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: var(--text-color);
+            font-size: 0.9rem;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+            opacity: 0.7;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            * {
+                transition: none !important;
+                animation: none !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="scene"></canvas>
+    <div class="caption">Innovation in Motion</div>
+
+    <script>
+        const canvas = document.getElementById('scene');
+        const ctx = canvas.getContext('2d', { alpha: false });
+        
+        // Configuration
+        const PARTICLE_COUNT = 3500;
+        const FOCAL_LENGTH = 800;
+        const BASE_COLOR = '255, 69, 58'; // Red Hat Red
+        const BRIM_COLOR = '200, 200, 200'; // Greyish brim
+        const GLOW_STRENGTH = 20;
+        
+        let width, height;
+        let particles = [];
+        let targetRotationY = 0;
+        let targetRotationX = 0.2; // Slight tilt
+        let isHovered = false;
+        let reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        // --- Geometry Generation ---
+        function generatePoints() {
+            const points = [];
+            
+            // 1. Top Dome (Flat circle top of hat)
+            for (let i = 0; i < 800; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const r = Math.sqrt(Math.random()) * 180; // Radius of crown
+                points.push({
+                    x: Math.cos(angle) * r,
+                    y: Math.sin(angle) * r,
+                    z: -200 // Top surface Z
+                });
+            }
+
+            // 2. Brim (Wide flat ring)
+            for (let i = 0; i < 1500; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const r = 150 + Math.random() * 150; // Brim radius 150-300
+                points.push({
+                    x: Math.cos(angle) * r,
+                    y: Math.sin(angle) * r,
+                    z: 200 // Brim Z
+                });
+            }
+
+            // 3. Side Walls (Connecting top to brim)
+            for (let i = 0; i < 1200; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const t = Math.random(); // 0 to 1 vertical interpolation
+                
+                // Radius varies from crown (180) to brim edge (300)
+                const r = 180 + t * 120; 
+                const z = -200 + t * 400; // Depth from top to brim
+
+                points.push({
+                    x: Math.cos(angle) * r,
+                    y: Math.sin(angle) * r,
+                    z: z
+                });
+            }
+
+            return points;
+        }
+
+        // --- Particle Class ---
+        class Particle {
+            constructor(target) {
+                this.target = target;
+                this.x = target.x;
+                this.y = target.y;
+                this.z = target.z;
+                
+                // Visuals
+                this.size = Math.random() * 2 + 1;
+                this.alpha = Math.random() * 0.5 + 0.5;
+                
+                // Determine color based on position (brim vs hat)
+                const isBrim = this.target.z > 0;
+                this.color = isBrim ? BRIM_COLOR : BASE_COLOR;
+
+                // Animation state
+                this.state = 'FORMED'; // FORMED, DISSOLVING, REFORMING
+                this.dissolveTimer = 0;
+                this.dissolveDuration = 2000;
+                this.swirlVelocity = {x:0, y:0, z:0};
+                this.isOrbiting = Math.random() < 0.05; // 5% chance to keep orbiting
+            }
+
+            update(dt) {
+                // Apply global rotation matrix (Y axis spin)
+                let rad = targetRotationY;
+                let cos = Math.cos(rad);
+                let sin = Math.sin(rad);
+                
+                // Pre-rotate coordinates for calculation
+                let rx = this.x * cos - this.z * sin;
+                let rz = this.x * sin + this.z * cos;
+                let ry = this.y;
+
+                if (this.isOrbiting) {
+                    // Special orbit logic: drift away but keep some rotation
+                    this.target.x *= 1.0001;
+                    this.target.z *= 1.0001;
+                }
+
+                // State transitions
+                if (isHovered && this.state === 'FORMED') {
+                    this.state = 'DISSOLVING';
+                    this.dissolveTimer = 0;
+                }
+
+                if (!isHovered && this.state !== 'FORMED') {
+                    this.state = 'REFORMING';
+                }
+
+                if (this.state === 'FORMED') {
+                    // Rigid body movement handled by rotation matrix below
+                } 
+                else if (this.state === 'DISSOLVING') {
+                    this.dissolveTimer += dt;
+                    let t = this.dissolveTimer / this.dissolveDuration;
+                    if (t > 1) t = 1;
+
+                    // Easing function
+                    let ease = 1 - Math.pow(1 - t, 3);
+
+                    // Drift out
+                    let drift = 1 + ease * 2.5; // Expand radius
+                    this.x = rx * drift;
+                    this.z = rz * drift;
+                    this.y = ry * (1 + ease * 0.2);
+                    
+                    // Add swirl
+                    let swirlSpeed = ease * 0.002;
+                    this.x += Math.sin(Date.now() * 0.001 + this.y) * ease * 50;
+                } 
+                else if (this.state === 'REFORMING') {
+                    // Ease back to original target
+                    let t = 0.08; // Fast ease-in-out
+                    this.x += (this.target.x - this.x) * t;
+                    this.y += (this.target.y - this.y) * t;
+                    this.z += (this.target.z - this.z) * t;
+
+                    if (Math.abs(this.x - this.target.x) < 1 && 
+                        Math.abs(this.y - this.target.y) < 1 && 
+                        Math.abs(this.z - this.target.z) < 1) {
+                        this.state = 'FORMED';
+                    }
+                }
+            }
+
+            draw() {
+                // Project to 2D
+                // Simple perspective: scale = focal / (focal + z)
+                // Adjust Z based on rotation for camera depth feel
+                let pScale = FOCAL_LENGTH / (FOCAL_LENGTH + this.z + 400);
+                
+                let screenX = width / 2 + this.x * pScale;
+                let screenY = height / 2 + this.y * pScale;
+
+                // Don't draw if off screen
+                if (screenX < 0 || screenX > width || screenY < 0 || screenY > height) return;
+
+                ctx.globalAlpha = this.alpha;
+                ctx.fillStyle = `rgba(${this.color}, ${this.alpha})`;
+                
+                // Additive glow effect for particles
+                ctx.shadowBlur = GLOW_STRENGTH;
+                ctx.shadowColor = `rgba(${this.color}, ${this.alpha})`;
+                
+                ctx.beginPath();
+                ctx.arc(screenX, screenY, this.size * pScale, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Reset shadow for performance
+                ctx.shadowBlur = 0;
+            }
+        }
+
+        // --- Core Logic ---
+
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        }
+
+        function init() {
+            if (reducedMotion) {
+                isHovered = false;
+                // Static image logic
+                drawStatic();
+                return;
+            }
+
+            const rawPoints = generatePoints();
+            particles = rawPoints.map(p => new Particle(p));
+            resize();
+            loop();
+        }
+
+        // Fallback for reduced motion
+        function drawStatic() {
+            ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--bg-color');
+            ctx.fillRect(0, 0, width, height);
+            
+            // Minimal visual representation
+            ctx.strokeStyle = `rgba(${BASE_COLOR}, 0.2)`;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(width/2, height/2, 100, 0, Math.PI*2); // Simple circle instead of hat
+            ctx.stroke();
+            
+            requestAnimationFrame(drawStatic);
+        }
+
+        function loop() {
+            if (reducedMotion) return;
+
+            const now = Date.now();
+            const dt = 16; // ms per frame approximation
+
+            // Background
+            ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--bg-color');
+            ctx.fillRect(0, 0, width, height);
+
+            // Interaction: Spin speed
+            let spinSpeed = isHovered ? 0.002 : 0.005;
+            targetRotationY += spinSpeed;
+
+            // Update and Draw particles
+            // Sort by Z depth (painter's algorithm) to improve transparency if using alpha blending
+            // But with additive blending, order matters less, but let's sort anyway for consistency
+            particles.sort((a, b) => b.z - a.z);
+
+            particles.forEach(p => {
+                p.update(dt);
+                p.draw();
+            });
+
+            requestAnimationFrame(loop);
+        }
+
+        // --- Event Listeners ---
+        window.addEventListener('resize', resize);
+
+        window.addEventListener('mousemove', (e) => {
+            if (reducedMotion) return;
+            isHovered = true;
+            // Subtle tilt towards mouse
+            targetRotationX = 0.2 + (e.clientY - height/2) * 0.0001;
+        });
+
+        window.addEventListener('mouseleave', () => {
+            if (reducedMotion) return;
+            isHovered = false;
+            targetRotationX = 0.2;
+        });
+
+        // Touch support
+        window.addEventListener('touchstart', () => { if(!reducedMotion) isHovered = true; });
+        window.addEventListener('touchend', () => { if(!reducedMotion) isHovered = false; });
+
+        // Start
+        init();
+
+    </script>
+</body>
+</html>
