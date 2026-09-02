@@ -1,0 +1,1481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Red Hat — 3D Fedora</title>
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #060709;
+      background: radial-gradient(circle at 50% 45%, #181920 0%, #0d0e13 45%, #050608 100%);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      color: #e6e8ec;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .hero-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+
+    canvas#webgl-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      outline: none;
+      touch-action: none;
+    }
+
+    /* Cinematic subtle vignette */
+    .vignette-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      background: radial-gradient(ellipse at 50% 46%, rgba(224, 6, 19, 0.02) 0%, rgba(0, 0, 0, 0.42) 75%, rgba(0, 0, 0, 0.9) 100%);
+      mix-blend-mode: multiply;
+    }
+
+    /* Minimalist caption underneath */
+    .caption-container {
+      position: absolute;
+      bottom: clamp(26px, 6vh, 46px);
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      pointer-events: none;
+      z-index: 10;
+      padding: 0 20px;
+    }
+
+    .caption-title {
+      font-size: clamp(0.72rem, 2.8vw, 0.92rem);
+      font-weight: 600;
+      letter-spacing: 0.40em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.94);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      white-space: nowrap;
+    }
+
+    .caption-title::before,
+    .caption-title::after {
+      content: "";
+      display: inline-block;
+      width: clamp(12px, 3vw, 22px);
+      height: 1px;
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .caption-hint {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: clamp(0.62rem, 2.2vw, 0.76rem);
+      letter-spacing: 0.14em;
+      color: rgba(255, 255, 255, 0.48);
+      text-transform: uppercase;
+      font-weight: 400;
+      white-space: nowrap;
+    }
+
+    .hint-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background-color: #e00613;
+      box-shadow: 0 0 8px rgba(224, 6, 19, 0.8), 0 0 16px rgba(224, 6, 19, 0.4);
+      animation: pulse-dot 2.6s ease-in-out infinite;
+      transition: background-color 0.4s ease, box-shadow 0.4s ease;
+    }
+
+    .hint-dot.active {
+      background-color: #ff9922;
+      box-shadow: 0 0 10px rgba(255, 153, 34, 0.9), 0 0 20px rgba(224, 6, 19, 0.6);
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% {
+        opacity: 0.55;
+        transform: scale(0.9);
+      }
+      50% {
+        opacity: 1;
+        transform: scale(1.15);
+      }
+    }
+
+    /* Accessibility: Respect Reduced Motion */
+    @media (prefers-reduced-motion: reduce) {
+      .hint-dot {
+        animation: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="hero-container" id="hero">
+    <canvas id="webgl-canvas"></canvas>
+    <div class="vignette-overlay"></div>
+    <div class="caption-container">
+      <div class="caption-title">Red Hat</div>
+      <div class="caption-hint">
+        <span class="hint-dot" id="hint-dot"></span>
+        <span id="hint-text">Hover or tap to dissolve</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      "use strict";
+
+      // -------------------------------------------------------------
+      // Reduced Motion Detection
+      // -------------------------------------------------------------
+      let prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      window.matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", (e) => {
+        prefersReducedMotion = e.matches;
+      });
+
+      // -------------------------------------------------------------
+      // 3D Matrix & Vector Utilities
+      // -------------------------------------------------------------
+      const V3 = {
+        create: (x = 0, y = 0, z = 0) => new Float32Array([x, y, z])
+      };
+
+      const M4 = {
+        create: () => {
+          const out = new Float32Array(16);
+          out[0] = 1; out[5] = 1; out[10] = 1; out[15] = 1;
+          return out;
+        },
+        identity: (out) => {
+          out.fill(0);
+          out[0] = 1; out[5] = 1; out[10] = 1; out[15] = 1;
+          return out;
+        },
+        multiply: (out, a, b) => {
+          const a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+          const a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+          const a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+          const a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
+
+          let b0 = b[0], b1 = b[1], b2 = b[2], b3 = b[3];
+          out[0] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+          out[1] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+          out[2] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+          out[3] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+
+          b0 = b[4]; b1 = b[5]; b2 = b[6]; b3 = b[7];
+          out[4] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+          out[5] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+          out[6] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+          out[7] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+
+          b0 = b[8]; b1 = b[9]; b2 = b[10]; b3 = b[11];
+          out[8] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+          out[9] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+          out[10] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+          out[11] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+
+          b0 = b[12]; b1 = b[13]; b2 = b[14]; b3 = b[15];
+          out[12] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+          out[13] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+          out[14] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+          out[15] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+          return out;
+        },
+        perspective: (out, fovy, aspect, near, far) => {
+          const f = 1.0 / Math.tan(fovy / 2);
+          const nf = 1 / (near - far);
+          out.fill(0);
+          out[0] = f / aspect;
+          out[5] = f;
+          out[10] = (far + near) * nf;
+          out[11] = -1;
+          out[14] = (2 * far * near) * nf;
+          return out;
+        },
+        lookAt: (out, eye, center, up) => {
+          let z0 = eye[0] - center[0];
+          let z1 = eye[1] - center[1];
+          let z2 = eye[2] - center[2];
+          let len = Math.hypot(z0, z1, z2) || 1.0;
+          z0 /= len; z1 /= len; z2 /= len;
+
+          let x0 = up[1] * z2 - up[2] * z1;
+          let x1 = up[2] * z0 - up[0] * z2;
+          let x2 = up[0] * z1 - up[1] * z0;
+          len = Math.hypot(x0, x1, x2) || 1.0;
+          x0 /= len; x1 /= len; x2 /= len;
+
+          let y0 = z1 * x2 - z2 * x1;
+          let y1 = z2 * x0 - z0 * x2;
+          let y2 = z0 * x1 - z1 * x0;
+
+          out[0] = x0; out[1] = y0; out[2] = z0; out[3] = 0;
+          out[4] = x1; out[5] = y1; out[6] = z1; out[7] = 0;
+          out[8] = x2; out[9] = y2; out[10] = z2; out[11] = 0;
+          out[12] = -(x0 * eye[0] + x1 * eye[1] + x2 * eye[2]);
+          out[13] = -(y0 * eye[0] + y1 * eye[1] + y2 * eye[2]);
+          out[14] = -(z0 * eye[0] + z1 * eye[1] + z2 * eye[2]);
+          out[15] = 1;
+          return out;
+        },
+        normalMatrix: (out, m) => {
+          const a00 = m[0], a01 = m[1], a02 = m[2];
+          const a10 = m[4], a11 = m[5], a12 = m[6];
+          const a20 = m[8], a21 = m[9], a22 = m[10];
+
+          const b01 = a22 * a11 - a12 * a21;
+          const b11 = -a22 * a10 + a12 * a20;
+          const b21 = a21 * a10 - a11 * a20;
+
+          const det = a00 * b01 + a01 * b11 + a02 * b21;
+          if (!det) return out;
+          const invDet = 1.0 / det;
+
+          out[0] = b01 * invDet;
+          out[1] = (-a22 * a01 + a02 * a21) * invDet;
+          out[2] = (a12 * a01 - a02 * a11) * invDet;
+          out[3] = b11 * invDet;
+          out[4] = (a22 * a00 - a02 * a20) * invDet;
+          out[5] = (-a12 * a00 + a02 * a10) * invDet;
+          out[6] = b21 * invDet;
+          out[7] = (-a21 * a00 + a01 * a20) * invDet;
+          out[8] = (a11 * a00 - a01 * a10) * invDet;
+          return out;
+        }
+      };
+
+      // -------------------------------------------------------------
+      // Authentic Red Hat Fedora Geometry & Particle Math
+      // -------------------------------------------------------------
+      const crownH = 0.66;
+      const rxIn = 0.88, rzIn = 1.05;
+      const rxOut = 1.48, rzOut = 1.68;
+
+      // Saddle rim height profile: dips in front/back, peaks on sides
+      function getCrownRimH(u) {
+        const sinU = Math.sin(u);
+        const cosU = Math.cos(u);
+        return crownH + 0.05 * (sinU * sinU) - 0.04 * Math.abs(cosU);
+      }
+
+      // Crown wall: tapered oval with deep front pinches
+      function crownWallPoint(u, v) {
+        const sinU = Math.sin(u);
+        const cosU = Math.cos(u);
+        const rimH = getCrownRimH(u);
+        const y = v * rimH;
+
+        const taper = 1.0 - 0.24 * Math.pow(v, 0.85);
+
+        // Front quarter pinch: indenting front corners
+        const front = Math.max(0, cosU);
+        const side = Math.abs(sinU);
+        const pinch = 0.40 * Math.pow(front, 0.7) * Math.pow(side, 0.7) * Math.sin(Math.pow(v, 0.65) * Math.PI);
+
+        const x = rxIn * taper * (1.0 - pinch) * sinU;
+        const z = rzIn * taper * (1.0 - pinch * 0.4) * cosU;
+        return [x, y, z];
+      }
+
+      // Crown crease & roof: center trough running front-to-back with lateral ridges
+      function crownCapPoint(u, t) {
+        const pRim = crownWallPoint(u, 1.0);
+        const rimH = getCrownRimH(u);
+        const rFrac = 1.0 - t;
+        const x = pRim[0] * rFrac;
+        const z = pRim[2] * rFrac;
+
+        const normX = x / 0.55;
+        const normZ = z / 0.75;
+        const frontSlope = 1.0 - 0.25 * normZ;
+
+        // Iconic crease dent along center line X=0
+        const dent = -0.16 * Math.exp(-(normX * normX) / 0.14) * frontSlope;
+        const ridge = 0.035 * Math.sin(Math.min(Math.PI, Math.abs(normX) * Math.PI * 1.3));
+
+        const y = rimH * (1.0 - t * 0.15) + (dent + ridge) * Math.sin(t * Math.PI * 0.5);
+        return [x, y, z];
+      }
+
+      // Curved fedora brim: swooping side curls, front snap dip, back curl
+      function brimPoint(u, t, isBottom = false) {
+        const sinU = Math.sin(u);
+        const cosU = Math.cos(u);
+
+        const rx = rxIn + (rxOut - rxIn) * t;
+        const rz = rzIn + (rzOut - rzIn) * t;
+
+        const x = rx * sinU;
+        const z = rz * cosU;
+
+        const w = Math.pow(t, 1.4);
+        const frontDown = Math.max(0, cosU);
+        const backUp = Math.max(0, -cosU);
+        const sideUp = sinU * sinU;
+
+        // Sides curl UP (+0.32), front snaps DOWN (-0.22), back curls UP (+0.16)
+        let y = w * (0.32 * sideUp - 0.22 * Math.pow(frontDown, 1.2) + 0.16 * Math.pow(backUp, 1.2));
+        const th = 0.018 * (1.0 - t * 0.35);
+        if (isBottom) y -= th;
+        return [x, y, z];
+      }
+
+      // Smooth face-averaged normals across vertices
+      function computeFaceNormals(positions, indices) {
+        const normals = new Float32Array(positions.length);
+        for (let i = 0; i < indices.length; i += 3) {
+          const i0 = indices[i] * 3;
+          const i1 = indices[i + 1] * 3;
+          const i2 = indices[i + 2] * 3;
+
+          const p0x = positions[i0], p0y = positions[i0 + 1], p0z = positions[i0 + 2];
+          const p1x = positions[i1], p1y = positions[i1 + 1], p1z = positions[i1 + 2];
+          const p2x = positions[i2], p2y = positions[i2 + 1], p2z = positions[i2 + 2];
+
+          const d1x = p1x - p0x, d1y = p1y - p0y, d1z = p1z - p0z;
+          const d2x = p2x - p0x, d2y = p2y - p0y, d2z = p2z - p0z;
+
+          const fnx = d1y * d2z - d1z * d2y;
+          const fny = d1z * d2x - d1x * d2z;
+          const fnz = d1x * d2y - d1y * d2x;
+
+          normals[i0] += fnx; normals[i0 + 1] += fny; normals[i0 + 2] += fnz;
+          normals[i1] += fnx; normals[i1 + 1] += fny; normals[i1 + 2] += fnz;
+          normals[i2] += fnx; normals[i2 + 1] += fny; normals[i2 + 2] += fnz;
+        }
+
+        for (let i = 0; i < normals.length; i += 3) {
+          const len = Math.hypot(normals[i], normals[i + 1], normals[i + 2]) || 1.0;
+          normals[i] /= len;
+          normals[i + 1] /= len;
+          normals[i + 2] /= len;
+        }
+        return normals;
+      }
+
+      function buildFedoraMesh() {
+        const positions = [];
+        const uvs = [];
+        const isBand = [];
+        const indices = [];
+
+        function addVert(x, y, z, u, v, band) {
+          const idx = positions.length / 3;
+          positions.push(x, y, z);
+          uvs.push(u, v);
+          isBand.push(band);
+          return idx;
+        }
+
+        const N_U = 64;
+        const N_CROWN_V = 22;
+        const N_CAP_T = 14;
+        const N_BRIM_T = 16;
+
+        // 1. Crown Side Walls
+        const crownGrid = [];
+        for (let j = 0; j <= N_CROWN_V; j++) {
+          const v = j / N_CROWN_V;
+          crownGrid[j] = [];
+          for (let i = 0; i < N_U; i++) {
+            const u = (i / N_U) * Math.PI * 2;
+            const p = crownWallPoint(u, v);
+            const idx = addVert(p[0], p[1], p[2], i / N_U, v, 0.0);
+            crownGrid[j][i] = idx;
+          }
+        }
+        for (let j = 0; j < N_CROWN_V; j++) {
+          for (let i = 0; i < N_U; i++) {
+            const iNext = (i + 1) % N_U;
+            indices.push(crownGrid[j][i], crownGrid[j][iNext], crownGrid[j + 1][i]);
+            indices.push(crownGrid[j][iNext], crownGrid[j + 1][iNext], crownGrid[j + 1][i]);
+          }
+        }
+
+        // 2. Crown Crease Top Cap
+        const capGrid = [];
+        for (let j = 0; j <= N_CAP_T; j++) {
+          const t = j / N_CAP_T;
+          capGrid[j] = [];
+          for (let i = 0; i < N_U; i++) {
+            const u = (i / N_U) * Math.PI * 2;
+            const p = crownCapPoint(u, t);
+            const idx = addVert(p[0], p[1], p[2], i / N_U, 1.0 - t, 0.0);
+            capGrid[j][i] = idx;
+          }
+        }
+        for (let j = 0; j < N_CAP_T; j++) {
+          for (let i = 0; i < N_U; i++) {
+            const iNext = (i + 1) % N_U;
+            indices.push(capGrid[j][i], capGrid[j][iNext], capGrid[j + 1][i]);
+            indices.push(capGrid[j][iNext], capGrid[j + 1][iNext], capGrid[j + 1][i]);
+          }
+        }
+
+        // 3. Brim Top Surface
+        const brimTopGrid = [];
+        for (let j = 0; j <= N_BRIM_T; j++) {
+          const t = j / N_BRIM_T;
+          brimTopGrid[j] = [];
+          for (let i = 0; i < N_U; i++) {
+            const u = (i / N_U) * Math.PI * 2;
+            const p = brimPoint(u, t, false);
+            const idx = addVert(p[0], p[1], p[2], i / N_U, t, 0.0);
+            brimTopGrid[j][i] = idx;
+          }
+        }
+        for (let j = 0; j < N_BRIM_T; j++) {
+          for (let i = 0; i < N_U; i++) {
+            const iNext = (i + 1) % N_U;
+            indices.push(brimTopGrid[j][i], brimTopGrid[j][iNext], brimTopGrid[j + 1][i]);
+            indices.push(brimTopGrid[j][iNext], brimTopGrid[j + 1][iNext], brimTopGrid[j + 1][i]);
+          }
+        }
+
+        // 4. Brim Bottom Surface
+        const brimBotGrid = [];
+        for (let j = 0; j <= N_BRIM_T; j++) {
+          const t = j / N_BRIM_T;
+          brimBotGrid[j] = [];
+          for (let i = 0; i < N_U; i++) {
+            const u = (i / N_U) * Math.PI * 2;
+            const p = brimPoint(u, t, true);
+            const idx = addVert(p[0], p[1], p[2], i / N_U, t, 0.0);
+            brimBotGrid[j][i] = idx;
+          }
+        }
+        for (let j = 0; j < N_BRIM_T; j++) {
+          for (let i = 0; i < N_U; i++) {
+            const iNext = (i + 1) % N_U;
+            indices.push(brimBotGrid[j][i], brimBotGrid[j + 1][i], brimBotGrid[j][iNext]);
+            indices.push(brimBotGrid[j][iNext], brimBotGrid[j + 1][iNext], brimBotGrid[j + 1][iNext]);
+          }
+        }
+
+        // 5. Brim Outer Edge Rim (Dedicated vertices for seamless edge curvature)
+        const edgeTopVerts = [];
+        const edgeBotVerts = [];
+        for (let i = 0; i < N_U; i++) {
+          const u = (i / N_U) * Math.PI * 2;
+          const pTop = brimPoint(u, 1.0, false);
+          const pBot = brimPoint(u, 1.0, true);
+          edgeTopVerts.push(addVert(pTop[0], pTop[1], pTop[2], i / N_U, 1.0, 0.0));
+          edgeBotVerts.push(addVert(pBot[0], pBot[1], pBot[2], i / N_U, 0.0, 0.0));
+        }
+        for (let i = 0; i < N_U; i++) {
+          const iNext = (i + 1) % N_U;
+          indices.push(edgeTopVerts[i], edgeBotVerts[i], edgeTopVerts[iNext]);
+          indices.push(edgeTopVerts[iNext], edgeBotVerts[i], edgeBotVerts[iNext]);
+        }
+
+        // 6. Black Silk Ribbon Hatband (wrapped snugly around crown base)
+        const N_BAND_V = 4;
+        const bandGrid = [];
+        for (let j = 0; j <= N_BAND_V; j++) {
+          const v = 0.015 + (j / N_BAND_V) * 0.22;
+          bandGrid[j] = [];
+          for (let i = 0; i < N_U; i++) {
+            const u = (i / N_U) * Math.PI * 2;
+            const p = crownWallPoint(u, v);
+            const sinU = Math.sin(u);
+            const cosU = Math.cos(u);
+            // Stand proud of crown wall by +0.014 units
+            const bx = p[0] + sinU * 0.014;
+            const by = p[1];
+            const bz = p[2] + cosU * 0.014;
+            const idx = addVert(bx, by, bz, i / N_U, j / N_BAND_V, 1.0); // 1.0 = Hatband
+            bandGrid[j][i] = idx;
+          }
+        }
+        for (let j = 0; j < N_BAND_V; j++) {
+          for (let i = 0; i < N_U; i++) {
+            const iNext = (i + 1) % N_U;
+            indices.push(bandGrid[j][i], bandGrid[j][iNext], bandGrid[j + 1][i]);
+            indices.push(bandGrid[j][iNext], bandGrid[j + 1][iNext], bandGrid[j + 1][i]);
+          }
+        }
+
+        const posArray = new Float32Array(positions);
+        const idxArray = new Uint16Array(indices);
+        const normArray = computeFaceNormals(posArray, idxArray);
+
+        return {
+          positions: posArray,
+          normals: normArray,
+          uvs: new Float32Array(uvs),
+          isBand: new Float32Array(isBand),
+          indices: idxArray
+        };
+      }
+
+      // Sample 18,000 particles across the fedora's natural surfaces
+      function buildParticles(count) {
+        const homePos = new Float32Array(count * 3);
+        const normals = new Float32Array(count * 3);
+        const seeds = new Float32Array(count * 4);
+        const matTypes = new Float32Array(count);
+        const isOrbiters = new Float32Array(count);
+
+        const NUM_ORBITERS = 48; // Lingering particles that orbit afterward
+
+        for (let i = 0; i < count; i++) {
+          const isOrbiter = i < NUM_ORBITERS ? 1.0 : 0.0;
+          isOrbiters[i] = isOrbiter;
+
+          seeds[i * 4 + 0] = Math.random();
+          seeds[i * 4 + 1] = Math.random();
+          seeds[i * 4 + 2] = Math.random();
+          seeds[i * 4 + 3] = Math.random();
+
+          const zone = Math.random();
+          let p, n = [0, 1, 0], matType = 0.0;
+
+          if (zone < 0.44) {
+            // Brim top
+            const u = Math.random() * Math.PI * 2;
+            const t = Math.sqrt(Math.random());
+            p = brimPoint(u, t, false);
+            n = [Math.sin(u) * 0.25, 0.95, Math.cos(u) * 0.25];
+            matType = Math.random() < 0.07 ? 2.0 : 0.0;
+          } else if (zone < 0.58) {
+            // Brim bottom
+            const u = Math.random() * Math.PI * 2;
+            const t = Math.sqrt(Math.random());
+            p = brimPoint(u, t, true);
+            n = [0, -1, 0];
+            matType = 0.0;
+          } else if (zone < 0.72) {
+            // Hatband
+            const u = Math.random() * Math.PI * 2;
+            const v = 0.015 + Math.random() * 0.20;
+            p = crownWallPoint(u, v);
+            n = [Math.sin(u), 0.05, Math.cos(u)];
+            matType = 1.0; // Black ribbon ember
+          } else if (zone < 0.88) {
+            // Crown side walls
+            const u = Math.random() * Math.PI * 2;
+            const v = 0.20 + Math.random() * 0.80;
+            p = crownWallPoint(u, v);
+            n = [Math.sin(u) * 0.85, 0.15, Math.cos(u) * 0.85];
+            matType = Math.random() < 0.08 ? 2.0 : 0.0;
+          } else {
+            // Crown crease top
+            const u = Math.random() * Math.PI * 2;
+            const t = Math.random();
+            p = crownCapPoint(u, t);
+            n = [0, 1, 0];
+            matType = Math.random() < 0.10 ? 2.0 : 0.0;
+          }
+
+          homePos[i * 3 + 0] = p[0];
+          homePos[i * 3 + 1] = p[1];
+          homePos[i * 3 + 2] = p[2];
+
+          const nlen = Math.hypot(n[0], n[1], n[2]) || 1.0;
+          normals[i * 3 + 0] = n[0] / nlen;
+          normals[i * 3 + 1] = n[1] / nlen;
+          normals[i * 3 + 2] = n[2] / nlen;
+
+          matTypes[i] = matType;
+        }
+
+        return {
+          count,
+          homePos,
+          normals,
+          seeds,
+          matTypes,
+          isOrbiters,
+          numOrbiters: NUM_ORBITERS
+        };
+      }
+
+      // -------------------------------------------------------------
+      // WebGL Shader Sources
+      // -------------------------------------------------------------
+
+      // 1. Fedora Mesh Shader: Red Hat Velvet Felt & Black Ribbon Band
+      const fedoraVS = `
+        attribute vec3 aPosition;
+        attribute vec3 aNormal;
+        attribute vec2 aUV;
+        attribute float aIsBand;
+
+        uniform mat4 uModel;
+        uniform mat4 uViewProj;
+        uniform mat3 uNormalMatrix;
+
+        varying vec3 vNormal;
+        varying vec3 vWorldPos;
+        varying vec3 vLocalPos;
+        varying float vIsBand;
+
+        void main() {
+          vLocalPos = aPosition;
+          vIsBand = aIsBand;
+          vec4 worldPos = uModel * vec4(aPosition, 1.0);
+          vWorldPos = worldPos.xyz;
+          vNormal = normalize(uNormalMatrix * aNormal);
+          gl_Position = uViewProj * worldPos;
+        }
+      `;
+
+      const fedoraFS = `
+        precision highp float;
+
+        varying vec3 vNormal;
+        varying vec3 vWorldPos;
+        varying vec3 vLocalPos;
+        varying float vIsBand;
+
+        uniform vec3 uCameraPos;
+        uniform float uDissolve;
+        uniform float uTime;
+
+        float hash(vec3 p) {
+          p = fract(p * 0.3183099 + 0.1);
+          p *= 17.0;
+          return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+        }
+
+        float noise3d(vec3 x) {
+          vec3 p = floor(x);
+          vec3 f = fract(x);
+          f = f * f * (3.0 - 2.0 * f);
+          return mix(
+            mix(mix(hash(p + vec3(0,0,0)), hash(p + vec3(1,0,0)), f.x),
+                mix(hash(p + vec3(0,1,0)), hash(p + vec3(1,1,0)), f.x), f.y),
+            mix(mix(hash(p + vec3(0,0,1)), hash(p + vec3(1,0,1)), f.x),
+                mix(hash(p + vec3(0,1,1)), hash(p + vec3(1,1,1)), f.x), f.y), f.z);
+        }
+
+        void main() {
+          float edgeAlpha = 0.0;
+          if (uDissolve > 0.0001) {
+            float n = noise3d(vLocalPos * 3.8 + vec3(0.0, -uTime * 0.28, 0.0));
+            float cut = n * 0.65 + (vLocalPos.y * 0.35 + 0.35) * 0.45;
+            float threshold = uDissolve * 1.45;
+            if (cut < threshold) {
+              discard;
+            }
+            float distToCut = cut - threshold;
+            if (distToCut < 0.08) {
+              edgeAlpha = 1.0 - (distToCut / 0.08);
+            }
+          }
+
+          vec3 N = normalize(vNormal);
+          vec3 V = normalize(uCameraPos - vWorldPos);
+
+          // Multi-point lighting
+          vec3 L1 = normalize(vec3(2.5, 4.2, 3.2));   // Key warm studio light
+          vec3 L2 = normalize(vec3(-3.0, 2.8, -2.5)); // Rim light
+          vec3 L3 = normalize(vec3(0.0, -1.0, 1.2));  // Soft bounce
+
+          // Wrapped diffuse for felt texture
+          float wrap1 = pow(max(0.0, dot(N, L1)) * 0.6 + 0.4, 1.5);
+          float wrap2 = pow(max(0.0, dot(N, L2)) * 0.5 + 0.5, 2.0);
+
+          float NdotV = max(0.0, dot(N, V));
+          float fresnel = pow(1.0 - NdotV, 2.8);
+
+          vec3 baseColor;
+          vec3 shadowColor;
+          vec3 finalColor;
+
+          if (vIsBand > 0.5) {
+            // Jet Black Silk Ribbon
+            baseColor = vec3(0.07, 0.07, 0.08);
+            shadowColor = vec3(0.015, 0.015, 0.02);
+            vec3 H = normalize(L1 + V);
+            float spec = pow(max(0.0, dot(N, H)), 18.0) * 0.28;
+            finalColor = mix(shadowColor, baseColor, wrap1) + vec3(spec);
+          } else {
+            // Red Hat Signature Crimson Felt (#E00613)
+            baseColor = vec3(0.88, 0.024, 0.075);
+            shadowColor = vec3(0.24, 0.012, 0.025);
+            // Velvet/Felt Sheen: grazing ruby/coral sheen
+            vec3 feltSheen = vec3(1.0, 0.35, 0.30) * fresnel * 0.38;
+            vec3 rim = vec3(1.0, 0.28, 0.25) * wrap2 * 0.22;
+            finalColor = mix(shadowColor, baseColor, wrap1) + feltSheen + rim;
+          }
+
+          // Burning ember rim during dissolve
+          if (edgeAlpha > 0.0) {
+            vec3 emberHot = mix(vec3(1.0, 0.18, 0.02), vec3(1.0, 0.85, 0.35), edgeAlpha);
+            finalColor = mix(finalColor, emberHot * 2.8, edgeAlpha);
+          }
+
+          gl_FragColor = vec4(finalColor, 1.0);
+        }
+      `;
+
+      // 2. Soft Ground Shadow Shader
+      const shadowVS = `
+        attribute vec2 aPosition;
+        uniform mat4 uViewProj;
+        uniform float uGroundY;
+        varying vec2 vUV;
+
+        void main() {
+          vUV = aPosition;
+          vec4 worldPos = vec4(aPosition.x * 2.0, uGroundY, aPosition.y * 2.2, 1.0);
+          gl_Position = uViewProj * worldPos;
+        }
+      `;
+
+      const shadowFS = `
+        precision highp float;
+        varying vec2 vUV;
+        uniform float uDissolve;
+
+        void main() {
+          float dist = length(vUV);
+          if (dist > 1.0) discard;
+          float falloff = exp(-dist * dist * 3.6);
+          float alpha = falloff * 0.58 * mix(1.0, 0.18, uDissolve);
+          gl_FragColor = vec4(0.01, 0.01, 0.02, alpha);
+        }
+      `;
+
+      // 3. Glowing Ember Particles Shader
+      const particleVS = `
+        attribute vec3 aHomePos;
+        attribute vec3 aNormal;
+        attribute vec4 aSeed;
+        attribute float aMatType;
+        attribute float aIsOrbiter;
+
+        uniform mat4 uModel;
+        uniform mat4 uViewProj;
+        uniform float uDissolve;
+        uniform float uPhase;
+        uniform float uTime;
+        uniform float uPixelRatio;
+        uniform float uHasReformed;
+        uniform float uReducedMotion;
+
+        varying float vAlpha;
+        varying vec3 vColor;
+
+        void main() {
+          vec4 worldHome = uModel * vec4(aHomePos, 1.0);
+          vec3 worldNormal = normalize(mat3(uModel) * aNormal);
+
+          vec3 pos = worldHome.xyz;
+          float alpha = 0.0;
+          float p = uPhase;
+
+          // Dissolve, swirl in vortex, and magnetic return
+          if (p > 0.0001 && p < 0.9999) {
+            float env = 0.0;
+            if (p < 0.38) {
+              env = smoothstep(0.0, 0.38, p);
+            } else if (p < 0.62) {
+              env = 1.0;
+            } else {
+              env = 1.0 - smoothstep(0.62, 0.98, p);
+            }
+
+            if (uReducedMotion > 0.5) {
+              env *= 0.22;
+            }
+
+            vec3 radial = normalize(vec3(worldHome.x, worldHome.y * 0.2, worldHome.z));
+            vec3 scatter = vec3(aSeed.x - 0.5, aSeed.y - 0.5, aSeed.z - 0.5);
+            vec3 dir = normalize(worldNormal * 0.55 + radial * 0.45 + scatter * 0.35);
+
+            float maxDist = (1.5 + aSeed.y * 1.9);
+            float dist = maxDist * env;
+
+            // Thermal updraft
+            float lift = (0.75 + aSeed.z * 0.85) * env * smoothstep(0.0, 0.5, p);
+
+            // 3D Vortex swirl around Y axis
+            float swirl = p * (3.8 + aSeed.x * 2.4);
+            if (uReducedMotion > 0.5) swirl *= 0.12;
+
+            float cosS = cos(swirl);
+            float sinS = sin(swirl);
+            vec3 disp = dir * dist;
+            float rx = disp.x * cosS - disp.z * sinS;
+            float rz = disp.x * sinS + disp.z * cosS;
+            disp.x = rx;
+            disp.z = rz;
+            disp.y += lift;
+
+            // Fluttering harmonic curl
+            vec3 flutter = vec3(
+              sin(uTime * 3.2 + aSeed.x * 24.0),
+              cos(uTime * 2.8 + aSeed.y * 22.0),
+              sin(uTime * 3.0 + aSeed.z * 26.0)
+            ) * 0.16 * env;
+
+            pos = worldHome.xyz + disp + flutter;
+            alpha = smoothstep(0.01, 0.14, p) * (1.0 - smoothstep(0.92, 1.0, p));
+          }
+
+          // Persistent Lingering Orbiters
+          if (aIsOrbiter > 0.5 && uHasReformed > 0.5) {
+            float orbSpeed = (0.72 + aSeed.x * 0.52) * (aSeed.y > 0.5 ? 1.0 : -1.0);
+            if (uReducedMotion > 0.5) orbSpeed *= 0.25;
+
+            float orbRadius = 1.70 + aSeed.z * 0.85;
+            float orbAngle = uTime * orbSpeed + aSeed.w * 6.283185;
+
+            float ox = cos(orbAngle) * orbRadius;
+            float oz = sin(orbAngle) * orbRadius;
+            float tilt = (aSeed.x - 0.5) * 0.65;
+            float oy = 0.28 + sin(orbAngle * 2.0 + aSeed.y * 4.0) * 0.32 + ox * tilt;
+
+            vec3 orbPos = vec3(ox, oy, oz);
+
+            if (p < 0.0001 || p >= 0.98) {
+              pos = orbPos;
+              alpha = 0.90;
+            } else {
+              float blend = smoothstep(0.75, 0.98, p);
+              pos = mix(pos, orbPos, blend);
+              alpha = mix(alpha, 0.90, blend);
+            }
+          }
+
+          // Tasteful palette: Glowing ruby crimson, golden highlights, dark charcoal
+          vec3 cRed = vec3(0.95, 0.08, 0.08);
+          vec3 cGold = vec3(1.0, 0.76, 0.30);
+          vec3 cBand = vec3(0.42, 0.18, 0.12);
+
+          if (aMatType > 1.5) {
+            vColor = cGold;
+          } else if (aMatType > 0.5) {
+            vColor = cBand;
+          } else {
+            vColor = mix(cRed, cGold, aSeed.x * 0.22);
+          }
+
+          vAlpha = alpha;
+
+          vec4 clipPos = uViewProj * vec4(pos, 1.0);
+          gl_Position = clipPos;
+
+          float pSize = (3.2 + aSeed.w * 3.2) * uPixelRatio;
+          if (aIsOrbiter > 0.5 && uHasReformed > 0.5) {
+            pSize *= 1.35;
+          }
+          gl_PointSize = clamp(pSize * (3.8 / max(1.0, clipPos.w)), 1.5, 24.0);
+        }
+      `;
+
+      const particleFS = `
+        precision highp float;
+        varying float vAlpha;
+        varying vec3 vColor;
+
+        void main() {
+          if (vAlpha <= 0.001) discard;
+
+          vec2 coord = gl_PointCoord - vec2(0.5);
+          float d = length(coord);
+          if (d > 0.5) discard;
+
+          // Soft exponential falloff with incandescent golden center
+          float core = exp(-d * d * 36.0);
+          float halo = exp(-d * 4.2);
+          float alpha = (core * 0.9 + halo * 0.5) * vAlpha;
+
+          vec3 color = mix(vColor, vec3(1.0, 0.96, 0.82), core * 0.72);
+          gl_FragColor = vec4(color, alpha);
+        }
+      `;
+
+      // 4. Lingering Orbiter Light Trails Shader
+      const trailVS = `
+        attribute vec3 aPosition;
+        attribute float aAge;
+        uniform mat4 uViewProj;
+        uniform float uPixelRatio;
+        varying float vAge;
+
+        void main() {
+          vAge = aAge;
+          vec4 clipPos = uViewProj * vec4(aPosition, 1.0);
+          gl_Position = clipPos;
+          gl_PointSize = clamp((3.6 * (1.0 - aAge * 0.75) * uPixelRatio) * (3.8 / max(1.0, clipPos.w)), 1.0, 14.0);
+        }
+      `;
+
+      const trailFS = `
+        precision highp float;
+        varying float vAge;
+
+        void main() {
+          vec2 coord = gl_PointCoord - vec2(0.5);
+          float d = length(coord);
+          if (d > 0.5) discard;
+
+          float intensity = exp(-d * 4.4);
+          float alpha = (1.0 - vAge) * (1.0 - vAge) * 0.42 * intensity;
+
+          vec3 trailColor = mix(vec3(1.0, 0.65, 0.20), vec3(0.9, 0.08, 0.08), vAge);
+          gl_FragColor = vec4(trailColor, alpha);
+        }
+      `;
+
+      // Shader compilation helper
+      function createProgram(gl, vsSource, fsSource) {
+        function compileShader(src, type) {
+          const shader = gl.createShader(type);
+          gl.shaderSource(shader, src);
+          gl.compileShader(shader);
+          if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            const err = gl.getShaderInfoLog(shader);
+            gl.deleteShader(shader);
+            throw new Error("Shader compile error: " + err);
+          }
+          return shader;
+        }
+
+        const vs = compileShader(vsSource, gl.VERTEX_SHADER);
+        const fs = compileShader(fsSource, gl.FRAGMENT_SHADER);
+        const prog = gl.createProgram();
+        gl.attachShader(prog, vs);
+        gl.attachShader(prog, fs);
+        gl.linkProgram(prog);
+
+        if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+          const err = gl.getProgramInfoLog(prog);
+          gl.deleteProgram(prog);
+          throw new Error("Program link error: " + err);
+        }
+        return prog;
+      }
+
+      // -------------------------------------------------------------
+      // Setup WebGL Scene
+      // -------------------------------------------------------------
+      const canvas = document.getElementById("webgl-canvas");
+      const hero = document.getElementById("hero");
+      const hintDot = document.getElementById("hint-dot");
+      const hintText = document.getElementById("hint-text");
+
+      const gl = canvas.getContext("webgl", {
+        antialias: true,
+        alpha: false,
+        depth: true,
+        stencil: false,
+        powerPreference: "high-performance"
+      });
+
+      if (!gl) {
+        document.body.innerHTML = "<div style='color:white;text-align:center;padding:50px;'>WebGL not supported.</div>";
+        return;
+      }
+
+      const fedoraProg = createProgram(gl, fedoraVS, fedoraFS);
+      const shadowProg = createProgram(gl, shadowVS, shadowFS);
+      const particleProg = createProgram(gl, particleVS, particleFS);
+      const trailProg = createProgram(gl, trailVS, trailFS);
+
+      const fedoraData = buildFedoraMesh();
+      const NUM_PARTICLES = 18000;
+      const particleData = buildParticles(NUM_PARTICLES);
+
+      // Fedora Buffers
+      const fedoraBuffers = {
+        position: gl.createBuffer(),
+        normal: gl.createBuffer(),
+        uv: gl.createBuffer(),
+        isBand: gl.createBuffer(),
+        index: gl.createBuffer(),
+        numIndices: fedoraData.indices.length
+      };
+      gl.bindBuffer(gl.ARRAY_BUFFER, fedoraBuffers.position);
+      gl.bufferData(gl.ARRAY_BUFFER, fedoraData.positions, gl.STATIC_DRAW);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, fedoraBuffers.normal);
+      gl.bufferData(gl.ARRAY_BUFFER, fedoraData.normals, gl.STATIC_DRAW);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, fedoraBuffers.uv);
+      gl.bufferData(gl.ARRAY_BUFFER, fedoraData.uvs, gl.STATIC_DRAW);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, fedoraBuffers.isBand);
+      gl.bufferData(gl.ARRAY_BUFFER, fedoraData.isBand, gl.STATIC_DRAW);
+
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, fedoraBuffers.index);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, fedoraData.indices, gl.STATIC_DRAW);
+
+      // Shadow Buffer
+      const shadowBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, shadowBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+        -1, -1,  1, -1, -1,  1,
+        -1,  1,  1, -1,  1,  1
+      ]), gl.STATIC_DRAW);
+
+      // Particle Buffers
+      const particleBuffers = {
+        homePos: gl.createBuffer(),
+        normal: gl.createBuffer(),
+        seed: gl.createBuffer(),
+        matType: gl.createBuffer(),
+        isOrbiter: gl.createBuffer()
+      };
+      gl.bindBuffer(gl.ARRAY_BUFFER, particleBuffers.homePos);
+      gl.bufferData(gl.ARRAY_BUFFER, particleData.homePos, gl.STATIC_DRAW);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, particleBuffers.normal);
+      gl.bufferData(gl.ARRAY_BUFFER, particleData.normals, gl.STATIC_DRAW);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, particleBuffers.seed);
+      gl.bufferData(gl.ARRAY_BUFFER, particleData.seeds, gl.STATIC_DRAW);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, particleBuffers.matType);
+      gl.bufferData(gl.ARRAY_BUFFER, particleData.matTypes, gl.STATIC_DRAW);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, particleBuffers.isOrbiter);
+      gl.bufferData(gl.ARRAY_BUFFER, particleData.isOrbiters, gl.STATIC_DRAW);
+
+      // Orbiters Light Trail Buffer
+      const TRAIL_STEPS = 8;
+      const numTrailVerts = particleData.numOrbiters * TRAIL_STEPS;
+      const trailPositions = new Float32Array(numTrailVerts * 3);
+      const trailAges = new Float32Array(numTrailVerts);
+
+      for (let i = 0; i < particleData.numOrbiters; i++) {
+        for (let s = 0; s < TRAIL_STEPS; s++) {
+          trailAges[i * TRAIL_STEPS + s] = (s + 1) / (TRAIL_STEPS + 1);
+        }
+      }
+
+      const trailBuffers = {
+        position: gl.createBuffer(),
+        age: gl.createBuffer()
+      };
+      gl.bindBuffer(gl.ARRAY_BUFFER, trailBuffers.age);
+      gl.bufferData(gl.ARRAY_BUFFER, trailAges, gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, trailBuffers.position);
+      gl.bufferData(gl.ARRAY_BUFFER, trailPositions, gl.DYNAMIC_DRAW);
+
+      // Uniforms
+      const fedoraUniforms = {
+        uModel: gl.getUniformLocation(fedoraProg, "uModel"),
+        uViewProj: gl.getUniformLocation(fedoraProg, "uViewProj"),
+        uNormalMatrix: gl.getUniformLocation(fedoraProg, "uNormalMatrix"),
+        uCameraPos: gl.getUniformLocation(fedoraProg, "uCameraPos"),
+        uDissolve: gl.getUniformLocation(fedoraProg, "uDissolve"),
+        uTime: gl.getUniformLocation(fedoraProg, "uTime")
+      };
+
+      const shadowUniforms = {
+        uViewProj: gl.getUniformLocation(shadowProg, "uViewProj"),
+        uGroundY: gl.getUniformLocation(shadowProg, "uGroundY"),
+        uDissolve: gl.getUniformLocation(shadowProg, "uDissolve")
+      };
+
+      const particleUniforms = {
+        uModel: gl.getUniformLocation(particleProg, "uModel"),
+        uViewProj: gl.getUniformLocation(particleProg, "uViewProj"),
+        uDissolve: gl.getUniformLocation(particleProg, "uDissolve"),
+        uPhase: gl.getUniformLocation(particleProg, "uPhase"),
+        uTime: gl.getUniformLocation(particleProg, "uTime"),
+        uPixelRatio: gl.getUniformLocation(particleProg, "uPixelRatio"),
+        uHasReformed: gl.getUniformLocation(particleProg, "uHasReformed"),
+        uReducedMotion: gl.getUniformLocation(particleProg, "uReducedMotion")
+      };
+
+      const trailUniforms = {
+        uViewProj: gl.getUniformLocation(trailProg, "uViewProj"),
+        uPixelRatio: gl.getUniformLocation(trailProg, "uPixelRatio")
+      };
+
+      // Attributes
+      const fedoraAttrs = {
+        aPosition: gl.getAttribLocation(fedoraProg, "aPosition"),
+        aNormal: gl.getAttribLocation(fedoraProg, "aNormal"),
+        aUV: gl.getAttribLocation(fedoraProg, "aUV"),
+        aIsBand: gl.getAttribLocation(fedoraProg, "aIsBand")
+      };
+
+      const shadowAttrs = {
+        aPosition: gl.getAttribLocation(shadowProg, "aPosition")
+      };
+
+      const particleAttrs = {
+        aHomePos: gl.getAttribLocation(particleProg, "aHomePos"),
+        aNormal: gl.getAttribLocation(particleProg, "aNormal"),
+        aSeed: gl.getAttribLocation(particleProg, "aSeed"),
+        aMatType: gl.getAttribLocation(particleProg, "aMatType"),
+        aIsOrbiter: gl.getAttribLocation(particleProg, "aIsOrbiter")
+      };
+
+      const trailAttrs = {
+        aPosition: gl.getAttribLocation(trailProg, "aPosition"),
+        aAge: gl.getAttribLocation(trailProg, "aAge")
+      };
+
+      // -------------------------------------------------------------
+      // State & Interactions
+      // -------------------------------------------------------------
+      let spinAngle = 0.40;
+      let spinVelocity = 0.50;
+      const DEFAULT_SPEED = 0.50;
+      const SLOW_SPEED = 0.10;
+
+      let isHovered = false;
+      let dissolveActive = false;
+      let dissolveTimer = 0.0;
+      const DISSOLVE_DURATION = 4.8;
+      let hasReformedOnce = 0.0;
+
+      function triggerDissolve() {
+        dissolveActive = true;
+        dissolveTimer = 0.0;
+        hintDot.classList.add("active");
+        hintText.textContent = "Dissolving into embers...";
+      }
+
+      hero.addEventListener("pointerenter", () => {
+        isHovered = true;
+        if (!dissolveActive) triggerDissolve();
+      });
+
+      hero.addEventListener("pointerleave", () => {
+        isHovered = false;
+      });
+
+      hero.addEventListener("pointerdown", () => {
+        triggerDissolve();
+      });
+
+      // Global test hook for automated verification
+      window.__triggerDissolve = triggerDissolve;
+      window.__setSimulationState = (timer, reformed) => {
+        dissolveActive = true;
+        dissolveTimer = timer;
+        if (reformed !== undefined) hasReformedOnce = reformed;
+      };
+
+      // Optional URL parameters for testing specific frames
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.has("t")) {
+          dissolveActive = true;
+          dissolveTimer = parseFloat(urlParams.get("t"));
+        }
+        if (urlParams.has("reformed")) {
+          hasReformedOnce = 1.0;
+        }
+      } catch (e) {}
+
+      let canvasWidth = 0, canvasHeight = 0, pixelRatio = 1;
+      function resizeCanvas() {
+        pixelRatio = Math.min(window.devicePixelRatio || 1, 2.0);
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        if (canvasWidth !== w || canvasHeight !== h) {
+          canvasWidth = w;
+          canvasHeight = h;
+          canvas.width = Math.floor(w * pixelRatio);
+          canvas.height = Math.floor(h * pixelRatio);
+        }
+      }
+      window.addEventListener("resize", resizeCanvas);
+      resizeCanvas();
+
+      // Matrices
+      const projMat = M4.create();
+      const viewMat = M4.create();
+      const viewProjMat = M4.create();
+      const modelMat = M4.create();
+      const rotYMat = M4.create();
+      const tiltMat = M4.create();
+      const normMat = new Float32Array(9);
+
+      // Camera: perfectly framed at eye-level elevation
+      const cameraPos = V3.create(0.0, 1.25, 4.8);
+      const cameraTarget = V3.create(0.0, 0.28, 0.0);
+      const cameraUp = V3.create(0.0, 1.0, 0.0);
+
+      // Fedora Stance: tipped forward (-13.5 deg) and slight roll (+4.5 deg)
+      const pitch = -0.235;
+      const roll = 0.08;
+      const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
+      const cosR = Math.cos(roll), sinR = Math.sin(roll);
+      M4.identity(tiltMat);
+      tiltMat[0] = cosR; tiltMat[1] = sinR * sinP; tiltMat[2] = sinR * cosP;
+      tiltMat[5] = cosP; tiltMat[6] = -sinP;
+      tiltMat[8] = -sinR; tiltMat[9] = cosR * sinP; tiltMat[10] = cosR * cosP;
+
+      let lastTime = performance.now();
+
+      function render(now) {
+        requestAnimationFrame(render);
+
+        const dt = Math.min((now - lastTime) * 0.001, 0.1);
+        lastTime = now;
+        const timeSec = now * 0.001;
+
+        resizeCanvas();
+        gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+
+        // Dissolve Progress
+        let dissolveProgress = 0.0;
+        let hatDissolveUniform = 0.0;
+
+        if (dissolveActive) {
+          dissolveTimer += dt;
+          dissolveProgress = Math.min(1.0, dissolveTimer / DISSOLVE_DURATION);
+
+          if (dissolveProgress < 0.25) {
+            hintText.textContent = "Dissolving into embers...";
+          } else if (dissolveProgress < 0.65) {
+            hintText.textContent = "Swirling in vortex...";
+          } else if (dissolveProgress < 0.96) {
+            hintText.textContent = "Reforming fedora...";
+          } else {
+            hintText.textContent = "Hover or tap to dissolve";
+            hintDot.classList.remove("active");
+          }
+
+          if (dissolveProgress < 0.25) {
+            hatDissolveUniform = dissolveProgress / 0.25;
+          } else if (dissolveProgress < 0.70) {
+            hatDissolveUniform = 1.0;
+          } else if (dissolveProgress < 0.98) {
+            hatDissolveUniform = 1.0 - (dissolveProgress - 0.70) / 0.28;
+          } else {
+            hatDissolveUniform = 0.0;
+          }
+
+          if (dissolveProgress >= 1.0) {
+            dissolveActive = false;
+            dissolveTimer = 0.0;
+            hasReformedOnce = 1.0;
+          }
+        }
+
+        // Spin Speed Dynamics
+        let targetSpeed = DEFAULT_SPEED;
+        if (prefersReducedMotion) {
+          targetSpeed = 0.0;
+        } else if (dissolveActive || isHovered) {
+          targetSpeed = SLOW_SPEED;
+        }
+
+        spinVelocity += (targetSpeed - spinVelocity) * Math.min(1.0, dt * 3.5);
+        spinAngle += spinVelocity * dt;
+
+        // View-Projection Matrix with Responsive Framing
+        const aspect = canvas.width / canvas.height;
+        // On portrait screens, back up camera proportionally so the hat fits gracefully
+        const fitScale = aspect < 1.0 ? Math.min(2.4, 0.90 / aspect) : 1.0;
+        const camZ = 4.8 * fitScale;
+        const camY = 0.28 + (1.25 - 0.28) * fitScale;
+        cameraPos[1] = camY;
+        cameraPos[2] = camZ;
+
+        M4.perspective(projMat, 0.66, aspect, 0.1, 60.0);
+        M4.lookAt(viewMat, cameraPos, cameraTarget, cameraUp);
+        M4.multiply(viewProjMat, projMat, viewMat);
+
+        // Rotation Matrix
+        M4.identity(rotYMat);
+        const cosY = Math.cos(spinAngle);
+        const sinY = Math.sin(spinAngle);
+        rotYMat[0] = cosY;  rotYMat[2] = sinY;
+        rotYMat[8] = -sinY; rotYMat[10] = cosY;
+
+        // Combine tilt and rotation
+        M4.multiply(modelMat, rotYMat, tiltMat);
+        M4.normalMatrix(normMat, modelMat);
+
+        // Clear Screen
+        gl.clearColor(0.024, 0.027, 0.035, 1.0);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+        // -----------------------------------------------------------
+        // PASS 1: Soft Ground Shadow
+        // -----------------------------------------------------------
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.depthMask(false);
+        gl.disable(gl.DEPTH_TEST);
+
+        gl.useProgram(shadowProg);
+        gl.uniformMatrix4fv(shadowUniforms.uViewProj, false, viewProjMat);
+        gl.uniform1f(shadowUniforms.uGroundY, -0.65);
+        gl.uniform1f(shadowUniforms.uDissolve, hatDissolveUniform);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, shadowBuffer);
+        gl.enableVertexAttribArray(shadowAttrs.aPosition);
+        gl.vertexAttribPointer(shadowAttrs.aPosition, 2, gl.FLOAT, false, 0, 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        // -----------------------------------------------------------
+        // PASS 2: Solid Fedora Mesh
+        // -----------------------------------------------------------
+        if (hatDissolveUniform < 0.999) {
+          gl.enable(gl.DEPTH_TEST);
+          gl.depthMask(true);
+          gl.disable(gl.BLEND);
+
+          gl.useProgram(fedoraProg);
+          gl.uniformMatrix4fv(fedoraUniforms.uModel, false, modelMat);
+          gl.uniformMatrix4fv(fedoraUniforms.uViewProj, false, viewProjMat);
+          gl.uniformMatrix3fv(fedoraUniforms.uNormalMatrix, false, normMat);
+          gl.uniform3fv(fedoraUniforms.uCameraPos, cameraPos);
+          gl.uniform1f(fedoraUniforms.uDissolve, hatDissolveUniform);
+          gl.uniform1f(fedoraUniforms.uTime, timeSec);
+
+          gl.bindBuffer(gl.ARRAY_BUFFER, fedoraBuffers.position);
+          gl.enableVertexAttribArray(fedoraAttrs.aPosition);
+          gl.vertexAttribPointer(fedoraAttrs.aPosition, 3, gl.FLOAT, false, 0, 0);
+
+          gl.bindBuffer(gl.ARRAY_BUFFER, fedoraBuffers.normal);
+          gl.enableVertexAttribArray(fedoraAttrs.aNormal);
+          gl.vertexAttribPointer(fedoraAttrs.aNormal, 3, gl.FLOAT, false, 0, 0);
+
+          gl.bindBuffer(gl.ARRAY_BUFFER, fedoraBuffers.uv);
+          gl.enableVertexAttribArray(fedoraAttrs.aUV);
+          gl.vertexAttribPointer(fedoraAttrs.aUV, 2, gl.FLOAT, false, 0, 0);
+
+          gl.bindBuffer(gl.ARRAY_BUFFER, fedoraBuffers.isBand);
+          gl.enableVertexAttribArray(fedoraAttrs.aIsBand);
+          gl.vertexAttribPointer(fedoraAttrs.aIsBand, 1, gl.FLOAT, false, 0, 0);
+
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, fedoraBuffers.index);
+          gl.drawElements(gl.TRIANGLES, fedoraBuffers.numIndices, gl.UNSIGNED_SHORT, 0);
+        }
+
+        // -----------------------------------------------------------
+        // PASS 3: Glowing Ember Particles (18,000 Particles)
+        // -----------------------------------------------------------
+        if (dissolveProgress > 0.0001 || hasReformedOnce > 0.5) {
+          gl.depthMask(false);
+          gl.enable(gl.BLEND);
+          gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+
+          gl.useProgram(particleProg);
+          gl.uniformMatrix4fv(particleUniforms.uModel, false, modelMat);
+          gl.uniformMatrix4fv(particleUniforms.uViewProj, false, viewProjMat);
+          gl.uniform1f(particleUniforms.uDissolve, hatDissolveUniform);
+          gl.uniform1f(particleUniforms.uPhase, dissolveProgress);
+          gl.uniform1f(particleUniforms.uTime, timeSec);
+          gl.uniform1f(particleUniforms.uPixelRatio, pixelRatio);
+          gl.uniform1f(particleUniforms.uHasReformed, hasReformedOnce);
+          gl.uniform1f(particleUniforms.uReducedMotion, prefersReducedMotion ? 1.0 : 0.0);
+
+          gl.bindBuffer(gl.ARRAY_BUFFER, particleBuffers.homePos);
+          gl.enableVertexAttribArray(particleAttrs.aHomePos);
+          gl.vertexAttribPointer(particleAttrs.aHomePos, 3, gl.FLOAT, false, 0, 0);
+
+          gl.bindBuffer(gl.ARRAY_BUFFER, particleBuffers.normal);
+          gl.enableVertexAttribArray(particleAttrs.aNormal);
+          gl.vertexAttribPointer(particleAttrs.aNormal, 3, gl.FLOAT, false, 0, 0);
+
+          gl.bindBuffer(gl.ARRAY_BUFFER, particleBuffers.seed);
+          gl.enableVertexAttribArray(particleAttrs.aSeed);
+          gl.vertexAttribPointer(particleAttrs.aSeed, 4, gl.FLOAT, false, 0, 0);
+
+          gl.bindBuffer(gl.ARRAY_BUFFER, particleBuffers.matType);
+          gl.enableVertexAttribArray(particleAttrs.aMatType);
+          gl.vertexAttribPointer(particleAttrs.aMatType, 1, gl.FLOAT, false, 0, 0);
+
+          gl.bindBuffer(gl.ARRAY_BUFFER, particleBuffers.isOrbiter);
+          gl.enableVertexAttribArray(particleAttrs.aIsOrbiter);
+          gl.vertexAttribPointer(particleAttrs.aIsOrbiter, 1, gl.FLOAT, false, 0, 0);
+
+          gl.drawArrays(gl.POINTS, 0, NUM_PARTICLES);
+
+          // -----------------------------------------------------------
+          // PASS 4: Lingering Orbiters Light Trails
+          // -----------------------------------------------------------
+          if (hasReformedOnce > 0.5 && (dissolveProgress < 0.001 || dissolveProgress > 0.85)) {
+            let vIdx = 0;
+            const motionFactor = prefersReducedMotion ? 0.25 : 1.0;
+
+            for (let i = 0; i < particleData.numOrbiters; i++) {
+              const seedX = particleData.seeds[i * 4 + 0];
+              const seedY = particleData.seeds[i * 4 + 1];
+              const seedZ = particleData.seeds[i * 4 + 2];
+              const seedW = particleData.seeds[i * 4 + 3];
+
+              const orbSpeed = (0.72 + seedX * 0.52) * (seedY > 0.5 ? 1.0 : -1.0) * motionFactor;
+              const orbRadius = 1.70 + seedZ * 0.85;
+              const tilt = (seedX - 0.5) * 0.65;
+
+              for (let s = 0; s < TRAIL_STEPS; s++) {
+                const delay = (s + 1) * 0.045;
+                const pastTime = timeSec - delay;
+                const pastAngle = pastTime * orbSpeed + seedW * 6.283185;
+
+                const ox = Math.cos(pastAngle) * orbRadius;
+                const oz = Math.sin(pastAngle) * orbRadius;
+                const oy = 0.28 + Math.sin(pastAngle * 2.0 + seedY * 4.0) * 0.32 + ox * tilt;
+
+                trailPositions[vIdx * 3 + 0] = ox;
+                trailPositions[vIdx * 3 + 1] = oy;
+                trailPositions[vIdx * 3 + 2] = oz;
+                vIdx++;
+              }
+            }
+
+            gl.useProgram(trailProg);
+            gl.uniformMatrix4fv(trailUniforms.uViewProj, false, viewProjMat);
+            gl.uniform1f(trailUniforms.uPixelRatio, pixelRatio);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, trailBuffers.position);
+            gl.bufferSubData(gl.ARRAY_BUFFER, 0, trailPositions);
+            gl.enableVertexAttribArray(trailAttrs.aPosition);
+            gl.vertexAttribPointer(trailAttrs.aPosition, 3, gl.FLOAT, false, 0, 0);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, trailBuffers.age);
+            gl.enableVertexAttribArray(trailAttrs.aAge);
+            gl.vertexAttribPointer(trailAttrs.aAge, 1, gl.FLOAT, false, 0, 0);
+
+            gl.drawArrays(gl.POINTS, 0, numTrailVerts);
+          }
+        }
+      }
+
+      requestAnimationFrame(render);
+    })();
+  </script>
+</body>
+</html>
