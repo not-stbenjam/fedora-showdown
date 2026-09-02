@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mercury Project</title>
+    <style>
+        :root { --bg: #0a0a0a; --text: #e0e0e0; }
+        body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        #scene { position: absolute; inset: 0; z-index: 1; }
+        #controls { position: absolute; bottom: 40px; width: 100%; text-align: center; z-index: 2; pointer-events: none; opacity: 0; transition: opacity 0.8s ease; }
+        #controls.visible { opacity: 1; }
+        .caption { font-size: 0.9rem; letter-spacing: 0.2em; text-transform: uppercase; text-shadow: 0 2px 10px rgba(0,0,0,0.8); }
+        @media (prefers-reduced-motion: reduce) { #controls { display: none; } #scene { transform: none !important; } }
+    </style>
+</head>
+<body>
+    <canvas id="scene"></canvas>
+    <div id="controls"><div class="caption">Hover to Dissolve</div></div>
+
+    <script>
+        const canvas = document.getElementById('scene');
+        const ctx = canvas.getContext('2d', { alpha: false });
+        const controls = document.getElementById('controls');
+        let width, height, particles = [];
+        let isHover = false, reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        
+        const config = {
+            count: 3500, 
+            spinSpeed: 0.005, 
+            hoverSpeed: 0.002,
+            explosionForce: 150,
+            orbitSpeed: 0.02,
+            color: { r: 255, g: 70, b: 100 } // Red Hat-ish
+        };
+
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        class Particle {
+            constructor() {
+                this.reset();
+            }
+
+            reset() {
+                const t = Math.random() * Math.PI * 2;
+                const u = Math.random();
+                const isBrim = Math.random() < 0.6;
+                
+                if (isBrim) {
+                    this.x = (Math.random() - 0.5) * 180;
+                    this.z = (Math.random() - 0.5) * 180;
+                    this.y = 20;
+                } else {
+                    this.x = (Math.random() - 0.5) * 60;
+                    this.z = (Math.random() - 0.5) * 60;
+                    this.y = -Math.random() * 120 - 10;
+                }
+                
+                this.tx = this.x;
+                this.ty = this.y;
+                this.tz = this.z;
+                this.vx = (Math.random() - 0.5) * 2;
+                this.vy = (Math.random() - 0.5) * 2;
+                this.vz = (Math.random() - 0.5) * 2;
+                this.friction = 0.96;
+                this.size = Math.random() * 2 + 1;
+                this.orbit = Math.random() < 0.05; 
+            }
+
+            update(angle) {
+                let targetX = this.tx, targetY = this.ty, targetZ = this.tz;
+
+                if (this.orbit) {
+                    targetX = this.tx * 1.2 + Math.cos(angle) * 200;
+                    targetZ = this.tz * 1.2 + Math.sin(angle) * 200;
+                    targetY = 0;
+                }
+
+                if (isHover) {
+                    const dist = Math.hypot(this.x, this.z) * 1.5;
+                    const force = config.explosionForce + Math.random() * 50;
+                    targetX += (Math.random() - 0.5) * force;
+                    targetY += (Math.random() - 0.5) * force;
+                    targetZ += (Math.random() - 0.5) * force;
+                }
+
+                this.vx += (targetX - this.x) * 0.03;
+                this.vy += (targetY - this.y) * 0.03;
+                this.vz += (targetZ - this.z) * 0.03;
+
+                this.vx *= this.friction;
+                this.vy *= this.friction;
+                this.vz *= this.friction;
+
+                this.x += this.vx;
+                this.y += this.vy;
+                this.z += this.vz;
+
+                if (!isHover && this.orbit) {
+                    this.vx -= this.x * 0.01;
+                    this.vy -= this.y * 0.01;
+                    this.vz -= this.z * 0.01;
+                }
+            }
+
+            draw(angle) {
+                const s = config.spinSpeed;
+                const rotY = reducedMotion ? 0 : angle;
+                const cos = Math.cos(rotY), sin = Math.sin(rotY);
+
+                const rx = this.x * cos - this.z * sin;
+                const rz = this.x * sin + this.z * cos;
+
+                const depth = 100 + rz;
+                const scale = 1 + depth / 800;
+                const sx = width / 2 + rx * scale;
+                const sy = height / 2 + this.y * scale;
+                const sz = this.size * scale;
+
+                const alpha = Math.min(1, depth / 400);
+                if (depth < 50) return;
+
+                ctx.beginPath();
+                ctx.arc(sx, sy, sz, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(${config.color.r}, ${config.color.g}, ${config.color.b}, ${alpha})`;
+                ctx.shadowBlur = 8;
+                ctx.shadowColor = `rgba(${config.color.r}, ${config.color.g}, ${config.color.b}, 0.5)`;
+                ctx.fill();
+            }
+        }
+
+        function initParticles() {
+            particles = [];
+            for (let i = 0; i < config.count; i++) particles.push(new Particle());
+        }
+
+        initParticles();
+        let frame = 0;
+
+        function animate() {
+            frame++;
+            ctx.fillStyle = reducedMotion ? '#0a0a0a' : 'rgba(10, 10, 10, 0.2)';
+            ctx.fillRect(0, 0, width, height);
+            ctx.shadowBlur = 0;
+
+            const speed = isHover ? config.hoverSpeed : config.spinSpeed;
+            const angle = reducedMotion ? 0 : frame * speed;
+
+            particles.forEach(p => { p.update(angle); p.draw(angle); });
+
+            controls.classList.toggle('visible', isHover);
+            requestAnimationFrame(animate);
+        }
+
+        canvas.addEventListener('mouseenter', () => isHover = true);
+        canvas.addEventListener('mouseleave', () => isHover = false);
+        canvas.addEventListener('touchstart', () => isHover = true);
+        canvas.addEventListener('touchend', () => isHover = false);
+        
+        animate();
+    </script>
+</body>
+</html>
