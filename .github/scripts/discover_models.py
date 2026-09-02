@@ -56,6 +56,16 @@ SKIP_NAME_PATTERNS = [
     "content-safety",
 ]
 
+# These models consistently fail in the discovery workflow and have never
+# produced a usable page. Keep the exact IDs here so newly released models
+# from the same providers remain eligible.
+BLOCKED_MODEL_IDS = frozenset({
+    "meituan/longcat-2.0",
+    "tencent/hy-mt2-1.8b",
+    "tencent/hy-mt2-30b-a3b",
+    "tencent/hy-mt2-7b",
+})
+
 SLUG_OVERRIDES = {
     "anthropic/claude-fable-5": "fable-5",
     "anthropic/claude-opus-4": "opus-4",
@@ -97,6 +107,8 @@ def should_include(model, cost_ceiling):
     mid = model["id"]
     provider = mid.split("/")[0]
 
+    if mid in BLOCKED_MODEL_IDS:
+        return False
     if mid.endswith(":free") or mid.endswith(":thinking") or mid.endswith(":batch") or mid.endswith("-fast"):
         return False
     if mid.startswith("~"):

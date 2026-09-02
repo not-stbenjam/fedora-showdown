@@ -43,6 +43,15 @@ def variant(slug, effort, warning=()):
 
 
 class ModelDiscoveryTest(unittest.TestCase):
+    def test_excludes_models_with_only_permanent_failures(self):
+        for model_id in discover_models.BLOCKED_MODEL_IDS:
+            with self.subTest(model_id=model_id):
+                model = model_metadata()
+                model["id"] = model_id
+                self.assertFalse(
+                    discover_models.should_include(model, float("inf"))
+                )
+
     def test_includes_meta_openrouter_models_except_spark(self):
         provider_groups = json.loads(discover_models.GROUPS_FILE.read_text())
         glimmer = model_metadata()
