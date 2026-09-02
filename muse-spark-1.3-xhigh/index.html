@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Crimson Fedora — Dark Hero</title>
+<style>
+  :root{
+    --bg:#07080b;
+    --ink:#eef0f3;
+    --muted:#9aa0ab;
+    --faint:#5c6270;
+    --red:#ee2c24;
+    --line:rgba(255,255,255,.09);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;
+    background:
+      radial-gradient(1100px 620px at 50% 34%, rgba(238,44,36,.10), transparent 60%),
+      radial-gradient(900px 700px at 50% 110%, rgba(120,40,30,.10), transparent 60%),
+      radial-gradient(1400px 1000px at 50% 40%, #14161d 0%, #0a0b0f 52%, #060709 100%);
+    background-color:var(--bg);
+    color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    min-height:100svh;
+    display:grid;
+    place-items:center;
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  body::after{
+    content:"";
+    position:fixed;inset:0;pointer-events:none;
+    background:radial-gradient(120% 90% at 50% 45%, transparent 55%, rgba(0,0,0,.55) 100%);
+  }
+  .hero{
+    position:relative;
+    width:min(92vw,600px);
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    text-align:center;
+    padding:clamp(16px,3vh,32px) 16px;
+    z-index:1;
+  }
+  .stage{
+    position:relative;
+    width:min(86vw,58svh,520px);
+    aspect-ratio:1/1;
+    outline:none;
+  }
+  .stage:focus-visible{outline:1px solid rgba(255,255,255,.35);outline-offset:10px;border-radius:18px}
+  canvas{
+    width:100%;height:100%;display:block;border-radius:24px;
+    cursor:pointer;
+    -webkit-tap-highlight-color:transparent;
+  }
+  h1{
+    margin:10px 0 0 0;
+    font-family:Georgia,"Times New Roman",serif;
+    font-size:clamp(26px,4vw,36px);
+    letter-spacing:0;
+    font-weight:500;
+  }
+  h1 span{color:var(--red);font-style:italic}
+  .caption{
+    margin:10px 0 0 0;
+    font-size:clamp(12px,1.8vw,14px);
+    line-height:1.6;
+    color:var(--muted);
+    max-width:44ch;
+  }
+  .hint{
+    margin:14px 0 0 0;
+    font-size:12px;
+    letter-spacing:.08em;
+    color:var(--faint);
+    user-select:none;
+  }
+  .pulse{animation:pulse 2.6s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:.55}50%{opacity:1}}
+  @media (prefers-reduced-motion: reduce){
+    .pulse{animation:none}
+  }
+</style>
+</head>
+<body>
+  <main class="hero">
+    <div class="stage" id="stage" tabindex="0" role="img"
+      aria-label="A red fedora spinning in 3D. Hover, tap, or press Enter to scatter it into glowing embers that reform.">
+      <canvas id="scene"></canvas>
+    </div>
+    <h1>Crimson <span>Fedora</span></h1>
+    <p class="caption">Soft light, deep shadow, quiet glow — a Red Hat–style fedora turning slowly in the dark.</p>
+    <p class="hint pulse" id="hint">hover or tap to scatter</p>
+  </main>
+<script>
+(function(){
+  "use strict";
+  var canvas = document.getElementById('scene');
+  var stage = document.getElementById('stage');
+  var hint = document.getElementById('hint');
+  var ctx = canvas.getContext('2d');
+  var REDUCED = false;
+  try{ REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; }catch(e){}
+
+  var W=0,H=0,DPR=1, CX=0, CY=0, S=100;
+  var bgGrad=null, glowGrad=null;
+
+  function resize(){
+    var r = stage.getBoundingClientRect();
+    DPR = Math.min(2, window.devicePixelRatio || 1);
+    W = Math.max(2, Math.round(r.width * DPR));
+    H = Math.max(2, Math.round(r.width * DPR));
+    canvas.width = W; canvas.height = H;
+    CX = W/2; CY = H*0.485;
+    S = Math.min(W,H)*0.335;
+    bgGrad = ctx.createRadialGradient(CX,CY*0.92,10, CX,CY*0.92,Math.max(W,H)*0.72);
+    bgGrad.addColorStop(0,'rgba(70,22,18,0.55)');
+    bgGrad.addColorStop(0.28,'rgba(40,16,15,0.28)');
+    bgGrad.addColorStop(0.6,'rgba(0,0,0,0)');
+    glowGrad = ctx.createRadialGradient(CX,CY,10, CX,CY,S*2.4);
+    glowGrad.addColorStop(0,'rgba(255,80,60,0.10)');
+    glowGrad.addColorStop(1,'rgba(255,80,60,0)');
+  }
+
+  function rand(a,b){ return a + Math.random()*(b-a); }
+  function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+  function easeIO(t){ t=clamp(t,0,1); return t*t*(3-2*t); }
+
+  // ---- particle field sampled from a fedora (brim + crown + top dome + band) ----
+  var COUNT = (window.innerWidth && window.innerWidth < 620) ? 2300 : 3400;
+  var P = [];
+  var ORBIT_N = REDUCED ? 0 : 36;
+  var extras = [];
+  var trails = [];
+
+  function crownRX(y01){ return 0.56*(1-0.30*y01); }
+  function crownRZ(y01){ return 0.375*(1-0.30*y01); }
+
+  function pushParticle(hx,hy,hz,kind,nx,ny,nz,albedo,size){
+    var l = Math.sqrt(hx*hx+hy*hy+hz*hz)+0.0001;
+    var spread = rand(1.15,2.15);
+    P.push({
+      hx:hx, hy:hy, hz:hz,
+      nx:nx, ny:ny, nz:nz,
+      r:albedo[0], g:albedo[1], b:albedo[2],
+      size:size,
+      ph:rand(0,Math.PI*2),
+      ph2:rand(0,Math.PI*2),
+      sx:hx/l + rand(-0.45,0.45),
+      sy:rand(-0.15,0.85),
+      sz:hz/l + rand(-0.45,0.45),
+      sw:rand(0.5,1.5)*(Math.random()<0.5?-1:1),
+      fl:rand(5,10),
+      kind:kind
+    });
+    var sl = Math.sqrt(P[P.length-1].sx*P[P.length-1].sx+P[P.length-1].sy*P[P.length-1].sy+P[P.length-1].sz*P[P.length-1].sz)+0.0001;
+    P[P.length-1].sx = P[P.length-1].sx/sl*spread;
+    P[P.length-1].sy = P[P.length-1].sy/sl*spread;
+    P[P.length-1].sz = P[P.length-1].sz/sl*spread;
+  }
+
+  function build(){
+    P.length=0;
+    var i, a, r, x, y, z, y01;
+    var nBrim=Math.floor(COUNT*0.34), nSide=Math.floor(COUNT*0.40),
+        nTop=Math.floor(COUNT*0.13), nBand=COUNT-nBrim-nSide-nTop;
+    var shade;
+    for(i=0;i<nBrim;i++){
+      a=rand(0,Math.PI*2); r=0.34+0.66*Math.sqrt(Math.random());
+      x=Math.cos(a)*r*1.0; z=Math.sin(a)*r*0.66;
+      var lift=0.10*Math.pow(Math.max(0,(r-0.45))/0.55,2.2);
+      y=lift+rand(-0.018,0.018)-0.30;
+      shade=rand(0.85,1.12);
+      var under = y<-0.29 ? 0.62 : 1.0;
+      pushParticle(x,y,z,'brim',0,1,0,
+        [226*shade*under,34*shade*under,30*shade*under], rand(1.1,2.4));
+    }
+    for(i=0;i<nSide;i++){
+      a=rand(0,Math.PI*2); y01=Math.pow(Math.random(),0.9);
+      var rx=crownRX(y01), rz=crownRZ(y01);
+      x=Math.cos(a)*rx; z=Math.sin(a)*rz; y=y01*0.62-0.30;
+      shade=rand(0.8,1.15);
+      pushParticle(x,y,z,'crown',Math.cos(a),0.18,Math.sin(a),
+        [228*shade,38*shade,32*shade], rand(1.1,2.5));
+    }
+    for(i=0;i<nTop;i++){
+      a=rand(0,Math.PI*2); r=Math.sqrt(Math.random());
+      var xt=Math.cos(a)*r*0.392, zt=Math.sin(a)*r*0.2625;
+      var yt=0.62+0.14*Math.sqrt(Math.max(0,1-r*r));
+      yt-=0.11*Math.exp(-(xt*xt)/0.025); // center crease
+      y=yt-0.30;
+      shade=rand(0.9,1.18);
+      pushParticle(xt,y,zt,'top',0,1,0,
+        [235*shade,52*shade,44*shade], rand(1.1,2.4));
+    }
+    for(i=0;i<nBand;i++){
+      a=rand(0,Math.PI*2); y01=rand(0.05,0.26);
+      var bx=Math.cos(a)*(crownRX(y01)+0.018), bz=Math.sin(a)*(crownRZ(y01)+0.018);
+      y=y01*0.62-0.30+rand(-0.008,0.008);
+      var sheen = (Math.cos(a)<-0.2)? rand(48,72):rand(14,30);
+      pushParticle(bx,y,bz,'band',Math.cos(a),0.1,Math.sin(a),
+        [sheen,sheen,sheen+4], rand(1.0,2.1));
+    }
+    extras.length=0; trails.length=0;
+    for(var e=0;e<ORBIT_N;e++){
+      extras.push({rad:rand(1.25,1.8), y:rand(-0.35,0.55),
+        spd:rand(0.4,0.9)*(Math.random()<0.5?-1:1), ph:rand(0,Math.PI*2),
+        size:rand(1.0,1.9), fl:rand(5,10)});
+      trails.push([]);
+    }
+  }
+
+  // ---- animation state ----
+  var spin = 0.6;
+  var spinSpeed = REDUCED ? 0 : 0.42;
+  var spinTarget = spinSpeed;
+  var dissolve = 0;            // 0 solid .. 1 fully scattered
+  var state = 'solid';         // solid | dispersing | swirling | reforming
+  var stateT = 0;
+  var time = 0;
+  var swirlAngle = 0;
+  var orbitOn = false;
+  var tiltX = -0.10, tiltY = 0;
+  var mNX = 0, mNY = 0, tNX = 0, tNY = 0;
+  var DUR = REDUCED ? {d:0.7, s:0.001, r:0.9} : {d:1.5, s:1.7, r:2.1};
+
+  function trigger(){
+    if(state!=='solid') return;
+    state='dispersing'; stateT=0;
+    spinTarget = REDUCED ? 0 : 0.05;
+    if(hint) hint.textContent='watch it come back';
+  }
+  function finishReform(){
+    state='solid'; dissolve=0;
+    spinTarget = REDUCED ? 0 : 0.42;
+    if(!REDUCED) orbitOn=true;
+    if(hint) hint.textContent='hover or tap to scatter';
+  }
+
+  stage.addEventListener('pointermove', function(e){
+    var r=canvas.getBoundingClientRect();
+    tNX=((e.clientX-r.left)/r.width-0.5)*2;
+    tNY=((e.clientY-r.top)/r.height-0.5)*2;
+    if(state==='solid' && !REDUCED){
+      var dx=(e.clientX-r.left)-r.width/2, dy=(e.clientY-r.top)-r.height/2;
+      if(Math.sqrt(dx*dx+dy*dy) < r.width*0.46) trigger();
+    }
+  });
+  stage.addEventListener('pointerdown', function(e){
+    var r=canvas.getBoundingClientRect();
+    tNX=((e.clientX-r.left)/r.width-0.5)*2;
+    tNY=((e.clientY-r.top)/r.height-0.5)*2;
+    trigger();
+  });
+  stage.addEventListener('pointerenter', function(){ if(!REDUCED) trigger(); });
+  stage.addEventListener('keydown', function(e){
+    if(e.key==='Enter'||e.key===' '){ e.preventDefault(); trigger(); }
+  });
+  window.addEventListener('resize', resize);
+
+  var LX=-0.45, LY=0.85, LZ=0.55;
+  (function(){ var l=Math.sqrt(LX*LX+LY*LY+LZ*LZ); LX/=l; LY/=l; LZ/=l; })();
+
+  var last=0;
+  function frame(ts){
+    requestAnimationFrame(frame);
+    var now=ts/1000;
+    var dt=Math.min(0.05, now-(last||now)); last=now;
+    time+=dt; stateT+=dt;
+
+    spinSpeed += (spinTarget-spinSpeed)*Math.min(1,dt*2.2);
+    spin += spinSpeed*dt;
+    if(!REDUCED){
+      swirlAngle += dt*(0.4+0.9*dissolve);
+      mNX += (tNX-mNX)*Math.min(1,dt*3);
+      mNY += (tNY-mNY)*Math.min(1,dt*3);
+    }
+
+    if(state==='dispersing'){
+      var k=easeIO(stateT/DUR.d); dissolve=k;
+      if(stateT>=DUR.d){ state = REDUCED ? 'reforming' : 'swirling'; stateT=0; }
+    }else if(state==='swirling'){
+      dissolve=1;
+      if(stateT>=DUR.s){ state='reforming'; stateT=0; }
+    }else if(state==='reforming'){
+      dissolve=1-easeIO(stateT/DUR.r);
+      spinTarget = REDUCED ? 0 : 0.42;
+      if(stateT>=DUR.r) finishReform();
+    }
+
+    var bob = REDUCED ? 0 : Math.sin(time*0.8)*0.03;
+    var curTiltX = tiltX + (REDUCED?0:mNY*0.10);
+    var extraY = REDUCED?0:mNX*0.12;
+    var cosY=Math.cos(spin+extraY), sinY=Math.sin(spin+extraY);
+    var cosX=Math.cos(curTiltX), sinX=Math.sin(curTiltX);
+    var spreadK = REDUCED ? 0.32 : 1.0;
+    var turbK = REDUCED ? 0 : 1;
+
+    // background
+    ctx.globalCompositeOperation='source-over';
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle=bgGrad;
+    ctx.fillRect(0,0,W,H);
+
+    // ground shadow
+    var shA = 0.55*(1-dissolve*0.72);
+    var shW=S*1.65, shH=S*0.20;
+    var shX=CX, shY=CY+S*0.92+bob*S*0.4;
+    var sg=ctx.createRadialGradient(shX,shY,4,shX,shY,shW/2);
+    sg.addColorStop(0,'rgba(0,0,0,'+shA.toFixed(3)+')');
+    sg.addColorStop(0.6,'rgba(0,0,0,'+(shA*0.45).toFixed(3)+')');
+    sg.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.save(); ctx.translate(shX,shY); ctx.scale(1,shH/shW); ctx.translate(-shX,-shY);
+    ctx.fillStyle=sg; ctx.beginPath(); ctx.arc(shX,shY,shW/2,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+
+    // soft halo behind hat
+    ctx.fillStyle=glowGrad;
+    ctx.fillRect(0,0,W,H);
+
+    var ember = dissolve>0.02;
+    ctx.globalCompositeOperation = ember ? 'lighter' : 'source-over';
+
+    var cam=3.4;
+    var i,p;
+    // precompute swirl rotation
+    var cS=Math.cos(swirlAngle), sS=Math.sin(swirlAngle);
+
+    for(i=0;i<P.length;i++){
+      p=P[i];
+      // rotate home around Y
+      var x1=p.hx*cosY + p.hz*sinY;
+      var z1=-p.hx*sinY + p.hz*cosY;
+      var y1=p.hy;
+      // tilt around X
+      var y2=y1*cosX - z1*sinX;
+      var z2=y1*sinX + z1*cosX;
+      // scatter / swirl offset
+      var ox=0,oy=0,oz=0;
+      if(dissolve>0.001){
+        var d=dissolve*spreadK;
+        var vx=p.sx*d, vz=p.sz*d;
+        ox=vx*cS - vz*sS;
+        oz=vx*sS + vz*cS;
+        oy=p.sy*d + Math.sin(time*1.6+p.ph)*0.14*d*turbK + Math.cos(time*1.1+p.ph2)*0.05*d*turbK;
+        ox+=Math.sin(time*1.3+p.ph*1.7)*0.12*d*turbK;
+        oz+=Math.cos(time*1.2+p.ph2*1.3)*0.12*d*turbK;
+        if(!REDUCED) ox+=Math.sin(p.ph*3+swirlAngle*p.sw)*0.22*d;
+      }
+      var px=x1+ox, py=y2+oy+bob, pz=z2+oz;
+
+      var persp=cam/(cam-pz*0.85);
+      var sx2=CX+px*S*persp;
+      var sy2=CY-py*S*persp;
+      if(sx2<-20||sx2>W+20||sy2<-20||sy2>H+20) continue;
+
+      // lighting
+      var diff=Math.max(0,p.nx*LX+p.ny*LY+p.nz*LZ);
+      var bright=0.52+0.62*diff;
+      bright+=0.14*clamp(0.5+py*0.8,0,1);
+      bright*= (0.82+0.18*persp);
+      var fl = ember ? (0.72+0.28*Math.sin(time*p.fl+p.ph*4)) : 1;
+      var er = p.r*bright, eg=p.g*bright, eb=p.b*bright;
+      if(ember && p.kind!=='band'){
+        var mix=dissolve*0.45*fl;
+        er=er+(255-er)*mix; eg=eg+(150-eg)*mix*0.8; eb=eb+(70-eb)*mix*0.6;
+      }
+      var alpha = ember ? (0.55+0.4*fl) : 0.96;
+      if(p.kind==='band') alpha=Math.min(alpha,0.95);
+      var sz=p.size*(0.55+0.45*persp)*(1+dissolve*0.35)*(DPR*0.9)*(S/170);
+      if(sz<0.6) sz=0.6;
+      ctx.fillStyle='rgba('+(er|0)+','+(eg|0)+','+(eb|0)+','+alpha.toFixed(3)+')';
+      ctx.beginPath();
+      ctx.arc(sx2,sy2,sz,0,6.2832);
+      ctx.fill();
+    }
+
+    // lingering orbiters: extra embers circling the reformed hat, with faint trails
+    if(orbitOn && state==='solid' && !REDUCED){
+      ctx.globalCompositeOperation='lighter';
+      ctx.lineWidth=Math.max(1,DPR*0.8);
+      for(var t=0;t<extras.length;t++){
+        var o=extras[t], tr=trails[t];
+        var oa=time*o.spd+o.ph;
+        var ex=Math.cos(oa)*o.rad, ez=Math.sin(oa)*o.rad*0.7;
+        var ey=o.y+Math.sin(time*0.9+o.ph*2)*0.18+bob;
+        var ep=cam/(cam-ez*0.85);
+        var ex2=CX+ex*S*ep, ey2=CY-ey*S*ep;
+        var onScreen = ex2>-20&&ex2<W+20&&ey2>-20&&ey2<H+20;
+        tr.push({x:onScreen?ex2:-999,y:onScreen?ey2:-999});
+        if(tr.length>14) tr.shift();
+        for(var q=1;q<tr.length;q++){
+          var a0=tr[q-1], a1=tr[q];
+          if(a0.x<-100||a1.x<-100) continue;
+          var al=(q/tr.length)*0.32;
+          ctx.strokeStyle='rgba(255,120,70,'+al.toFixed(3)+')';
+          ctx.beginPath(); ctx.moveTo(a0.x,a0.y); ctx.lineTo(a1.x,a1.y); ctx.stroke();
+        }
+        if(onScreen){
+          var tw=0.6+0.4*Math.sin(time*o.fl+o.ph*4);
+          ctx.fillStyle='rgba(255,150,90,'+(0.75*tw).toFixed(3)+')';
+          ctx.beginPath();
+          ctx.arc(ex2,ey2,Math.max(0.7,o.size*(DPR*0.9)*(S/170)*tw),0,6.2832);
+          ctx.fill();
+        }
+      }
+      ctx.globalCompositeOperation='source-over';
+    } else if(!REDUCED){
+      for(var c=0;c<trails.length;c++){ if(trails[c].length) trails[c].length=0; }
+    }
+  }
+
+  build();
+  resize();
+  window.addEventListener('resize', resize);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
