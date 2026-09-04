@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0c0c0f">
+  <meta name="description" content="A familiar silhouette. A little alchemy. An interactive fedora, sculpted in light and embers.">
+  <title>Ember — An icon, in motion.</title>
+  <style>
+    :root { color-scheme: dark; --paper: #eeeae6; --muted: #939096; --red: #ef493e; }
+    * { box-sizing: border-box; }
+    html { min-width: 280px; background: #0c0c0f; }
+    body { margin: 0; color: var(--paper); font-family: Arial, Helvetica, sans-serif; -webkit-font-smoothing: antialiased; }
+    button { font: inherit; }
+    button:focus-visible { outline: 2px solid #f38269; outline-offset: 7px; }
+    button:disabled { cursor: default; }
+    ::selection { background: #813029; color: #fff; }
+    .page {
+      min-height: 100vh; min-height: 100svh; display: flex; flex-direction: column; overflow: hidden;
+      background: radial-gradient(ellipse at 50% 40%, #191317 0%, #111014 33%, #0c0c0f 69%);
+      position: relative; isolation: isolate;
+    }
+    .page::before {
+      content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: .16;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.91' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='%23fff' filter='url(%23n)' opacity='.19' d='M0 0h180v180H0z'/%3E%3C/svg%3E");
+    }
+    header, footer { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-inline: clamp(24px, 4.7vw, 76px); }
+    header { min-height: 104px; }
+    .identity { display: flex; align-items: center; gap: 11px; }
+    .brand-mark { width: 22px; height: 26px; color: var(--red); }
+    .wordmark { font-size: 19px; letter-spacing: -.65px; font-weight: 600; }
+    .brand-note { margin-left: 17px; padding-left: 23px; border-left: 1px solid #353035; font-size: 9px; letter-spacing: 2px; color: var(--muted); }
+    .live { display: flex; align-items: center; gap: 9px; font-size: 9px; letter-spacing: 1.8px; color: #aaa3a5; }
+    .live-dot { width: 5px; height: 5px; border-radius: 50%; background: #e76c56; box-shadow: 0 0 9px #e15a3933; }
+    main { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 0 0 48px; }
+    .scene { position: relative; width: 100%; max-width: 1600px; height: clamp(330px, 52svh, 600px); }
+    .scene::before {
+      content: ""; position: absolute; width: min(76%, 800px); height: 85%; left: 50%; top: 48%; transform: translate(-50%, -50%);
+      background: radial-gradient(ellipse, #902f2413, #71332307 42%, transparent 69%); pointer-events: none;
+    }
+    canvas { display: block; width: 100%; height: 100%; position: absolute; inset: 0; visibility: hidden; }
+    .ready canvas { visibility: visible; }
+    .fallback { position: absolute; width: min(76%, 580px); height: 100%; left: 50%; transform: translateX(-50%); overflow: visible; }
+    .ready .fallback { display: none; }
+    .hat-target {
+      position: absolute; width: min(78%, 620px); height: 71%; left: 50%; top: 12%; transform: translateX(-50%);
+      appearance: none; background: transparent; border: 0; border-radius: 50%; cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+    }
+    .hat-target:focus-visible { outline: 1px solid #e886674d; outline-offset: 10px; }
+    .scene-index { position: absolute; left: 50%; top: 5px; transform: translateX(-50%); color: #938489; letter-spacing: 3px; font-size: 9px; white-space: nowrap; }
+    .caption { position: relative; text-align: center; padding-inline: 24px; margin-top: -2px; }
+    .eyebrow { color: #c27565; font-size: 9px; font-weight: 400; letter-spacing: 3px; margin: 0 0 17px; }
+    h1 { margin: 0; font: 400 clamp(29px, 3vw, 39px)/1.2 Georgia, 'Times New Roman', serif; letter-spacing: -1.1px; }
+    .description { margin: 14px 0 25px; color: var(--muted); font-size: 12px; line-height: 1.7; letter-spacing: .15px; }
+    .interact {
+      display: inline-flex; align-items: center; gap: 10px; min-height: 38px; padding: 10px 16px; color: #b7abad;
+      font-size: 10px; letter-spacing: .25px; border: 1px solid #a4796829; border-radius: 30px; background: #b96d5006;
+      cursor: pointer; transition: color .2s, border-color .2s, background .2s; touch-action: manipulation;
+    }
+    .interact:hover:not(:disabled) { color: #f1d5c8; border-color: #ae76615e; background: #b96d500e; }
+    .interact svg { width: 13px; height: 13px; color: #d8896f; }
+    footer { min-height: 80px; border-top: 1px solid #ffffff0a; font-size: 9px; letter-spacing: 1.3px; color: #827c82; }
+    .footer-label { display: flex; gap: 15px; align-items: center; }
+    .footer-label b { font-weight: 400; color: #b7a7a6; }
+    .footer-label span + span::before { content: "/"; color: #50474a; margin-right: 15px; }
+    .motion-toggle {
+      display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 44px; margin-right: -8px; padding: 8px;
+      border: none; background: none; color: #aaa0a3; font-size: 10px; letter-spacing: .3px; cursor: pointer;
+    }
+    .motion-toggle:hover:not(:disabled) { color: #eee4df; }
+    .motion-toggle svg { width: 11px; height: 11px; }
+    .motion-toggle .play-icon { display: none; }
+    .motion-toggle[aria-pressed="true"] .play-icon { display: block; }
+    .motion-toggle[aria-pressed="true"] .pause-icon { display: none; }
+    .motion-toggle:disabled { color: #827c82; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+    @media (min-height: 950px) { main { padding-bottom: 60px; } }
+    @media (max-width: 600px) {
+      header { min-height: 86px; } .brand-note { display: none; } .live { font-size: 8px; letter-spacing: 1.3px; }
+      .scene { height: clamp(300px, 46svh, 440px); } .scene-index { top: 2px; font-size: 8px; letter-spacing: 2.6px; }
+      main { padding: 10px 0 38px; } .eyebrow { font-size: 8px; margin-bottom: 16px; }
+      .description { max-width: 270px; margin: 14px auto 24px; font-size: 11px; }
+      footer { min-height: 72px; font-size: 8px; letter-spacing: 1px; } .footer-label { gap: 10px; }
+      .footer-label span + span::before { margin-right: 10px; }
+    }
+    @media (max-height: 620px) and (min-width: 650px) {
+      header { min-height: 70px; } .scene { height: 300px; } main { padding-bottom: 28px; }
+      .caption { margin-top: -16px; } .eyebrow { margin-bottom: 10px; } .description { margin: 9px 0 15px; } footer { min-height: 64px; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div class="identity" aria-label="Ember, object studies">
+        <svg class="brand-mark" viewBox="0 0 24 28" fill="none" aria-hidden="true"><path d="M12 1 9.1 9.5 1 13l8.1 3.5L12 27l2.9-10.5L23 13l-8.1-3.5L12 1Z" fill="currentColor"/><path d="m12 8-1.3 4L7 13l3.7 1L12 19l1.3-5 3.7-1-3.7-1L12 8Z" fill="#0c0c0f"/></svg>
+        <span class="wordmark">ember</span><span class="brand-note" aria-hidden="true">OBJECT STUDIES</span>
+      </div>
+      <div class="live" aria-hidden="true"><span class="live-dot"></span><span id="phase-label">A LITTLE ALCHEMY</span></div>
+    </header>
+    <main>
+      <div class="scene" id="scene">
+        <span class="scene-index" aria-hidden="true">VOLUME 01 &nbsp; — &nbsp; THE FEDORA</span>
+        <svg class="fallback" viewBox="0 0 600 430" role="img" aria-label="A sculpted red fedora with a black ribbon, floating in soft light">
+          <defs>
+            <linearGradient id="crown" x1="0" y1="0" x2="1" y2=".8"><stop stop-color="#ff5041"/><stop offset=".45" stop-color="#d82225"/><stop offset="1" stop-color="#790c1a"/></linearGradient>
+            <linearGradient id="brim" x1="0" y1="0" x2=".6" y2="1"><stop stop-color="#f84537"/><stop offset="1" stop-color="#850d1c"/></linearGradient>
+            <linearGradient id="ribbon" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#292024"/><stop offset="1" stop-color="#100e13"/></linearGradient>
+            <radialGradient id="shadow"><stop stop-color="#000" stop-opacity=".7"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>
+            <linearGradient id="dent" x1="0" y1="0" x2=".3" y2="1"><stop stop-color="#760e18"/><stop offset="1" stop-color="#e3312e"/></linearGradient>
+          </defs>
+          <ellipse cx="306" cy="349" rx="179" ry="25" fill="url(#shadow)"/>
+          <ellipse cx="304" cy="351" rx="231" ry="41" fill="none" stroke="#b99a8b" stroke-opacity=".1"/>
+          <g transform="rotate(-9 300 210)">
+            <path d="M68 235C97 210 138 201 185 196L411 190C459 195 511 214 535 239 552 264 448 291 310 294 165 295 46 272 68 235Z" fill="#700e19"/>
+            <path d="M67 230C103 207 149 196 190 192L410 187C463 194 513 208 535 235 545 254 447 282 310 285 163 285 47 261 67 230Z" fill="url(#brim)"/>
+            <path d="M179 228C168 210 185 124 205 107 218 93 245 92 270 103 290 113 307 104 329 94 353 83 385 97 395 118L423 219C403 254 217 264 179 228Z" fill="url(#crown)"/>
+            <path d="M207 110C225 93 249 100 269 112 291 128 326 103 349 102 366 101 380 109 384 119 354 142 234 151 207 110Z" fill="url(#dent)"/>
+            <path d="M182 199C228 226 365 225 416 195L424 222C403 251 223 258 179 230Z" fill="url(#ribbon)"/>
+            <path d="M183 199C229 225 367 226 416 195" fill="none" stroke="#64504d" stroke-opacity=".3" stroke-width="2"/>
+          </g>
+        </svg>
+        <canvas id="canvas" role="img" aria-label="A sculpted red fedora with a black ribbon, floating in soft light"></canvas>
+        <button class="hat-target" id="hat-target" type="button" aria-label="Dissolve the fedora into embers, then watch it reform" aria-describedby="interaction-help" disabled></button>
+      </div>
+      <div class="caption">
+        <p class="eyebrow">A FAMILIAR FORM. A DIFFERENT FEELING.</p>
+        <h1>An icon, in motion.</h1>
+        <p class="description">Let it fall apart. Watch it find its way back.</p>
+        <button class="interact" id="interact" type="button" disabled>
+          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1v3M8 12v3M1 8h3M12 8h3M3 3l2 2m6 6 2 2M3 13l2-2m6-6 2-2" stroke="currentColor" stroke-linecap="round"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/></svg>
+          <span id="interaction-help">A familiar form, held in light</span>
+        </button>
+      </div>
+      <p class="sr-only" id="announcement" role="status" aria-live="polite"></p>
+    </main>
+    <footer>
+      <div class="footer-label"><span><b>01</b> / ∞</span><span>FORM BECOMES FEELING</span></div>
+      <button class="motion-toggle" id="motion-toggle" type="button" aria-pressed="false" aria-label="Pause animation" disabled>
+        <svg class="pause-icon" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><rect x="2" y="1.5" width="2" height="9" rx=".5"/><rect x="8" y="1.5" width="2" height="9" rx=".5"/></svg>
+        <svg class="play-icon" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="m3 1 8 5-8 5Z"/></svg>
+        <span id="motion-label">Still life</span>
+      </button>
+    </footer>
+  </div>
+  <script>
+  (() => {
+    'use strict';
+
+    const canvas = document.getElementById('canvas');
+    const scene = document.getElementById('scene');
+    const target = document.getElementById('hat-target');
+    const interact = document.getElementById('interact');
+    const motionButton = document.getElementById('motion-toggle');
+    const motionLabel = document.getElementById('motion-label');
+    const hint = document.getElementById('interaction-help');
+    const phaseLabel = document.getElementById('phase-label');
+    const announcement = document.getElementById('announcement');
+    const preference = matchMedia('(prefers-reduced-motion: reduce)');
+    const TAU = Math.PI * 2;
+    const duration = 7.8;
+    let reduced = preference.matches, paused = false, renderer = null;
+    let frameId = 0, lastFrame = 0, time = 0, angle = -.48, speed = .18;
+    let elapsed = -1, scatter = 0, hasScattered = false, phase = '';
+
+    const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+    const smooth = v => { v = clamp(v); return v * v * (3 - 2 * v); };
+    const smoother = v => { v = clamp(v); return v * v * v * (v * (v * 6 - 15) + 10); };
+    const mix = (a, b, t) => a + (b - a) * t;
+    const subtract = (a, b) => a.map((x, i) => x - b[i]);
+    const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+    const dot = (a, b) => a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+    const normalize = a => { const n = Math.hypot(...a) || 1; return a.map(x => x / n); };
+    function multiply(a, b) {
+      const out = new Float32Array(16);
+      for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++)
+        for (let k = 0; k < 4; k++) out[c*4+r] += a[k*4+r] * b[c*4+k];
+      return out;
+    }
+    function viewProjection(width, height, spread) {
+      const fov = .59, f = 1 / Math.tan(fov / 2), near = .1, far = 60;
+      const desiredWidth = Math.min(width * .81, 610, height * 1.27);
+      const distance = 4.4 * height * f / (2 * desiredWidth) * (1 + spread * (width < 600 ? .45 : .18));
+      const eye = [0, distance * .37 + .15, distance * .929];
+      const z = normalize(subtract(eye, [0, .15, 0]));
+      const x = normalize(cross([0, 1, 0], z)), y = cross(z, x);
+      const view = [x[0],y[0],z[0],0, x[1],y[1],z[1],0, x[2],y[2],z[2],0, -dot(x,eye),-dot(y,eye),-dot(z,eye),1];
+      const projection = [f/(width/height),0,0,0, 0,f,0,0, 0,0,(far+near)/(near-far),-1, 0,0,2*far*near/(near-far),0];
+      return { matrix: multiply(projection, view), eye };
+    }
+    function modelMatrix(rotation, clock) {
+      const c = Math.cos(rotation), s = Math.sin(rotation);
+      const roll = -.115 + Math.sin(clock * .31) * .018, cr = Math.cos(roll), sr = Math.sin(roll);
+      return multiply([cr,sr,0,0, -sr,cr,0,0, 0,0,1,0, 0,Math.sin(clock*.65)*.045,0,1], [c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1]);
+    }
+
+    // Parametric felt surfaces: a pinched crown, a recessed center crease,
+    // a curved, solid brim, and a separate grosgrain ribbon.
+    function crown(u, v) {
+      const a = u * TAU;
+      const wrappedDistance = b => Math.atan2(Math.sin(a-b), Math.cos(a-b));
+      const pinch = .125 * (Math.exp(-Math.pow(wrappedDistance(.88)/.29, 2)) + Math.exp(-Math.pow(wrappedDistance(Math.PI-.88)/.29, 2))) * smooth((v-.3)/.7);
+      const rx = 1.035 - .16*v + .032*Math.sin(v*Math.PI) - .045*smooth((v-.88)/.12);
+      const rz = .805 - .14*v + .02*Math.sin(v*Math.PI) - .035*smooth((v-.88)/.12);
+      const vertical = v < .9 ? v : .9 + .1*Math.sin((v-.9)*Math.PI*5);
+      return [(rx-pinch)*Math.cos(a)+.025*v, -.41+1.37*vertical+smooth(v)*smooth(v)*(.07*Math.cos(2*a)-.035*Math.sin(a)), (rz-pinch*.65)*Math.sin(a)-.10*v];
+    }
+    function crownTop(u, v) {
+      const edge = crown(u, 1), r = 1-v;
+      const x = mix(.025, edge[0], r), z = mix(-.10, edge[2], r);
+      const dent = .26*Math.exp(-Math.pow((x-.025)/.32,2))*Math.pow(1-r*r,2);
+      return [x, mix(.96, edge[1], smooth(r))-dent, z];
+    }
+    function brim(u, v, bottom = false) {
+      const a = u * TAU, rx = mix(.65, 2.06, v), rz = mix(.48, 1.43, v);
+      const y = -.445 + .18*Math.pow(Math.abs(Math.cos(a)),4)*v*v - .115*Math.pow(Math.max(0,Math.sin(a)),4)*v*v + .028*Math.cos(a+.6)*v*v;
+      return [rx*Math.cos(a), y-(bottom ? .052 : 0), rz*Math.sin(a)];
+    }
+    function makeGeometry() {
+      const vertices = [], triangles = [];
+      let totalArea = 0;
+      function surface(fn, columns, rows, material, flip = false) {
+        const grid = [];
+        for (let j = 0; j <= rows; j++) for (let i = 0; i <= columns; i++) {
+          const u = i/columns, v = j/rows, e = .0001;
+          const p = fn(u,v), du = subtract(fn(u+e,v),fn(u-e,v));
+          const lo = Math.max(0,v-e), hi = Math.min(1,v+e);
+          const dv = subtract(fn(u,hi),fn(u,lo));
+          let n = normalize(cross(dv,du));
+          if (flip) n = n.map(x => -x);
+          grid.push({ p, n });
+        }
+        function triangle(a,b,c) {
+          if (flip) [b,c] = [c,b];
+          const area = Math.hypot(...cross(subtract(b.p,a.p),subtract(c.p,a.p)))/2;
+          if (area < 1e-10) return;
+          for (const vertex of [a,b,c]) vertices.push(...vertex.p,...vertex.n,material);
+          totalArea += area;
+          triangles.push({ a,b,c,material,end:totalArea });
+        }
+        for (let j=0;j<rows;j++) for (let i=0;i<columns;i++) {
+          const a = j*(columns+1)+i, b = a+1, c = a+columns+1, d = c+1;
+          triangle(grid[a],grid[c],grid[b]); triangle(grid[b],grid[c],grid[d]);
+        }
+      }
+      surface(crown, 144, 32, 0);
+      surface(crownTop, 144, 28, 0);
+      surface((u,v) => brim(u,v), 176, 18, 2, true);
+      surface((u,v) => brim(u,v,true), 176, 14, 3);
+      surface((u,v) => { const p = brim(u,1); p[1] -= v*.052; return p; }, 176, 2, 4, true);
+      surface((u,v) => { const p = crown(u,mix(.037,.279,v)); p[0]*=1.017; p[2]*=1.021; return p; }, 144, 10, 1);
+      // A slim, soft edge catches the light along the ribbon.
+      for (const edge of [.037,.279]) surface((u,v) => { const p=crown(u,edge+(v-.5)*.007); p[0]*=1.018; p[2]*=1.022; return p; },144,2,5);
+
+      let seed = 91731;
+      const random = () => { seed = (Math.imul(seed,1664525)+1013904223)>>>0; return seed/4294967296; };
+      const count = 12000, particles = new Float32Array(count*11);
+      for (let i=0;i<count;i++) {
+        const selected = random()*totalArea;
+        let lo=0, hi=triangles.length-1;
+        while (lo<hi) { const mid=(lo+hi)>>>1; if (triangles[mid].end<selected) lo=mid+1; else hi=mid; }
+        const t=triangles[lo], r=Math.sqrt(random()), s=random(), weights=[1-r,r*(1-s),r*s];
+        const p=[0,0,0], n=[0,0,0];
+        [t.a,t.b,t.c].forEach((v,k) => { for (let j=0;j<3;j++) { p[j]+=v.p[j]*weights[k]; n[j]+=v.n[j]*weights[k]; } });
+        particles.set([...p,...normalize(n),random(),random(),random(),random(),t.material],i*11);
+      }
+      return { vertices:new Float32Array(vertices), particles, count };
+    }
+
+    const geometry = makeGeometry();
+    function createRenderer() {
+      const gl = canvas.getContext('webgl', { alpha:true, antialias:true, premultipliedAlpha:true, powerPreference:'low-power' });
+      if (!gl) throw new Error('WebGL unavailable');
+      function program(vs,fs,names) {
+        function shader(type,source) {
+          const s=gl.createShader(type); gl.shaderSource(s,source); gl.compileShader(s);
+          if (!gl.getShaderParameter(s,gl.COMPILE_STATUS)) { const error=gl.getShaderInfoLog(s); gl.deleteShader(s); throw new Error(error); }
+          return s;
+        }
+        const v=shader(gl.VERTEX_SHADER,vs), f=shader(gl.FRAGMENT_SHADER,fs), p=gl.createProgram();
+        gl.attachShader(p,v); gl.attachShader(p,f); gl.linkProgram(p); gl.deleteShader(v); gl.deleteShader(f);
+        if (!gl.getProgramParameter(p,gl.LINK_STATUS)) { const error=gl.getProgramInfoLog(p); gl.deleteProgram(p); throw new Error(error); }
+        const loc={}; names.forEach(n=>loc[n]=gl.getUniformLocation(p,n));
+        return { p,loc };
+      }
+      const hash = `float hash(vec3 p) { p=fract(p*.3183099+vec3(.11,.27,.43)); p*=17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }`;
+      const mesh=program(`
+        attribute vec3 aPosition, aNormal; attribute float aMaterial;
+        uniform mat4 uModel,uVP;
+        varying vec3 vPosition,vNormal,vWorld; varying float vMaterial;
+        void main(){ vec4 world=uModel*vec4(aPosition,1.); vWorld=world.xyz; vPosition=aPosition;
+          vNormal=mat3(uModel)*aNormal; vMaterial=aMaterial; gl_Position=uVP*world; }
+      `,`
+        precision highp float;
+        varying vec3 vPosition,vNormal,vWorld; varying float vMaterial;
+        uniform vec3 uEye; uniform float uScatter;
+        ${hash}
+        void main(){
+          float grain=hash(floor(vPosition*57.));
+          if(uScatter>0. && grain<uScatter/ .31) discard;
+          vec3 n=normalize(vNormal), view=normalize(uEye-vWorld);
+          vec3 key=normalize(vec3(-3.5,5.,4.5)), fill=normalize(vec3(4.,1.2,1.8)), back=normalize(vec3(1.,3.,-4.));
+          float diffuse=max(dot(n,key),0.), fillLight=max(dot(n,fill),0.), rimLight=max(dot(n,back),0.);
+          vec3 base=vec3(.60,.023,.036);
+          bool band=vMaterial>.5 && vMaterial<1.5 || vMaterial>4.5;
+          if(band) base=vec3(.039,.031,.040);
+          if(vMaterial>1.5 && vMaterial<2.5) base=vec3(.59,.021,.034);
+          if(vMaterial>2.5 && vMaterial<3.5) base=vec3(.37,.013,.027);
+          if(vMaterial>3.5 && vMaterial<4.5) base=vec3(.65,.032,.044);
+          float occlusion=1.;
+          if(vMaterial>1.5 && vMaterial<3.5){
+            float radial=length(vec2(vPosition.x/1.04,vPosition.z/.83));
+            occlusion=mix(.38,1.,smoothstep(.94,1.42,radial));
+          }
+          if(vMaterial<.5) occlusion=mix(.76,1.,smoothstep(-.2,.7,vPosition.y));
+          vec3 light=vec3(.21,.17,.19)+diffuse*vec3(1.04,.90,.82)+fillLight*vec3(.23,.24,.32)+rimLight*vec3(.45,.20,.13);
+          float spec=pow(max(dot(n,normalize(key+view)),0.),band?38.:25.);
+          float fresnel=pow(1.-max(dot(n,view),0.),3.);
+          float fiber=hash(floor(vPosition*900.))-.5;
+          vec3 color=base*light*occlusion*(1.+fiber*.065);
+          color+=spec*(band?.085:.095)*vec3(1.,.76,.66)*occlusion;
+          color+=fresnel*rimLight*vec3(.16,.039,.024);
+          if(band) color*=.94+.06*sin(vPosition.y*390.);
+          if(vMaterial>4.5) color*=1.35;
+          gl_FragColor=vec4(pow(max(color,vec3(0.)),vec3(.91)),1.);
+        }
+      `,['uModel','uVP','uEye','uScatter']);
+
+      const particleFragment=`
+        precision mediump float;
+        varying vec3 vColor; varying float vAlpha;
+        void main(){ vec2 p=gl_PointCoord*2.-1.; float d=dot(p,p); if(d>1.) discard;
+          float core=exp(-d*27.); float glow=exp(-d*4.5)*.38+core*.62;
+          gl_FragColor=vec4(vColor+core*vec3(.12,.10,.07),glow*(1.-smoothstep(.65,1.,d))*vAlpha); }
+      `;
+      const particles=program(`
+        precision highp float;
+        attribute vec3 aPosition,aNormal; attribute vec4 aSeed; attribute float aMaterial;
+        uniform mat4 uModel,uVP; uniform float uScatter,uTime,uRatio,uPointMax;
+        varying vec3 vColor; varying float vAlpha;
+        ${hash}
+        void main(){
+          float threshold=hash(floor(aPosition*57.))*.31;
+          float travel=smoothstep(threshold,1.,uScatter);
+          float birth=smoothstep(threshold-.018,threshold+.045,uScatter);
+          vec3 home=(uModel*vec4(aPosition+aNormal*.004,1.)).xyz;
+          float phase=aSeed.x*6.2831853+uTime*(.42+aSeed.y*.22);
+          float radius=2.1+aSeed.z*1.7;
+          vec3 away=vec3(cos(phase)*radius, (aSeed.y-.5)*1.7+sin(phase*1.7+aSeed.w*8.)*.30+.3, sin(phase)*radius*.65);
+          vec3 flutter=vec3(sin(uTime*.9+aSeed.w*31.),cos(uTime*.7+aSeed.x*29.),sin(uTime*.6+aSeed.z*37.));
+          vec3 position=mix(home,away,travel)+flutter*sin(travel*3.1415926)*.18;
+          gl_Position=uVP*vec4(position,1.);
+          gl_PointSize=clamp((3.1+aSeed.w*3.2)*uRatio*6./max(gl_Position.w,1.),1.,uPointMax);
+          vColor=mix(vec3(.93,.105,.045),vec3(1.,.58,.27),pow(aSeed.w,3.));
+          vAlpha=birth*(.45+aSeed.z*.4)*smoothstep(0.,.018,uScatter);
+          if(aMaterial>.5 && aMaterial<1.5) vAlpha*=.68;
+        }
+      `,particleFragment,['uModel','uVP','uScatter','uTime','uRatio','uPointMax']);
+
+      const orbit=program(`
+        precision highp float;
+        attribute vec4 aSeed;
+        uniform mat4 uVP; uniform float uTime,uRatio,uAfter,uPointMax;
+        varying vec3 vColor; varying float vAlpha;
+        void main(){
+          float tail=aSeed.y, phase=aSeed.x*2.399963+uTime*(.21+aSeed.z*.08)-tail*.19;
+          float r=2.18+aSeed.z*.72;
+          vec3 p=vec3(cos(phase)*r,sin(phase+aSeed.w*4.)*.62-.12,sin(phase)*r*.73);
+          gl_Position=uVP*vec4(p,1.);
+          gl_PointSize=min((tail<.01?6.8:3.8)*uRatio*6./max(gl_Position.w,1.),uPointMax);
+          vColor=mix(vec3(.93,.19,.07),vec3(1.,.62,.31),aSeed.z);
+          vAlpha=pow(1.-tail,2.)*(tail<.01?.75:.18)*(1.-smoothstep(mix(6.,17.,uAfter),mix(7.,18.,uAfter),aSeed.x));
+        }
+      `,particleFragment,['uVP','uTime','uRatio','uAfter','uPointMax']);
+
+      const ground=program(`
+        attribute vec3 aPosition; uniform mat4 uVP; varying vec2 vGround;
+        void main(){vGround=aPosition.xz; gl_Position=uVP*vec4(aPosition,1.);}
+      `,`
+        precision mediump float; varying vec2 vGround; uniform float uScatter;
+        void main(){
+          float r=length(vGround/vec2(2.9,1.75));
+          float ring=(1.-smoothstep(.0015,.0055,abs(r-1.)))*.062;
+          float shadow=exp(-dot(vGround/vec2(1.55,.78),vGround/vec2(1.55,.78))*1.5)*.57*(1.-uScatter*.85);
+          gl_FragColor=vec4(mix(vec3(.002),vec3(.58,.37,.30),ring/(shadow+ring+.0001)),shadow+ring);
+        }
+      `,['uVP','uScatter']);
+
+      function buffer(data) { const b=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,b); gl.bufferData(gl.ARRAY_BUFFER,data,gl.STATIC_DRAW); return b; }
+      const meshBuffer=buffer(geometry.vertices), particleBuffer=buffer(geometry.particles);
+      const orbitData=[];
+      for(let i=0;i<18;i++) for(let j=0;j<24;j++) orbitData.push(i,j/23,(Math.sin(i*42.1)*437.1)%1*.5+.5,(Math.cos(i*9.31)+1)*.5);
+      const orbitBuffer=buffer(new Float32Array(orbitData));
+      const groundBuffer=buffer(new Float32Array([-8,-1.02,-6, -8,-1.02,6, 8,-1.02,-6, 8,-1.02,-6, -8,-1.02,6, 8,-1.02,6]));
+      const maxAttributes=gl.getParameter(gl.MAX_VERTEX_ATTRIBS);
+      const maxPointSize=gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)[1];
+      function bind(p,b,stride,attributes) {
+        gl.useProgram(p.p); gl.bindBuffer(gl.ARRAY_BUFFER,b);
+        for(let i=0;i<maxAttributes;i++) gl.disableVertexAttribArray(i);
+        for(const [name,size,offset] of attributes) {
+          const location=gl.getAttribLocation(p.p,name);
+          if(location<0) continue;
+          gl.enableVertexAttribArray(location); gl.vertexAttribPointer(location,size,gl.FLOAT,false,stride*4,offset*4);
+        }
+      }
+      let width=1,height=1,ratio=1;
+      return {
+        resize() {
+          width=Math.max(1,scene.clientWidth); height=Math.max(1,scene.clientHeight);
+          ratio=Math.min(devicePixelRatio||1,2,Math.sqrt(2600000/(width*height)));
+          canvas.width=Math.round(width*ratio); canvas.height=Math.round(height*ratio); gl.viewport(0,0,canvas.width,canvas.height);
+        },
+        draw(clock,rotation,spread,after) {
+          const {matrix:vp,eye}=viewProjection(width,height,spread), model=modelMatrix(rotation,clock);
+          gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+          gl.enable(gl.BLEND); gl.blendFuncSeparate(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA,gl.ONE,gl.ONE_MINUS_SRC_ALPHA); gl.disable(gl.DEPTH_TEST); gl.depthMask(false);
+          bind(ground,groundBuffer,3,[['aPosition',3,0]]);
+          gl.uniformMatrix4fv(ground.loc.uVP,false,vp); gl.uniform1f(ground.loc.uScatter,spread); gl.drawArrays(gl.TRIANGLES,0,6);
+          gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.depthMask(true); gl.disable(gl.BLEND);
+          if(spread<.31) {
+            bind(mesh,meshBuffer,7,[['aPosition',3,0],['aNormal',3,3],['aMaterial',1,6]]);
+            gl.uniformMatrix4fv(mesh.loc.uVP,false,vp); gl.uniformMatrix4fv(mesh.loc.uModel,false,model);
+            gl.uniform3fv(mesh.loc.uEye,eye); gl.uniform1f(mesh.loc.uScatter,spread); gl.drawArrays(gl.TRIANGLES,0,geometry.vertices.length/7);
+          }
+          gl.enable(gl.BLEND); gl.blendFuncSeparate(gl.SRC_ALPHA,gl.ONE,gl.ONE,gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
+          if(spread>0) {
+            bind(particles,particleBuffer,11,[['aPosition',3,0],['aNormal',3,3],['aSeed',4,6],['aMaterial',1,10]]);
+            gl.uniformMatrix4fv(particles.loc.uVP,false,vp); gl.uniformMatrix4fv(particles.loc.uModel,false,model);
+            gl.uniform1f(particles.loc.uScatter,spread); gl.uniform1f(particles.loc.uTime,clock);
+            gl.uniform1f(particles.loc.uRatio,ratio); gl.uniform1f(particles.loc.uPointMax,maxPointSize);
+            gl.drawArrays(gl.POINTS,0,geometry.count);
+          }
+          bind(orbit,orbitBuffer,4,[['aSeed',4,0]]);
+          gl.uniformMatrix4fv(orbit.loc.uVP,false,vp); gl.uniform1f(orbit.loc.uTime,clock);
+          gl.uniform1f(orbit.loc.uRatio,ratio); gl.uniform1f(orbit.loc.uAfter,after?1:0); gl.uniform1f(orbit.loc.uPointMax,maxPointSize);
+          gl.drawArrays(gl.POINTS,0,orbitData.length/4);
+          gl.depthMask(true);
+        }
+      };
+    }
+
+    function setPhase(next) {
+      if(phase===next) return;
+      phase=next; scene.dataset.phase=next;
+      const labels={idle:'A LITTLE ALCHEMY',dissolving:'BECOMING EMBERS',drifting:'A MOMENT OF FREEDOM',reforming:'FINDING ITS WAY HOME',paused:'A MOMENT, HELD',reduced:'STILL HAS ITS BEAUTY',unavailable:'A STUDY IN STILLNESS'};
+      phaseLabel.textContent=labels[next];
+    }
+    function updateControls() {
+      const still=reduced||paused||!renderer;
+      target.disabled=still; interact.disabled=still;
+      motionButton.disabled=reduced||!renderer;
+      motionButton.setAttribute('aria-pressed',String(reduced||paused));
+      motionButton.setAttribute('aria-label',reduced?'Reduced motion enabled':paused?'Resume animation':'Pause animation');
+      motionLabel.textContent=!renderer?'Still life':reduced?'Reduced motion':paused?'Resume motion':'Pause motion';
+      hint.textContent=!renderer?'A familiar form, held in light':reduced?'A still moment. Reduced motion is on.':paused?'A moment, held still.':elapsed>=0?'Every ember finds its way home':'Hover or tap the hat to dissolve';
+      if(!renderer) setPhase('unavailable'); else if(reduced) setPhase('reduced'); else if(paused) setPhase('paused');
+    }
+    function requestFrame() { if(!frameId&&!document.hidden&&renderer) frameId=requestAnimationFrame(render); }
+    function stopFrames() { cancelAnimationFrame(frameId); frameId=0; lastFrame=0; }
+    function render(now) {
+      frameId=0;
+      if(!renderer||document.hidden) return;
+      const dt=lastFrame?Math.min((now-lastFrame)/1000,.05):0; lastFrame=now;
+      if(!paused&&!reduced) {
+        time+=dt;
+        const desiredSpeed=elapsed>=0?.022:.18;
+        speed+=(desiredSpeed-speed)*(1-Math.exp(-dt*3)); angle+=speed*dt;
+        if(elapsed>=0) {
+          elapsed+=dt;
+          if(elapsed<2.2) { scatter=smoother(elapsed/2.2); setPhase('dissolving'); }
+          else if(elapsed<4.5) { scatter=1; setPhase('drifting'); }
+          else { scatter=1-smoother((elapsed-4.5)/(duration-4.5)); setPhase('reforming'); }
+          if(elapsed>=duration) {
+            elapsed=-1; scatter=0; hasScattered=true; setPhase('idle'); updateControls();
+            announcement.textContent='The fedora has reformed. A few embers continue to orbit. You can dissolve it again.';
+          }
+        } else setPhase('idle');
+      }
+      renderer.draw(time,angle,scatter,hasScattered);
+      if(!paused&&!reduced) requestFrame();
+    }
+    function dissolve() {
+      if(!renderer||paused||reduced||elapsed>=0) return;
+      elapsed=0; setPhase('dissolving'); updateControls();
+      announcement.textContent='The fedora dissolves into drifting embers, then gently reforms.';
+      requestFrame();
+    }
+    target.addEventListener('pointerenter',event=>{ if(event.pointerType==='mouse') dissolve(); });
+    target.addEventListener('click',dissolve);
+    interact.addEventListener('click',dissolve);
+    motionButton.addEventListener('click',()=>{
+      if(reduced||!renderer) return;
+      paused=!paused; stopFrames(); updateControls(); requestFrame();
+    });
+    preference.addEventListener('change',event=>{
+      reduced=event.matches; stopFrames();
+      if(reduced) { elapsed=-1; scatter=0; angle=-.48; time=0; speed=.18; }
+      updateControls(); requestFrame();
+    });
+    document.addEventListener('visibilitychange',()=>{ stopFrames(); if(!document.hidden) requestFrame(); });
+    function resize() { if(renderer) { renderer.resize(); requestFrame(); } }
+    window.addEventListener('resize',resize,{passive:true});
+    if('ResizeObserver' in window) new ResizeObserver(resize).observe(scene);
+    canvas.addEventListener('webglcontextlost',event=>{
+      event.preventDefault(); stopFrames(); renderer=null; scene.classList.remove('ready'); updateControls();
+    });
+    function initialize() {
+      try {
+        renderer=createRenderer(); renderer.resize(); renderer.draw(time,angle,scatter,hasScattered);
+        scene.classList.add('ready'); updateControls(); requestFrame();
+      } catch(error) {
+        renderer=null; scene.classList.remove('ready'); updateControls();
+      }
+    }
+    canvas.addEventListener('webglcontextrestored',initialize);
+    initialize();
+  })();
+  </script>
+</body>
+</html>
