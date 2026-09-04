@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101012">
+  <title>Red, reimagined — A study in motion</title>
+  <style>
+    :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #101012; color: #ede9e5; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 280px; }
+    button { font: inherit; color: inherit; -webkit-tap-highlight-color: transparent; }
+    button:focus-visible { outline: 2px solid #ec725d; outline-offset: 7px; }
+    .page { min-height: 100svh; display: flex; flex-direction: column; overflow: hidden; position: relative; isolation: isolate; }
+    .page::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: radial-gradient(ellipse at 50% 40%, #28222655, transparent 57%), radial-gradient(ellipse at 50% 108%, #301b1c35, transparent 55%); }
+    .topbar, .footer { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+    .topbar { padding: 32px 42px; }
+    .wordmark { display: flex; align-items: center; gap: 11px; font-size: 12px; font-weight: 650; letter-spacing: .025em; }
+    .mark { width: 28px; height: 23px; color: #ed403a; }
+    .edition, .eyebrow, .footer { font-size: 10px; letter-spacing: .17em; text-transform: uppercase; }
+    .edition { color: #78767b; display: flex; align-items: center; gap: 12px; }
+    .edition::before { content: ""; width: 4px; height: 4px; border-radius: 50%; background: #bc6154; box-shadow: 0 0 9px #c6574130; }
+    main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 30px 0 52px; }
+    .eyebrow { color: #8d8587; margin: 0 0 5px; font-size: 9px; letter-spacing: .24em; }
+    .scene { position: relative; width: min(900px, 100%); height: clamp(300px, 43vw, 445px); }
+    .ground { position: absolute; width: 43%; height: 7%; left: 28.5%; top: 78%; border-radius: 50%; background: #000; filter: blur(18px); opacity: .6; transform: scale(1); pointer-events: none; }
+    .halo { position: absolute; width: 58%; height: 26%; left: 21%; top: 66%; border-radius: 50%; background: radial-gradient(ellipse, #b92d2210, transparent 70%); filter: blur(20px); pointer-events: none; }
+    canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+    .interact { position: absolute; inset: 10% 12% 7%; border: 0; background: transparent; border-radius: 50%; cursor: pointer; touch-action: manipulation; }
+    .interact:focus-visible { outline-offset: -10px; outline-color: #a1534560; }
+    .fallback { position: absolute; width: 65%; height: 70%; left: 17.5%; top: 12%; overflow: visible; }
+    .caption { text-align: center; position: relative; padding: 0 24px; margin-top: -9px; }
+    h1 { font-family: Georgia, "Times New Roman", serif; font-size: clamp(27px, 4.5vw, 36px); font-weight: 400; line-height: 1.25; letter-spacing: -.035em; margin: 0 0 13px; }
+    .description { color: #89848a; font-size: 12px; line-height: 1.7; margin: 0; letter-spacing: .015em; }
+    .hint { display: inline-flex; align-items: center; justify-content: center; gap: 9px; color: #a69b9c; min-height: 44px; margin: 20px 0 0; font-size: 10px; letter-spacing: .025em; }
+    .hint svg { width: 13px; height: 13px; color: #ba7165; }
+    .hint-text { min-width: 160px; text-align: left; }
+    .footer { padding: 23px 42px 28px; color: #625e65; font-size: 9px; letter-spacing: .11em; }
+    .footer-left { display: flex; align-items: center; gap: 13px; }
+    .footer-line { height: 1px; width: 24px; background: #615153; }
+    .motion { display: flex; gap: 8px; align-items: center; background: transparent; border: 1px solid #ffffff0d; border-radius: 30px; padding: 10px 13px; cursor: pointer; color: #9d959c; font-size: 10px; letter-spacing: .02em; text-transform: none; min-height: 36px; }
+    .motion:hover { background: #ffffff05; border-color: #ffffff18; }
+    .motion-icon { width: 10px; height: 10px; display: block; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    [hidden] { display: none !important; }
+    @media (max-width: 600px) {
+      .topbar { padding: 25px 23px; }
+      .edition { font-size: 8px; letter-spacing: .11em; }
+      main { padding: 32px 0 45px; }
+      .scene { height: clamp(290px, 85vw, 400px); }
+      .caption { margin-top: 0; }
+      .footer { padding: 20px 23px; font-size: 8px; }
+      .footer-line { width: 15px; }
+      .footer-left { gap: 8px; }
+      .ground { width: 55%; left: 22.5%; top: 71%; }
+    }
+    @media (max-height: 650px) and (min-width: 601px) {
+      .topbar { padding-block: 20px; }
+      main { padding: 8px 0 18px; }
+      .scene { height: 280px; }
+      .hint { margin-top: 10px; }
+      .footer { padding-block: 16px; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="topbar">
+      <div class="wordmark">
+        <svg class="mark" viewBox="0 0 40 30" fill="currentColor" aria-hidden="true"><path d="M11 16 14 4Q15 2 19 4L23 5Q28 1 30 5L33 18Q23 23 11 16ZM3 18Q7 15 10 16Q22 24 34 18Q39 20 37 23Q20 32 3 23Q0 21 3 18Z"/></svg>
+        <span>Red, reimagined.</span>
+      </div>
+      <div class="edition">A study in motion</div>
+    </header>
+    <main>
+      <p class="eyebrow">One icon. A thousand possibilities.</p>
+      <div class="scene" id="scene">
+        <div class="halo" aria-hidden="true"></div>
+        <div class="ground" id="ground" aria-hidden="true"></div>
+        <svg class="fallback" id="fallback" viewBox="0 0 500 340" role="img" aria-label="A softly lit red fedora with a black ribbon">
+          <defs>
+            <linearGradient id="brim" x1="0" y1="0" x2=".5" y2="1"><stop stop-color="#f33d35"/><stop offset="1" stop-color="#960f16"/></linearGradient>
+            <linearGradient id="crown" x1="0" y1="0" x2="1" y2=".4"><stop stop-color="#fa4e43"/><stop offset=".45" stop-color="#d52025"/><stop offset="1" stop-color="#850e17"/></linearGradient>
+            <linearGradient id="ribbon" x2="0" y2="1"><stop stop-color="#292227"/><stop offset="1" stop-color="#100d11"/></linearGradient>
+          </defs>
+          <g transform="rotate(-8 250 170)">
+            <path d="M60 224Q28 243 63 267C151 308 356 302 441 252Q474 226 433 211Q383 187 298 184Q140 173 60 224Z" fill="url(#brim)"/>
+            <path d="M131 219 155 87Q163 52 203 67L252 82Q310 49 343 72Q354 80 360 107L383 219Q270 272 131 219Z" fill="url(#crown)"/>
+            <path d="M157 89Q169 68 204 83L252 100Q308 64 337 80Q302 82 268 121Q249 139 216 117Z" fill="#8b111a" opacity=".68"/>
+            <path d="M139 174Q244 222 374 177L383 219Q272 271 131 219Z" fill="url(#ribbon)"/>
+            <path d="M67 267Q234 325 441 252" fill="none" stroke="#ff5945" stroke-opacity=".25" stroke-width="2"/>
+          </g>
+        </svg>
+        <canvas id="canvas" aria-hidden="true"></canvas>
+        <button class="interact" id="interact" aria-label="Dissolve the red fedora into embers" aria-describedby="interaction-help" hidden></button>
+      </div>
+      <div class="caption">
+        <h1>An icon, in its element.</h1>
+        <p class="description">A little curiosity. A little transformation.</p>
+        <p class="hint" id="interaction-help">
+          <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m10 1 1.8 6.8L18 10l-6.2 2.2L10 19l-1.8-6.8L2 10l6.2-2.2L10 1Z" stroke="currentColor" stroke-width="1"/></svg>
+          <span class="hint-text" id="hint">A familiar shape, in a new light.</span>
+        </p>
+        <span class="sr-only" id="status" role="status" aria-live="polite"></span>
+      </div>
+    </main>
+    <footer class="footer">
+      <div class="footer-left"><span class="footer-line"></span><span>Form / Light / Possibility</span></div>
+      <button class="motion" id="motion" aria-pressed="false" hidden>
+        <svg class="motion-icon" id="pause-icon" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M2 1h2v10H2zm6 0h2v10H8z"/></svg>
+        <span id="motion-text">Pause motion</span>
+      </button>
+    </footer>
+  </div>
+  <script>
+  (() => {
+    'use strict';
+    const canvas = document.getElementById('canvas');
+    const scene = document.getElementById('scene');
+    const fallback = document.getElementById('fallback');
+    const interact = document.getElementById('interact');
+    const motion = document.getElementById('motion');
+    const motionText = document.getElementById('motion-text');
+    const pauseIcon = document.getElementById('pause-icon');
+    const hint = document.getElementById('hint');
+    const status = document.getElementById('status');
+    const ground = document.getElementById('ground');
+    const preference = matchMedia('(prefers-reduced-motion: reduce)');
+    const gl = canvas.getContext('webgl', { alpha: true, antialias: true, premultipliedAlpha: true, powerPreference: 'low-power' });
+    if (!gl) return;
+    const maxAttributes = gl.getParameter(gl.MAX_VERTEX_ATTRIBS);
+
+    let raf = 0, ready = false, lost = false;
+    let reduced = preference.matches, paused = false, staticCloud = false;
+    let lastTime = 0, clock = 0, rotation = -.42, speed = .24;
+    let cycle = -1, spread = 0, hasScattered = false;
+    let pixelRatio = 1, view, projection;
+    const TAU = Math.PI * 2;
+    const clamp = x => Math.max(0, Math.min(1, x));
+    const smooth = x => { x = clamp(x); return x * x * (3 - 2 * x); };
+    const normalize = a => { const l = Math.hypot(...a) || 1; return a.map(v => v / l); };
+    const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+    const subtract = (a, b) => a.map((v, i) => v - b[i]);
+    const dot = (a, b) => a.reduce((v, x, i) => v + x * b[i], 0);
+    let randomState = 17031;
+    const random = () => { randomState = (Math.imul(randomState, 1664525) + 1013904223) >>> 0; return randomState / 4294967296; };
+
+    // Both the solid surface and its embers come from this single sculpted mesh.
+    const vertices = [], faces = [];
+    let surfaceArea = 0;
+    function surface(fn, rows, columns, color, reverse = false) {
+      const grid = [];
+      for (let i = 0; i <= rows; i++) {
+        const row = [];
+        for (let j = 0; j <= columns; j++) {
+          const u = i / rows, a = j / columns * TAU, e = .0002;
+          const p = fn(u, a);
+          const du = subtract(fn(Math.min(1, u + e), a), fn(Math.max(0, u - e), a));
+          const da = subtract(fn(u, a + e), fn(u, a - e));
+          let n = normalize(cross(du, da));
+          if (reverse) n = n.map(v => -v);
+          row.push({ p, n, c: color });
+        }
+        grid.push(row);
+      }
+      function triangle(a, b, c) {
+        const area = Math.hypot(...cross(subtract(b.p, a.p), subtract(c.p, a.p))) * .5;
+        if (area < .0000001) return;
+        for (const v of [a, b, c]) vertices.push(...v.p, ...v.n, ...v.c);
+        surfaceArea += area;
+        faces.push({ a, b, c, area: surfaceArea });
+      }
+      for (let i = 0; i < rows; i++) for (let j = 0; j < columns; j++) {
+        triangle(grid[i][j], grid[i+1][j], grid[i][j+1]);
+        triangle(grid[i][j+1], grid[i+1][j], grid[i+1][j+1]);
+      }
+    }
+    const red = [.72, .024, .037], edgeRed = [.49, .012, .021], black = [.018, .014, .02];
+    function crown(u, a, offset = 0) {
+      const front = Math.max(0, Math.sin(a));
+      const pinch = .115 * Math.exp(-Math.pow((u - .8) / .26, 2)) * Math.pow(front, 4);
+      const r = 1.045 - .18 * u + .047 * Math.sin(Math.PI * u) - pinch + offset;
+      const top = 1.18 + .045 * Math.cos(a) - .18 * Math.pow(Math.abs(Math.sin(a)), 6);
+      return [Math.cos(a) * r, -.08 + u * top, Math.sin(a) * r * .79];
+    }
+    function brim(u, a, lower = false) {
+      const inner = .81, outer = 1.91 + .06 * Math.sin(a * 3 + .5);
+      const r = inner + (outer - inner) * u;
+      const y = -.085 - .115 * Math.sin(u * Math.PI * .85)
+        + .16 * Math.pow(u, 3) * Math.pow(Math.cos(a), 6)
+        - .09 * Math.sin(a) * u + .028 * Math.cos(2 * a) * u;
+      return [r * Math.cos(a), y - (lower ? .046 : 0), r * Math.sin(a) * .735];
+    }
+    surface((u, a) => crown(u, a), 30, 128, red);
+    surface((u, a) => {
+      const rim = crown(1, a), r = 1 - u;
+      // The low longitudinal center and raised shoulders form a fedora's crease.
+      const depression = .24 * Math.pow(Math.sin(Math.PI * u / 2), .8);
+      const crease = .085 * Math.exp(-Math.pow(r * Math.cos(a) / .24, 2)) * Math.sin(Math.PI * u);
+      return [rim[0] * r, rim[1] * (1-u) + 1.10 * u - depression - crease, rim[2] * r];
+    }, 24, 128, red);
+    surface((u, a) => brim(u, a), 20, 144, red, true);
+    surface((u, a) => brim(u, a, true), 8, 144, edgeRed);
+    surface((u, a) => { const p = brim(1, a); p[1] -= u * .046; return p; }, 1, 144, edgeRed, true);
+    surface((u, a) => crown(.105 + .24 * u, a, .012), 6, 128, black);
+    // Narrow rolled seams catch a soft highlight at either edge of the ribbon.
+    for (const height of [.105, .343]) {
+      surface((u, a) => crown(height + u * .007, a, .016), 1, 128, [.034, .026, .032]);
+    }
+
+    const common = `
+      precision highp float;
+      uniform mat4 uModel, uView, uProjection;
+      uniform float uSpread, uTime, uDpr;
+    `;
+    const meshVertex = common + `
+      attribute vec3 aPosition, aNormal, aColor;
+      varying vec3 vNormal, vColor, vPosition, vWorld;
+      void main() {
+        vec4 world = uModel * vec4(aPosition, 1.0);
+        vNormal = mat3(uModel) * aNormal;
+        vColor = aColor; vPosition = aPosition; vWorld = world.xyz;
+        gl_Position = uProjection * uView * world;
+      }
+    `;
+    const meshFragment = `
+      precision mediump float;
+      uniform float uSpread;
+      uniform vec3 uEye;
+      varying vec3 vNormal, vColor, vPosition, vWorld;
+      float hash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+      void main() {
+        float erosion = smoothstep(0.015, 0.38, uSpread);
+        float grain = hash(floor(vPosition * 65.0));
+        if (erosion > 0.0 && grain < erosion) discard;
+        vec3 n = normalize(vNormal);
+        vec3 eye = normalize(uEye - vWorld);
+        vec3 key = normalize(vec3(-3.0, 5.0, 4.0));
+        vec3 fill = normalize(vec3(4.0, 1.0, 2.0));
+        vec3 rim = normalize(vec3(0.0, 2.0, -4.0));
+        float diffuse = max(dot(n, key), 0.0);
+        float bounce = max(dot(n, fill), 0.0);
+        float specular = pow(max(dot(n, normalize(key + eye)), 0.0), 24.0);
+        float rimLight = pow(max(dot(n, rim), 0.0), 3.0);
+        float fresnel = pow(1.0 - max(dot(n, eye), 0.0), 3.0);
+        vec3 color = vColor * (0.24 + 0.95 * diffuse + 0.22 * bounce);
+        color += vec3(1.0, 0.77, 0.65) * specular * 0.065;
+        color += vec3(0.55, 0.16, 0.12) * rimLight * 0.17;
+        color += vec3(0.16, 0.13, 0.15) * fresnel * 0.17;
+        color *= 0.985 + 0.03 * hash(floor(vPosition * 380.0));
+        color = pow(color, vec3(0.78));
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `;
+    const particleVertex = common + `
+      attribute vec3 aPosition, aNormal, aColor, aScatter;
+      attribute float aSeed;
+      varying vec3 vColor;
+      varying float vAlpha;
+      void main() {
+        float s = uSpread;
+        vec3 p = aPosition + aScatter * s;
+        float angle = s * (uTime * 0.58 + aSeed * 1.8);
+        float c = cos(angle), sn = sin(angle);
+        p.xz = mat2(c, -sn, sn, c) * p.xz;
+        p.y += s * (sin(uTime * 1.4 + aSeed * 30.0) * 0.26 + 0.2);
+        p.x += s * sin(uTime * 0.9 + aSeed * 19.0) * 0.18;
+        vec4 world = uModel * vec4(p, 1.0);
+        vec4 camera = uView * world;
+        gl_Position = uProjection * camera;
+        gl_PointSize = clamp(uDpr * (1.4 + aSeed * 2.2) * (7.0 / -camera.z), 1.0, 9.0);
+        float light = 0.6 + 0.4 * max(dot(normalize(mat3(uModel) * aNormal), normalize(vec3(-3.0, 5.0, 4.0))), 0.0);
+        vec3 ember = mix(vec3(0.87, 0.12, 0.055), vec3(1.0, 0.62, 0.28), pow(aSeed, 5.0));
+        vColor = mix(aColor, ember, 0.76) * light;
+        vAlpha = smoothstep(0.0, 0.17, s) * (0.48 + 0.3 * sin(aSeed * 70.0 + uTime * 2.5));
+      }
+    `;
+    const pointFragment = `
+      precision mediump float;
+      varying vec3 vColor;
+      varying float vAlpha;
+      void main() {
+        float r = length(gl_PointCoord - 0.5) * 2.0;
+        if (r > 1.0) discard;
+        float glow = exp(-r * r * 4.0) * (1.0 - smoothstep(0.65, 1.0, r));
+        gl_FragColor = vec4(vColor, glow * vAlpha);
+      }
+    `;
+    const orbitVertex = common + `
+      attribute vec3 aOrbit;
+      uniform float uOrbit;
+      varying vec3 vColor;
+      varying float vAlpha;
+      void main() {
+        float id = aOrbit.x, tail = aOrbit.y, seed = aOrbit.z;
+        float t = uTime * (0.30 + seed * 0.15) + id * 2.39996 - tail * 0.025;
+        float radius = 1.65 + seed * 0.58;
+        vec3 p = vec3(cos(t) * radius, 0.35 + sin(t * 1.7 + id) * 0.65, sin(t) * radius * 0.77);
+        vec4 camera = uView * uModel * vec4(p, 1.0);
+        gl_Position = uProjection * camera;
+        gl_PointSize = uDpr * (tail < 0.5 ? 3.5 : 2.2) * (7.0 / -camera.z);
+        vColor = vec3(1.0, 0.44 + seed * 0.15, 0.19);
+        vAlpha = uOrbit * (tail < 0.5 ? 0.7 : 0.14 * exp(-tail * 0.16));
+      }
+    `;
+    function program(vertex, fragment) {
+      const shaders = [];
+      const p = gl.createProgram();
+      for (const [type, source] of [[gl.VERTEX_SHADER, vertex], [gl.FRAGMENT_SHADER, fragment]]) {
+        const s = gl.createShader(type);
+        gl.shaderSource(s, source); gl.compileShader(s);
+        if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+        gl.attachShader(p, s); shaders.push(s);
+      }
+      gl.linkProgram(p);
+      if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+      shaders.forEach(s => gl.deleteShader(s));
+      const uniforms = {};
+      for (const name of ['uModel', 'uView', 'uProjection', 'uSpread', 'uTime', 'uDpr', 'uEye', 'uOrbit']) uniforms[name] = gl.getUniformLocation(p, name);
+      const locations = {};
+      for (const name of ['aPosition', 'aNormal', 'aColor', 'aScatter', 'aSeed', 'aOrbit']) locations[name] = gl.getAttribLocation(p, name);
+      return { p, uniforms, locations };
+    }
+    function buffer(data) {
+      const b = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, b);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+      return b;
+    }
+    let solidProgram, emberProgram, orbitProgram, solidBuffer, emberBuffer, orbitBuffer;
+    const particleCount = 8500, orbitCount = 12, tailCount = 18;
+    try {
+      solidProgram = program(meshVertex, meshFragment);
+      emberProgram = program(particleVertex, pointFragment);
+      orbitProgram = program(orbitVertex, pointFragment);
+      solidBuffer = buffer(vertices);
+      const particles = [];
+      for (let i = 0; i < particleCount; i++) {
+        const target = random() * surfaceArea;
+        let low = 0, high = faces.length - 1;
+        while (low < high) { const mid = (low + high) >>> 1; if (faces[mid].area < target) low = mid + 1; else high = mid; }
+        const { a, b, c } = faces[low];
+        const root = Math.sqrt(random()), weights = [1 - root, root * (1 - random()), 0];
+        weights[2] = 1 - weights[0] - weights[1];
+        const interpolate = key => [0, 1, 2].map(k => a[key][k]*weights[0] + b[key][k]*weights[1] + c[key][k]*weights[2]);
+        const position = interpolate('p');
+        const direction = normalize([position[0] + (random()-.5)*1.1, (random()-.3)*1.6, position[2] + (random()-.5)*1.1]);
+        const distance = .35 + Math.pow(random(), .7) * 1.45;
+        particles.push(...position, ...interpolate('n'), ...a.c, ...direction.map(v => v * distance), random());
+      }
+      emberBuffer = buffer(particles);
+      const orbits = [];
+      for (let i = 0; i < orbitCount; i++) { const seed = random(); for (let j = 0; j < tailCount; j++) orbits.push(i, j, seed); }
+      orbitBuffer = buffer(orbits);
+    } catch (error) { console.warn('The static illustration is being shown.', error); return; }
+
+    function perspective(fov, aspect, near, far) {
+      const f = 1 / Math.tan(fov / 2), nf = 1 / (near - far);
+      return new Float32Array([f/aspect,0,0,0, 0,f,0,0, 0,0,(far+near)*nf,-1, 0,0,2*far*near*nf,0]);
+    }
+    function lookAt(eye, center) {
+      const z = normalize(subtract(eye, center)), x = normalize(cross([0,1,0], z)), y = cross(z, x);
+      return new Float32Array([x[0],y[0],z[0],0, x[1],y[1],z[1],0, x[2],y[2],z[2],0, -dot(x,eye),-dot(y,eye),-dot(z,eye),1]);
+    }
+    function modelMatrix(angle, bob) {
+      const c = Math.cos(angle), s = Math.sin(angle), tilt = -.115, ct = Math.cos(tilt), st = Math.sin(tilt);
+      return new Float32Array([ct*c,st*c,-s,0, -st,ct,0,0, ct*s,st*s,c,0, 0,bob,0,1]);
+    }
+    let eye = [0, 3, 8];
+    function resize() {
+      const width = scene.clientWidth, height = scene.clientHeight;
+      pixelRatio = Math.min(devicePixelRatio || 1, 2);
+      canvas.width = Math.round(width * pixelRatio); canvas.height = Math.round(height * pixelRatio);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      const aspect = width / height, distance = Math.max(7.0, 6.0 / aspect);
+      eye = [0, distance * .40, distance];
+      view = lookAt(eye, [0, .26, 0]);
+      projection = perspective(.63, aspect, .1, 50);
+      if (ready && !lost) render();
+    }
+    function attributes(p, b, stride, fields) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, b);
+      for (let i = 0; i < maxAttributes; i++) gl.disableVertexAttribArray(i);
+      let offset = 0;
+      for (const [name, size] of fields) {
+        const location = p.locations[name];
+        if (location >= 0) { gl.enableVertexAttribArray(location); gl.vertexAttribPointer(location, size, gl.FLOAT, false, stride * 4, offset * 4); }
+        offset += size;
+      }
+    }
+    const surfaceFields = [['aPosition',3], ['aNormal',3], ['aColor',3]];
+    function use(p, model) {
+      gl.useProgram(p.p);
+      const u = p.uniforms;
+      gl.uniformMatrix4fv(u.uModel, false, model); gl.uniformMatrix4fv(u.uView, false, view); gl.uniformMatrix4fv(u.uProjection, false, projection);
+      const time = p === emberProgram ? (cycle >= 0 ? cycle : 2.2) : clock;
+      gl.uniform1f(u.uSpread, spread); gl.uniform1f(u.uTime, time); gl.uniform1f(u.uDpr, pixelRatio);
+    }
+    function render() {
+      if (lost) return;
+      gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      const aspect = canvas.width / canvas.height;
+      const breathingRoom = .10 + .24 * clamp((1.8 - aspect) / .7);
+      projection = perspective(.63 + spread * breathingRoom, aspect, .1, 50);
+      const bob = reduced || paused ? 0 : Math.sin(clock * .75) * .035;
+      const model = modelMatrix(rotation, bob);
+      gl.enable(gl.DEPTH_TEST); gl.depthMask(true); gl.disable(gl.BLEND);
+      if (spread < .38) {
+        use(solidProgram, model); gl.uniform3fv(solidProgram.uniforms.uEye, eye);
+        attributes(solidProgram, solidBuffer, 9, surfaceFields);
+        gl.drawArrays(gl.TRIANGLES, 0, vertices.length / 9);
+      }
+      gl.enable(gl.BLEND); gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE, gl.ONE, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
+      if (spread > 0) {
+        use(emberProgram, model);
+        attributes(emberProgram, emberBuffer, 13, [...surfaceFields, ['aScatter',3], ['aSeed',1]]);
+        gl.drawArrays(gl.POINTS, 0, particleCount);
+      }
+      if (hasScattered && !reduced) {
+        use(orbitProgram, model); gl.uniform1f(orbitProgram.uniforms.uOrbit, (1 - smooth(spread)) * .85);
+        attributes(orbitProgram, orbitBuffer, 3, [['aOrbit',3]]);
+        gl.drawArrays(gl.POINTS, 0, orbitCount * tailCount);
+      }
+      gl.depthMask(true);
+      ground.style.opacity = String(.58 - spread * .43);
+      ground.style.transform = `scale(${1 + spread * .4})`;
+    }
+    function syncUI() {
+      const still = reduced || paused;
+      motion.setAttribute('aria-pressed', String(still));
+      motionText.textContent = reduced ? 'Reduced motion' : paused ? 'Resume motion' : 'Pause motion';
+      motion.setAttribute('aria-label', reduced ? 'Reduced motion enabled in your system settings' : paused ? 'Resume animation' : 'Pause animation');
+      motion.disabled = reduced;
+      pauseIcon.innerHTML = still ? '<path d="m3 1 8 5-8 5z"/>' : '<path d="M2 1h2v10H2zm6 0h2v10H8z"/>';
+      if (still) {
+        hint.textContent = staticCloud ? 'Tap to restore the shape' : 'Tap to explore the particles';
+        interact.setAttribute('aria-label', staticCloud ? 'Show the solid red fedora' : 'Show a still view of the ember particles');
+      } else {
+        hint.textContent = cycle >= 0 ? 'Every ember finds its way home' : 'Hover or tap to transform';
+        interact.setAttribute('aria-label', 'Dissolve the red fedora into embers');
+      }
+    }
+    function frame(now) {
+      raf = 0;
+      if (document.hidden || paused || reduced || lost) return;
+      const dt = lastTime ? Math.min((now - lastTime) / 1000, .05) : 0;
+      lastTime = now; clock += dt;
+      if (cycle >= 0) {
+        cycle += dt;
+        if (cycle < 1.5) spread = smooth(cycle / 1.5);
+        else if (cycle < 3.3) spread = 1;
+        else if (cycle < 6.4) spread = 1 - smooth((cycle - 3.3) / 3.1);
+        else {
+          cycle = -1; spread = 0; hasScattered = true;
+          status.textContent = 'The fedora has reformed. A few embers remain in orbit.';
+          syncUI();
+        }
+      }
+      const targetSpeed = cycle >= 0 ? .035 : .24;
+      speed += (targetSpeed - speed) * (1 - Math.exp(-dt * 3));
+      rotation = (rotation + speed * dt) % TAU;
+      render(); raf = requestAnimationFrame(frame);
+    }
+    function start() { if (!raf && !document.hidden && !paused && !reduced && !lost) { lastTime = 0; raf = requestAnimationFrame(frame); } }
+    function stop() { cancelAnimationFrame(raf); raf = 0; lastTime = 0; }
+    function transform() {
+      if (reduced || paused) {
+        staticCloud = !staticCloud; spread = staticCloud ? .85 : 0; cycle = -1;
+        status.textContent = staticCloud ? 'A still constellation of red and gold embers.' : 'The red fedora, reformed.';
+        syncUI(); render(); return;
+      }
+      if (cycle >= 0) return;
+      cycle = 0;
+      status.textContent = 'The fedora dissolves into embers, then gathers itself together.';
+      syncUI(); start();
+    }
+    interact.addEventListener('pointerenter', event => {
+      if (event.pointerType === 'mouse' && !reduced && !paused) transform();
+    });
+    // A native button gives touch, Enter and Space the same behavior.
+    interact.addEventListener('click', transform);
+    motion.addEventListener('click', () => {
+      if (reduced) return;
+      paused = !paused;
+      if (paused) { stop(); staticCloud = spread > .5; }
+      else { staticCloud = false; if (cycle < 0 && spread > 0) cycle = 3.3; start(); }
+      syncUI(); render();
+    });
+    preference.addEventListener('change', event => {
+      reduced = event.matches; stop(); cycle = -1; spread = 0; staticCloud = false;
+      syncUI(); render(); start();
+    });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); else start(); });
+    canvas.addEventListener('webglcontextlost', event => {
+      event.preventDefault(); lost = true; stop(); canvas.hidden = true; fallback.removeAttribute('hidden');
+      interact.hidden = true; motion.hidden = true; ground.style.opacity = '.58';
+      hint.textContent = 'A familiar shape, in a new light.';
+    });
+    window.addEventListener('resize', resize, { passive: true });
+    if ('ResizeObserver' in window) new ResizeObserver(resize).observe(scene);
+    resize(); ready = true; render();
+    fallback.setAttribute('hidden', ''); interact.hidden = false; motion.hidden = false;
+    syncUI(); start();
+  })();
+  </script>
+</body>
+</html>

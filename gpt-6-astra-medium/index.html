@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#09090c">
+<title>Ember — a study in red</title>
+<style>
+:root{color-scheme:dark;font-family:Arial,Helvetica,sans-serif;background:#09090c;color:#ece8e3}
+*{box-sizing:border-box}body{margin:0}button{font:inherit}
+main{min-height:100svh;position:relative;overflow:hidden;display:flex;flex-direction:column;background:radial-gradient(ellipse at 50% 43%,#1a1217 0%,#0d0c10 43%,#09090c 75%)}
+header,footer{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:30px 40px;z-index:2}
+.brand{font-size:12px;font-weight:600;letter-spacing:.27em;display:flex;align-items:center;gap:12px}.mark{width:7px;height:7px;background:#e54b3e;border-radius:50%;box-shadow:0 0 15px #ec443944}
+.edition,footer{font-size:10px;letter-spacing:.16em;color:#77717b;text-transform:uppercase}
+.hero{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 20px 50px}
+.scene{position:relative;width:min(900px,100vw);height:clamp(290px,53svh,590px)}
+canvas{display:block;width:100%;height:100%}.interact{position:absolute;inset:8% 8%;border:0;border-radius:50%;background:transparent;cursor:pointer;-webkit-tap-highlight-color:transparent}.interact:focus-visible{outline:1px solid #b77d65;outline-offset:5px}
+.caption{text-align:center;margin-top:0;z-index:1}.eyebrow{font-size:9px;letter-spacing:.36em;color:#b88c7b;text-transform:uppercase;margin:0 0 15px}h1{font-size:clamp(29px,5vw,46px);font-weight:400;letter-spacing:-.045em;margin:0 0 13px;line-height:1.12}.description{font-size:13px;color:#89838d;line-height:1.7;margin:0}.hint{display:inline-flex;align-items:center;gap:9px;margin-top:27px;font-size:10px;letter-spacing:.12em;color:#a19a9f}.hint svg{width:14px;height:14px;color:#bb7968}.status{min-width:150px;text-align:left}footer{padding-top:0;font-size:9px}.foot-right{display:flex;align-items:center;gap:9px}.foot-right:before{content:"";width:4px;height:4px;background:#7c756f;border-radius:50%}
+@media(max-width:550px){header,footer{padding:25px 24px}.edition{font-size:8px;letter-spacing:.1em}.hero{padding-bottom:38px}.scene{height:clamp(280px,47svh,450px)}footer{font-size:8px;letter-spacing:.08em}.description{font-size:12px}}
+@media(prefers-reduced-motion:reduce){.interact{cursor:default}}
+</style>
+</head>
+<body>
+<main>
+<header><div class="brand"><span class="mark"></span>EMBER</div><div class="edition">Form studies &nbsp; / &nbsp; 001</div></header>
+<section class="hero" aria-labelledby="title">
+<div class="scene">
+<canvas aria-hidden="true"></canvas>
+<button class="interact" aria-label="Dissolve the red fedora into embers and reform it" aria-describedby="instruction"></button>
+</div>
+<div class="caption"><p class="eyebrow">An experiment in impermanence</p><h1 id="title">Nothing disappears.</h1><p class="description">A familiar silhouette. A thousand possibilities.</p>
+<div class="hint" id="instruction"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2v4m0 8v4M2 10h4m8 0h4M4.3 4.3l2.8 2.8m5.8 5.8 2.8 2.8m0-11.4-2.8 2.8m-5.8 5.8-2.8 2.8" stroke="currentColor" stroke-linecap="round"/></svg><span class="status">Hover or tap to unravel</span></div>
+</div>
+</section>
+<footer><span>Built from light. Held by motion.</span><span class="foot-right">An interactive study</span></footer>
+</main>
+<script>
+(() => {
+'use strict';
+const canvas = document.querySelector('canvas'), ctx = canvas.getContext('2d');
+const trigger = document.querySelector('.interact'), status = document.querySelector('.status');
+const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+if (!ctx) { status.textContent = 'Canvas is unavailable'; trigger.disabled = true; return; }
+const TAU = Math.PI * 2, faces = [], particles = [];
+let width = 0, height = 0, scale = 1, yaw = -.38, spin = .23;
+let previous = 0, time = 0, cycle = -1, orbiting = false, frame = 0;
+let seed = 7103;
+const random = () => { seed = (Math.imul(seed,1664525)+1013904223)>>>0; return seed/4294967296; };
+const clamp = v => Math.max(0,Math.min(1,v));
+const smooth = v => { v=clamp(v); return v*v*(3-2*v); };
+const mix = (a,b,t) => a+(b-a)*t;
+function triangle(a,b,c,color) {
+ const u=b.map((v,i)=>v-a[i]),v=c.map((v,i)=>v-a[i]);
+ const n=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]];
+ const length=Math.hypot(...n); if(length<.00001)return;
+ faces.push({a,b,c,n:n.map(v=>v/length),area:length/2,color});
+}
+function surface(rows,segments,fn,color,flip=false){
+ for(let j=0;j<rows;j++)for(let i=0;i<segments;i++){
+  const a=fn(j/rows,i/segments*TAU),b=fn(j/rows,(i+1)/segments*TAU);
+  const c=fn((j+1)/rows,(i+1)/segments*TAU),d=fn((j+1)/rows,i/segments*TAU);
+  if(flip){triangle(a,c,b,color);triangle(a,d,c,color);}else{triangle(a,b,c,color);triangle(a,c,d,color);}
+ }
+}
+// The brim curls at its sides and dips gently at the front and back.
+function brim(t,a,under=0){
+ const r=.12+.88*t,x=2.14*r*Math.cos(a),z=1.39*r*Math.sin(a);
+ const y=-.40+.20*Math.pow(Math.abs(Math.cos(a)),5)*Math.pow(t,4)-.12*Math.sin(a)*Math.pow(t,3)-under;
+ return [x,y,z];
+}
+surface(18,96,(t,a)=>brim(t,a),[183,24,32]);
+surface(4,96,(t,a)=>brim(t,a,.048),[104,12,21],true);
+surface(1,96,(t,a)=>{const p=brim(1,a,t*.048);return p;},[137,17,25]);
+// Tapered crown with paired front pinches, a raised rim, and a sunken teardrop top.
+function crown(t,a){
+ const pinch=.105*Math.exp(-Math.pow((Math.sin(a)-.7)/.25,2))*smooth(t);
+ const rx=1.11-.18*t-pinch,rz=.81-.10*t;
+ return [rx*Math.cos(a),-.395+1.18*t+.055*Math.cos(2*a)*t,rz*Math.sin(a)];
+}
+surface(22,96,crown,[210,30,39],true);
+surface(18,96,(t,a)=>{
+ const edge=crown(1,a),r=1-t;
+ const depression=.31*Math.pow(Math.sin(t*Math.PI/2),.75);
+ return [edge[0]*r,edge[1]-depression-.045*Math.sin(a)*Math.sin(Math.PI*t),edge[2]*r];
+},[219,37,44],true);
+// A matte charcoal ribbon wraps the entire crown.
+surface(5,96,(t,a)=>{const p=crown(.055+.225*t,a);p[0]*=1.012;p[2]*=1.016;return p;},[24,20,25],true);
+// Small folded ribbon detail on one side.
+const bow=[[-1.12,-.28,-.24],[-1.12,-.04,-.30],[-1.12,-.07,.23],[-1.12,-.30,.18]];
+triangle(bow[0],bow[1],bow[2],[31,25,29]);triangle(bow[0],bow[2],bow[3],[31,25,29]);
+let totalArea=0;for(const f of faces){totalArea+=f.area;f.end=totalArea;}
+for(let i=0;i<4600;i++){
+ const target=random()*totalArea;let lo=0,hi=faces.length-1;
+ while(lo<hi){const mid=(lo+hi)>>1;if(faces[mid].end<target)lo=mid+1;else hi=mid;}
+ const f=faces[lo],u=Math.sqrt(random()),v=random();
+ particles.push({home:f.a.map((a,k)=>a*(1-u)+f.b[k]*u*(1-v)+f.c[k]*u*v),
+  phase:random()*TAU,radius:.65+random()*1.85,lift:(random()-.32)*2.2,
+  size:.45+random()*.8,warm:random(),color:f.color,delay:random()*.14});
+}
+function rotate(p){
+ const c=Math.cos(yaw),s=Math.sin(yaw),x=p[0]*c+p[2]*s,z=-p[0]*s+p[2]*c;
+ const pitch=.31;return [x,p[1]*Math.cos(pitch)-z*Math.sin(pitch),p[1]*Math.sin(pitch)+z*Math.cos(pitch)];
+}
+function project(p){const k=7/(7-p[2]);return [width/2+p[0]*scale*k,height*.49-p[1]*scale*k,k,p[2]];}
+function light(f){
+ const n=rotate(f.n),diff=Math.max(0,n[0]*-.36+n[1]*.78+n[2]*.51);
+ const rim=Math.pow(Math.max(0,n[0]*.72+n[1]*.5-n[2]*.48),4);
+ const level=.49+.54*diff;
+ return `rgb(${Math.min(255,f.color[0]*level+rim*35)|0},${Math.min(255,f.color[1]*level+rim*13)|0},${Math.min(255,f.color[2]*level+rim*15)|0})`;
+}
+function drawHat(alpha){
+ if(alpha<.001)return;
+ const sorted=faces.filter(f=>rotate(f.n)[2]>0).map(f=>{const a=rotate(f.a),b=rotate(f.b),c=rotate(f.c);return {f,a:project(a),b:project(b),c:project(c),z:(a[2]+b[2]+c[2])/3};}).sort((a,b)=>a.z-b.z);
+ ctx.globalAlpha=alpha;
+ for(const t of sorted){
+  ctx.fillStyle=light(t.f);ctx.strokeStyle=ctx.fillStyle;ctx.lineWidth=.65;ctx.beginPath();ctx.moveTo(t.a[0],t.a[1]);ctx.lineTo(t.b[0],t.b[1]);ctx.lineTo(t.c[0],t.c[1]);ctx.closePath();ctx.fill();ctx.stroke();
+ }
+ ctx.globalAlpha=1;
+}
+const glow=document.createElement('canvas');glow.width=glow.height=32;
+const g=glow.getContext('2d'),gradient=g.createRadialGradient(16,16,0,16,16,16);
+gradient.addColorStop(0,'rgba(255,218,165,.85)');gradient.addColorStop(.14,'rgba(255,141,83,.5)');gradient.addColorStop(.45,'rgba(220,66,35,.12)');gradient.addColorStop(1,'rgba(220,66,35,0)');g.fillStyle=gradient;g.fillRect(0,0,32,32);
+function drawParticles(progress){
+ if(progress<=0||progress>=1)return;
+ const dissolve=smooth(progress/.18),returning=smooth((progress-.64)/.36);
+ const opacity=dissolve*(1-smooth((progress-.92)/.08));
+ ctx.globalCompositeOperation='lighter';
+ for(const p of particles){
+  const release=smooth((progress-p.delay)/.23)*(1-returning);
+  const angle=p.phase+progress*TAU*1.3;
+  const drift=[Math.cos(angle)*p.radius, p.lift+Math.sin(angle*.8)*.38,Math.sin(angle)*p.radius*.85];
+  const pos=p.home.map((v,k)=>v+drift[k]*release);
+  const q=project(rotate(pos)),s=p.size*q[2]*(.75+.25*release);
+  ctx.globalAlpha=opacity*(.38+.5*p.warm);
+  ctx.fillStyle=p.warm>.83?'#ffd5a0':p.warm>.4?'#ef7250':'#c93632';
+  ctx.fillRect(q[0]-s/2,q[1]-s/2,s,s);
+  if(p.warm>.84){ctx.globalAlpha=opacity*.45;ctx.drawImage(glow,q[0]-s*5,q[1]-s*5,s*10,s*10);}
+ }
+ ctx.globalCompositeOperation='source-over';ctx.globalAlpha=1;
+}
+function drawOrbits(){
+ if(!orbiting||reduced.matches)return;
+ ctx.globalCompositeOperation='lighter';
+ for(let i=0;i<14;i++){
+  for(let j=10;j>=0;j--){
+   const t=time*.36+i*2.399-j*.015,r=2.0+.20*Math.sin(i*4);
+   const q=project(rotate([Math.cos(t)*r,.08+Math.sin(t*1.4+i)*.65,Math.sin(t)*1.18]));
+   // Occlude rear embers to let the silhouette sit inside its orbit.
+   if(q[3]<0&&Math.abs(q[0]-width/2)<scale*1.2)continue;
+   ctx.globalAlpha=(1-j/11)*.55;
+   const size=j===0?9:3;ctx.drawImage(glow,q[0]-size/2,q[1]-size/2,size,size);
+  }
+ }
+ ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';
+}
+function render(){
+ ctx.clearRect(0,0,width,height);
+ const progress=cycle<0?0:clamp(cycle/7.6);
+ const spread=Math.sin(progress*Math.PI);
+ ctx.save();ctx.translate(width/2,height*.49+scale*.83);ctx.scale(1,.17);
+ const shadow=ctx.createRadialGradient(0,0,scale*.06,0,0,scale*(2.0+spread*.4));
+ shadow.addColorStop(0,`rgba(0,0,0,${.55-spread*.3})`);shadow.addColorStop(1,'rgba(0,0,0,0)');
+ ctx.fillStyle=shadow;ctx.fillRect(-scale*3,-scale*3,scale*6,scale*6);ctx.restore();
+ const solid=cycle<0?1:1-smooth(progress/.18)+smooth((progress-.91)/.09);
+ drawHat(clamp(solid));drawParticles(progress);drawOrbits();
+}
+function tick(now){
+ frame=0;if(document.hidden||reduced.matches)return;
+ const dt=Math.min((now-(previous||now))/1000,.05);previous=now;time+=dt;
+ spin=mix(spin,cycle<0?.23:.035,1-Math.exp(-dt*3));yaw+=dt*spin;
+ if(cycle>=0){cycle+=dt;if(cycle>=7.6){cycle=-1;orbiting=true;status.textContent='Hover or tap to unravel';}}
+ render();frame=requestAnimationFrame(tick);
+}
+function start(){
+ if(reduced.matches||cycle>=0)return;
+ cycle=0;status.textContent='Scattering. Returning.';
+}
+function resize(){
+ const rect=canvas.getBoundingClientRect();width=rect.width;height=rect.height;
+ const dpr=Math.min(devicePixelRatio||1,2);canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);
+ ctx.setTransform(dpr,0,0,dpr,0,0);scale=Math.min(width/7.8,height/5.5);render();
+}
+function motion(){
+ cancelAnimationFrame(frame);frame=0;previous=0;
+ if(reduced.matches){cycle=-1;yaw=-.38;spin=0;status.textContent='Stillness, by preference';trigger.disabled=true;}
+ else{trigger.disabled=false;status.textContent='Hover or tap to unravel';if(!document.hidden)frame=requestAnimationFrame(tick);}
+ render();
+}
+trigger.addEventListener('pointerenter',e=>{if(e.pointerType==='mouse')start();});
+trigger.addEventListener('click',start);
+reduced.addEventListener('change',motion);
+document.addEventListener('visibilitychange',()=>{cancelAnimationFrame(frame);frame=0;previous=0;if(!document.hidden&&!reduced.matches)frame=requestAnimationFrame(tick);});
+new ResizeObserver(resize).observe(canvas);resize();motion();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101013">
+  <meta name="description" content="A study in form and impermanence. A sculpted red fedora dissolves into embers and finds its way home.">
+  <title>Red, in motion — A study in form</title>
+  <style>
+    :root { color-scheme: dark; --paper: #e9e5e1; --muted: #858187; --red: #ef483d; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-width: 280px; min-height: 100%; }
+    body { background: #101013; color: var(--paper); font-family: Arial, Helvetica, sans-serif; -webkit-font-smoothing: antialiased; }
+    button { font: inherit; color: inherit; }
+    button:focus-visible { outline: 1px solid #ff8b77; outline-offset: 7px; }
+    .page { position: relative; isolation: isolate; min-height: 100svh; display: flex; flex-direction: column; overflow: hidden; }
+    .page::before { content: ""; position: absolute; z-index: -1; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 50% 43%, #26212455, transparent 48%), radial-gradient(ellipse at 50% 110%, #381b191f, transparent 50%); }
+    header, footer { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin: 0 clamp(24px, 5vw, 80px); }
+    header { min-height: 112px; border-bottom: 1px solid #ffffff0b; }
+    .wordmark { display: flex; align-items: center; gap: 12px; font-size: 13px; letter-spacing: .025em; }
+    .mark { width: 21px; height: 21px; color: var(--red); }
+    .wordmark span { color: #8d888b; }
+    .edition, .eyebrow, .footnote, .motion { font-size: 9px; font-weight: 400; letter-spacing: .16em; text-transform: uppercase; }
+    .edition { color: #716e74; }
+    .edition b { margin-left: 22px; color: #b4afb3; font-weight: 400; }
+    main { flex: 1; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 35px 0 49px; }
+    .eyebrow { margin: 0 0 -14px; position: relative; z-index: 2; color: #8d8589; }
+    .eyebrow::before { content: ""; display: inline-block; width: 4px; height: 4px; margin: 0 10px 2px 0; border-radius: 50%; background: #ca4b41; box-shadow: 0 0 9px #ca4b4133; }
+    .scene { position: relative; width: min(960px, 100%); height: clamp(310px, 49vh, 550px); }
+    .ground { position: absolute; width: 43%; height: 11%; left: 28.5%; top: 78%; border-radius: 50%; background: radial-gradient(ellipse, #000000b3 0%, #00000052 38%, transparent 71%); filter: blur(10px); pointer-events: none; }
+    .ground::after { content: ""; position: absolute; inset: -35% -35%; background: radial-gradient(ellipse, #e7351d08, transparent 66%); }
+    canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+    .interact { position: absolute; z-index: 2; top: 16%; left: 18%; width: 64%; height: 64%; border: 0; border-radius: 45%; background: transparent; cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+    .interact:focus-visible { outline-offset: -12px; outline-color: #d05b4544; }
+    .caption { text-align: center; margin: -5px 24px 0; position: relative; }
+    h1 { margin: 0; font-family: Georgia, 'Times New Roman', serif; font-weight: 400; font-size: clamp(25px, 3.3vw, 35px); line-height: 1.25; letter-spacing: -.035em; }
+    h1 em { color: #a59b99; font-weight: 400; }
+    .description { margin: 14px 0 0; color: var(--muted); font-size: 12px; line-height: 1.8; letter-spacing: .02em; }
+    .trigger { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px; padding: 6px 9px; border: 0; background: transparent; cursor: pointer; color: #b5acad; font-size: 9px; letter-spacing: .16em; text-transform: uppercase; margin-top: 21px; touch-action: manipulation; }
+    .trigger svg { width: 15px; height: 15px; color: #d96350; }
+    .trigger:hover { color: #fff0ea; }
+    .track { height: 1px; width: 104px; margin: 1px auto 0; background: #ffffff0d; overflow: hidden; }
+    .track span { display: block; width: 100%; height: 100%; transform: scaleX(0); transform-origin: left; background: #ce5c47; }
+    footer { min-height: 85px; border-top: 1px solid #ffffff0b; }
+    .footnote { margin: 0; color: #6f6a70; font-size: 8px; letter-spacing: .12em; }
+    .footnote span { color: #b7a39c; padding: 0 9px; }
+    .motion { display: flex; align-items: center; gap: 9px; padding: 12px 0 12px 12px; border: 0; background: transparent; color: #8b8285; cursor: pointer; font-size: 8px; letter-spacing: .12em; }
+    .motion svg { width: 11px; height: 11px; }
+    .motion:disabled, .trigger:disabled { cursor: default; opacity: .65; }
+    .fallback { display: block; position: absolute; width: 64%; max-width: 520px; height: 75%; top: 9%; left: 50%; transform: translateX(-50%) rotate(-8deg); filter: drop-shadow(0 22px 18px #0005); pointer-events: none; }
+    .ready .fallback { display: none; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+    @media (max-width: 600px) {
+      header { min-height: 82px; }
+      .edition { font-size: 8px; letter-spacing: .1em; }
+      .edition b { margin-left: 10px; }
+      .wordmark { font-size: 12px; gap: 9px; }
+      main { padding: 35px 0 40px; }
+      .scene { height: clamp(280px, 47vh, 440px); }
+      .eyebrow { font-size: 8px; margin-bottom: -5px; }
+      .interact { left: 7%; width: 86%; }
+      .ground { width: 63%; left: 18.5%; top: 72%; }
+      .caption { margin-top: 0; }
+      .description { font-size: 11px; max-width: 280px; }
+      footer { min-height: 75px; }
+      .footnote { max-width: 180px; font-size: 7px; line-height: 1.8; }
+      .footnote span { padding: 0 5px; }
+      .motion { font-size: 7px; }
+      .fallback { width: 85%; }
+    }
+    @media (max-height: 680px) and (min-width: 601px) {
+      header { min-height: 72px; } main { padding: 24px 0 28px; }
+      .scene { height: 310px; } footer { min-height: 62px; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div class="wordmark">
+        <svg class="mark" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 13.5 7.6 6.8c.3-.8.9-1.1 1.6-.7l2.2 1.1 3.3-.8c.9-.2 1.4.2 1.7 1l2 6.1c-3.1 2-10.1 1.8-13.4 0Z" fill="currentColor"/><path d="M5.6 12.1c3.7 1.8 8.9 2 12.2.1l.6 1.8c-3.3 1.9-10.3 1.8-13.4-.1l.6-1.8Z" fill="#101013"/><path d="M4.7 13c-2.2.6-3.5 1.7-3.2 2.8.5 1.7 5.5 3.2 11.4 2.9 5.8-.3 9.6-2.3 9.3-3.8-.2-1-1.5-1.8-3.4-2.1.2 1.9-2.3 3-7.1 3.1-4.7 0-7.3-1.2-7-2.9Z" fill="currentColor"/></svg>
+        <div>Red, <span>in motion.</span></div>
+      </div>
+      <div class="edition">A study in form <b>001</b></div>
+    </header>
+    <main>
+      <p class="eyebrow">Nothing is lost. Just reimagined.</p>
+      <div class="scene" id="scene">
+        <div class="ground" id="ground"></div>
+        <svg class="fallback" viewBox="0 0 600 400" role="img" aria-label="A sculpted red fedora with a black ribbon">
+          <defs>
+            <linearGradient id="felt" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#ff5948"/><stop offset=".5" stop-color="#d92520"/><stop offset="1" stop-color="#920f17"/></linearGradient>
+            <linearGradient id="brim" x2=".8" y2="1"><stop stop-color="#ed4030"/><stop offset="1" stop-color="#950c16"/></linearGradient>
+            <linearGradient id="ribbon" x2="0" y2="1"><stop stop-color="#262026"/><stop offset="1" stop-color="#08090c"/></linearGradient>
+          </defs>
+          <path d="M62 242c35-29 91-47 179-48 105-5 220 4 283 35 30 15 35 37 11 54-56 40-281 58-409 19-68-21-89-38-64-60Z" fill="url(#brim)"/>
+          <path d="M155 238c3-52 25-121 40-146 9-14 25-13 47-1l50 25 89-27c18-5 31 4 40 20 17 30 32 80 38 125-69 40-229 44-304 4Z" fill="url(#felt)"/>
+          <path d="M198 94c41 6 71 44 99 41 34-5 68-31 102-39-34 4-69 30-105 28-31-2-56-29-96-30Z" fill="#a51b1a"/>
+          <path d="m163 201-8 37c63 39 227 39 304-4l-8-37c-77 39-218 36-288 4Z" fill="url(#ribbon)"/>
+          <path d="M62 258c84 60 363 67 482-9" fill="none" stroke="#ff7560" stroke-opacity=".22" stroke-width="2"/>
+        </svg>
+        <canvas id="canvas" aria-hidden="true"></canvas>
+        <button class="interact" id="interact" aria-label="Dissolve the red fedora into embers and watch it reform" aria-describedby="description"></button>
+      </div>
+      <div class="caption">
+        <h1>An icon. <em>In its element.</em></h1>
+        <p class="description" id="description">A little curiosity. A thousand possibilities.<br>Every ember finds its way home.</p>
+        <button class="trigger" id="trigger">
+          <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2v4m0 8v4M2 10h4m8 0h4M4.3 4.3l2.5 2.5m6.4 6.4 2.5 2.5M4.3 15.7l2.5-2.5m6.4-6.4 2.5-2.5" stroke="currentColor" stroke-width="1"/><circle cx="10" cy="10" r="1.5" fill="currentColor"/></svg>
+          <span id="hint">Hover or tap to unravel</span>
+        </button>
+        <div class="track" aria-hidden="true"><span id="progress"></span></div>
+      </div>
+      <p class="sr-only" id="status" role="status" aria-live="polite"></p>
+    </main>
+    <footer>
+      <p class="footnote">One familiar form <span>·</span> Endless possibility</p>
+      <button class="motion" id="motion" aria-label="Pause animation" aria-pressed="false">
+        <svg id="motion-icon" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M3 2h2v8H3zm4 0h2v8H7z"/></svg>
+        <span id="motion-label">Motion on</span>
+      </button>
+    </footer>
+  </div>
+  <script>
+  (() => {
+    'use strict';
+    const $ = id => document.getElementById(id);
+    const canvas = $('canvas'), scene = $('scene'), ground = $('ground');
+    const trigger = $('trigger'), interact = $('interact'), hint = $('hint');
+    const motion = $('motion'), motionLabel = $('motion-label'), status = $('status');
+    const preference = matchMedia('(prefers-reduced-motion: reduce)');
+    let reduced = preference.matches, paused = false, available = true;
+    let gl, frame = 0, previous = 0, time = 0, angle = -.36, speed = .24;
+    let elapsed = -1, spread = 0, hasEmbers = false, width = 1, height = 1, dpr = 1;
+    const duration = 7.6;
+    const smooth = x => { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); };
+    const playing = () => available && !reduced && !paused && !document.hidden;
+
+    function updateControls() {
+      const staticMode = reduced || !available;
+      interact.disabled = trigger.disabled = staticMode || paused;
+      motion.disabled = staticMode;
+      motion.setAttribute('aria-pressed', String(paused || reduced));
+      motion.setAttribute('aria-label', paused ? 'Resume animation' : 'Pause animation');
+      motionLabel.textContent = !available ? 'Still life' : reduced ? 'Reduced motion' : paused ? 'Motion paused' : 'Motion on';
+      hint.textContent = !available ? 'A study in stillness' : reduced ? 'A quieter kind of motion' : paused ? 'A moment of stillness' : elapsed >= 0 ? 'Every ember finds its way home' : 'Hover or tap to unravel';
+      $('motion-icon').innerHTML = paused ? '<path d="m3 1 8 5-8 5z"/>' : '<path d="M3 2h2v8H3zm4 0h2v8H7z"/>';
+    }
+    function fallback() {
+      available = false;
+      cancelAnimationFrame(frame); frame = 0;
+      scene.classList.remove('ready');
+      canvas.style.display = 'none';
+      ground.style.opacity = '1';
+      $('progress').style.transform = 'scaleX(0)';
+      updateControls();
+    }
+    try {
+      gl = canvas.getContext('webgl', { alpha: true, antialias: true, premultipliedAlpha: true, powerPreference: 'low-power' });
+      if (!gl) { fallback(); return; }
+
+      const transform = `
+        uniform mat4 uProjection;
+        uniform float uAngle;
+        vec3 rotate(vec3 p) {
+          float c = cos(uAngle), s = sin(uAngle);
+          p = vec3(c*p.x+s*p.z, p.y, -s*p.x+c*p.z);
+          float roll = -0.12;
+          p.xy = mat2(cos(roll), sin(roll), -sin(roll), cos(roll)) * p.xy;
+          float pitch = 0.40;
+          p.yz = mat2(cos(pitch), sin(pitch), -sin(pitch), cos(pitch)) * p.yz;
+          return p;
+        }
+        vec4 project(vec3 p) { return uProjection * vec4(p + vec3(0.0, -0.20, -7.7), 1.0); }
+      `;
+      const meshVS = `
+        attribute vec3 aPosition, aNormal;
+        attribute float aMaterial;
+        varying vec3 vNormal, vWorld, vLocal;
+        varying float vMaterial;
+        ${transform}
+        void main() {
+          vLocal = aPosition; vWorld = rotate(aPosition);
+          vNormal = rotate(aNormal); vMaterial = aMaterial;
+          gl_Position = project(vWorld);
+        }
+      `;
+      const meshFS = `
+        precision highp float;
+        varying vec3 vNormal, vWorld, vLocal;
+        varying float vMaterial;
+        uniform float uSpread;
+        float hash(vec3 p) { return fract(sin(dot(p, vec3(127.1,311.7,74.7))) * 43758.5453); }
+        void main() {
+          float grain = hash(floor(vLocal * 67.0));
+          if (uSpread > grain) discard;
+          vec3 n = normalize(vNormal);
+          if (!gl_FrontFacing) n = -n;
+          vec3 view = normalize(vec3(0.0, 0.0, 7.7) - vWorld);
+          vec3 light = normalize(vec3(-3.5, 6.0, 4.0));
+          float diffuse = max(dot(n, light), 0.0);
+          float fill = max(dot(n, normalize(vec3(4.0, 1.5, -2.5))), 0.0);
+          float spec = pow(max(dot(n, normalize(light + view)), 0.0), 38.0);
+          float rim = pow(1.0 - max(dot(n, view), 0.0), 3.0);
+          float band = step(0.5, vMaterial);
+          vec3 base = mix(vec3(0.69, 0.018, 0.013), vec3(0.009, 0.009, 0.012), band);
+          float occlusion = mix(1.0, 0.63, (1.0 - smoothstep(-0.17, 0.02, vLocal.y)) * (1.0 - smoothstep(0.95, 1.4, length(vLocal.xz))));
+          vec3 color = base * (0.24 + diffuse * 1.05 + fill * 0.31) * occlusion;
+          color += vec3(1.0, 0.68, 0.52) * spec * mix(0.085, 0.029, band);
+          color += vec3(0.14, 0.035, 0.022) * rim * (0.3 + fill) * (1.0 - band * 0.7);
+          color *= 0.97 + grain * 0.055;
+          gl_FragColor = vec4(pow(color, vec3(0.4545)), 1.0);
+        }
+      `;
+      const particleVS = `
+        attribute vec3 aPosition, aNormal;
+        attribute vec4 aSeed;
+        attribute float aMaterial, aTrail;
+        uniform float uSpread, uTime, uAge, uEmbers, uDpr, uScale;
+        varying vec3 vColor;
+        varying float vAlpha;
+        ${transform}
+        void main() {
+          vec3 p;
+          float size;
+          if (aTrail < 0.0) {
+            float e = smoothstep(0.0, 1.0, clamp((uSpread - aSeed.w * 0.08) / (1.0 - aSeed.w * 0.08), 0.0, 1.0));
+            vec3 direction = normalize(aPosition * vec3(0.65, 0.7, 0.65) + aNormal * 0.6 + (aSeed.xyz - 0.5) * 1.8);
+            vec3 target = aPosition + direction * (0.55 + aSeed.y * 1.55);
+            float swirl = e * (uAge * (0.20 + aSeed.z * 0.19) + aSeed.x * 1.8);
+            float c = cos(swirl), s = sin(swirl);
+            target.xz = mat2(c, s, -s, c) * target.xz;
+            target.xz *= min(1.0, (2.25 + aSeed.w * 0.45) / max(0.01, length(target.xz)));
+            target.y = aPosition.y * 0.65 + direction.y * (0.45 + aSeed.y * 1.1);
+            target.y += sin(uAge * 0.75 + aSeed.x * 6.283) * 0.18 + aSeed.z * 0.18;
+            p = rotate(mix(aPosition, target, e));
+            p *= mix(vec3(1.0), vec3(0.94, 0.76, 0.94), e);
+            vAlpha = smoothstep(0.0, 0.19, uSpread) * (0.32 + aSeed.z * 0.42);
+            vColor = mix(vec3(1.0, 0.22, 0.095), vec3(1.0, 0.66, 0.34), pow(aSeed.x, 5.0));
+            vColor *= mix(1.0, 0.60, step(0.5, aMaterial));
+            size = (1.7 + aSeed.y * 1.6 + pow(aSeed.x, 18.0) * 2.1) * uDpr * uScale;
+          } else {
+            float phase = uTime * (0.23 + aSeed.y * 0.12) + aSeed.x * 6.283 - aTrail * 0.018;
+            float radius = 2.15 + aSeed.z * 0.53;
+            p = rotate(vec3(cos(phase) * radius, sin(phase * 1.7 + aSeed.z * 6.283) * 0.47 + 0.13, sin(phase) * radius * 0.63));
+            vAlpha = uEmbers * (1.0 - uSpread * 0.8) * pow(1.0 - aTrail / 13.0, 2.0) * 0.45;
+            vColor = vec3(1.0, 0.40 + aSeed.z * 0.2, 0.17);
+            size = (aTrail < 0.5 ? 3.4 : 2.5) * uDpr * uScale;
+          }
+          gl_Position = project(p);
+          gl_PointSize = max(1.0, size * 7.7 / (7.7 - p.z));
+        }
+      `;
+      const particleFS = `
+        precision mediump float;
+        varying vec3 vColor;
+        varying float vAlpha;
+        void main() {
+          float r = length(gl_PointCoord - 0.5) * 2.0;
+          if (r > 1.0 || vAlpha < 0.001) discard;
+          float glow = exp(-r*r*4.5) * (1.0 - smoothstep(0.65, 1.0, r));
+          gl_FragColor = vec4(vColor, glow * vAlpha);
+        }
+      `;
+      function program(vs, fs) {
+        const p = gl.createProgram();
+        for (const [type, source] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+          const shader = gl.createShader(type);
+          gl.shaderSource(shader, source); gl.compileShader(shader);
+          if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(shader));
+          gl.attachShader(p, shader); gl.deleteShader(shader);
+        }
+        gl.linkProgram(p);
+        if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+        const uniforms = {};
+        for (const name of ['uProjection', 'uAngle', 'uSpread', 'uTime', 'uAge', 'uEmbers', 'uDpr', 'uScale']) uniforms[name] = gl.getUniformLocation(p, name);
+        return { p, uniforms };
+      }
+      const meshProgram = program(meshVS, meshFS), particleProgram = program(particleVS, particleFS);
+
+      // Each surface is retained as triangles, also used to sample the ember homes.
+      const mesh = [], triangles = [];
+      const TAU = Math.PI * 2;
+      const normalize = v => { const l = Math.hypot(...v) || 1; return v.map(x => x / l); };
+      const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+      const sub = (a, b) => a.map((x, i) => x - b[i]);
+      function patch(fn, nu, nv, material, reverse = false) {
+        const vertices = [];
+        for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
+          const u = i / nu, v = j / nv, h = 0.0001;
+          const a = sub(fn(u + h, v), fn(u - h, v));
+          const b = sub(fn(u, Math.min(1, v + h)), fn(u, Math.max(0, v - h)));
+          let n = normalize(cross(a, b));
+          if (reverse) n = n.map(x => -x);
+          vertices.push({ p: fn(u, v), n });
+        }
+        function triangle(a, b, c) {
+          if (reverse) [b, c] = [c, b];
+          const area = Math.hypot(...cross(sub(b.p, a.p), sub(c.p, a.p))) / 2;
+          if (area < 1e-9) return;
+          triangles.push({ a, b, c, area, material });
+          for (const v of [a, b, c]) mesh.push(...v.p, ...v.n, material);
+        }
+        for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) {
+          const k = j * (nu + 1) + i;
+          triangle(vertices[k], vertices[k+1], vertices[k+nu+1]);
+          triangle(vertices[k+1], vertices[k+nu+2], vertices[k+nu+1]);
+        }
+      }
+      function crown(u, t, extra = 0) {
+        const a = u * TAU;
+        const pinch = 1 - 0.105 * Math.pow(t, 3) * Math.exp(-Math.pow((Math.sin(a) - 0.68) / 0.26, 2));
+        const rx = (1.09 - 0.23 * t) * pinch + extra;
+        const rz = 0.77 - 0.12 * t + extra;
+        const crease = 0.045*Math.sin(a) - 0.19*Math.pow(Math.sin(a),2);
+        return [rx * Math.cos(a), -0.23 + 1.12*t + Math.pow(t,4)*crease, rz * Math.sin(a)];
+      }
+      function brim(u, r, underside = false) {
+        const a = u * TAU;
+        const x = 2.02 * r * Math.cos(a), z = 1.27 * r * Math.sin(a);
+        const y = -0.25 + 0.105*r*r + 0.09*Math.pow(r, 4)*Math.cos(2*a) - 0.065*Math.pow(r, 3)*Math.sin(a);
+        return [x, y - (underside ? 0.045 : 0), z];
+      }
+      patch((u,v) => brim(u,v), 128, 22, 0);
+      patch((u,v) => brim(u,v,true), 128, 12, 0, true);
+      patch((u,v) => { const p = brim(u,1); p[1] -= v*0.045; return p; }, 128, 2, 0);
+      patch((u,v) => crown(u,v), 128, 32, 0, true);
+      patch((u,r) => {
+        const outer = crown(u,1), x = outer[0]*r, z = outer[2]*r;
+        const dent = 0.235 * Math.exp(-Math.pow(x/0.32,2)) * Math.pow(Math.max(0,1-r*r),0.65);
+        return [x, 0.89 + (outer[1]-0.89)*r*r + 0.055*(1-r*r) - dent, z];
+      }, 128, 30, 0);
+      patch((u,v) => crown(u, 0.035 + 0.235*v, 0.012), 128, 9, 1, true);
+
+      function buffer(data) { const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,b); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(data),gl.STATIC_DRAW); return b; }
+      const meshBuffer = buffer(mesh);
+      // Seeded sampling makes every particle's original surface position immutable.
+      let seed = 4817;
+      function random() { seed = (Math.imul(seed,1664525)+1013904223) >>> 0; return seed / 4294967296; }
+      let area = 0;
+      const cumulative = triangles.map(t => area += t.area);
+      const particles = [], count = 11000;
+      for (let i = 0; i < count; i++) {
+        const target = random()*area;
+        let lo = 0, hi = triangles.length-1;
+        while (lo < hi) { const mid = (lo+hi) >> 1; if (cumulative[mid] < target) lo = mid+1; else hi = mid; }
+        const t = triangles[lo], r = Math.sqrt(random()), s = random(), weights = [1-r, r*(1-s), r*s];
+        const p = [0,0,0], n = [0,0,0];
+        [t.a,t.b,t.c].forEach((v,j) => { for (let k=0;k<3;k++) { p[k]+=v.p[k]*weights[j]; n[k]+=v.n[k]*weights[j]; } });
+        particles.push(...p,...normalize(n),random(),random(),random(),random(),t.material,-1);
+      }
+      for (let i=0;i<16;i++) {
+        const seeds = [random(),random(),random(),random()];
+        for (let tail=0;tail<13;tail++) particles.push(0,0,0,0,1,0,...seeds,0,tail);
+      }
+      const particleBuffer = buffer(particles);
+      const projection = new Float32Array(16);
+      function resize() {
+        const rect = scene.getBoundingClientRect();
+        width = rect.width; height = rect.height; dpr = Math.min(devicePixelRatio || 1, 2);
+        canvas.width = Math.round(width*dpr); canvas.height = Math.round(height*dpr);
+        gl.viewport(0,0,canvas.width,canvas.height);
+        const aspect = width/height;
+        const visibleHeight = Math.max(4.25, 5.6/aspect);
+        const f = 15.4/visibleHeight, near = 0.1, far = 30;
+        projection.fill(0); projection[0]=f/aspect; projection[5]=f;
+        projection[10]=(far+near)/(near-far); projection[11]=-1; projection[14]=2*far*near/(near-far);
+        draw();
+      }
+      const enabled = new Set();
+      function attributes(p, b, stride, fields) {
+        gl.bindBuffer(gl.ARRAY_BUFFER,b);
+        const next = new Set();
+        for (const [name,size,offset] of fields) {
+          const loc = gl.getAttribLocation(p,name);
+          if (loc < 0) continue;
+          next.add(loc); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc,size,gl.FLOAT,false,stride*4,offset*4);
+        }
+        for (const loc of enabled) if (!next.has(loc)) gl.disableVertexAttribArray(loc);
+        enabled.clear(); next.forEach(loc => enabled.add(loc));
+      }
+      function uniforms(program) {
+        gl.useProgram(program.p);
+        const u = program.uniforms;
+        gl.uniformMatrix4fv(u.uProjection,false,projection); gl.uniform1f(u.uAngle,angle);
+        gl.uniform1f(u.uSpread,spread); gl.uniform1f(u.uTime,time);
+        gl.uniform1f(u.uAge,Math.max(0,elapsed)); gl.uniform1f(u.uEmbers,hasEmbers && !reduced ? 1 : 0);
+        gl.uniform1f(u.uDpr,dpr); gl.uniform1f(u.uScale,Math.min(1.15,Math.max(0.65,width/760)));
+      }
+      function draw() {
+        if (!available || gl.isContextLost()) return;
+        gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+        gl.enable(gl.DEPTH_TEST); gl.depthMask(true); gl.disable(gl.BLEND);
+        uniforms(meshProgram);
+        attributes(meshProgram.p,meshBuffer,7,[['aPosition',3,0],['aNormal',3,3],['aMaterial',1,6]]);
+        gl.drawArrays(gl.TRIANGLES,0,mesh.length/7);
+        if (spread > 0 || (hasEmbers && !reduced)) {
+          gl.enable(gl.BLEND); gl.blendFuncSeparate(gl.SRC_ALPHA,gl.ONE,gl.ONE,gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
+          uniforms(particleProgram);
+          attributes(particleProgram.p,particleBuffer,12,[['aPosition',3,0],['aNormal',3,3],['aSeed',4,6],['aMaterial',1,10],['aTrail',1,11]]);
+          gl.drawArrays(gl.POINTS,0,particles.length/12);
+          gl.depthMask(true);
+        }
+        ground.style.opacity = String(1-spread*0.87);
+        ground.style.transform = `scale(${1+spread*0.3})`;
+      }
+      function tick(now) {
+        frame = 0;
+        if (!playing()) { previous=0; return; }
+        const dt = previous ? Math.min((now-previous)/1000,0.05) : 0;
+        previous=now; time+=dt;
+        speed += ((elapsed>=0 ? 0.037 : 0.24)-speed)*(1-Math.exp(-dt*3));
+        angle += dt*speed;
+        if (elapsed>=0) {
+          elapsed += dt;
+          const t = Math.min(1,elapsed/duration);
+          spread = t<0.28 ? smooth(t/0.28) : t<0.51 ? 1 : 1-smooth((t-0.51)/0.49);
+          $('progress').style.transform = `scaleX(${t})`;
+          if (elapsed>=duration) {
+            elapsed=-1; spread=0; hasEmbers=true;
+            $('progress').style.transform='scaleX(0)';
+            status.textContent='The fedora has reformed. A few embers remain in orbit.';
+            updateControls();
+          }
+        }
+        draw(); frame=requestAnimationFrame(tick);
+      }
+      function startLoop() { if (!frame && playing()) { previous=0; frame=requestAnimationFrame(tick); } }
+      function unravel() {
+        if (!playing() || elapsed>=0) return;
+        elapsed=0; hasEmbers=true;
+        status.textContent='The fedora dissolves into glowing embers, then returns to its original form.';
+        updateControls(); startLoop();
+      }
+      for (const button of [interact,trigger]) {
+        button.addEventListener('pointerenter', e => { if (e.pointerType==='mouse') unravel(); });
+        button.addEventListener('click',unravel);
+      }
+      motion.addEventListener('click', () => {
+        paused=!paused;
+        if (paused) { cancelAnimationFrame(frame); frame=0; previous=0; } else startLoop();
+        updateControls();
+      });
+      preference.addEventListener('change', e => {
+        reduced=e.matches;
+        if (reduced) {
+          cancelAnimationFrame(frame); frame=0; previous=0;
+          elapsed=-1; spread=0; angle=-0.36; hasEmbers=false;
+          $('progress').style.transform='scaleX(0)';
+          status.textContent='Reduced motion enabled. The fedora is displayed as a still life.';
+          draw();
+        } else startLoop();
+        updateControls();
+      });
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) { cancelAnimationFrame(frame); frame=0; previous=0; } else startLoop();
+      });
+      canvas.addEventListener('webglcontextlost', e => { e.preventDefault(); fallback(); });
+      window.addEventListener('resize',resize,{passive:true});
+      if (typeof ResizeObserver!=='undefined') new ResizeObserver(resize).observe(scene);
+      scene.classList.add('ready');
+      updateControls(); resize(); startLoop();
+    } catch (error) {
+      console.warn('The 3D scene could not start; showing the inline illustration.',error);
+      fallback();
+    }
+  })();
+  </script>
+</body>
+</html>
