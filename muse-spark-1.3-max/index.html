@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="A Red Hat-style fedora spun from light. Hover or tap to dissolve it into embers." />
+<title>Fedora in Light</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: #06070b;
+    color: #e6e9f1;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  .hero {
+    position: relative;
+    min-height: 100vh;
+    min-height: 100dvh;
+    display: grid;
+    place-items: center;
+    padding: clamp(16px, 4vmin, 48px);
+    overflow: hidden;
+    background:
+      radial-gradient(58vmax 42vmax at 50% 40%, rgba(255, 45, 25, 0.08), rgba(255, 45, 25, 0) 62%),
+      radial-gradient(100vmax 80vmax at 50% 118%, #121724 0%, rgba(18, 23, 36, 0) 55%),
+      radial-gradient(130vmax 95vmax at 50% -25%, #161c2a 0%, #06070b 58%);
+  }
+  .hero::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(120% 90% at 50% 45%, rgba(0, 0, 0, 0) 55%, rgba(0, 0, 0, 0.5) 100%);
+  }
+  .stage {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: clamp(6px, 2vmin, 18px);
+    margin: 0;
+    width: 100%;
+  }
+  #scene {
+    display: block;
+    width: min(88vw, 58vh, 620px);
+    height: auto;
+    aspect-ratio: 1 / 1;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    border-radius: 24px;
+  }
+  #scene:focus { outline: none; }
+  #scene:focus-visible { box-shadow: 0 0 0 2px rgba(230, 233, 241, 0.4); }
+  .caption {
+    margin: 0;
+    text-align: center;
+    font-size: clamp(11px, 0.9vmin + 9px, 14px);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #98a1b3;
+  }
+  .caption .dot { color: #4a5163; padding: 0 0.6em; }
+  @media (prefers-reduced-motion: reduce) {
+    #scene { cursor: default; }
+  }
+</style>
+</head>
+<body>
+<main class="hero">
+  <figure class="stage" id="stage">
+    <canvas id="scene" tabindex="0" role="img"
+      aria-label="A red fedora spinning slowly in a dark space. Activate to dissolve it into glowing embers that reform the hat."></canvas>
+    <figcaption class="caption">A red fedora, spun from light<span class="dot" aria-hidden="true">&middot;</span>hover or tap to dissolve</figcaption>
+  </figure>
+</main>
+<noscript><p style="text-align:center;color:#98a1b3">This piece needs JavaScript to render the hat.</p></noscript>
+<script>
+(() => {
+'use strict';
+
+const stage = document.getElementById('stage');
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+const reduceMQ = window.matchMedia('(prefers-reduced-motion: reduce)');
+const coarseMQ = window.matchMedia('(pointer: coarse)');
+
+const TAU = Math.PI * 2;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const easeOutCubic = x => 1 - Math.pow(1 - x, 3);
+const easeInOutCubic = x => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+const c255 = v => v > 255 ? 255 : (v | 0);
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const rand = mulberry32(0x5ED04A11);
+const angDiff = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
+
+/* ---------------- sizing ---------------- */
+let W = 300, H = 300, DPR = 1;
+function resize() {
+  const r = canvas.getBoundingClientRect();
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = Math.max(1, r.width);
+  H = Math.max(1, r.height);
+  canvas.width = Math.round(W * DPR);
+  canvas.height = Math.round(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+
+/* ---------------- hat point cloud ----------------
+   y-up units: brim ~ radius 1.55 at y=0, crown rises to ~y=1.05. */
+const COUNT = (coarseMQ.matches || Math.min(window.innerWidth, window.innerHeight) < 560) ? 3800 : 6000;
+const hx = new Float32Array(COUNT), hy = new Float32Array(COUNT), hz = new Float32Array(COUNT);
+const nxA = new Float32Array(COUNT), nyA = new Float32Array(COUNT), nzA = new Float32Array(COUNT);
+const bR = new Float32Array(COUNT), bG = new Float32Array(COUNT), bB = new Float32Array(COUNT);
+const eR = new Float32Array(COUNT), eG = new Float32Array(COUNT), eB = new Float32Array(COUNT);
+const dxA = new Float32Array(COUNT), dyA = new Float32Array(COUNT), dzA = new Float32Array(COUNT);
+const spread = new Float32Array(COUNT), swirlF = new Float32Array(COUNT);
+const twk = new Float32Array(COUNT), seed = new Float32Array(COUNT);
+const sizeM = new Float32Array(COUNT), upA = new Float32Array(COUNT);
+
+function buildHat() {
+  for (let i = 0; i < COUNT; i++) {
+    const u = rand();
+    let x, y, z, nx, ny, nz, R, G, B;
+    if (u < 0.30) {
+      // Brim top
+      const th = rand() * TAU;
+      const rr = Math.sqrt(lerp(0.72 * 0.72, 1.55 * 1.55, rand()));
+      const k = clamp((rr - 0.8) / 0.75, 0, 1);
+      y = -0.10 * k * k + 0.05 * Math.cos(2 * th) * Math.pow(k, 1.5);
+      x = rr * Math.cos(th);
+      z = rr * Math.sin(th) * 0.94;
+      const il = 1 / Math.hypot(-0.18 * Math.cos(th), 1, -0.18 * Math.sin(th));
+      nx = -0.18 * Math.cos(th) * il; ny = il; nz = -0.18 * Math.sin(th) * il;
+      const m = 0.82 + rand() * 0.36;
+      R = 238 * m; G = 8 + rand() * 22; B = 6 + rand() * 16;
+    } else if (u < 0.34) {
+      // Brim edge
+      const th = rand() * TAU;
+      const edgeTop = -0.10 + 0.05 * Math.cos(2 * th);
+      y = edgeTop - 0.045 * rand();
+      x = 1.55 * Math.cos(th);
+      z = 1.55 * Math.sin(th) * 0.94;
+      const il = 1 / (Math.hypot(Math.cos(th), Math.sin(th)) || 1);
+      nx = Math.cos(th) * il; ny = 0; nz = Math.sin(th) * il;
+      const m = 0.55 + rand() * 0.25;
+      R = 238 * m; G = 6 + rand() * 12; B = 5 + rand() * 10;
+    } else if (u < 0.37) {
+      // Brim underside
+      const th = rand() * TAU;
+      const rr = Math.sqrt(lerp(0.8 * 0.8, 1.5 * 1.5, rand()));
+      const k = clamp((rr - 0.8) / 0.75, 0, 1);
+      y = -0.10 * k * k + 0.05 * Math.cos(2 * th) * Math.pow(k, 1.5) - 0.045;
+      x = rr * Math.cos(th);
+      z = rr * Math.sin(th) * 0.94;
+      nx = 0; ny = -1; nz = 0;
+      const m = 0.40 + rand() * 0.20;
+      R = 238 * m; G = 5 + rand() * 8; B = 4 + rand() * 7;
+    } else if (u < 0.75) {
+      // Crown wall, with front pinches and a dark band at the base
+      const yy = 0.02 + rand() * 0.93;
+      const f = yy / 0.95;
+      const th = rand() * TAU;
+      let r = 0.82 - 0.25 * Math.pow(f, 1.12);
+      const d1 = angDiff(th, Math.PI / 2 - 0.55);
+      const d2 = angDiff(th, Math.PI / 2 + 0.55);
+      const g = Math.exp(-(d1 * d1) / 0.0968) + Math.exp(-(d2 * d2) / 0.0968);
+      r -= 0.085 * g * Math.max(0, Math.sin(Math.PI * clamp(yy / 0.75, 0, 1)));
+      y = yy;
+      x = r * Math.cos(th);
+      z = r * Math.sin(th) * 0.94;
+      const il = 1 / (Math.hypot(Math.cos(th), 0.38, Math.sin(th)) || 1);
+      nx = Math.cos(th) * il; ny = 0.38 * il; nz = Math.sin(th) * il;
+      if (yy < 0.27) {
+        const v = rand();
+        R = 16 + v * 20; G = 14 + v * 14; B = 16 + v * 14;
+      } else {
+        const m = 0.85 + rand() * 0.30;
+        R = 238 * m; G = 8 + rand() * 20; B = 6 + rand() * 14;
+      }
+    } else {
+      // Crown top with center-crease dent
+      const rr2 = Math.sqrt(rand()) * 0.57;
+      const th = rand() * TAU;
+      x = rr2 * Math.cos(th);
+      z = rr2 * Math.sin(th) * 0.94;
+      const q = rr2 / 0.57;
+      const dome = 0.10 * (1 - q * q);
+      const qx = x / 0.19;
+      const dent = 0.20 * Math.exp(-qx * qx) * (1 - 0.35 * q * q);
+      y = 0.95 + dome - dent;
+      const dDome = -0.20 * x / (0.57 * 0.57);
+      const dDent = dent * (-2 * x / (0.19 * 0.19));
+      const dTopX = dDome - dDent, dTopZ = -0.616 * z;
+      const il = 1 / (Math.hypot(-dTopX, 1, -dTopZ) || 1);
+      nx = -dTopX * il; ny = il; nz = -dTopZ * il;
+      const m = 0.88 + rand() * 0.30;
+      R = 238 * m; G = 8 + rand() * 22; B = 6 + rand() * 15;
+    }
+    x += (rand() - 0.5) * 0.012;
+    y += (rand() - 0.5) * 0.012;
+    z += (rand() - 0.5) * 0.012;
+    hx[i] = x; hy[i] = y; hz[i] = z;
+    nxA[i] = nx; nyA[i] = ny; nzA[i] = nz;
+    bR[i] = R; bG[i] = G; bB[i] = B;
+
+    // Outward drift direction with a slight upward ember bias
+    let dx = x, dy = (y - 0.42) * 0.9, dz = z;
+    let L = Math.hypot(dx, dy, dz) || 1;
+    dx /= L; dy /= L; dz /= L;
+    dx += (rand() - 0.5) * 0.85;
+    dy += rand() * 0.35 - 0.12;
+    dz += (rand() - 0.5) * 0.85;
+    L = Math.hypot(dx, dy, dz) || 1;
+    dxA[i] = dx / L; dyA[i] = dy / L; dzA[i] = dz / L;
+
+    spread[i] = 0.85 + Math.pow(rand(), 1.4) * 1.15;
+    swirlF[i] = 0.6 + rand() * 1.1;
+    twk[i] = rand() * TAU;
+    seed[i] = rand() * TAU;
+    sizeM[i] = 0.7 + rand() * 0.6;
+    upA[i] = 0.35 + rand() * 0.65;
+
+    // Per-particle ember tint
+    const p = rand();
+    let er, eg, eb;
+    if (p < 0.35) { er = 255; eg = 122; eb = 26; }
+    else if (p < 0.6) { er = 255; eg = 80; eb = 20; }
+    else if (p < 0.8) { er = 255; eg = 170; eb = 70; }
+    else { er = 255; eg = 220; eb = 150; }
+    const em = 0.8 + rand() * 0.3;
+    eR[i] = er * em; eG[i] = eg * em; eB[i] = eb * em;
+  }
+}
+
+/* ---------------- lingering orbiters ---------------- */
+const orbiters = [];
+for (let k = 0; k < 12; k++) {
+  orbiters.push({
+    R: 1.95 + rand() * 0.75,
+    w: (0.28 + rand() * 0.35) * (rand() < 0.5 ? -1 : 1),
+    ph: rand() * TAU,
+    yA: 0.18 + rand() * 0.30,
+    yP: rand() * TAU,
+    sz: 1.3 + rand() * 1.2,
+    warm: rand() < 0.5 ? '255,154,60' : '255,210,122',
+    trail: []
+  });
+}
+
+/* ---------------- state ---------------- */
+const CAMD = 5.2;
+const LX = -0.4355, LY = 0.7259, LZ = 0.5323;   // key light
+const RX = 0.5488, RY = 0.3293, RZ = -0.7683;   // rim light
+const BURST_DUR = 6.8, BURST_OUT = 1.5, BURST_HOLD = 3.5;
+
+const state = {
+  t: 0, rotY: 0.7, tilt: 0.34, camYaw: 0,
+  e: 0, mode: 'idle', burstT: 0, swirl: 0,
+  orbA: 0, orbTarget: 0, mx: 0, my: 0
+};
+
+const sX = new Float32Array(COUNT), sY = new Float32Array(COUNT);
+const sZ = new Float32Array(COUNT), sP = new Float32Array(COUNT);
+const sR = new Float32Array(COUNT), fA = new Float32Array(COUNT);
+const fR = new Uint8Array(COUNT), fG = new Uint8Array(COUNT), fB = new Uint8Array(COUNT);
+const idx = new Array(COUNT);
+for (let i = 0; i < COUNT; i++) idx[i] = i;
+
+let stride = 1, emaDt = 1 / 60, frames = 0;
+
+function burstEnvelope(t) {
+  if (t < BURST_OUT) return easeOutCubic(t / BURST_OUT);
+  if (t < BURST_HOLD) return 1;
+  return 1 - easeInOutCubic((t - BURST_HOLD) / (BURST_DUR - BURST_HOLD));
+}
+
+function update(dt) {
+  const s = state;
+  s.t += dt;
+  if (s.mode === 'burst') {
+    s.burstT += dt;
+    if (s.burstT >= BURST_DUR) {
+      s.mode = 'idle';
+      s.e = 0;
+      s.orbTarget = 1; // a few embers keep orbiting, trailing light
+    } else {
+      s.e = burstEnvelope(s.burstT);
+    }
+  }
+  const spin = lerp(0.55, 0.06, s.e); // hover slows the spin
+  s.rotY = (s.rotY + spin * dt) % TAU;
+  s.swirl += dt * s.e * 1.35;
+  s.camYaw += (s.mx * 0.16 - s.camYaw) * Math.min(1, dt * 2.5);
+  s.tilt += ((0.34 + s.my * 0.07) - s.tilt) * Math.min(1, dt * 2.5);
+  s.orbA += (s.orbTarget - s.orbA) * Math.min(1, dt * 0.8);
+}
+
+function render() {
+  const s = state, t = s.t, e = s.e;
+  const minWH = Math.min(W, H);
+  const S = minWH * 0.235 * (1 - e * 0.40); // camera eases back as embers spread
+  const cx = W / 2, cy = H * 0.47;
+  const rotY = s.rotY + s.camYaw, tilt = s.tilt;
+  const cosY = Math.cos(rotY), sinY = Math.sin(rotY);
+  const cosT = Math.cos(tilt), sinT = Math.sin(tilt);
+
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  ctx.clearRect(0, 0, W, H);
+
+  // Faint warm halo behind the hat
+  const hg = ctx.createRadialGradient(cx, cy - S * 0.15, 0, cx, cy - S * 0.15, S * 2.7);
+  const haloA = 0.075 * (1 - e * 0.4);
+  hg.addColorStop(0, 'rgba(255,70,40,' + haloA.toFixed(4) + ')');
+  hg.addColorStop(1, 'rgba(255,70,40,0)');
+  ctx.fillStyle = hg;
+  ctx.fillRect(0, 0, W, H);
+
+  // Soft floor shadow (+ a whisper of red bounce light)
+  const fy2 = -0.72 * cosT, fz2 = -0.72 * sinT;
+  const fp = CAMD / (CAMD - fz2);
+  const shX = cx, shY = cy - fy2 * S * fp;
+  const shW = S * 2.35 * fp * (1 + e * 0.55);
+  ctx.save();
+  ctx.translate(shX, shY);
+  ctx.scale(1, 0.26);
+  const sg = ctx.createRadialGradient(0, 0, 0, 0, 0, shW);
+  sg.addColorStop(0, 'rgba(0,0,0,' + (0.55 * (1 - e * 0.55)).toFixed(3) + ')');
+  sg.addColorStop(0.6, 'rgba(0,0,0,' + (0.28 * (1 - e * 0.55)).toFixed(3) + ')');
+  sg.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = sg;
+  ctx.beginPath(); ctx.arc(0, 0, shW, 0, TAU); ctx.fill();
+  const bg = ctx.createRadialGradient(0, 0, 0, 0, 0, shW * 0.5);
+  bg.addColorStop(0, 'rgba(238,20,10,' + (0.05 * (1 - e * 0.5)).toFixed(4) + ')');
+  bg.addColorStop(1, 'rgba(238,20,10,0)');
+  ctx.fillStyle = bg;
+  ctx.beginPath(); ctx.arc(0, 0, shW * 0.5, 0, TAU); ctx.fill();
+  ctx.restore();
+
+  // Project + shade every particle
+  const be = Math.pow(e, 0.65);
+  const raw = e <= 0.05 ? 0 : e >= 0.65 ? 1 : (e - 0.05) / 0.6;
+  const ce = raw * raw * (3 - 2 * raw); // solid -> ember color blend
+  const idle = e < 0.0001;
+  for (let i = 0; i < COUNT; i++) {
+    let px, py, pz;
+    if (idle) {
+      px = hx[i];
+      py = hy[i] + Math.sin(t * 0.8 + seed[i]) * 0.004;
+      pz = hz[i];
+    } else {
+      const fl = e;
+      const b = spread[i] * be;
+      const fx = Math.sin(t * 1.25 + seed[i] * 3.1) * 0.28 * fl;
+      const fy = (Math.sin(t * 1.6 + seed[i] * 4.3) * 0.18 + s.swirl * 0.10 * upA[i]) * fl;
+      const fz = Math.cos(t * 1.05 + seed[i] * 2.2) * 0.28 * fl;
+      px = hx[i] + dxA[i] * b + fx;
+      py = hy[i] + dyA[i] * b + fy;
+      pz = hz[i] + dzA[i] * b + fz;
+      const ang = s.swirl * swirlF[i] * e;
+      if (ang !== 0) {
+        const ca = Math.cos(ang), sa = Math.sin(ang);
+        const rx = px * ca + pz * sa, rz = -px * sa + pz * ca;
+        px = rx; pz = rz;
+      }
+    }
+    const x1 = px * cosY + pz * sinY, z1 = -px * sinY + pz * cosY;
+    const y2 = py * cosT - z1 * sinT, z2 = py * sinT + z1 * cosT;
+    let persp = CAMD / (CAMD - z2);
+    persp = persp > 2.4 ? 2.4 : persp < 0.5 ? 0.5 : persp;
+    sX[i] = cx + x1 * S * persp;
+    sY[i] = cy - y2 * S * persp;
+    sZ[i] = z2;
+    sP[i] = persp;
+
+    const nx = nxA[i], ny = nyA[i], nz = nzA[i];
+    const wx1 = nx * cosY + nz * sinY, wz1 = -nx * sinY + nz * cosY;
+    const wy2 = ny * cosT - wz1 * sinT, wz2 = ny * sinT + wz1 * cosT;
+    const dl = wx1 * LX + wy2 * LY + wz2 * LZ;
+    const diff = 0.40 + 0.60 * (dl > 0 ? dl : 0);
+    const rl = wx1 * RX + wy2 * RY + wz2 * RZ;
+    const rim = rl > 0 ? rl * rl * 0.30 : 0;
+    let sh = (persp - 0.78) / 0.55;
+    sh = sh < 0 ? 0 : sh > 1 ? 1 : sh;
+    let bb = (diff + rim) * (0.70 + 0.30 * sh);
+    bb = bb < 0.30 ? 0.30 : bb > 1.30 ? 1.30 : bb;
+
+    const tw = 0.72 + 0.28 * Math.sin(t * 7 + twk[i]);
+    const sr = bR[i] * bb, sg2 = bG[i] * bb, sb = bB[i] * bb;
+    const eb = 0.75 + 0.5 * tw;
+    fR[i] = c255(sr + (eR[i] * eb - sr) * ce);
+    fG[i] = c255(sg2 + (eG[i] * eb - sg2) * ce);
+    fB[i] = c255(sb + (eB[i] * eb - sb) * ce);
+    fA[i] = (1 - ce) * 0.95 + ce * (0.55 + 0.30 * tw);
+
+    let rad = S * 0.030 * sizeM[i] * Math.pow(persp, 0.65) * (1 - e * 0.42);
+    sR[i] = rad < 0.5 ? 0.5 : rad > 6.5 ? 6.5 : rad;
+  }
+
+  if (e < 0.4) idx.sort((a, b) => sZ[a] - sZ[b]); // far to near while solid
+
+  ctx.globalCompositeOperation = e > 0.35 ? 'lighter' : 'source-over';
+  for (let k = 0; k < COUNT; k += stride) {
+    const i = idx[k];
+    ctx.globalAlpha = fA[i];
+    ctx.fillStyle = 'rgb(' + fR[i] + ',' + fG[i] + ',' + fB[i] + ')';
+    const r = sR[i], x = sX[i], y = sY[i];
+    if (r < 1.7) ctx.fillRect(x - r, y - r, r * 2, r * 2);
+    else { ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill(); }
+  }
+  ctx.globalAlpha = 1;
+
+  // Lingering orbiters with faint trails
+  if (s.orbA > 0.01) {
+    ctx.globalCompositeOperation = 'lighter';
+    for (let oi = 0; oi < orbiters.length; oi++) {
+      const o = orbiters[oi];
+      const a = o.ph + t * o.w;
+      const wx = o.R * Math.cos(a), wz = o.R * Math.sin(a) * 0.9;
+      const wy = 0.45 + Math.sin(a * 2 + o.yP) * o.yA * 0.5 + Math.sin(t * 0.9 + o.yP) * 0.12;
+      const oy = wy * cosT - wz * sinT, oz = wy * sinT + wz * cosT;
+      let op = CAMD / (CAMD - oz);
+      op = op > 2.2 ? 2.2 : op < 0.5 ? 0.5 : op;
+      const ox = cx + wx * S * op, oy2 = cy - oy * S * op;
+      o.trail.unshift([ox, oy2]);
+      if (o.trail.length > 16) o.trail.pop();
+      ctx.fillStyle = 'rgb(' + o.warm + ')';
+      for (let j = o.trail.length - 1; j >= 1; j--) {
+        const f = 1 - j / o.trail.length;
+        ctx.globalAlpha = s.orbA * 0.20 * f * f;
+        const tr = o.sz * f * 0.8 + 0.3;
+        const p = o.trail[j];
+        if (tr < 1.5) ctx.fillRect(p[0] - tr, p[1] - tr, tr * 2, tr * 2);
+        else { ctx.beginPath(); ctx.arc(p[0], p[1], tr, 0, TAU); ctx.fill(); }
+      }
+      ctx.globalAlpha = s.orbA * 0.10;
+      ctx.beginPath(); ctx.arc(ox, oy2, o.sz * 3.0, 0, TAU); ctx.fill();
+      ctx.globalAlpha = s.orbA * 0.9;
+      ctx.beginPath(); ctx.arc(ox, oy2, o.sz, 0, TAU); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+/* ---------------- loop ---------------- */
+let raf = 0, last = 0;
+function frame(now) {
+  raf = requestAnimationFrame(frame);
+  let dt = (now - last) / 1000;
+  last = now;
+  if (!(dt > 0)) return;
+  if (dt > 0.05) dt = 0.05;
+  emaDt += (dt - emaDt) * 0.05;
+  if (++frames % 60 === 0) {
+    if (emaDt > 0.031 && stride < 3) stride++;
+    else if (emaDt < 0.017 && stride > 1) stride--;
+  }
+  update(dt);
+  render();
+}
+function start() {
+  if (!raf) { last = performance.now(); raf = requestAnimationFrame(frame); }
+}
+function stop() {
+  if (raf) { cancelAnimationFrame(raf); raf = 0; }
+}
+
+/* ---------------- interaction ---------------- */
+function trigger() {
+  if (reduceMQ.matches) return;
+  if (state.mode === 'burst') return;
+  state.mode = 'burst';
+  state.burstT = 0;
+}
+stage.addEventListener('mouseenter', trigger);
+stage.addEventListener('pointerdown', trigger);
+canvas.addEventListener('keydown', ev => {
+  if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); trigger(); }
+});
+stage.addEventListener('pointermove', ev => {
+  const r = canvas.getBoundingClientRect();
+  state.mx = clamp(((ev.clientX - r.left) / r.width) * 2 - 1, -1, 1);
+  state.my = clamp(-(((ev.clientY - r.top) / r.height) * 2 - 1), -1, 1);
+});
+stage.addEventListener('pointerleave', () => { state.mx = 0; state.my = 0; });
+
+/* ---------------- reduced motion ---------------- */
+const LABEL_ANIMATED = 'A red fedora spinning slowly in a dark space. Activate to dissolve it into glowing embers that reform the hat.';
+const LABEL_STILL = 'A still red fedora floating in a dark space.';
+function renderStill() {
+  state.mode = 'idle';
+  state.e = 0;
+  resize();
+  render();
+}
+function onMotionPref() {
+  if (reduceMQ.matches) {
+    stop();
+    canvas.setAttribute('aria-label', LABEL_STILL);
+    renderStill();
+  } else {
+    canvas.setAttribute('aria-label', LABEL_ANIMATED);
+    resize();
+    start();
+  }
+}
+if (typeof reduceMQ.addEventListener === 'function') reduceMQ.addEventListener('change', onMotionPref);
+else if (typeof reduceMQ.addListener === 'function') reduceMQ.addListener(onMotionPref);
+window.addEventListener('resize', () => { resize(); if (reduceMQ.matches) render(); });
+
+/* ---------------- boot ---------------- */
+buildHat();
+if (reduceMQ.matches) {
+  canvas.setAttribute('aria-label', LABEL_STILL);
+  renderStill();
+} else {
+  resize();
+  start();
+}
+})();
+</script>
+</body>
+</html>
