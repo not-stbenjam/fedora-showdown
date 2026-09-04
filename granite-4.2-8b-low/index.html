@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Red Hat Fedora 3D</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  body, html {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #1a1a1a;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: #ddd;
+  }
+  .hero {
+    position: relative;
+    width: 100%;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 0 2rem;
+    text-align: center;
+    perspective: 800px;
+  }
+  .caption {
+    margin-top: 1rem;
+    font-size: 0.9rem;
+    color: #ccc;
+    max-width: 600px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hat, .particle {
+      animation: none;
+      transition: none;
+    }
+    .hat-spin {
+      animation: none;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="hero">
+  <div class="hat-container" id="hatContainer">
+    <div class="hat-spin" id="hatSpin"></div>
+  </div>
+  <div class="caption">Red Hat Fedora – subtle motion</div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  // Reduced motion check
+  const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (prefersReduced) {
+    document.querySelector('.hat-spin').style.animation = 'none';
+    return;
+  }
+
+  const container = document.getElementById('hatContainer');
+  const spinEl = document.getElementById('hatSpin');
+  const size = Math.min(window.innerWidth, window.innerHeight) * 0.3;
+  const radius = size * 0.4;
+
+  // Simple SVG hat (abstract fedora shape)
+  const svgNS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("width", size);
+  svg.setAttribute("height", size);
+  svg.setAttribute("viewBox", `0 0 ${size} ${size}`);
+  svg.setAttribute("style", "margin: auto;");
+
+  // Define path for fedora (simple cap)
+  const pathDef = `
+    <path d="M ${radius} 0 
+             c 0 -${radius*0.8} ${radius*0.8} -0.8 ${radius} 0 
+             c 0 ${radius*0.8} -0.8 ${radius*0.8} 0 
+             l -${radius*0.6} -${radius*0.6} 
+             l ${radius*0.6} -${radius*0.6} 
+             c 0 -${radius*0.8} ${radius*0.8} -0.8 ${radius} 0 
+             z" fill="#444" />
+    <path d="M ${radius - radius*0.3} ${radius*0.8} 
+             c 0.2 0.1 0.2 0.3 0 0.4 
+             c -0.1 0.1 -0.3 0 -0.4 0 
+             c -0.1 -0.1 -0.1 -0.3 0 -0.4 
+             c 0.1 -0.1 0.3 0 0.4 0 z" fill="#222" />
+  `;
+
+  svg.innerHTML = pathDef;
+  spinEl.appendChild(svg);
+
+  // Position hat at center
+  container.style.position = "relative";
+  container.style.transformStyle = "preserve-3d";
+  container.style.perspective = "800px";
+
+  // Initial rotation
+  let angle = 0;
+  let isHovering = false;
+  let particles = [];
+  let particleCount = 0;
+  let dissolveTimer = null;
+  let dissolveDelay = 0;
+  const dissolveDuration = 800;
+  const particleLife = 3000; // ms
+  const orbitDuration = 8000;
+
+  function animateHat() {
+    if (prefersReduced) return;
+    spinEl.style.transform = `rotateY(${angle}deg) rotateX(${angle/2}deg)`;
+    requestAnimationFrame(animateHat);
+  }
+  animateHat();
+
+  function spawnParticles(count) {
+    for (let i = 0; i < count; i++) {
+      const p = document.createElement('div');
+      p.className = 'particle';
+      // initial position around hat
+      const theta = Math.random() * 2 * Math.PI;
+      const r = radius * Math.random();
+      const x = radius + Math.cos(theta) * r;
+      const y = radius * Math.sin(theta) * r;
+      // small random upward
+      const z = Math.random() * radius * 0.5 - radius * 0.25;
+      p.style.left = `${x}px`;
+      p.style.top = `${y}px`;
+      p.style.transform = `translate3d(${x}px, ${y}px, ${z}px)`;
+      p.style.animation = `drift ${particleLife}ms linear infinite`;
+      p.style.pointerEvents = 'none';
+      p.style.userSelect = 'none';
+      p.style.zIndex = '10';
+      container.appendChild(p);
+      particles.push({el: p, x, y, z, lifeStart: Date.now()});
+    }
+  }
+
+  function orbitParticle(p) {
+    const {el, x, y, z} = p;
+    const orbitRadius = radius * 0.8;
+    const orbitSpeed = 0.005;
+    const orbitStart = Date.now();
+    el.style.animation = `orbit ${orbitDuration}ms linear infinite`;
+    // Already in drift animation
+  }
+
+  function startDissolve(callback) {
+    if (isHovering && particles.length === 0) {
+      // spawn ~200 particles
+      particleCount = 200;
+      spawnParticles(particleCount);
+      // start drifting animation via CSS (handled in style)
+      // trigger dissolve spin slowdown
+      angle = 0; // stop spinning
+      // linear dissolve over duration
+      dissolveTimer = setInterval(() => {
+        const elapsed = Date.now() - dissolveDelay;
+        const t = Math.min(elapsed / dissolveDuration, 1);
+        spinEl.style.transform = `rotateY(${angle}deg) rotateX(${angle/2}deg)`;
+      }, 100);
+      
+      // after dissolve, reform
+      setTimeout(() => {
+        clearInterval(dissolveTimer);
+        // fade out particles
+        particles.forEach(p => {
+          p.el.style.opacity = '0';
+        });
+        // reform after particles fade out
+        setTimeout(() => {
+          // reset hat to original angle (slow spin back)
+          angle = 0;
+          spinEl.style.transform = `rotateY(${angle}deg) rotateX(${angle/2}deg)`;
+          // restart normal spin
+          if (!prefersReduced) {
+            angle = 0;
+            requestAnimationFrame(animateHat);
+          }
+        }, 300);
+      }, dissolveDuration);
+    }
+  }
+
+  function cleanupParticles() {
+    particles = particles.filter(p => {
+      if (Date.now() - p.lifeStart < particleLife * 0.8) return true;
+      // remove element
+      p.el.remove();
+      return false;
+    });
+  }
+
+  // For simplicity, we use CSS animations for drift and orbit
+  // The JS only handles spawning and dissolve trigger
+  const style = document.querySelector('style');
+  // Dynamically inject particle style if not exists (we already have in style tag)
+  // but we need to ensure each particle gets proper opacity animation
+  // We'll set CSS in script
+  const particleStyle = document.createElement('style');
+  particleStyle.innerHTML = `
+    .particle {
+      position: absolute;
+      width: 4px; height: 4px;
+      background: radial-gradient(circle, #ff9800 0%, transparent 70%);
+      border-radius: 50%;
+      pointer-events: none;
+      opacity: 1;
+      animation: fadeout 3s ease-out forwards;
+    }
+    @keyframes drift {
+      from {
+        transform: translate3d(0,0,0) rotate(0deg);
+      }
+      to {
+        transform: translate3d(0,0,0) rotate(360deg);
+      }
+    }
+    @keyframes orbit {
+      from { transform: translate3d(0,0,0); }
+      to {
+        transform: translate3d(
+          ${radius * 0.8}px,
+          ${radius * 0.8} * Math.sin(0.01) px,
+          0
+        );
+      }
+    }
+    @keyframes fadeout {
+      to { opacity: 0; }
+    }
+  `;
+  document.head.appendChild(particleStyle);
+
+  // Hover/tap handling
+  container.addEventListener('mouseenter', (e) => {
+    if (e.target === container) {
+      isHovering = true;
+      startDissolve(() => {});
+    }
+  });
+  container.addEventListener('mouseleave', (e) => {
+    if (e.target === container) {
+      isHovering = false;
+    }
+  });
+  container.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (e.target === container) {
+      isHovering = true;
+      startDissolve(() => {});
+    }
+  });
+  container.addEventListener('touchend', (e) => {
+    if (e.target === container) {
+      isHovering = false;
+    }
+  });
+
+  // Resize handler
+  window.addEventListener('resize', () => {
+    size = Math.min(window.innerWidth, window.innerHeight) * 0.3;
+    radius = size * 0.4;
+    // reposition hat? simple: keep centered
+    // just ensure SVG size updated
+    const svg = spinEl.querySelector('svg');
+    if (svg) {
+      svg.setAttribute('width', size);
+      svg.setAttribute('height', size);
+    }
+  });
+});
+</script>
+</body>
+</html>
