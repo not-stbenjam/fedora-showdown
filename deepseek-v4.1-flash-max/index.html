@@ -1,0 +1,990 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark" />
+<title>Ember Fedora — a Red Hat in three dimensions</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    min-height: 100svh;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    color: #f6ebe9;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    background:
+      radial-gradient(130vmax 95vmax at 50% 36%, #2a1116 0%, #170a0e 34%, #0a0507 64%, #030203 100%);
+  }
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(120% 90% at 50% 42%, rgba(0,0,0,0) 52%, rgba(0,0,0,.6) 100%);
+  }
+  figure.scene {
+    position: relative;
+    z-index: 1;
+    margin: 0;
+    width: min(92vw, 64vh, 600px);
+    width: min(92vw, 64svh, 600px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: clamp(10px, 2.6vh, 32px);
+    gap: clamp(10px, 2.6svh, 32px);
+  }
+  .stage {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    outline: none;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+  .stage .halo,
+  .stage .floor,
+  .stage .shadow {
+    position: absolute;
+    pointer-events: none;
+    border-radius: 50%;
+  }
+  .stage .halo {
+    inset: 8% 8% 12%;
+    background: radial-gradient(circle at 50% 44%, rgba(238,0,0,.20), rgba(238,0,0,.06) 44%, rgba(238,0,0,0) 72%);
+    filter: blur(16px);
+  }
+  .stage .floor {
+    left: 50%;
+    bottom: 9%;
+    width: 88%;
+    height: 26%;
+    transform: translateX(-50%);
+    background: radial-gradient(ellipse at 50% 50%, rgba(255,96,64,.10), rgba(255,96,64,0) 70%);
+  }
+  .stage .shadow {
+    left: 50%;
+    bottom: 13%;
+    width: 52%;
+    height: 11%;
+    transform: translateX(-50%) scale(1);
+    opacity: 1;
+    background: radial-gradient(ellipse at 50% 50%, rgba(0,0,0,.95) 0%, rgba(0,0,0,.55) 48%, rgba(0,0,0,0) 74%);
+    filter: blur(7px);
+  }
+  canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  canvas:focus-visible {
+    outline: 2px solid rgba(255,96,76,.55);
+    outline-offset: 8px;
+    border-radius: 18px;
+  }
+  .fallback {
+    position: absolute;
+    inset: 14% 8% 18%;
+    width: 84%;
+    height: 68%;
+    display: none;
+    filter: drop-shadow(0 18px 26px rgba(0,0,0,.55)) drop-shadow(0 0 28px rgba(238,0,0,.22));
+  }
+  .no-webgl .fallback { display: block; }
+  .no-webgl canvas { display: none; }
+  .caption {
+    text-align: center;
+    line-height: 1.2;
+  }
+  .caption .mark {
+    display: block;
+    font-size: clamp(11px, 1.55vh, 14px);
+    font-size: clamp(11px, 1.55svh, 14px);
+    font-weight: 650;
+    letter-spacing: .46em;
+    text-indent: .46em;
+    text-transform: uppercase;
+    color: rgba(255,118,108,.95);
+    text-shadow: 0 0 18px rgba(238,0,0,.35);
+  }
+  .caption .hint {
+    display: block;
+    margin-top: .62em;
+    font-size: clamp(10px, 1.4vh, 12.5px);
+    font-size: clamp(10px, 1.4svh, 12.5px);
+    letter-spacing: .2em;
+    text-indent: .2em;
+    text-transform: uppercase;
+    color: rgba(246,235,233,.42);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .caption .hint { animation: hint 5s ease-in-out infinite; }
+    @keyframes hint { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+  }
+  .scene.engaged .caption .hint { animation: none; opacity: .4; }
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+</style>
+</head>
+<body>
+<main>
+  <figure class="scene" id="sceneWrap">
+    <div class="stage" id="stage" tabindex="0" role="img"
+         aria-label="A red fedora spinning slowly in 3D. Hover or tap to scatter it into glowing embers.">
+      <div class="halo" aria-hidden="true"></div>
+      <div class="floor" aria-hidden="true"></div>
+      <div class="shadow" id="shadow" aria-hidden="true"></div>
+      <canvas id="scene" aria-hidden="true"></canvas>
+      <svg class="fallback" viewBox="0 0 240 140" aria-hidden="true">
+        <defs>
+          <radialGradient id="fg" cx="50%" cy="26%" r="82%">
+            <stop offset="0%" stop-color="#ff4a37"/>
+            <stop offset="52%" stop-color="#cf1019"/>
+            <stop offset="100%" stop-color="#70060f"/>
+          </radialGradient>
+        </defs>
+        <ellipse cx="120" cy="92" rx="102" ry="20" fill="url(#fg)"/>
+        <path d="M78 92 C74 54 92 30 120 30 C148 30 166 54 162 92 Z" fill="url(#fg)"/>
+        <path d="M80 78 C96 89 144 89 160 78 L162 92 C144 101 96 101 78 92 Z" fill="#7d0812"/>
+        <path d="M85 43 C96 36 144 36 155 43 C144 50 96 50 85 43 Z" fill="#a6111c" opacity=".55"/>
+      </svg>
+    </div>
+    <figcaption class="caption">
+      <span class="mark">Red Hat</span>
+      <span class="hint">Hover or tap to scatter</span>
+    </figcaption>
+  </figure>
+  <p class="sr-only" id="status" aria-live="polite"></p>
+</main>
+<noscript>
+  <style>
+    .fallback { display: block !important; }
+    canvas { display: none !important; }
+  </style>
+</noscript>
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('scene');
+  var stage = document.getElementById('stage');
+  var sceneWrap = document.getElementById('sceneWrap');
+  var shadowEl = document.getElementById('shadow');
+  var statusEl = document.getElementById('status');
+
+  var reduceMQ = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  var reduced = !!(reduceMQ && reduceMQ.matches);
+
+  var gl = null;
+  try {
+    var glOpts = {
+      alpha: true, antialias: true, depth: true,
+      premultipliedAlpha: true, powerPreference: 'high-performance'
+    };
+    gl = canvas.getContext('webgl', glOpts) || canvas.getContext('experimental-webgl', glOpts);
+  } catch (err) { gl = null; }
+  if (!gl) {
+    document.documentElement.className += ' no-webgl';
+    return;
+  }
+
+  /* ------------------------------------------------------------------ math */
+
+  var FOV = 33 * Math.PI / 180;
+  var EYE = [0, 1.02, 5.75];
+  var CENTER = [0, 0.38, 0];
+  var TILT = 0.26;
+
+  var proj = new Float32Array(16);
+  var view = new Float32Array(16);
+  var model = new Float32Array(16);
+  var nrmMat = new Float32Array(9);
+  var pointScale = 1000;
+
+  function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
+  function smooth01(v) { v = clamp01(v); return v * v * (3 - 2 * v); }
+
+  function makePerspective(out, fov, aspect, near, far) {
+    var f = 1 / Math.tan(fov / 2);
+    var nf = 1 / (near - far);
+    out[0] = f / aspect; out[1] = 0; out[2] = 0; out[3] = 0;
+    out[4] = 0; out[5] = f; out[6] = 0; out[7] = 0;
+    out[8] = 0; out[9] = 0; out[10] = (far + near) * nf; out[11] = -1;
+    out[12] = 0; out[13] = 0; out[14] = 2 * far * near * nf; out[15] = 0;
+  }
+
+  function makeLookAt(out, e, c, u) {
+    var zx = e[0] - c[0], zy = e[1] - c[1], zz = e[2] - c[2];
+    var zl = Math.sqrt(zx * zx + zy * zy + zz * zz) || 1;
+    zx /= zl; zy /= zl; zz /= zl;
+    var xx = u[1] * zz - u[2] * zy;
+    var xy = u[2] * zx - u[0] * zz;
+    var xz = u[0] * zy - u[1] * zx;
+    var xl = Math.sqrt(xx * xx + xy * xy + xz * xz) || 1;
+    xx /= xl; xy /= xl; xz /= xl;
+    var yx = zy * xz - zz * xy;
+    var yy = zz * xx - zx * xz;
+    var yz = zx * xy - zy * xx;
+    out[0] = xx; out[1] = yx; out[2] = zx; out[3] = 0;
+    out[4] = xy; out[5] = yy; out[6] = zy; out[7] = 0;
+    out[8] = xz; out[9] = yz; out[10] = zz; out[11] = 0;
+    out[12] = -(xx * e[0] + xy * e[1] + xz * e[2]);
+    out[13] = -(yx * e[0] + yy * e[1] + yz * e[2]);
+    out[14] = -(zx * e[0] + zy * e[1] + zz * e[2]);
+    out[15] = 1;
+  }
+
+  function makeModel(out, spin, tilt) {
+    var cs = Math.cos(spin), ss = Math.sin(spin);
+    var ct = Math.cos(tilt), st = Math.sin(tilt);
+    /* RotX(tilt) * RotY(spin), column-major */
+    out[0] = cs;  out[1] = st * ss;  out[2] = -ct * ss; out[3] = 0;
+    out[4] = 0;   out[5] = ct;       out[6] = st;       out[7] = 0;
+    out[8] = ss;  out[9] = -st * cs; out[10] = ct * cs; out[11] = 0;
+    out[12] = 0;  out[13] = 0;       out[14] = 0;       out[15] = 1;
+  }
+
+  function modelNormal(out, m) {
+    out[0] = m[0]; out[1] = m[1]; out[2] = m[2];
+    out[3] = m[4]; out[4] = m[5]; out[5] = m[6];
+    out[6] = m[8]; out[7] = m[9]; out[8] = m[10];
+  }
+
+  /* ---------------------------------------------------------------- shaders */
+
+  var HAT_VS = [
+    'attribute vec3 aPos;',
+    'attribute vec3 aNor;',
+    'uniform mat4 uProj, uView, uModel;',
+    'uniform mat3 uNrm;',
+    'varying vec3 vN;',
+    'varying vec3 vW;',
+    'varying vec3 vL;',
+    'void main(){',
+    '  vec4 wp = uModel * vec4(aPos, 1.0);',
+    '  vW = wp.xyz;',
+    '  vL = aPos;',
+    '  vN = uNrm * aNor;',
+    '  gl_Position = uProj * uView * wp;',
+    '}'
+  ].join('\n');
+
+  var HAT_FS = [
+    'precision highp float;',
+    'varying vec3 vN;',
+    'varying vec3 vW;',
+    'varying vec3 vL;',
+    'uniform vec3 uCam;',
+    'uniform float uDissolve;',
+    'uniform float uGlow;',
+    'float hash13(vec3 p3){',
+    '  p3 = fract(p3 * 0.1031);',
+    '  p3 += dot(p3, p3.yzx + 33.33);',
+    '  return fract((p3.x + p3.y) * p3.z);',
+    '}',
+    'float vnoise(vec3 x){',
+    '  vec3 i = floor(x);',
+    '  vec3 f = fract(x);',
+    '  f = f * f * (3.0 - 2.0 * f);',
+    '  float a = hash13(i);',
+    '  float b = hash13(i + vec3(1.0, 0.0, 0.0));',
+    '  float c = hash13(i + vec3(0.0, 1.0, 0.0));',
+    '  float d = hash13(i + vec3(1.0, 1.0, 0.0));',
+    '  float e = hash13(i + vec3(0.0, 0.0, 1.0));',
+    '  float g = hash13(i + vec3(1.0, 0.0, 1.0));',
+    '  float h = hash13(i + vec3(0.0, 1.0, 1.0));',
+    '  float k = hash13(i + vec3(1.0, 1.0, 1.0));',
+    '  return mix(mix(mix(a, b, f.x), mix(c, d, f.x), f.y),',
+    '             mix(mix(e, g, f.x), mix(h, k, f.x), f.y), f.z);',
+    '}',
+    'void main(){',
+    '  vec3 N = normalize(vN);',
+    '  if (!gl_FrontFacing) N = -N;',
+    '  vec3 V = normalize(uCam - vW);',
+    '  vec3 L1 = normalize(vec3(-0.42, 0.88, 0.72));',
+    '  vec3 L2 = normalize(vec3(0.95, 0.10, 0.30));',
+    '  vec3 L3 = normalize(vec3(0.10, 0.42, -1.00));',
+    '  float lam = dot(N, L1) * 0.5 + 0.5;',
+    '  float diff = pow(clamp(lam, 0.0, 1.0), 1.4);',
+    '  float fill = max(dot(N, L2), 0.0);',
+    '  float rimL = max(dot(N, L3), 0.0);',
+    '  vec3 albedo = vec3(0.82, 0.012, 0.028);',
+    '  float band = smoothstep(0.008, 0.05, vL.y) * (1.0 - smoothstep(0.22, 0.31, vL.y));',
+    '  albedo = mix(albedo, vec3(0.21, 0.005, 0.012), band * 0.95);',
+    '  vec3 col = albedo * (0.22 + diff * 0.92 + fill * 0.22 + rimL * 0.10);',
+    '  vec3 H = normalize(L1 + V);',
+    '  col += vec3(1.0, 0.92, 0.86) * pow(max(dot(N, H), 0.0), 64.0) * 0.34;',
+    '  float fres = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 3.0);',
+    '  col += vec3(1.0, 0.28, 0.20) * fres * (0.22 + 0.5 * uGlow);',
+    '  float down = clamp(-N.y, 0.0, 1.0);',
+    '  col *= 1.0 - 0.42 * down * down;',
+    '  float th = 0.14 + 0.72 * vnoise(vL * 5.5 + 9.1);',
+    '  float cut = smoothstep(th, th + 0.05, uDissolve);',
+    '  if (cut > 0.985) discard;',
+    '  float active = sin(3.14159265 * clamp(uDissolve, 0.0, 1.0));',
+    '  float edge = exp(-abs(uDissolve - th) * 9.0) * active;',
+    '  col += vec3(1.0, 0.36, 0.14) * edge * 2.0;',
+    '  col = (col * (2.51 * col + 0.03)) / (col * (2.43 * col + 0.59) + 0.14);',
+    '  gl_FragColor = vec4(col * (1.0 - cut), 1.0 - cut);',
+    '}'
+  ].join('\n');
+
+  var SWARM_VS = [
+    'attribute vec3 aTarget;',
+    'attribute vec3 aNormal;',
+    'attribute vec3 aRand;',
+    'attribute vec3 aColor;',
+    'uniform mat4 uProj, uView, uModel;',
+    'uniform float uTime;',
+    'uniform float uRise;',
+    'uniform float uFall;',
+    'uniform float uSize;',
+    'uniform float uPointScale;',
+    'uniform float uOpacity;',
+    'varying vec3 vColor;',
+    'varying float vAlpha;',
+    'void main(){',
+    '  float delay = aRand.x * 0.22;',
+    '  float rise = smoothstep(delay, 0.72 + delay, uRise);',
+    '  float fall = smoothstep(delay, 0.66 + delay, uFall);',
+    '  float s = rise * (1.0 - fall);',
+    '  vec3 p = aTarget;',
+    '  vec3 outward = normalize(vec3(p.x, p.y * 0.4 + 0.22, p.z) + vec3(0.0001));',
+    '  p += outward * ((0.25 + 0.80 * aRand.y) * s);',
+    '  p += aNormal * (0.01 + 0.18 * s * aRand.z);',
+    '  p.y += s * (0.16 + 0.80 * aRand.y);',
+    '  float ang = s * (0.6 + 1.9 * aRand.z + 0.6 * sin(uTime * 0.55 + aRand.y * 6.2831853));',
+    '  float ca = cos(ang);',
+    '  float sa = sin(ang);',
+    '  float rx = ca * p.x - sa * p.z;',
+    '  float rz = sa * p.x + ca * p.z;',
+    '  p.x = rx; p.z = rz;',
+    '  p.x += s * 0.16 * sin(uTime * 1.31 + aRand.x * 21.0);',
+    '  p.y += s * 0.10 * sin(uTime * 1.73 + aRand.z * 17.0);',
+    '  p.z += s * 0.16 * cos(uTime * 1.13 + aRand.y * 19.0);',
+    '  vec4 wp = uModel * vec4(p, 1.0);',
+    '  vec4 vp = uView * wp;',
+    '  gl_Position = uProj * vp;',
+    '  float a = smoothstep(0.0, 0.10, s);',
+    '  vAlpha = a * (0.30 + 0.70 * aRand.z) * uOpacity;',
+    '  vColor = aColor;',
+    '  float size = uSize * (0.5 + 1.3 * aRand.z);',
+    '  gl_PointSize = clamp(size * uPointScale / max(0.001, -vp.z), 0.6, 40.0);',
+    '}'
+  ].join('\n');
+
+  var SPARK_VS = [
+    'attribute vec4 aOrbit;',
+    'attribute float aTrail;',
+    'attribute vec3 aTint;',
+    'uniform mat4 uProj, uView, uModel;',
+    'uniform float uTime;',
+    'uniform float uPointScale;',
+    'uniform float uSparkAlpha;',
+    'varying vec3 vColor;',
+    'varying float vAlpha;',
+    'void main(){',
+    '  float dir = aOrbit.w < 0.0 ? -1.0 : 1.0;',
+    '  float ang = aOrbit.z + uTime * aOrbit.w - dir * aTrail * 0.17;',
+    '  float ca = cos(ang);',
+    '  float sa = sin(ang);',
+    '  float y = aOrbit.y + 0.09 * sin(uTime * 1.2 + aOrbit.z * 2.7);',
+    '  vec3 p = vec3(aOrbit.x * ca, y, aOrbit.x * 0.68 * sa);',
+    '  vec4 wp = uModel * vec4(p, 1.0);',
+    '  vec4 vp = uView * wp;',
+    '  gl_Position = uProj * vp;',
+    '  float fade = pow(1.0 - aTrail, 2.2);',
+    '  vAlpha = uSparkAlpha * fade * 0.9;',
+    '  vColor = aTint;',
+    '  float size = 0.021 * (1.0 - 0.4 * aTrail);',
+    '  gl_PointSize = clamp(size * uPointScale / max(0.001, -vp.z), 0.6, 32.0);',
+    '}'
+  ].join('\n');
+
+  var PARTICLE_FS = [
+    'precision highp float;',
+    'varying vec3 vColor;',
+    'varying float vAlpha;',
+    'void main(){',
+    '  vec2 q = gl_PointCoord * 2.0 - 1.0;',
+    '  float r2 = dot(q, q);',
+    '  if (r2 > 1.0) discard;',
+    '  float fall = 1.0 - r2;',
+    '  float halo = pow(fall, 2.0);',
+    '  float core = pow(fall, 8.0);',
+    '  vec3 col = vColor * halo * 0.55 + mix(vColor, vec3(1.0, 0.95, 0.85), 0.75) * core * 1.6;',
+    '  float a = vAlpha * (0.4 + 0.6 * core);',
+    '  gl_FragColor = vec4(col * a, a);',
+    '}'
+  ].join('\n');
+
+  function compile(type, src) {
+    var sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+      if (window.console) { console.error(gl.getShaderInfoLog(sh)); }
+      return null;
+    }
+    return sh;
+  }
+
+  function link(vsSrc, fsSrc) {
+    var vs = compile(gl.VERTEX_SHADER, vsSrc);
+    var fs = compile(gl.FRAGMENT_SHADER, fsSrc);
+    if (!vs || !fs) { return null; }
+    var p = gl.createProgram();
+    gl.attachShader(p, vs);
+    gl.attachShader(p, fs);
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+      if (window.console) { console.error(gl.getProgramInfoLog(p)); }
+      return null;
+    }
+    return p;
+  }
+
+  function pickUniforms(prog, names) {
+    var out = {};
+    for (var i = 0; i < names.length; i++) { out[names[i]] = gl.getUniformLocation(prog, names[i]); }
+    return out;
+  }
+
+  function pickAttribs(prog, names) {
+    var out = {};
+    for (var i = 0; i < names.length; i++) { out[names[i]] = gl.getAttribLocation(prog, names[i]); }
+    return out;
+  }
+
+  var hatProg = link(HAT_VS, HAT_FS);
+  var swarmProg = link(SWARM_VS, PARTICLE_FS);
+  var sparkProg = link(SPARK_VS, PARTICLE_FS);
+
+  if (!hatProg || !swarmProg || !sparkProg) {
+    document.documentElement.className += ' no-webgl';
+    return;
+  }
+
+  var hatU = pickUniforms(hatProg, ['uProj', 'uView', 'uModel', 'uNrm', 'uCam', 'uDissolve', 'uGlow']);
+  var hatA = pickAttribs(hatProg, ['aPos', 'aNor']);
+  var swarmU = pickUniforms(swarmProg, ['uProj', 'uView', 'uModel', 'uTime', 'uRise', 'uFall', 'uSize', 'uPointScale', 'uOpacity']);
+  var swarmA = pickAttribs(swarmProg, ['aTarget', 'aNormal', 'aRand', 'aColor']);
+  var sparkU = pickUniforms(sparkProg, ['uProj', 'uView', 'uModel', 'uTime', 'uPointScale', 'uSparkAlpha']);
+  var sparkA = pickAttribs(sparkProg, ['aOrbit', 'aTrail', 'aTint']);
+
+  /* --------------------------------------------------------------- geometry */
+
+  var SEG = 96;
+  var PROF = 96;
+  var PARTICLE_COUNT = 5600;
+  var SPARKS = 20;
+  var TRAIL = 22;
+
+  var PROFILE = [
+    [0.000, 1.000], [0.105, 0.996], [0.215, 0.982], [0.325, 0.958],
+    [0.425, 0.920], [0.512, 0.866], [0.580, 0.792], [0.628, 0.702],
+    [0.654, 0.604], [0.665, 0.504], [0.668, 0.404], [0.668, 0.304],
+    [0.667, 0.210], [0.666, 0.130], [0.668, 0.066], [0.676, 0.022],
+    [0.706, -0.004], [0.772, -0.022], [0.868, -0.036], [0.972, -0.042],
+    [1.072, -0.036], [1.152, -0.012], [1.206, 0.028], [1.232, 0.070],
+    [1.238, 0.094], [1.212, 0.074], [1.158, 0.032], [1.086, -0.008],
+    [0.986, -0.030], [0.876, -0.042], [0.776, -0.042], [0.706, -0.032],
+    [0.646, -0.024], [0.530, -0.019], [0.410, -0.016], [0.285, -0.014],
+    [0.150, -0.012], [0.000, -0.012]
+  ];
+
+  function catmull(p0, p1, p2, p3, t) {
+    var t2 = t * t, t3 = t2 * t;
+    return 0.5 * (
+      2 * p1 +
+      (-p0 + p2) * t +
+      (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
+      (-p0 + 3 * p1 - 3 * p2 + p3) * t3
+    );
+  }
+
+  function sampleProfile(ctrl, count) {
+    var n = ctrl.length;
+    var segs = n - 1;
+    var out = [];
+    for (var i = 0; i < count; i++) {
+      var u = (i / (count - 1)) * segs;
+      var seg = Math.min(Math.floor(u), segs - 1);
+      var t = u - seg;
+      var p0 = ctrl[Math.max(0, seg - 1)];
+      var p1 = ctrl[seg];
+      var p2 = ctrl[seg + 1];
+      var p3 = ctrl[Math.min(n - 1, seg + 2)];
+      out.push([
+        catmull(p0[0], p1[0], p2[0], p3[0], t),
+        catmull(p0[1], p1[1], p2[1], p3[1], t)
+      ]);
+    }
+    return out;
+  }
+
+  function buildHat() {
+    var prof = sampleProfile(PROFILE, PROF);
+    var SX = 1.05, SZ = 0.97;
+    var P = [];
+    var i, j;
+
+    for (i = 0; i < SEG; i++) {
+      var th = (i / SEG) * Math.PI * 2;
+      var c = Math.cos(th), s = Math.sin(th);
+      var col = [];
+      for (j = 0; j < PROF; j++) {
+        var r = prof[j][0];
+        var y = prof[j][1];
+        var x = r * c * SX;
+        var z = r * s * SZ;
+        var tdent = smooth01((y - 0.45) / 0.45);
+        var dent = 0.115
+          * Math.exp(-(z * z) / (2 * 0.24 * 0.24))
+          * Math.exp(-(x * x) / (2 * 0.45 * 0.45))
+          * tdent;
+        y -= dent;
+        col.push([x, y, z]);
+      }
+      P.push(col);
+    }
+
+    var NRM = [];
+    for (i = 0; i < SEG; i++) {
+      var ncol = [];
+      for (j = 0; j < PROF; j++) {
+        var n;
+        if (j === 0) {
+          n = [0, 1, 0];
+        } else if (j === PROF - 1) {
+          n = [0, -1, 0];
+        } else {
+          var ip = (i + 1) % SEG;
+          var im = (i + SEG - 1) % SEG;
+          var pa = P[ip][j], pb = P[im][j], pc = P[i][j + 1], pd = P[i][j - 1];
+          var tix = pa[0] - pb[0], tiy = pa[1] - pb[1], tiz = pa[2] - pb[2];
+          var tjx = pc[0] - pd[0], tjy = pc[1] - pd[1], tjz = pc[2] - pd[2];
+          var nx = tiy * tjz - tiz * tjy;
+          var ny = tiz * tjx - tix * tjz;
+          var nz = tix * tjy - tiy * tjx;
+          var nl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+          n = [nx / nl, ny / nl, nz / nl];
+        }
+        ncol.push(n);
+      }
+      NRM.push(ncol);
+    }
+
+    var positions = new Float32Array(SEG * PROF * 3);
+    var normals = new Float32Array(SEG * PROF * 3);
+    for (i = 0; i < SEG; i++) {
+      for (j = 0; j < PROF; j++) {
+        var vi = (i * PROF + j) * 3;
+        positions[vi] = P[i][j][0];
+        positions[vi + 1] = P[i][j][1];
+        positions[vi + 2] = P[i][j][2];
+        normals[vi] = NRM[i][j][0];
+        normals[vi + 1] = NRM[i][j][1];
+        normals[vi + 2] = NRM[i][j][2];
+      }
+    }
+
+    var indices = new Uint16Array(SEG * (PROF - 1) * 6);
+    var k = 0;
+    for (i = 0; i < SEG; i++) {
+      var i2 = (i + 1) % SEG;
+      for (j = 0; j < PROF - 1; j++) {
+        var a = i * PROF + j;
+        var b = i2 * PROF + j;
+        var c2 = i2 * PROF + j + 1;
+        var d = i * PROF + j + 1;
+        indices[k++] = a; indices[k++] = b; indices[k++] = c2;
+        indices[k++] = a; indices[k++] = c2; indices[k++] = d;
+      }
+    }
+
+    return { positions: positions, normals: normals, indices: indices };
+  }
+
+  function buildParticles(mesh, count) {
+    var pos = mesh.positions, nor = mesh.normals, idx = mesh.indices;
+    var triCount = idx.length / 3;
+    var cum = new Float64Array(triCount);
+    var total = 0;
+    var t, i0, i1, i2;
+    var ax, ay, az, bx, by, bz;
+    for (t = 0; t < triCount; t++) {
+      i0 = idx[t * 3] * 3;
+      i1 = idx[t * 3 + 1] * 3;
+      i2 = idx[t * 3 + 2] * 3;
+      ax = pos[i1] - pos[i0]; ay = pos[i1 + 1] - pos[i0 + 1]; az = pos[i1 + 2] - pos[i0 + 2];
+      bx = pos[i2] - pos[i0]; by = pos[i2 + 1] - pos[i0 + 1]; bz = pos[i2 + 2] - pos[i0 + 2];
+      var cx = ay * bz - az * by;
+      var cy = az * bx - ax * bz;
+      var cz = ax * by - ay * bx;
+      total += 0.5 * Math.sqrt(cx * cx + cy * cy + cz * cz);
+      cum[t] = total;
+    }
+    if (total <= 0) { total = 1; }
+
+    var data = new Float32Array(count * 12);
+    for (var p = 0; p < count; p++) {
+      var r = Math.random() * total;
+      var lo = 0, hi = triCount - 1;
+      while (lo < hi) {
+        var mid = (lo + hi) >> 1;
+        if (cum[mid] < r) { lo = mid + 1; } else { hi = mid; }
+      }
+      t = lo;
+      i0 = idx[t * 3];
+      i1 = idx[t * 3 + 1];
+      i2 = idx[t * 3 + 2];
+      var u = Math.random();
+      var v = Math.random();
+      if (u + v > 1) { u = 1 - u; v = 1 - v; }
+      var w = 1 - u - v;
+      var o = p * 12;
+
+      data[o] = w * pos[i0 * 3] + u * pos[i1 * 3] + v * pos[i2 * 3];
+      data[o + 1] = w * pos[i0 * 3 + 1] + u * pos[i1 * 3 + 1] + v * pos[i2 * 3 + 1];
+      data[o + 2] = w * pos[i0 * 3 + 2] + u * pos[i1 * 3 + 2] + v * pos[i2 * 3 + 2];
+
+      var nx = w * nor[i0 * 3] + u * nor[i1 * 3] + v * nor[i2 * 3];
+      var ny = w * nor[i0 * 3 + 1] + u * nor[i1 * 3 + 1] + v * nor[i2 * 3 + 1];
+      var nz = w * nor[i0 * 3 + 2] + u * nor[i1 * 3 + 2] + v * nor[i2 * 3 + 2];
+      var nl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+      data[o + 3] = nx / nl;
+      data[o + 4] = ny / nl;
+      data[o + 5] = nz / nl;
+
+      data[o + 6] = Math.random();
+      data[o + 7] = Math.random();
+      data[o + 8] = Math.random();
+
+      var pick = Math.random();
+      var cr, cg, cb;
+      if (pick < 0.05) { cr = 1.0; cg = 0.85; cb = 0.60; }
+      else if (pick < 0.32) { cr = 1.0; cg = 0.42; cb = 0.16; }
+      else { cr = 1.0; cg = 0.13; cb = 0.06; }
+      var lum = 0.65 + Math.random() * 0.5;
+      data[o + 9] = cr * lum;
+      data[o + 10] = cg * lum;
+      data[o + 11] = cb * lum;
+    }
+    return data;
+  }
+
+  function buildSparks() {
+    var data = new Float32Array(SPARKS * TRAIL * 8);
+    var o = 0;
+    for (var s = 0; s < SPARKS; s++) {
+      var rad = 1.35 + Math.random() * 0.55;
+      var y = 0.12 + Math.random() * 0.85;
+      var phase = Math.random() * Math.PI * 2;
+      var speed = (0.18 + Math.random() * 0.30) * (Math.random() < 0.32 ? -1 : 1);
+      var hot = Math.random();
+      var cr, cg, cb;
+      if (hot < 0.18) { cr = 1.0; cg = 0.86; cb = 0.62; }
+      else if (hot < 0.60) { cr = 1.0; cg = 0.44; cb = 0.18; }
+      else { cr = 1.0; cg = 0.16; cb = 0.08; }
+      for (var t = 0; t < TRAIL; t++) {
+        data[o++] = rad;
+        data[o++] = y;
+        data[o++] = phase;
+        data[o++] = speed;
+        data[o++] = TRAIL > 1 ? t / (TRAIL - 1) : 0;
+        data[o++] = cr;
+        data[o++] = cg;
+        data[o++] = cb;
+      }
+    }
+    return data;
+  }
+
+  function makeBuffer(target, data, usage) {
+    var b = gl.createBuffer();
+    gl.bindBuffer(target, b);
+    gl.bufferData(target, data, usage || gl.STATIC_DRAW);
+    return b;
+  }
+
+  var hatGeo = buildHat();
+  var hatPosBuf = makeBuffer(gl.ARRAY_BUFFER, hatGeo.positions);
+  var hatNorBuf = makeBuffer(gl.ARRAY_BUFFER, hatGeo.normals);
+  var hatIdxBuf = makeBuffer(gl.ELEMENT_ARRAY_BUFFER, hatGeo.indices);
+  var hatIndexCount = hatGeo.indices.length;
+
+  var swarmData = buildParticles(hatGeo, PARTICLE_COUNT);
+  var swarmBuf = makeBuffer(gl.ARRAY_BUFFER, swarmData);
+
+  var sparkData = buildSparks();
+  var sparkBuf = makeBuffer(gl.ARRAY_BUFFER, sparkData);
+  var sparkPointCount = SPARKS * TRAIL;
+
+  function attrib(loc, size, stride, offset) {
+    if (loc < 0) { return; }
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, size, gl.FLOAT, false, stride, offset);
+  }
+
+  function bindHatBuffers() {
+    gl.bindBuffer(gl.ARRAY_BUFFER, hatPosBuf);
+    attrib(hatA.aPos, 3, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, hatNorBuf);
+    attrib(hatA.aNor, 3, 0, 0);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, hatIdxBuf);
+  }
+
+  function bindSwarmBuffers() {
+    gl.bindBuffer(gl.ARRAY_BUFFER, swarmBuf);
+    var stride = 48;
+    attrib(swarmA.aTarget, 3, stride, 0);
+    attrib(swarmA.aNormal, 3, stride, 12);
+    attrib(swarmA.aRand, 3, stride, 24);
+    attrib(swarmA.aColor, 3, stride, 36);
+  }
+
+  function bindSparkBuffers() {
+    gl.bindBuffer(gl.ARRAY_BUFFER, sparkBuf);
+    var stride = 32;
+    attrib(sparkA.aOrbit, 4, stride, 0);
+    attrib(sparkA.aTrail, 1, stride, 16);
+    attrib(sparkA.aTint, 3, stride, 20);
+  }
+
+  /* ------------------------------------------------------------- simulation */
+
+  var BASE_SPIN = 0.44;
+  var SLOW_SPIN = 0.085;
+  var SEQ_TOTAL = 4.8;
+
+  var elapsed = 0;
+  var spin = 0;
+  var spinVel = reduced ? 0 : BASE_SPIN;
+  var running = false;
+  var seqT = 0;
+  var hasShown = false;
+  var hovering = false;
+  var pressing = false;
+  var emphasis = 0;
+  var sparkAlpha = 0;
+  var rise = 0;
+  var fall = 0;
+  var dissolve = 0;
+
+  function trigger() {
+    if (reduced || running) { return; }
+    running = true;
+    seqT = 0;
+    hasShown = true;
+    sceneWrap.className = 'scene engaged';
+    if (statusEl) { statusEl.textContent = 'The fedora dissolves into glowing embers.'; }
+  }
+
+  function update(dt) {
+    elapsed += dt;
+
+    var targetSpin = running ? SLOW_SPIN : (reduced ? 0 : BASE_SPIN);
+    var kSpin = 1 - Math.exp(-dt * (running ? 3.2 : 1.6));
+    spinVel += (targetSpin - spinVel) * kSpin;
+    spin += spinVel * dt;
+
+    var targetEmph = (hovering || pressing) ? 1 : 0;
+    emphasis += (targetEmph - emphasis) * (1 - Math.exp(-dt * 5));
+
+    rise = 0; fall = 0; dissolve = 0;
+    if (running) {
+      seqT += dt;
+      var p = Math.min(1, seqT / SEQ_TOTAL);
+      rise = smooth01((p - 0.02) / 0.32);
+      fall = smooth01((p - 0.60) / 0.36);
+      var up = smooth01((p - 0.005) / 0.27);
+      var down = smooth01((p - 0.64) / 0.27);
+      dissolve = up * (1 - down);
+      if (p >= 1) {
+        running = false;
+        if (statusEl) { statusEl.textContent = 'The fedora reassembles; a few embers keep circling.'; }
+      }
+    }
+
+    var targetSpark = (!running && hasShown && !reduced) ? 1 : 0;
+    sparkAlpha += (targetSpark - sparkAlpha) * (1 - Math.exp(-dt * 1.4));
+
+    if (shadowEl) {
+      var so = 1 - dissolve * 0.92;
+      var ss = 1 - dissolve * 0.28;
+      shadowEl.style.opacity = so.toFixed(3);
+      shadowEl.style.transform = 'translateX(-50%) scale(' + ss.toFixed(3) + ')';
+    }
+  }
+
+  /* ----------------------------------------------------------------- render */
+
+  function resize() {
+    var dpr = Math.min(2, window.devicePixelRatio || 1);
+    var w = Math.max(1, Math.round((canvas.clientWidth || 1) * dpr));
+    var h = Math.max(1, Math.round((canvas.clientHeight || 1) * dpr));
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+    makePerspective(proj, FOV, w / h, 0.1, 40);
+    pointScale = h / (2 * Math.tan(FOV / 2));
+  }
+
+  function render() {
+    resize();
+
+    makeModel(model, spin, TILT);
+    modelNormal(nrmMat, model);
+
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
+    gl.disable(gl.CULL_FACE);
+    gl.clearColor(0, 0, 0, 0);
+    gl.depthMask(true);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    /* fedora */
+    if (dissolve < 0.999) {
+      gl.useProgram(hatProg);
+      gl.uniformMatrix4fv(hatU.uProj, false, proj);
+      gl.uniformMatrix4fv(hatU.uView, false, view);
+      gl.uniformMatrix4fv(hatU.uModel, false, model);
+      gl.uniformMatrix3fv(hatU.uNrm, false, nrmMat);
+      gl.uniform3f(hatU.uCam, EYE[0], EYE[1], EYE[2]);
+      gl.uniform1f(hatU.uDissolve, dissolve);
+      gl.uniform1f(hatU.uGlow, emphasis);
+      gl.enable(gl.BLEND);
+      gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      bindHatBuffers();
+      gl.drawElements(gl.TRIANGLES, hatIndexCount, gl.UNSIGNED_SHORT, 0);
+    }
+
+    /* ember swarm */
+    if (!reduced && (rise > 0.001 || fall > 0.001)) {
+      gl.useProgram(swarmProg);
+      gl.uniformMatrix4fv(swarmU.uProj, false, proj);
+      gl.uniformMatrix4fv(swarmU.uView, false, view);
+      gl.uniformMatrix4fv(swarmU.uModel, false, model);
+      gl.uniform1f(swarmU.uTime, elapsed);
+      gl.uniform1f(swarmU.uRise, rise);
+      gl.uniform1f(swarmU.uFall, fall);
+      gl.uniform1f(swarmU.uSize, 0.0125);
+      gl.uniform1f(swarmU.uPointScale, pointScale);
+      gl.uniform1f(swarmU.uOpacity, 1);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE);
+      gl.depthMask(false);
+      bindSwarmBuffers();
+      gl.drawArrays(gl.POINTS, 0, PARTICLE_COUNT);
+    }
+
+    /* lingering orbiters */
+    if (!reduced && sparkAlpha > 0.004) {
+      gl.useProgram(sparkProg);
+      gl.uniformMatrix4fv(sparkU.uProj, false, proj);
+      gl.uniformMatrix4fv(sparkU.uView, false, view);
+      gl.uniformMatrix4fv(sparkU.uModel, false, model);
+      gl.uniform1f(sparkU.uTime, elapsed);
+      gl.uniform1f(sparkU.uPointScale, pointScale);
+      gl.uniform1f(sparkU.uSparkAlpha, sparkAlpha);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE);
+      gl.depthMask(false);
+      bindSparkBuffers();
+      gl.drawArrays(gl.POINTS, 0, sparkPointCount);
+    }
+
+    gl.depthMask(true);
+  }
+
+  /* ------------------------------------------------------------------ input */
+
+  function onEnter(e) {
+    if (e && e.pointerType === 'touch') { return; }
+    hovering = true;
+    trigger();
+  }
+  function onLeave() { hovering = false; }
+  function onDown() { pressing = true; trigger(); }
+  function onUp() { pressing = false; }
+  function onKey(e) {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+      e.preventDefault();
+      trigger();
+    }
+  }
+
+  stage.addEventListener('pointerenter', onEnter);
+  stage.addEventListener('pointerleave', onLeave);
+  stage.addEventListener('pointerdown', onDown);
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('pointercancel', onUp);
+  stage.addEventListener('keydown', onKey);
+
+  if (reduceMQ) {
+    var onReduceChange = function (e) {
+      reduced = !!e.matches;
+      if (reduced) {
+        running = false;
+        seqT = 0;
+        rise = 0; fall = 0; dissolve = 0;
+      }
+    };
+    if (reduceMQ.addEventListener) { reduceMQ.addEventListener('change', onReduceChange); }
+    else if (reduceMQ.addListener) { reduceMQ.addListener(onReduceChange); }
+  }
+
+  /* ------------------------------------------------------------------- boot */
+
+  makeLookAt(view, EYE, CENTER, [0, 1, 0]);
+  resize();
+
+  if (window.ResizeObserver) {
+    new ResizeObserver(resize).observe(canvas);
+  } else {
+    window.addEventListener('resize', resize);
+  }
+  window.addEventListener('resize', resize);
+
+  canvas.addEventListener('webglcontextlost', function (e) { e.preventDefault(); }, false);
+
+  var last = (window.performance && performance.now) ? performance.now() : Date.now();
+
+  function tick(now) {
+    requestAnimationFrame(tick);
+    if (typeof now !== 'number') {
+      now = (window.performance && performance.now) ? performance.now() : Date.now();
+    }
+    var dt = (now - last) / 1000;
+    last = now;
+    if (!(dt > 0)) { dt = 0.016; }
+    if (dt > 0.05) { dt = 0.05; }
+    update(dt);
+    render();
+  }
+
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
