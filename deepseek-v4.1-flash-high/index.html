@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Red Hat — Fedora</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;
+    background:#040406;
+    overflow:hidden;
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+    user-select:none;
+    -webkit-user-select:none;
+    -webkit-tap-highlight-color:transparent;
+  }
+  #scene{
+    position:fixed; inset:0; display:block;
+    width:100%; height:100%;
+  }
+  .vignette{
+    position:fixed; inset:0; pointer-events:none;
+    background:radial-gradient(125% 95% at 50% 40%, rgba(0,0,0,0) 38%, rgba(0,0,0,.42) 78%, rgba(0,0,0,.72) 100%);
+  }
+  .ui{
+    position:fixed; inset:0; pointer-events:none;
+    display:flex; flex-direction:column; align-items:center; justify-content:flex-end;
+    padding:0 6vw max(26px, 7vh);
+  }
+  .caption{
+    display:flex; flex-direction:column; align-items:center; gap:7px;
+    text-align:center;
+  }
+  .name{
+    font-size:clamp(10px,1.45vw,13px);
+    letter-spacing:.54em;
+    text-indent:.54em;
+    font-weight:600;
+    color:rgba(255,255,255,.93);
+    text-shadow:0 0 22px rgba(255,40,30,.28);
+  }
+  .hint{
+    font-size:clamp(9px,1.15vw,11.5px);
+    letter-spacing:.17em;
+    color:rgba(255,255,255,.32);
+    transition:color .5s ease;
+  }
+  @media (prefers-reduced-motion: reduce){ .hint{ transition:none; } }
+</style>
+</head>
+<body>
+<canvas id="scene" aria-hidden="true"></canvas>
+<div class="vignette" aria-hidden="true"></div>
+<div class="ui">
+  <div class="caption">
+    <div class="name">RED HAT</div>
+    <div class="hint">hover or tap to scatter</div>
+  </div>
+</div>
+
+<script>
+(function(){
+'use strict';
+
+var canvas = document.getElementById('scene');
+var ctx = canvas.getContext('2d', { alpha:false });
+var trail = document.createElement('canvas');
+var tctx = trail.getContext('2d');
+var hintEl = document.querySelector('.hint');
+
+var mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+var reduced = mq.matches;
+
+/* ---------- configuration ---------- */
+var BASE_SPEED = 0.52;      // rad / s
+var SLOW_SPEED = 0.10;
+var TILT       = 0.30;      // radians, camera looks slightly down
+var CAM        = 10.5;      // perspective strength
+var YOFF       = 0.72;      // recentre hat vertically
+var SEQ_DUR    = 4.30;      // seconds for the whole dissolve / reform
+
+var RB     = 0.94;          // crown base radius
+var RT     = 0.66;          // crown top radius
+var HWALL  = 1.02;          // crown wall height
+var HCAP   = 0.55;          // crown cap height
+var BRIM   = 2.02;          // brim outer radius
+var BRIM_T = 0.05;          // brim thickness
+var DIMPLE = 0.24;          // soft dent in the crown
+
+/* ---------- state ---------- */
+var W = 0, Hh = 0, DPR = 1, ppw = 95, cx = 0, cy = 0;
+var bgGrad = null;
+var shadowSprite = null, glowSprite = null;
+var shadowW = 0, shadowH = 0, shadowY = 0, glowW = 0, glowH = 0, glowY = 0;
+
+var N = 0;
+var HX, HY, HZ, NX, NY, NZ;
+var DLY, SDX, SDY, SDZ, SDIST, SWS, RDL, WAMP, WF, WPH, SZ, BRT;
+
+var ORB = 44;
+var oAng, oRad, oSpd, oY, oYw, oPh, oWob, oSp2, oSX, oSY, oSS;
+var orbAppear = 0;
+
+var spin = -0.40, spinSpeed = BASE_SPEED;
+var hover = false, seqActive = false, seqT = 0, orbEmerge = false;
+var running = false, rafId = 0, lastT = 0;
+
+/* ---------- palette sprites ---------- */
+var PAL_N = 26;
+var sprites = [];
+var RAMP = [
+  [30, 4, 7],
+  [92, 9, 13],
+  [172, 15, 19],
+  [216, 18, 22],
+  [255, 66, 42],
+  [255, 208, 170]
+];
+
+var LX, LY, LZ, HLX, HLY, HLZ;
+
+/* ---------- helpers ---------- */
+function clamp(v, a, b){ return v < a ? a : (v > b ? b : v); }
+function smoothstep(t){ t = clamp(t, 0, 1); return t * t * (3 - 2 * t); }
+function rnd(a, b){ return a + Math.random() * (b - a); }
+
+function rampColor(u){
+  u = clamp(u, 0, 1);
+  var seg = u * (RAMP.length - 1);
+  var i = Math.min(RAMP.length - 2, Math.floor(seg));
+  var f = seg - i;
+  var a = RAMP[i], b = RAMP[i + 1];
+  return [
+    Math.round(a[0] + (b[0] - a[0]) * f),
+    Math.round(a[1] + (b[1] - a[1]) * f),
+    Math.round(a[2] + (b[2] - a[2]) * f)
+  ];
+}
+
+function makeSprites(){
+  sprites = [];
+  for (var i = 0; i < PAL_N; i++){
+    var c = rampColor(i / (PAL_N - 1));
+    var s = 64;
+    var cv = document.createElement('canvas');
+    cv.width = cv.height = s;
+    var g = cv.getContext('2d');
+    var grd = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+    var col = 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',';
+    grd.addColorStop(0.00, col + '1)');
+    grd.addColorStop(0.16, col + '0.74)');
+    grd.addColorStop(0.40, col + '0.28)');
+    grd.addColorStop(0.68, col + '0.075)');
+    grd.addColorStop(1.00, col + '0)');
+    g.fillStyle = grd;
+    g.fillRect(0, 0, s, s);
+    sprites.push(cv);
+  }
+}
+
+function makeShadowSprite(){
+  var s = 256, cv = document.createElement('canvas');
+  cv.width = cv.height = s;
+  var g = cv.getContext('2d');
+  var grd = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+  grd.addColorStop(0.00, 'rgba(0,0,0,0.66)');
+  grd.addColorStop(0.42, 'rgba(0,0,0,0.38)');
+  grd.addColorStop(0.74, 'rgba(0,0,0,0.10)');
+  grd.addColorStop(1.00, 'rgba(0,0,0,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, s, s);
+  return cv;
+}
+
+function makeGlowSprite(){
+  var s = 256, cv = document.createElement('canvas');
+  cv.width = cv.height = s;
+  var g = cv.getContext('2d');
+  var grd = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+  grd.addColorStop(0.00, 'rgba(196,18,22,0.155)');
+  grd.addColorStop(0.40, 'rgba(150,10,14,0.075)');
+  grd.addColorStop(0.72, 'rgba(90,6,10,0.022)');
+  grd.addColorStop(1.00, 'rgba(0,0,0,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, s, s);
+  return cv;
+}
+
+/* ---------- geometry ---------- */
+function crownWall(th, t){
+  var s = smoothstep(t);
+  var r = RB + (RT - RB) * s;
+  return [r * Math.cos(th), HWALL * t, r * Math.sin(th)];
+}
+function crownCap(th, phi){
+  var c = Math.cos(phi);
+  var r = RT * c;
+  var y = HWALL + HCAP * Math.sin(phi) - DIMPLE * (1 - c * c);
+  return [r * Math.cos(th), y, r * Math.sin(th)];
+}
+function brimTop(th, r){
+  var u = (r - RB) / (BRIM - RB);
+  var y = u * u * (0.16 - 0.20 * Math.cos(2 * th));
+  return [r * Math.cos(th), y, r * Math.sin(th)];
+}
+function brimBot(th, r){
+  var p = brimTop(th, r);
+  return [p[0], p[1] - BRIM_T, p[2]];
+}
+function brimRim(th, s){
+  var y = (0.16 - 0.20 * Math.cos(2 * th)) - BRIM_T * s;
+  return [BRIM * Math.cos(th), y, BRIM * Math.sin(th)];
+}
+
+function normalOf(f, u, v, hint){
+  var e = 1e-3;
+  var p = f(u, v);
+  var pu = f(u + e, v);
+  var pv = f(u, v + e);
+  var ax = pu[0] - p[0], ay = pu[1] - p[1], az = pu[2] - p[2];
+  var bx = pv[0] - p[0], by = pv[1] - p[1], bz = pv[2] - p[2];
+  var nx = ay * bz - az * by;
+  var ny = az * bx - ax * bz;
+  var nz = ax * by - ay * bx;
+  var l = Math.sqrt(nx * nx + ny * ny + nz * nz);
+  if (l < 1e-9){ nx = 0; ny = 1; nz = 0; l = 1; }
+  nx /= l; ny /= l; nz /= l;
+  var h = hint(p[0], p[1], p[2]);
+  if (nx * h[0] + ny * h[1] + nz * h[2] < 0){ nx = -nx; ny = -ny; nz = -nz; }
+  return [nx, ny, nz];
+}
+
+function radialHint(x, y, z){ return [x, 0, z]; }
+function upHint(x, y, z){ return [0, 1, 0]; }
+function downHint(x, y, z){ return [0, -1, 0]; }
+
+function buildGeometry(){
+  var area = W * Hh;
+  var total = reduced
+    ? 2800
+    : Math.round(clamp(area / 265, 1500, 5200));
+
+  var nWall = Math.round(total * 0.38);
+  var nCap  = Math.round(total * 0.15);
+  var nTop  = Math.round(total * 0.30);
+  var nBot  = Math.round(total * 0.12);
+  var nRim  = Math.max(50, total - nWall - nCap - nTop - nBot);
+
+  N = nWall + nCap + nTop + nBot + nRim;
+
+  HX    = new Float32Array(N); HY  = new Float32Array(N); HZ   = new Float32Array(N);
+  NX    = new Float32Array(N); NY  = new Float32Array(N); NZ   = new Float32Array(N);
+  DLY   = new Float32Array(N); SDX = new Float32Array(N); SDY  = new Float32Array(N);
+  SDZ   = new Float32Array(N); SDIST = new Float32Array(N); SWS = new Float32Array(N);
+  RDL   = new Float32Array(N); WAMP = new Float32Array(N); WF  = new Float32Array(N);
+  WPH   = new Float32Array(N); SZ  = new Float32Array(N); BRT  = new Float32Array(N);
+
+  var i = 0;
+  function put(x, y, z, nx, ny, nz){
+    HX[i] = x; HY[i] = y; HZ[i] = z;
+    NX[i] = nx; NY[i] = ny; NZ[i] = nz;
+
+    DLY[i]   = rnd(0, 0.50);
+    SDIST[i] = rnd(0.35, 2.15);
+    SWS[i]   = rnd(0.55, 1.95) * (Math.random() < 0.5 ? -1 : 1);
+    RDL[i]   = rnd(0, 0.60);
+    WAMP[i]  = rnd(0.05, 0.35);
+    WF[i]    = rnd(0.50, 1.70);
+    WPH[i]   = Math.random() * Math.PI * 2;
+    SZ[i]    = rnd(0.70, 1.35);
+    BRT[i]   = rnd(0.85, 1.15);
+
+    var dx = x, dy = y - 0.55, dz = z;
+    var l = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+    dx /= l; dy /= l; dz /= l;
+    dx += rnd(-0.75, 0.75);
+    dy += rnd(-0.45, 0.95);
+    dz += rnd(-0.75, 0.75);
+    l = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+    SDX[i] = dx / l; SDY[i] = dy / l; SDZ[i] = dz / l;
+    i++;
+  }
+
+  var k, th, p, n;
+
+  for (k = 0; k < nWall; k++){
+    th = Math.random() * Math.PI * 2;
+    var t = Math.pow(Math.random(), 1.10);
+    p = crownWall(th, t);
+    n = normalOf(crownWall, th, t, radialHint);
+    put(p[0], p[1], p[2], n[0], n[1], n[2]);
+  }
+
+  for (k = 0; k < nCap; k++){
+    th = Math.random() * Math.PI * 2;
+    var phi = Math.min(Math.PI / 2 - 0.035, (Math.PI / 2) * Math.pow(Math.random(), 0.72));
+    p = crownCap(th, phi);
+    n = normalOf(crownCap, th, phi, upHint);
+    put(p[0], p[1], p[2], n[0], n[1], n[2]);
+  }
+
+  for (k = 0; k < nTop; k++){
+    th = Math.random() * Math.PI * 2;
+    var uTop = Math.random();
+    var rTop = Math.sqrt(RB * RB + uTop * (BRIM * BRIM - RB * RB));
+    p = brimTop(th, rTop);
+    n = normalOf(brimTop, th, rTop, upHint);
+    put(p[0], p[1], p[2], n[0], n[1], n[2]);
+  }
+
+  for (k = 0; k < nBot; k++){
+    th = Math.random() * Math.PI * 2;
+    var uBot = Math.random();
+    var rBot = Math.sqrt(RB * RB + uBot * (BRIM * BRIM - RB * RB));
+    p = brimBot(th, rBot);
+    n = normalOf(brimBot, th, rBot, downHint);
+    put(p[0], p[1], p[2], n[0], n[1], n[2]);
+  }
+
+  for (k = 0; k < nRim; k++){
+    th = Math.random() * Math.PI * 2;
+    var sRim = Math.random();
+    p = brimRim(th, sRim);
+    n = normalOf(brimRim, th, sRim, radialHint);
+    put(p[0], p[1], p[2], n[0], n[1], n[2]);
+  }
+}
+
+function buildOrbiters(){
+  oAng = new Float32Array(ORB); oRad = new Float32Array(ORB);
+  oSpd = new Float32Array(ORB); oY   = new Float32Array(ORB);
+  oYw  = new Float32Array(ORB); oPh  = new Float32Array(ORB);
+  oWob = new Float32Array(ORB); oSp2 = new Float32Array(ORB);
+  oSX  = new Float32Array(ORB); oSY  = new Float32Array(ORB);
+  oSS  = new Float32Array(ORB);
+  for (var k = 0; k < ORB; k++){
+    oAng[k] = Math.random() * Math.PI * 2;
+    oRad[k] = rnd(1.35, 2.65);
+    oSpd[k] = rnd(-0.55, 0.55);
+    oY[k]   = rnd(0.05, 1.55);
+    oYw[k]  = rnd(0.06, 0.32);
+    oPh[k]  = Math.random() * Math.PI * 2;
+    oWob[k] = rnd(0.02, 0.16);
+    oSp2[k] = rnd(0.5, 1.7);
+  }
+}
+
+/* ---------- sizing ---------- */
+function resize(){
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth;
+  Hh = window.innerHeight;
+
+  canvas.width = Math.max(1, Math.floor(W * DPR));
+  canvas.height = Math.max(1, Math.floor(Hh * DPR));
+  canvas.style.width = W + 'px';
+  canvas.style.height = Hh + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  trail.width = canvas.width;
+  trail.height = canvas.height;
+  tctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  ppw = Math.min(W, Hh) * 0.48 / (2 * BRIM);
+  cx = W * 0.5;
+  cy = Hh * 0.46;
+
+  var rr = Math.max(W, Hh) * 0.82;
+  bgGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, rr);
+  bgGrad.addColorStop(0.00, '#1a1a21');
+  bgGrad.addColorStop(0.34, '#101015');
+  bgGrad.addColorStop(0.72, '#08080b');
+  bgGrad.addColorStop(1.00, '#040406');
+
+  shadowW = 2 * BRIM * ppw * 1.5;
+  shadowH = shadowW * 0.33;
+  shadowY = cy + (YOFF + 0.87) * ppw * 0.96;
+
+  glowW = Math.min(W, Hh) * 1.7;
+  glowH = glowW * 0.82;
+  glowY = cy + 0.10 * ppw;
+
+  buildGeometry();
+  buildOrbiters();
+}
+
+/* ---------- render ---------- */
+function drawScene(dt){
+  if (!reduced){
+    if (seqActive){
+      seqT += dt;
+      if (seqT >= SEQ_DUR){ seqActive = false; orbEmerge = true; }
+    }
+    var targetSpeed = (hover || seqActive) ? SLOW_SPEED : BASE_SPEED;
+    spinSpeed += (targetSpeed - spinSpeed) * Math.min(1, dt * 2.2);
+    spin += spinSpeed * dt;
+
+    var targetAppear = (orbEmerge && !seqActive) ? 1 : 0;
+    orbAppear += (targetAppear - orbAppear) * Math.min(1, dt * (targetAppear > orbAppear ? 1.5 : 3.5));
+  }
+
+  var ct = Math.cos(TILT), st = Math.sin(TILT);
+  var ca = Math.cos(spin), sa = Math.sin(spin);
+
+  /* background */
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, Hh);
+
+  /* contact shadow */
+  ctx.globalAlpha = 0.9;
+  ctx.drawImage(shadowSprite, cx - shadowW * 0.5, shadowY - shadowH * 0.5, shadowW, shadowH);
+  ctx.globalAlpha = 1;
+
+  /* ambient bloom */
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.drawImage(glowSprite, cx - glowW * 0.5, glowY - glowH * 0.5, glowW, glowH);
+
+  /* the hat, as light */
+  var sizeBase = ppw * 0.13;
+  var t = seqT;
+
+  for (var k = 0; k < N; k++){
+    var x = HX[k], y = HY[k], z = HZ[k];
+    var heat = 0;
+
+    if (seqActive){
+      var tt = t - DLY[k];
+      if (tt > 0){
+        var b = tt < 0.8 ? tt / 0.8 : 1;
+        var e = 1 - Math.pow(1 - b, 3);
+        var d = SDIST[k] * e;
+        var fx = SDX[k] * d, fy = SDY[k] * d, fz = SDZ[k] * d;
+
+        var t2 = tt - 0.8;
+        if (t2 > 0){
+          var ang = t2 * SWS[k];
+          var c2 = Math.cos(ang), s2 = Math.sin(ang);
+          var rx = fx * c2 + fz * s2;
+          var rz = -fx * s2 + fz * c2;
+          fx = rx; fz = rz;
+          fy += 0.55 * Math.min(1.7, t2);
+
+          var w = WAMP[k] * e;
+          var ph = WF[k] * tt + WPH[k];
+          fx += w * Math.sin(ph * 1.7);
+          fy += w * Math.cos(ph * 1.1);
+          fz += w * Math.sin(ph * 0.8 + 1.3);
+        }
+
+        var rs = 1.7 + RDL[k];
+        var re = 0;
+        if (tt > rs){
+          var pr = (tt - rs) / 1.3;
+          if (pr > 1) pr = 1;
+          var c1 = 1.4, c3 = c1 + 1, pm = pr - 1;
+          re = 1 + c3 * pm * pm * pm + c1 * pm * pm;
+        }
+        var kk = 1 - re;
+        x += fx * kk; y += fy * kk; z += fz * kk;
+        heat = e * (tt > rs ? Math.max(0, 1 - (tt - rs) / 1.3) : 1);
+      }
+    }
+
+    var X  = x * ca + z * sa;
+    var Z  = -x * sa + z * ca;
+    var Y  = y - YOFF;
+    var Y2 = Y * ct - Z * st;
+    var Z2 = Y * st + Z * ct;
+    var persp = CAM / (CAM - Z2);
+
+    var sx = cx + X * ppw * persp;
+    var sy = cy - Y2 * ppw * persp;
+    if (sx < -40 || sx > W + 40 || sy < -40 || sy > Hh + 40) continue;
+
+    var nX  = NX[k] * ca + NZ[k] * sa;
+    var nZ  = -NX[k] * sa + NZ[k] * ca;
+    var nY  = NY[k];
+    var nY2 = nY * ct - nZ * st;
+    var nZ2 = nY * st + nZ * ct;
+
+    var diff = nX * LX + nY2 * LY + nZ2 * LZ;
+    if (diff < 0) diff = 0;
+
+    var spec = 0;
+    if (diff > 0){
+      var dh = nX * HLX + nY2 * HLY + nZ2 * HLZ;
+      if (dh > 0){
+        var s1 = dh * dh; s1 *= s1; s1 *= s1;   /* dh^8 */
+        spec = s1 * s1 * s1;                    /* dh^24 */
+      }
+    }
+
+    var fog = 0.55 + 0.45 * clamp((Z2 + 2.6) / 5.2, 0, 1);
+    var u = 0.14 + diff * 0.78 + spec * 0.62 + heat * 0.14;
+    u *= BRT[k];
+    if (u > 0.999) u = 0.999;
+    if (u < 0) u = 0;
+
+    var alpha = (0.14 + 0.28 * diff) * fog * BRT[k] * (1 + heat * 0.55);
+    if (alpha <= 0.004) continue;
+
+    var idx = (u * (PAL_N - 1)) | 0;
+    var s = sizeBase * SZ[k] * persp * (0.85 + 0.30 * fog);
+    if (s < 0.7) s = 0.7;
+
+    ctx.globalAlpha = alpha > 0.9 ? 0.9 : alpha;
+    ctx.drawImage(sprites[idx], sx - s * 0.5, sy - s * 0.5, s, s);
+  }
+
+  /* ----- leftover embers: orbiters with faint trails ----- */
+  tctx.globalCompositeOperation = 'destination-out';
+  tctx.globalAlpha = 1;
+  tctx.fillStyle = 'rgba(0,0,0,0.10)';
+  tctx.fillRect(0, 0, W, Hh);
+
+  if (orbAppear > 0.01 && !reduced){
+    tctx.globalCompositeOperation = 'lighter';
+    tctx.globalAlpha = 1;
+
+    for (var o = 0; o < ORB; o++){
+      oAng[o] += oSpd[o] * dt;
+      var R = oRad[o] + oWob[o] * Math.sin(oAng[o] * oSp2[o] + oPh[o]);
+      var ox = Math.cos(oAng[o]) * R;
+      var oz = Math.sin(oAng[o]) * R;
+      var oy = oY[o] + oYw[o] * Math.sin(oAng[o] * 1.7 + oPh[o]);
+
+      var OX = ox * ca + oz * sa;
+      var OZ = -ox * sa + oz * ca;
+      var OY = oy - YOFF;
+      var OY2 = OY * ct - OZ * st;
+      var OZ2 = OY * st + OZ * ct;
+      var op = CAM / (CAM - OZ2);
+
+      var osx = cx + OX * ppw * op;
+      var osy = cy - OY2 * ppw * op;
+      oSX[o] = osx; oSY[o] = osy; oSS[o] = sizeBase * op;
+      if (osx < -60 || osx > W + 60 || osy < -60 || osy > Hh + 60) continue;
+
+      var os = sizeBase * 2.6 * op;
+      tctx.globalAlpha = 0.30 * orbAppear;
+      tctx.drawImage(sprites[PAL_N - 2], osx - os * 0.5, osy - os * 0.5, os, os);
+    }
+  }
+
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = 1;
+  ctx.drawImage(trail, 0, 0, W, Hh);
+
+  if (orbAppear > 0.01 && !reduced){
+    for (var q = 0; q < ORB; q++){
+      var qs = oSS[q] * 1.15;
+      if (oSX[q] < -60 || oSX[q] > W + 60) continue;
+      ctx.globalAlpha = 0.55 * orbAppear;
+      ctx.drawImage(sprites[PAL_N - 1], oSX[q] - qs * 0.5, oSY[q] - qs * 0.5, qs, qs);
+    }
+  }
+
+  ctx.globalAlpha = 1;
+}
+
+/* ---------- loop ---------- */
+function frame(now){
+  if (!running) return;
+  rafId = requestAnimationFrame(frame);
+  var dt = lastT ? (now - lastT) / 1000 : 0.016;
+  lastT = now;
+  if (dt > 0.05) dt = 0.05;
+  drawScene(dt);
+}
+
+function start(){
+  if (running || reduced || document.hidden) return;
+  running = true;
+  lastT = 0;
+  rafId = requestAnimationFrame(frame);
+}
+
+function stop(){
+  running = false;
+  if (rafId) cancelAnimationFrame(rafId);
+  rafId = 0;
+}
+
+function applyMode(){
+  if (reduced){
+    stop();
+    spin = -0.42;
+    spinSpeed = 0;
+    seqActive = false;
+    orbEmerge = false;
+    orbAppear = 0;
+    drawScene(0);
+    hintEl.textContent = 'motion reduced';
+  } else {
+    hintEl.textContent = 'hover or tap to scatter';
+    start();
+  }
+}
+
+/* ---------- interaction ---------- */
+function trigger(){
+  if (reduced || seqActive) return;
+  seqActive = true;
+  seqT = 0;
+  orbEmerge = false;
+}
+
+canvas.addEventListener('pointerenter', function(){ hover = true; trigger(); });
+canvas.addEventListener('pointerdown', function(){ hover = true; trigger(); });
+canvas.addEventListener('pointerleave', function(){ hover = false; });
+window.addEventListener('pointercancel', function(){ hover = false; });
+window.addEventListener('blur', function(){ hover = false; });
+
+/* ---------- boot ---------- */
+makeSprites();
+glowSprite = makeGlowSprite();
+shadowSprite = makeShadowSprite();
+
+/* light + half vector, view space */
+(function(){
+  var lx = -0.45, ly = 0.72, lz = 0.53;
+  var ll = Math.sqrt(lx * lx + ly * ly + lz * lz);
+  LX = lx / ll; LY = ly / ll; LZ = lz / ll;
+  var hx = lx / ll, hy = ly / ll, hz = lz / ll + 1;
+  var hl = Math.sqrt(hx * hx + hy * hy + hz * hz);
+  HLX = hx / hl; HLY = hy / hl; HLZ = hz / hl;
+})();
+
+resize();
+applyMode();
+
+var resizeTimer = null;
+window.addEventListener('resize', function(){
+  if (resizeTimer) clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(function(){
+    resize();
+    if (reduced) drawScene(0);
+  }, 80);
+});
+
+document.addEventListener('visibilitychange', function(){
+  if (reduced) return;
+  if (document.hidden) stop();
+  else { lastT = 0; start(); }
+});
+
+function onReduceChange(){
+  reduced = mq.matches;
+  applyMode();
+}
+if (mq.addEventListener) mq.addEventListener('change', onReduceChange);
+else if (mq.addListener) mq.addListener(onReduceChange);
+
+})();
+</script>
+</body>
+</html>
