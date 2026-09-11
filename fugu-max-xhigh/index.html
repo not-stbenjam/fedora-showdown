@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Red Hat</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      min-height: 100dvh;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: #050506;
+      color: #f0e6e6;
+      overflow: hidden;
+    }
+    .hero {
+      min-height: 100dvh;
+      min-height: 100svh;
+      display: grid;
+      place-items: center;
+      padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+      background:
+        radial-gradient(ellipse 46% 34% at 50% 44%, rgba(112, 18, 28, 0.28), transparent 72%),
+        radial-gradient(ellipse 70% 55% at 50% 48%, #141014 0%, #080809 58%, #030303 100%);
+    }
+    .stage {
+      position: relative;
+      width: min(92vw, 78vh, 820px);
+      aspect-ratio: 1;
+      outline: none;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      filter: drop-shadow(0 28px 48px rgba(0, 0, 0, 0.55));
+    }
+    .caption {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 13%;
+      text-align: center;
+      font-size: clamp(10px, 1.7vw, 13px);
+      font-weight: 400;
+      letter-spacing: 0.52em;
+      text-transform: uppercase;
+      color: rgba(255, 228, 228, 0.38);
+      padding-left: 0.52em;
+      pointer-events: none;
+      user-select: none;
+      text-shadow: 0 6px 24px rgba(0, 0, 0, 0.55);
+    }
+    .vignette {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(ellipse 72% 68% at 50% 48%, transparent 40%, rgba(0, 0, 0, 0.42) 100%);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      canvas { filter: drop-shadow(0 18px 32px rgba(0, 0, 0, 0.5)); }
+    }
+  </style>
+</head>
+<body>
+  <main class="hero">
+    <div class="stage" id="stage" tabindex="0" role="img" aria-label="Red fedora. Hover or tap to dissolve it into embers.">
+      <canvas id="c"></canvas>
+      <p class="caption">Red Hat</p>
+    </div>
+  </main>
+  <div class="vignette"></div>
+  <script>
+    (() => {
+      const TAU = Math.PI * 2;
+      const canvas = document.getElementById("c");
+      const stage = document.getElementById("stage");
+      const ctx = canvas.getContext("2d", { alpha: true, desynchronized: true });
+
+      const reducedMq = matchMedia("(prefers-reduced-motion: reduce)");
+      let reduced = reducedMq.matches;
+      reducedMq.addEventListener?.("change", (e) => {
+        reduced = e.matches;
+        if (reduced) haltMotion();
+      });
+
+      const CROWN_H = 1.16;
+      const CROWN_RX = 0.82;
+      const CROWN_RZ = 1.0;
+      const BRIM_RX = 1.5;
+      const BRIM_RZ = 1.7;
+      const TILT = 0.52;
+
+      const particles = [];
+      const orbiters = [];
+
+      let w = 0, h = 0, dpr = 1;
+      let spin = 0.85;
+      let spinVel = 0.42;
+      let targetSpinVel = 0.42;
+      let playing = false;
+      let hovered = false;
+      let phase = "idle";
+      let phaseT = 0;
+      let flash = 0;
+      let last = performance.now();
+      let running = true;
+
+      function rand(a = 0, b = 1) { return a + Math.random() * (b - a); }
+      function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+      function lerp(a, b, t) { return a + (b - a) * t; }
+      function smoothstep(a, b, x) {
+        const t = clamp((x - a) / (b - a), 0, 1);
+        return t * t * (3 - 2 * t);
+      }
+      function easeInOutCubic(t) {
+        return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      }
+      function easeOutQuart(t) { return 1 - Math.pow(1 - t, 4); }
+      function easeInOutQuart(t) {
+        return t < 0.5 ? 8 * t * t * t * t : 1 - Math.pow(-2 * t + 2, 4) / 2;
+      }
+      function norm3(x, y, z) {
+        const m = Math.hypot(x, y, z) || 1;
+        return [x / m, y / m, z / m];
+      }
+
+      function addP(x, y, z, nx, ny, nz, kind, size) {
+        const n = norm3(nx, ny, nz);
+        particles.push({
+          x, y, z,
+          nx: n[0], ny: n[1], nz: n[2],
+          kind,
+          size: size || 1,
+          ox: 0, oy: 0, oz: 0,
+          hx: 0, hy: 0, hz: 0,
+          vx: 0, vy: 0, vz: 0,
+          seed: rand(0, TAU),
+          ember: rand(0.35, 1),
+          glow: 0
+        });
+      }
+
+      function crownCrease(x, z, top) {
+        const c = Math.exp(-(x * x) / 0.095);
+        const front = 0.58 + 0.42 * smoothstep(-0.15, 0.55, z);
+        return -0.27 * c * Math.pow(top, 1.2) * front;
+      }
+
+      function generate() {
+        particles.length = 0;
+
+        const topN = 26, topU = 52;
+        for (let ir = 0; ir <= topN; ir++) {
+          const r = ir / topN;
+          const ring = Math.max(10, Math.floor(topU * Math.sqrt(r) + 1));
+          for (let iu = 0; iu < ring; iu++) {
+            const u = (iu + 0.18 * ir) / ring * TAU;
+            const jitter = (1 - r) * 0.012;
+            const px = r * CROWN_RX * 0.98 * Math.sin(u) + rand(-jitter, jitter);
+            const pz = r * CROWN_RZ * 0.98 * Math.cos(u) + rand(-jitter, jitter);
+            const py = CROWN_H + 0.05 - 0.07 * r * r + crownCrease(px, pz, 1 - r * 0.15);
+            const [nx, ny, nz] = norm3(
+              px * 0.25 + (px > 0 ? 0.55 : -0.55) * (1 - Math.exp(-(px * px) / 0.08)),
+              1.0,
+              pz * 0.12
+            );
+            addP(px, py, pz, nx, ny, nz, "felt", rand(0.85, 1.15));
+          }
+        }
+
+        const sV = 22, sU = 60;
+        for (let iv = 0; iv <= sV; iv++) {
+          const v = iv / sV;
+          for (let iu = 0; iu < sU; iu++) {
+            if (Math.random() < 0.04) continue;
+            const u = (iu / sU) * TAU + rand(-0.01, 0.01);
+            const taper = 0.73 + 0.27 * Math.pow(v, 0.72);
+            const side = Math.abs(Math.sin(u));
+            const pinch = 1 - 0.15 * Math.pow(side, 1.35) * smoothstep(0.08, 0.52, v) * (1 - smoothstep(0.72, 1, v));
+            const rx = CROWN_RX * taper * pinch;
+            const rz = CROWN_RZ * taper * pinch;
+            const x = rx * Math.sin(u) + rand(-0.012, 0.012);
+            const z = rz * Math.cos(u) + rand(-0.012, 0.012);
+            let y = 0.2 + CROWN_H * (1 - v) * 0.92;
+            y += crownCrease(x, z, Math.pow(1 - v, 1.6) * 0.55);
+            const [nx, ny, nz] = norm3(x, 0.22 + 0.2 * (1 - v), z);
+            addP(x, y, z, nx, ny, nz, "felt", rand(0.9, 1.2));
+          }
+        }
+
+        const bV = 7, bU = 64;
+        for (let iv = 0; iv <= bV; iv++) {
+          const v = iv / bV;
+          for (let iu = 0; iu < bU; iu++) {
+            const u = (iu / bU) * TAU;
+            const y = 0.175 + v * 0.155 + rand(-0.006, 0.006);
+            const flare = 1 + 0.04 * v;
+            const x = CROWN_RX * flare * Math.sin(u) + rand(-0.01, 0.01);
+            const z = CROWN_RZ * flare * Math.cos(u) + rand(-0.01, 0.01);
+            addP(x, y, z, x, 0.15, z, "band", rand(0.75, 1));
+          }
+        }
+
+        const rN = 16, rU = 74;
+        for (let ir = 0; ir <= rN; ir++) {
+          const t = ir / rN;
+          const inner = 0.02;
+          const rr = inner + t * (1 - inner);
+          for (let iu = 0; iu < rU; iu++) {
+            if (t < 0.12 && Math.random() < 0.2) continue;
+            const u = (iu / rU) * TAU + 0.03 * ir;
+            const rx = lerp(CROWN_RX * 1.02, BRIM_RX, rr);
+            const rz = lerp(CROWN_RZ * 1.02, BRIM_RZ, rr);
+            const x = rx * Math.sin(u) + rand(-0.01, 0.01);
+            const z = rz * Math.cos(u) + rand(-0.01, 0.01);
+            const sides = Math.abs(Math.sin(u));
+            const curl = -0.015 - 0.13 * t * t * (0.28 + 0.72 * sides) + 0.045 * t * (-Math.cos(u));
+            const y = 0.175 + curl;
+            const [nx, ny, nz] = norm3(0.12 * Math.sin(u), 1, 0.12 * Math.cos(u));
+            addP(x, y, z, nx, ny, nz, "felt", rand(0.88, 1.18));
+          }
+        }
+
+        const eN = 5, eU = 96;
+        for (let ie = 0; ie < eN; ie++) {
+          for (let iu = 0; iu < eU; iu++) {
+            const u = (iu / eU) * TAU;
+            const t = 0.92 + ie * 0.02;
+            const x = BRIM_RX * t * Math.sin(u);
+            const z = BRIM_RZ * t * Math.cos(u);
+            const sides = Math.abs(Math.sin(u));
+            const curl = -0.015 - 0.13 * (0.28 + 0.72 * sides) + 0.045 * (-Math.cos(u));
+            const y = 0.16 + curl - ie * 0.018;
+            addP(x, y, z, x, 0.4, z, "edge", rand(0.7, 1.05));
+          }
+        }
+
+        const uN = 10, uU = 48;
+        for (let ir = 0; ir <= uN; ir++) {
+          const t = 0.18 + 0.82 * (ir / uN);
+          for (let iu = 0; iu < uU; iu++) {
+            if (Math.random() < 0.12) continue;
+            const u = (iu / uU) * TAU;
+            const x = lerp(CROWN_RX, BRIM_RX * 0.96, t) * Math.sin(u);
+            const z = lerp(CROWN_RZ, BRIM_RZ * 0.96, t) * Math.cos(u);
+            const sides = Math.abs(Math.sin(u));
+            const curl = -0.04 - 0.1 * t * t * sides;
+            const y = 0.14 + curl - 0.045;
+            addP(x, y, z, -x * 0.1, -1, -z * 0.1, "under", rand(0.7, 1));
+          }
+        }
+      }
+
+      function resize() {
+        const rect = canvas.getBoundingClientRect();
+        dpr = Math.min(window.devicePixelRatio || 1, 2);
+        w = Math.max(1, Math.floor(rect.width));
+        h = Math.max(1, Math.floor(rect.height));
+        canvas.width = Math.floor(w * dpr);
+        canvas.height = Math.floor(h * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        if (reduced) draw(0);
+      }
+
+      function shade(nx, ny, nz, kind, glow, depth) {
+        const diff = Math.max(0, nx * 0.42 + ny * 0.78 + nz * 0.46);
+        const wrap = diff * 0.68 + 0.32;
+        const rim = Math.pow(1 - Math.max(0, ny * 0.35 + nz * 0.72), 1.65) * 0.34;
+        const spec = Math.pow(diff, 14) * 0.42;
+        const fog = clamp(1.12 - depth * 0.09, 0.55, 1);
+        let r, g, b;
+        if (kind === "band") {
+          r = 10 + wrap * 38 + spec * 90 + rim * 20;
+          g = 7 + wrap * 14 + spec * 30;
+          b = 9 + wrap * 14 + spec * 24;
+        } else if (kind === "under") {
+          r = 28 + wrap * 50;
+          g = 6 + wrap * 10;
+          b = 8 + wrap * 10;
+        } else if (kind === "edge") {
+          r = 90 + wrap * 130 + spec * 80 + rim * 70;
+          g = 16 + wrap * 36 + spec * 40;
+          b = 18 + wrap * 24;
+        } else {
+          r = 78 + wrap * 148 + spec * 95 + rim * 48;
+          g = 8 + wrap * 30 + spec * 46 + rim * 10;
+          b = 16 + wrap * 22 + spec * 28;
+        }
+        const em = glow * glow;
+        r = (r + (255 - r) * em * 0.62) * fog;
+        g = (g + (150 - g) * em * 0.48) * fog;
+        b = (b + (48 - b) * em * 0.18) * fog;
+        r += flash * 40;
+        g += flash * 16;
+        return [clamp(r, 0, 255), clamp(g, 0, 255), clamp(b, 0, 255)];
+      }
+
+      function project(x, y, z) {
+        const camZ = 5.35;
+        const focal = 2.55;
+        const dz = camZ - z;
+        const s = focal / dz;
+        const k = Math.min(w, h) * 0.5;
+        return { x: x * s * k, y: -y * s * k + h * 0.028, s, depth: dz };
+      }
+
+      function transform(p, oy, so, co, st, ct) {
+        const x0 = p.x + p.ox;
+        const y0 = p.y + p.oy;
+        const z0 = p.z + p.oz;
+        const x1 = x0 * co + z0 * so;
+        let y1 = y0;
+        let z1 = -x0 * so + z0 * co;
+        const y2 = y1 * ct - z1 * st;
+        const z2 = y1 * st + z1 * ct;
+        const nx0 = p.nx, ny0 = p.ny, nz0 = p.nz;
+        const nx1 = nx0 * co + nz0 * so;
+        const nz1 = -nx0 * so + nz0 * co;
+        const ny2 = ny0 * ct - nz1 * st;
+        const nz2 = ny0 * st + nz1 * ct;
+        return { x: x1, y: y2 + oy, z: z2, nx: nx1, ny: ny2, nz: nz2 };
+      }
+
+      function beginScatter() {
+        phase = "heat";
+        phaseT = 0;
+        targetSpinVel = 0.075;
+        flash = 0;
+        orbiters.length = 0;
+        for (const p of particles) {
+          p.glow = 0;
+          const n = norm3(p.x + rand(-0.4, 0.4), 0.35, p.z + rand(-0.4, 0.4));
+          const spd = (0.55 + p.ember * 1.35);
+          p.vx = n[0] * spd + rand(-0.25, 0.25);
+          p.vy = 0.55 + p.ember * 1.1 + rand(0, 0.35);
+          p.vz = n[2] * spd + rand(-0.25, 0.25);
+        }
+      }
+
+      function pickOrbiters() {
+        orbiters.length = 0;
+        const n = 16;
+        const used = new Set();
+        while (orbiters.length < n && used.size < particles.length) {
+          const i = Math.floor(rand(0, particles.length));
+          if (used.has(i)) continue;
+          used.add(i);
+          const p = particles[i];
+          orbiters.push({
+            p,
+            a: rand(0, TAU),
+            s: rand(0.55, 1.15) * (Math.random() < 0.5 ? 1 : -1),
+            r: rand(1.15, 1.95),
+            tilt: rand(0.12, 0.4),
+            yOff: rand(0.15, 0.85),
+            trail: []
+          });
+        }
+      }
+
+      function haltMotion() {
+        playing = false;
+        phase = "idle";
+        spinVel = 0;
+        targetSpinVel = 0;
+        orbiters.length = 0;
+        for (const p of particles) {
+          p.ox = p.oy = p.oz = 0;
+          p.glow = 0;
+        }
+        draw(0);
+      }
+
+      function update(dt) {
+        if (reduced) return;
+
+        spinVel += (targetSpinVel - spinVel) * (1 - Math.pow(0.001, dt));
+        spin += spinVel * dt;
+        flash *= Math.pow(0.12, dt);
+
+        if (phase === "idle") {
+          for (const o of orbiters) {
+            o.a += o.s * dt;
+            o.p.ox = Math.cos(o.a) * o.r;
+            o.p.oy = o.yOff + Math.sin(o.a * 1.6) * o.tilt;
+            o.p.oz = Math.sin(o.a) * o.r;
+            o.p.glow = 0.55;
+          }
+          return;
+        }
+
+        phaseT += dt;
+
+        if (phase === "heat") {
+          const t = Math.min(1, phaseT / 0.38);
+          for (const p of particles) {
+            const j = t * 0.045;
+            p.ox = Math.sin(p.seed + phaseT * 38) * j;
+            p.oy = Math.cos(p.seed * 1.7 + phaseT * 29) * j * 0.8;
+            p.oz = Math.sin(p.seed * 0.6 + phaseT * 33) * j;
+            p.glow = t * 0.55;
+          }
+          if (t >= 1) { phase = "scatter"; phaseT = 0; }
+          return;
+        }
+
+        if (phase === "scatter") {
+          const t = Math.min(1, phaseT / 1.15);
+          const drag = Math.pow(0.18, dt);
+          for (const p of particles) {
+            p.vy += 0.22 * dt;
+            p.vx *= drag; p.vy *= drag; p.vz *= drag;
+            p.ox += p.vx * dt * 1.65;
+            p.oy += p.vy * dt * 1.65;
+            p.oz += p.vz * dt * 1.65;
+            p.glow = lerp(0.55, 1, t) * p.ember;
+          }
+          if (t >= 1) { phase = "swirl"; phaseT = 0; }
+          return;
+        }
+
+        if (phase === "swirl") {
+          const t = Math.min(1, phaseT / 1.05);
+          const ang = (0.95 + t * 1.4) * dt;
+          const ca = Math.cos(ang), sa = Math.sin(ang);
+          const pull = 0.22 * dt;
+          for (const p of particles) {
+            const x = p.ox * ca + p.oz * sa;
+            const z = -p.ox * sa + p.oz * ca;
+            p.ox = x - x * pull;
+            p.oz = z - z * pull;
+            p.oy += Math.sin(p.seed + phaseT * 3.2) * 0.18 * dt;
+            p.oy -= p.oy * 0.12 * dt;
+            p.glow = 0.85 + 0.15 * Math.sin(p.seed + phaseT * 6);
+          }
+          if (t >= 1) {
+            phase = "reform";
+            phaseT = 0;
+            for (const p of particles) {
+              p.hx = p.ox; p.hy = p.oy; p.hz = p.oz;
+            }
+          }
+          return;
+        }
+
+        if (phase === "reform") {
+          const t = Math.min(1, phaseT / 1.65);
+          const e = easeInOutQuart(t);
+          const spiral = (1 - e) * 1.65;
+          const cs = Math.cos(spiral), ss = Math.sin(spiral);
+          for (const p of particles) {
+            const sx = p.hx * cs + p.hz * ss;
+            const sz = -p.hx * ss + p.hz * cs;
+            const k = 1 - e;
+            p.ox = sx * k;
+            p.oy = p.hy * k * (1 - 0.35 * e);
+            p.oz = sz * k;
+            p.glow = (1 - e) * p.ember;
+          }
+          if (t > 0.82) flash = Math.max(flash, Math.sin(((t - 0.82) / 0.18) * Math.PI) * 0.22);
+          if (t >= 1) {
+            for (const p of particles) {
+              p.ox = p.oy = p.oz = 0;
+              p.glow = 0;
+            }
+            phase = "idle";
+            phaseT = 0;
+            playing = false;
+            targetSpinVel = 0.42;
+            pickOrbiters();
+          }
+        }
+      }
+
+      const order = [];
+
+      function draw() {
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, w, h);
+
+        const co = Math.cos(spin), so = Math.sin(spin);
+        const ct = Math.cos(TILT), st = Math.sin(TILT);
+        const n = particles.length;
+        if (order.length !== n) {
+          order.length = n;
+          for (let i = 0; i < n; i++) order[i] = i;
+        }
+
+        const world = new Array(n);
+        let disperse = 0;
+        for (let i = 0; i < n; i++) {
+          const p = particles[i];
+          const tw = transform(p, 0, so, co, st, ct);
+          world[i] = tw;
+          disperse += Math.hypot(p.ox, p.oy, p.oz);
+        }
+        disperse = Math.min(1, disperse / (n * 0.55));
+
+        const ground = project(0, -0.05, 0);
+        ctx.save();
+        ctx.translate(w * 0.5 + ground.x, h * 0.5 + ground.y + Math.min(w, h) * 0.165);
+        ctx.scale(1, 0.2);
+        const shR = Math.min(w, h) * (0.22 + disperse * 0.08);
+        const g1 = ctx.createRadialGradient(0, 0, shR * 0.1, 0, 0, shR);
+        g1.addColorStop(0, "rgba(0,0,0,0.5)");
+        g1.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = g1;
+        ctx.beginPath();
+        ctx.arc(0, 0, shR, 0, TAU);
+        ctx.fill();
+        const g2 = ctx.createRadialGradient(0, 0, 0, 0, 0, shR * 0.55);
+        g2.addColorStop(0, `rgba(90, 12, 20, ${0.16 * (1 - disperse * 0.7)})`);
+        g2.addColorStop(1, "rgba(90,12,20,0)");
+        ctx.fillStyle = g2;
+        ctx.beginPath();
+        ctx.arc(0, 0, shR * 0.55, 0, TAU);
+        ctx.fill();
+        ctx.restore();
+
+        order.sort((a, b) => world[a].z - world[b].z);
+
+        const cx = w * 0.5, cy = h * 0.5;
+        const baseR = Math.min(w, h) * 0.0074;
+
+        if (orbiters.length) {
+          ctx.save();
+          ctx.lineCap = "round";
+          ctx.lineJoin = "round";
+          for (const o of orbiters) {
+            const tw = transform(o.p, 0, so, co, st, ct);
+            const pr = project(tw.x, tw.y, tw.z);
+            const sx = cx + pr.x, sy = cy + pr.y;
+            o.trail.push({ x: sx, y: sy });
+            if (o.trail.length > 18) o.trail.shift();
+            const tr = o.trail;
+            if (tr.length > 2) {
+              for (let i = 1; i < tr.length; i++) {
+                const a = i / tr.length;
+                ctx.strokeStyle = `rgba(255, 168, 96, ${a * 0.22})`;
+                ctx.lineWidth = 1.15 * a;
+                ctx.beginPath();
+                ctx.moveTo(tr[i - 1].x, tr[i - 1].y);
+                ctx.lineTo(tr[i].x, tr[i].y);
+                ctx.stroke();
+              }
+            }
+          }
+          ctx.restore();
+        }
+
+        const glowPass = disperse > 0.04 || phase !== "idle";
+        if (glowPass) ctx.globalCompositeOperation = "lighter";
+
+        for (let k = 0; k < n; k++) {
+          const i = order[k];
+          const p = particles[i];
+          const tw = world[i];
+          const pr = project(tw.x, tw.y, tw.z);
+          const col = shade(tw.nx, tw.ny, tw.nz, p.kind, p.glow, pr.depth);
+          const g = p.glow;
+          const rad = baseR * p.size * pr.s * (1.05 + g * 0.55) * (0.88 + 0.28 * (col[0] / 255));
+          const x = cx + pr.x;
+          const y = cy + pr.y;
+          const a = glowPass ? 0.22 + g * 0.45 : 0.92;
+
+          if (g > 0.35 && rad > 0.6) {
+            ctx.fillStyle = `rgba(${col[0] | 0},${col[1] | 0},${Math.min(180, col[2] + 20) | 0},${0.1 + g * 0.12})`;
+            ctx.beginPath();
+            ctx.arc(x, y, rad * (2.4 + g * 1.6), 0, TAU);
+            ctx.fill();
+          }
+
+          ctx.fillStyle = `rgba(${col[0] | 0},${col[1] | 0},${col[2] | 0},${a})`;
+          ctx.beginPath();
+          ctx.arc(x, y, Math.max(0.45, rad), 0, TAU);
+          ctx.fill();
+        }
+
+        ctx.globalCompositeOperation = "source-over";
+      }
+
+      function frame(now) {
+        const dt = Math.min(0.05, (now - last) / 1000);
+        last = now;
+        if (!reduced) {
+          update(dt);
+          draw();
+        }
+        if (running) requestAnimationFrame(frame);
+      }
+
+      function trigger() {
+        if (reduced || playing) return;
+        playing = true;
+        beginScatter();
+      }
+
+      generate();
+      resize();
+      window.addEventListener("resize", resize);
+
+      const fineHover = matchMedia("(hover: hover) and (pointer: fine)").matches;
+      if (fineHover) {
+        stage.addEventListener("pointerenter", () => { hovered = true; trigger(); });
+        stage.addEventListener("pointerleave", () => { hovered = false; });
+      } else {
+        stage.addEventListener("pointerdown", (e) => {
+          e.preventDefault();
+          trigger();
+        });
+      }
+      stage.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          trigger();
+        }
+      });
+
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) running = false;
+        else {
+          running = true;
+          last = performance.now();
+          requestAnimationFrame(frame);
+        }
+      });
+
+      if (reduced) {
+        spin = 0.85;
+        draw();
+      } else {
+        requestAnimationFrame(frame);
+      }
+    })();
+  </script>
+</body>
+</html>
