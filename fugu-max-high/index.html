@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#08090c">
+  <title>Red Fedora — In Motion</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #f7f4f1;
+      --muted: #918b8c;
+      --red: #d62f42;
+      --red-deep: #8f1327;
+      --line: rgba(255,255,255,.11);
+      --bg: #08090c;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; margin: 0; }
+    body {
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .scene {
+      position: relative;
+      min-height: 100svh;
+      isolation: isolate;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      background:
+        radial-gradient(ellipse 44% 32% at 50% 47%, rgba(126, 30, 40, .15), transparent 74%),
+        radial-gradient(ellipse 70% 90% at 50% 45%, #14151a 0%, #0c0d11 47%, #08090c 100%);
+    }
+
+    .scene::before,
+    .scene::after {
+      content: "";
+      position: absolute;
+      pointer-events: none;
+      inset: 0;
+    }
+    .scene::before {
+      z-index: -1;
+      opacity: .26;
+      background-image:
+        linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px);
+      background-size: 68px 68px;
+      mask-image: radial-gradient(ellipse at center, black 0%, transparent 72%);
+    }
+    .scene::after {
+      z-index: 2;
+      background: radial-gradient(ellipse at center, transparent 42%, rgba(0,0,0,.42) 100%);
+    }
+
+    .stage {
+      position: relative;
+      z-index: 1;
+      width: min(100vw, 1080px);
+      height: min(100svh, 780px);
+      display: grid;
+      place-items: center;
+    }
+
+    canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: manipulation;
+      cursor: pointer;
+    }
+
+    .wordmark {
+      position: absolute;
+      left: clamp(24px, 5vw, 58px);
+      top: clamp(22px, 5vw, 52px);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: rgba(255,255,255,.64);
+      font-size: 10px;
+      font-weight: 650;
+      letter-spacing: .2em;
+      text-transform: uppercase;
+      user-select: none;
+    }
+    .wordmark i {
+      width: 8px;
+      height: 8px;
+      display: block;
+      border-radius: 50%;
+      background: var(--red);
+      box-shadow: 0 0 15px rgba(214,47,66,.65);
+    }
+
+    .note {
+      position: absolute;
+      bottom: clamp(28px, 6vh, 62px);
+      left: 0;
+      width: 100%;
+      text-align: center;
+      pointer-events: none;
+      user-select: none;
+    }
+    .note .eyebrow {
+      margin: 0 0 10px;
+      color: rgba(255,255,255,.4);
+      font-size: 9px;
+      font-weight: 650;
+      letter-spacing: .26em;
+      text-transform: uppercase;
+    }
+    .note .caption {
+      margin: 0;
+      color: rgba(255,255,255,.86);
+      font-size: clamp(13px, 1.6vw, 16px);
+      font-weight: 400;
+      letter-spacing: .025em;
+    }
+    .note .hint {
+      margin: 12px 0 0;
+      color: rgba(255,255,255,.27);
+      font-size: 10px;
+      letter-spacing: .08em;
+    }
+
+    @media (max-width: 560px) {
+      .stage { height: 100svh; }
+      .wordmark { left: 22px; top: 24px; }
+      .note { bottom: 30px; }
+      .note .hint { display: none; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .note .hint { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="scene">
+    <section class="stage" aria-label="Interactive red fedora illustration">
+      <div class="wordmark"><i></i><span>Form / 01</span></div>
+      <canvas id="canvas" role="img" aria-label="A dimensional red fedora that dissolves into glowing particles when touched"></canvas>
+      <div class="note">
+        <p class="eyebrow">A red silhouette in motion</p>
+        <p class="caption">Hold a shape lightly. Let it become light.</p>
+        <p class="hint">hover or tap to transform</p>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    (() => {
+      'use strict';
+
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d', { alpha: true });
+      const stage = document.querySelector('.stage');
+      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+      let width = 0, height = 0, dpr = 1, scale = 1;
+      let centerX = 0, centerY = 0;
+      let angle = -0.16;
+      let last = 0;
+      let mode = 'idle';
+      let modeTime = 0;
+      let hoverReady = true;
+      let particles = [];
+      let orbiters = [];
+      let seed = 18473;
+
+      const TAU = Math.PI * 2;
+      const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+      const lerp = (a, b, t) => a + (b - a) * t;
+      const ease = t => t * t * (3 - 2 * t);
+      const easeOut = t => 1 - Math.pow(1 - t, 3);
+      const easeInOut = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      const fract = n => n - Math.floor(n);
+      const random = () => {
+        seed = (seed * 1664525 + 1013904223) >>> 0;
+        return seed / 4294967296;
+      };
+      const smoothNoise = (t, offset) =>
+        Math.sin(t * 1.73 + offset) * .52 + Math.sin(t * 3.91 + offset * 1.7) * .3 + Math.sin(t * 7.13 + offset * .4) * .18;
+
+      function resize() {
+        const rect = stage.getBoundingClientRect();
+        width = Math.max(1, rect.width);
+        height = Math.max(1, rect.height);
+        dpr = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.round(width * dpr);
+        canvas.height = Math.round(height * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        centerX = width / 2;
+        centerY = height * .465;
+        scale = Math.min(width / 540, height / 420) * 1.04;
+        drawFrame(0);
+      }
+
+      // The normalized outline is intentionally slightly asymmetric, like a real fedora.
+      function inHat(x, y) {
+        const crown = y > -.77 && y < .27 && Math.abs(x) < lerp(.31, .72, clamp((y + .77) / 1.04, 0, 1)) + .025 * Math.sin(y * 8);
+        const brimEllipse = ((x + .02) / 1.62) ** 2 + ((y - .22) / .37) ** 2 < 1;
+        const frontCut = y > .53 && Math.abs(x) > 1.25 - (y - .53) * .35;
+        return (crown || brimEllipse) && !frontCut;
+      }
+
+      function makeParticles() {
+        particles = [];
+        seed = 18473;
+        // A dense but restrained field: tiny points make the dissolve read as a surface.
+        const target = 2850;
+        while (particles.length < target) {
+          const x = random() * 3.35 - 1.675;
+          const y = random() * 1.48 - .84;
+          if (!inHat(x, y)) continue;
+          const edge = Math.min(
+            Math.abs(x - 1.62), Math.abs(x + 1.62),
+            Math.abs(y - .59), Math.abs(y + .78)
+          );
+          const z = (random() - .5) * (.24 + Math.max(0, edge) * .12);
+          const angleOut = Math.atan2(y * .9, x * .58) + (random() - .5) * .8;
+          const radius = .45 + random() * 1.35;
+          particles.push({
+            x, y, z,
+            ox: Math.cos(angleOut) * radius + x * .18,
+            oy: Math.sin(angleOut) * radius * .68 + y * .12,
+            oz: (random() - .5) * 1.8,
+            phase: random() * TAU,
+            speed: .45 + random() * 1.5,
+            size: .48 + random() * 1.5,
+            warm: random(),
+            alpha: .48 + random() * .52
+          });
+        }
+        orbiters = particles
+          .slice()
+          .sort((a, b) => b.size - a.size)
+          .slice(0, 25)
+          .map((p, i) => ({ p, i, radius: 1.24 + random() * .68, tilt: random() * TAU, speed: .16 + random() * .28 }));
+      }
+
+      function project(p, spin, size = scale) {
+        const c = Math.cos(spin);
+        const s = Math.sin(spin);
+        return {
+          x: (p.x * c - p.z * s) * size,
+          y: (p.y + p.z * .07 * c) * size
+        };
+      }
+
+      function drawShadow(opacity = 1) {
+        ctx.save();
+        ctx.translate(centerX + 6 * scale, centerY + 92 * scale);
+        ctx.scale(1, .19);
+        const gradient = ctx.createRadialGradient(0, 0, 5 * scale, 0, 0, 150 * scale);
+        gradient.addColorStop(0, `rgba(0,0,0,${.58 * opacity})`);
+        gradient.addColorStop(.5, `rgba(0,0,0,${.25 * opacity})`);
+        gradient.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 150 * scale, 44 * scale, 0, 0, TAU);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      function drawHat(spin, opacity = 1) {
+        const c = Math.cos(spin);
+        const facing = Math.max(.13, Math.abs(c));
+        const flip = c < 0 ? -1 : 1;
+        const lit = .5 + .5 * Math.sin(spin + .9);
+        const red = `rgba(203, ${Math.round(31 + lit * 13)}, ${Math.round(49 + lit * 19)}, ${opacity})`;
+
+        ctx.save();
+        ctx.translate(centerX, centerY);
+        ctx.scale(facing * flip, 1);
+
+        // The brim has its own low light and a crisp, dimensional underside.
+        const brimGradient = ctx.createLinearGradient(0, -.02 * scale, 0, .6 * scale);
+        brimGradient.addColorStop(0, `rgba(${Math.round(231 + lit * 10)}, ${Math.round(48 + lit * 10)}, ${Math.round(66 + lit * 12)}, ${opacity})`);
+        brimGradient.addColorStop(.48, red);
+        brimGradient.addColorStop(1, `rgba(117, 11, 27, ${opacity})`);
+        ctx.fillStyle = brimGradient;
+        ctx.shadowColor = `rgba(0,0,0,${.42 * opacity})`;
+        ctx.shadowBlur = 22 * scale;
+        ctx.shadowOffsetY = 12 * scale;
+        ctx.beginPath();
+        ctx.moveTo(-1.58 * scale, .2 * scale);
+        ctx.bezierCurveTo(-1.5 * scale, .02 * scale, -.88 * scale, -.08 * scale, -.53 * scale, -.02 * scale);
+        ctx.bezierCurveTo(-.04 * scale, .06 * scale, .74 * scale, -.12 * scale, 1.52 * scale, .13 * scale);
+        ctx.bezierCurveTo(1.68 * scale, .19 * scale, 1.7 * scale, .33 * scale, 1.53 * scale, .43 * scale);
+        ctx.bezierCurveTo(.88 * scale, .73 * scale, -.77 * scale, .72 * scale, -1.52 * scale, .48 * scale);
+        ctx.bezierCurveTo(-1.7 * scale, .43 * scale, -1.72 * scale, .29 * scale, -1.58 * scale, .2 * scale);
+        ctx.closePath();
+        ctx.fill();
+        ctx.shadowColor = 'transparent';
+
+        // Crown, with a soft highlight rolling over the curved top.
+        const crownGradient = ctx.createLinearGradient(-.75 * scale, -.7 * scale, .72 * scale, .35 * scale);
+        crownGradient.addColorStop(0, `rgba(111, 12, 28, ${opacity})`);
+        crownGradient.addColorStop(.18, `rgba(177, 23, 42, ${opacity})`);
+        crownGradient.addColorStop(.52, `rgba(${Math.round(218 + lit * 10)}, ${Math.round(36 + lit * 12)}, ${Math.round(54 + lit * 10)}, ${opacity})`);
+        crownGradient.addColorStop(1, `rgba(132, 15, 31, ${opacity})`);
+        ctx.fillStyle = crownGradient;
+        ctx.beginPath();
+        ctx.moveTo(-.72 * scale, .25 * scale);
+        ctx.bezierCurveTo(-.76 * scale, .02 * scale, -.65 * scale, -.2 * scale, -.57 * scale, -.57 * scale);
+        ctx.bezierCurveTo(-.5 * scale, -.79 * scale, -.25 * scale, -.87 * scale, .08 * scale, -.84 * scale);
+        ctx.bezierCurveTo(.42 * scale, -.82 * scale, .62 * scale, -.7 * scale, .64 * scale, -.48 * scale);
+        ctx.bezierCurveTo(.67 * scale, -.12 * scale, .76 * scale, .08 * scale, .75 * scale, .28 * scale);
+        ctx.bezierCurveTo(.31 * scale, .38 * scale, -.29 * scale, .38 * scale, -.72 * scale, .25 * scale);
+        ctx.closePath();
+        ctx.fill();
+
+        // Crown crease and the red-black hatband add the logo-like graphic clarity.
+        ctx.globalAlpha = opacity * .55;
+        ctx.strokeStyle = 'rgba(88, 8, 20, .7)';
+        ctx.lineWidth = 1.8 * scale;
+        ctx.beginPath();
+        ctx.moveTo(-.51 * scale, -.59 * scale);
+        ctx.bezierCurveTo(-.2 * scale, -.47 * scale, .26 * scale, -.48 * scale, .53 * scale, -.61 * scale);
+        ctx.stroke();
+
+        const band = ctx.createLinearGradient(0, .04 * scale, 0, .27 * scale);
+        band.addColorStop(0, 'rgba(72, 8, 19, .95)');
+        band.addColorStop(.45, 'rgba(113, 10, 25, .92)');
+        band.addColorStop(1, 'rgba(48, 6, 15, .93)');
+        ctx.globalAlpha = opacity;
+        ctx.fillStyle = band;
+        ctx.beginPath();
+        ctx.moveTo(-.7 * scale, .04 * scale);
+        ctx.bezierCurveTo(-.34 * scale, .13 * scale, .3 * scale, .14 * scale, .74 * scale, .04 * scale);
+        ctx.lineTo(.75 * scale, .2 * scale);
+        ctx.bezierCurveTo(.28 * scale, .34 * scale, -.35 * scale, .33 * scale, -.71 * scale, .21 * scale);
+        ctx.closePath();
+        ctx.fill();
+
+        // A restrained, almost photographic rim highlight.
+        ctx.globalAlpha = opacity * (.18 + lit * .12);
+        ctx.strokeStyle = '#ff9a98';
+        ctx.lineWidth = 1.15 * scale;
+        ctx.beginPath();
+        ctx.moveTo(-1.27 * scale, .21 * scale);
+        ctx.bezierCurveTo(-.72 * scale, .06 * scale, -.35 * scale, .09 * scale, -.05 * scale, .12 * scale);
+        ctx.bezierCurveTo(.54 * scale, .17 * scale, 1.05 * scale, .1 * scale, 1.38 * scale, .2 * scale);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      function drawParticles(t, dissolve, reform) {
+        const spin = angle;
+        const d = dissolve;
+        const r = reform;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+
+        for (let i = 0; i < particles.length; i++) {
+          const p = particles[i];
+          const origin = project(p, spin);
+          const driftTime = t * p.speed + p.phase;
+          const swirl = smoothNoise(driftTime, p.phase);
+          const burst = easeOut(d);
+          const destination = {
+            x: p.ox + Math.cos(driftTime * .72 + p.phase) * .22 + swirl * .12,
+            y: p.oy + Math.sin(driftTime * .9 + p.phase) * .18 + smoothNoise(driftTime, p.phase + 3) * .1,
+            z: p.oz + Math.sin(driftTime * .5 + p.phase) * .26
+          };
+          const away = project(destination, spin);
+          let px, py, alpha;
+          if (r > 0) {
+            const back = easeInOut(r);
+            px = lerp(away.x, origin.x, back);
+            py = lerp(away.y, origin.y, back);
+            alpha = p.alpha * (1 - .25 * back);
+          } else {
+            px = lerp(origin.x, away.x, burst);
+            py = lerp(origin.y, away.y, burst);
+            alpha = p.alpha * (.8 + .2 * Math.sin(driftTime));
+          }
+          const twinkle = .72 + .28 * Math.sin(driftTime * 2.5 + p.phase);
+          const radius = (p.size * (.7 + .3 * twinkle)) * (1 + .25 * d);
+          const warm = p.warm;
+          ctx.fillStyle = warm > .74
+            ? `rgba(255, ${Math.round(109 + warm * 65)}, ${Math.round(87 + warm * 35)}, ${alpha * .25})`
+            : `rgba(244, ${Math.round(55 + warm * 45)}, ${Math.round(61 + warm * 25)}, ${alpha * .19})`;
+          ctx.beginPath();
+          ctx.arc(centerX + px, centerY + py, radius * 2.6, 0, TAU);
+          ctx.fill();
+          ctx.fillStyle = warm > .74
+            ? `rgba(255, 181, 130, ${alpha * .82})`
+            : `rgba(255, ${Math.round(77 + warm * 49)}, ${Math.round(78 + warm * 35)}, ${alpha * .72})`;
+          ctx.beginPath();
+          ctx.arc(centerX + px, centerY + py, Math.max(.35, radius * .62), 0, TAU);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      function drawOrbiters(t, reveal) {
+        if (!orbiters.length || reveal <= 0) return;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        orbiters.forEach(({ p, i, radius, tilt, speed }) => {
+          const a = t * speed + tilt;
+          const x = Math.cos(a) * radius * (1 + .14 * Math.sin(t * .21 + i));
+          const y = Math.sin(a * 1.27) * radius * .52 - .08 + Math.sin(t * .37 + i) * .08;
+          const z = Math.sin(a) * .7;
+          const point = project({ x, y, z }, angle, scale);
+          const alpha = reveal * (.35 + .35 * Math.sin(a + i) ** 2);
+          ctx.fillStyle = `rgba(255, ${150 + (i % 3) * 18}, 118, ${alpha * .18})`;
+          ctx.beginPath();
+          ctx.arc(centerX + point.x, centerY + point.y, 4.2 * scale, 0, TAU);
+          ctx.fill();
+          ctx.fillStyle = `rgba(255, 191, 144, ${alpha})`;
+          ctx.beginPath();
+          ctx.arc(centerX + point.x, centerY + point.y, (.9 + (i % 3) * .3) * scale, 0, TAU);
+          ctx.fill();
+          // A tiny line of afterglow makes the orbit feel continuous, not noisy.
+          const tail = project({ x: x - Math.sin(a) * .12, y: y + Math.cos(a) * .07, z }, angle, scale);
+          ctx.strokeStyle = `rgba(241, 93, 86, ${alpha * .28})`;
+          ctx.lineWidth = .7 * scale;
+          ctx.beginPath();
+          ctx.moveTo(centerX + tail.x, centerY + tail.y);
+          ctx.lineTo(centerX + point.x, centerY + point.y);
+          ctx.stroke();
+        });
+        ctx.restore();
+      }
+
+      function trigger() {
+        if (reduced.matches || mode !== 'idle') return;
+        mode = 'dissolve';
+        modeTime = 0;
+      }
+
+      function drawFrame(now) {
+        const dt = Math.min(.05, (now - last) / 1000 || 0);
+        last = now;
+        const seconds = now / 1000;
+
+        if (!reduced.matches) {
+          angle += dt * (mode === 'idle' ? .43 : .12);
+          modeTime += dt;
+          if (mode === 'dissolve' && modeTime > .9) { mode = 'drift'; modeTime = 0; }
+          else if (mode === 'drift' && modeTime > 2.65) { mode = 'reform'; modeTime = 0; }
+          else if (mode === 'reform' && modeTime > 1.5) { mode = 'idle'; modeTime = 0; }
+        } else {
+          angle = -.16;
+          mode = 'idle';
+        }
+
+        ctx.clearRect(0, 0, width, height);
+        drawShadow(mode === 'idle' || mode === 'reform' ? 1 : .15);
+
+        if (mode === 'idle') {
+          drawHat(angle, 1);
+        } else if (mode === 'dissolve') {
+          const p = easeOut(clamp(modeTime / .9, 0, 1));
+          drawHat(angle, 1 - p);
+          drawParticles(seconds, p, 0);
+        } else if (mode === 'drift') {
+          drawParticles(seconds, 1, 0);
+        } else if (mode === 'reform') {
+          const p = clamp(modeTime / 1.5, 0, 1);
+          drawParticles(seconds, 1, p);
+          drawHat(angle, easeOut(p));
+        }
+
+        const reveal = mode === 'idle' ? 1 : mode === 'reform' ? clamp(modeTime / 1.5, 0, 1) : 0;
+        drawOrbiters(seconds, reveal);
+        if (!reduced.matches) requestAnimationFrame(drawFrame);
+      }
+
+      canvas.addEventListener('pointerenter', () => {
+        if (hoverReady) { trigger(); hoverReady = false; }
+      });
+      canvas.addEventListener('pointerleave', () => { hoverReady = true; });
+      canvas.addEventListener('pointerdown', () => trigger(), { passive: true });
+      reduced.addEventListener?.('change', () => {
+        if (reduced.matches) {
+          mode = 'idle';
+          drawFrame(performance.now());
+        } else {
+          last = performance.now();
+          requestAnimationFrame(drawFrame);
+        }
+      });
+
+      makeParticles();
+      window.addEventListener('resize', resize, { passive: true });
+      resize();
+      if (reduced.matches) drawFrame(performance.now());
+      else requestAnimationFrame(drawFrame);
+    })();
+  </script>
+</body>
+</html>
