@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Red Fedora — Ember Dissolve</title>
+<style>
+  :root{ color-scheme: dark; }
+  *{ margin:0; padding:0; box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{
+    background: radial-gradient(120% 85% at 50% 10%, #191921 0%, #0d0d13 46%, #050508 100%);
+    display:flex; align-items:center; justify-content:center;
+    font-family: ui-sans-serif, system-ui, "Segoe UI", Helvetica, Arial, sans-serif;
+    overflow:hidden;
+    user-select:none; -webkit-user-select:none;
+  }
+  main{ display:flex; flex-direction:column; align-items:center; gap:clamp(14px,3.2vmin,30px); }
+  .stage{
+    position:relative;
+    width:min(80vmin, 620px);
+    aspect-ratio:1/1;
+    cursor:pointer;
+    touch-action:manipulation;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .halo{
+    position:absolute; inset:0; pointer-events:none;
+    background:radial-gradient(42% 40% at 50% 42%, rgba(255,64,52,.12), rgba(255,64,52,0) 70%);
+    opacity:.55; transition:opacity .8s ease;
+  }
+  .stage:hover .halo{ opacity:1; }
+  canvas{ position:relative; width:100%; height:100%; display:block; }
+  .caption{
+    font-size:clamp(10px,1.55vmin,13px);
+    letter-spacing:.34em; text-transform:uppercase;
+    color:#847f7a; text-align:center; padding:0 16px;
+    animation:rise 1.4s cubic-bezier(.2,.7,.2,1) .25s both;
+  }
+  .caption b{ color:#d9d2cb; font-weight:600; }
+  .caption .dot{ color:#e2372e; }
+  @keyframes rise{ from{ opacity:0; transform:translateY(10px); } to{ opacity:1; transform:none; } }
+  @media (prefers-reduced-motion: reduce){
+    .caption{ animation:none; }
+    .halo{ transition:none; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <div class="stage" id="stage" role="img" aria-label="A red fedora logo spinning slowly in 3D">
+    <div class="halo"></div>
+    <canvas id="scene"></canvas>
+  </div>
+  <p class="caption"><b>Red Fedora</b> <span class="dot">·</span> hover or tap — it scatters into embers, then returns</p>
+</main>
+
+<script>
+(() => {
+'use strict';
+
+const stage  = document.getElementById('stage');
+const canvas = document.getElementById('scene');
+const ctx    = canvas.getContext('2d');
+
+/* ---------------- reduced motion ---------------- */
+const RM = window.matchMedia('(prefers-reduced-motion: reduce)');
+let reduced = RM.matches;
+let running = false;
+function onRM(e){
+  reduced = e.matches;
+  if (reduced){ running = false; resize(); }
+  else if (!running){ running = true; last = performance.now(); requestAnimationFrame(frame); }
+}
+if (RM.addEventListener) RM.addEventListener('change', onRM);
+else if (RM.addListener) RM.addListener(onRM);
+
+/* ---------------- viewport ---------------- */
+let W=2,H=2,DPR=1,U=100,CX=0,CY=0;
+function resize(){
+  const r = stage.getBoundingClientRect();
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = Math.max(2, r.width);  H = Math.max(2, r.height);
+  canvas.width  = Math.round(W*DPR);
+  canvas.height = Math.round(H*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  CX = W*0.5; CY = H*0.5;
+  U  = Math.min(W,H)*0.36;
+  if (reduced) draw(0, 0);
+}
+window.addEventListener('resize', resize);
+
+/* ---------------- fedora mesh ---------------- */
+const SEG = 48;
+const bx=[], by=[], bz=[];   // base vertices
+const quads=[];              // {v:[a,b,c,d], cr,cg,cb, a1, area}
+
+function addV(x,y,z){ bx.push(x); by.push(y); bz.push(z); return bx.length-1; }
+
+function revolve(profile, col){
+  const rings = profile.map(p=>{
+    const idx=[];
+    for(let i=0;i<SEG;i++){
+      const a = i/SEG*Math.PI*2;
+      idx.push(addV(Math.cos(a)*p[0], p[1], Math.sin(a)*p[0]));
+    }
+    return idx;
+  });
+  for(let i=0;i<profile.length-1;i++){
+    for(let j=0;j<SEG;j++){
+      const j2=(j+1)%SEG;
+      const a=rings[i][j], b=rings[i][j2], c=rings[i+1][j2], d=rings[i+1][j];
+      quads.push({ v: profile[i+1][0] < 1e-3 ? [a,b,c,c] : [a,b,c,d],
+                   cr:col[0], cg:col[1], cb:col[2] });
+    }
+  }
+}
+
+const RED =[226,30,36], RED2=[204,24,32], BAND=[26,14,16];
+revolve([[0.40, 0.02],[0.56,-0.005],[0.74,-0.05],[0.89,-0.11],[1.00,-0.20]], RED);                                                          // brim (curls down)
+revolve([[0.40, 0.02],[0.415,0.10],[0.425,0.20],[0.415,0.30],[0.385,0.40],[0.31,0.47],[0.17,0.505],[0.001,0.52]], RED2);                    // crown
+revolve([[0.437,0.025],[0.443,0.095],[0.437,0.165]], BAND);                                                                                 // hat band
+
+/* triangle areas, for uniform surface sampling */
+for(const q of quads){
+  const v=q.v, a=v[0], b=v[1], c=v[2], d=v[3];
+  const e1x=bx[b]-bx[a], e1y=by[b]-by[a], e1z=bz[b]-bz[a];
+  const e2x=bx[c]-bx[a], e2y=by[c]-by[a], e2z=bz[c]-bz[a];
+  const e3x=bx[d]-bx[a], e3y=by[d]-by[a], e3z=bz[d]-bz[a];
+  q.a1  =0.5*Math.hypot(e1y*e2z-e1z*e2y, e1z*e2x-e1x*e2z, e1x*e2y-e1y*e2x);
+  const a2=0.5*Math.hypot(e1y*e3z-e1z*e3y, e1z*e3x-e1x*e3z, e1x*e3y-e1y*e3x);
+  q.area=q.a1+a2;
+}
+let total=0;
+const CUM=quads.map(q=>total+=q.area);
+
+/* ---------------- camera & light ---------------- */
+const F=3.0, DIST=4.2, TILT=0.5;
+const CT=Math.cos(TILT), ST=Math.sin(TILT);
+const L=(()=>{const x=-0.5,y=0.8,z=-0.55,l=Math.hypot(x,y,z);return [x/l,y/l,z/l];})();
+
+let spin=0.6, cs=Math.cos(spin), sn=Math.sin(spin), bob=0;
+const T0=[0,0,0];
+
+function xf(x,y,z,o){                 // model -> view space (spin, tilt, bob)
+  const x1=x*cs+z*sn, z1=z*cs-x*sn;
+  o[0]=x1; o[1]=y*CT+z1*ST+bob; o[2]=z1*CT-y*ST;
+}
+
+const NV=bx.length;
+const wx=new Float32Array(NV), wy=new Float32Array(NV), wz=new Float32Array(NV);
+const px=new Float32Array(NV), py=new Float32Array(NV), pd=new Float32Array(NV);
+const order=quads.map((_,i)=>i);
+const dep=new Float32Array(quads.length);
+
+/* ---------------- glow sprites ---------------- */
+function makeSprite(r,g,b){
+  const c=document.createElement('canvas'); c.width=c.height=64;
+  const x=c.getContext('2d');
+  const gr=x.createRadialGradient(32,32,0,32,32,32);
+  gr.addColorStop(0,'rgba(255,255,255,0.85)');
+  gr.addColorStop(0.22,'rgba('+r+','+g+','+b+',0.6)');
+  gr.addColorStop(0.55,'rgba('+r+','+g+','+b+',0.18)');
+  gr.addColorStop(1,'rgba('+r+','+g+','+b+',0)');
+  x.fillStyle=gr; x.fillRect(0,0,64,64);
+  return c;
+}
+const sprites=[
+  makeSprite(255,188,110),   // ember gold
+  makeSprite(255,96,66),     // hot red-orange
+  makeSprite(226,42,40),     // hat red
+  makeSprite(255,238,214)    // white-hot
+];
+function pickSprite(){
+  const r=Math.random();
+  return r<0.42?1 : r<0.68?2 : r<0.9?0 : 3;
+}
+
+/* ---------------- dissolve effect ---------------- */
+const P_N=2600;
+const REL=0.55, DRIFT=2.7, RET=4.15;
+let parts=null, effectT=0, state='idle';
+const orbiters=[];
+
+function solidAlpha(){
+  if(state==='idle') return 1;
+  const T=effectT;
+  if(T<0.06) return 1;
+  if(T<0.5)  return 1-(T-0.06)/0.44;
+  if(T<3.8)  return 0;
+  return Math.min(1,(T-3.8)/(RET-3.8));
+}
+function burstAlpha(){
+  if(state==='idle') return 0;
+  const T=effectT;
+  if(T<0.1)  return 0;
+  if(T<0.5)  return (T-0.1)/0.4;
+  if(T<3.75) return 1;
+  if(T<RET)  return 1-(T-3.75)/(RET-3.75);
+  return 0;
+}
+
+function surfacePoint(q,out){
+  const v=q.v;
+  let A,B,C;
+  if(Math.random()*q.area<q.a1){ A=v[0];B=v[1];C=v[2]; } else { A=v[0];B=v[2];C=v[3]; }
+  const u=Math.sqrt(Math.random()), w=Math.random();
+  out[0]=bx[A]+u*(bx[B]-bx[A])+u*w*(bx[C]-bx[B]);
+  out[1]=by[A]+u*(by[B]-by[A])+u*w*(by[C]-by[B]);
+  out[2]=bz[A]+u*(bz[B]-bz[A])+u*w*(bz[C]-bz[B]);
+  const e1x=bx[B]-bx[A], e1y=by[B]-by[A], e1z=bz[B]-bz[A];
+  const e2x=bx[C]-bx[A], e2y=by[C]-by[A], e2z=bz[C]-bz[A];
+  let nx=e1y*e2z-e1z*e2y, ny=e1z*e2x-e1x*e2z, nz=e1x*e2y-e1y*e2x;
+  const l=Math.hypot(nx,ny,nz)||1;
+  out[3]=nx/l; out[4]=ny/l; out[5]=nz/l;
+}
+
+function spawnParticles(){
+  parts=[];
+  const s=[0,0,0,0,0,0];
+  for(let i=0;i<P_N;i++){
+    const r=Math.random()*total;
+    let lo=0, hi=CUM.length-1;
+    while(lo<hi){ const m=(lo+hi)>>1; if(CUM[m]<r) lo=m+1; else hi=m; }
+    const q=quads[lo];
+    surfacePoint(q,s);
+    // world-space normal for lighting at spawn
+    const nx1=s[3]*cs+s[5]*sn, nz1=s[5]*cs-s[3]*sn;
+    const nwx=nx1, nwy=s[4]*CT+nz1*ST, nwz=nz1*CT-s[4]*ST;
+    const d=Math.max(0, nwx*L[0]+nwy*L[1]+nwz*L[2]);
+    const m=0.75+Math.random()*0.5;
+    const lit=v=>Math.min(255, v*(0.34+0.78*d)*m + Math.pow(d,16)*0.4*230);
+    xf(s[0],s[1],s[2],T0);
+    parts.push({
+      tx:s[0], ty:s[1], tz:s[2],
+      x:T0[0], y:T0[1], z:T0[2],
+      vx:0, vy:0, vz:0,
+      nwx, nwy, nwz,
+      si:0.6+Math.random()*1.5,
+      seed:Math.random()*100,
+      sp:pickSprite(),
+      k:20+Math.random()*14,
+      kicked:false
+    });
+  }
+}
+
+function updateParticles(dt){
+  const T=effectT, damp=Math.exp(-1.6*dt), sdamp=Math.exp(-7.5*dt);
+  for(const p of parts){
+    xf(p.tx,p.ty,p.tz,T0);
+    const ax=T0[0], ay=T0[1], az=T0[2];
+    if(T<REL){ p.x=ax; p.y=ay; p.z=az; p.vx=p.vy=p.vz=0; continue; }
+    if(!p.kicked){
+      p.kicked=true;
+      const s=0.5+Math.random()*0.8, q=(Math.random()-0.5)*0.9;
+      p.vx=p.nwx*s; p.vy=p.nwy*s*0.6+0.15; p.vz=p.nwz*s;
+      const rl=Math.hypot(p.x,p.z)+1e-4;
+      p.vx+=-p.z/rl*q; p.vz+=p.x/rl*q;
+    }
+    if(T<DRIFT){
+      const rl=Math.hypot(p.x,p.z)+1e-4;
+      const sw=1.2+(p.seed%1)*1.4;
+      p.vx+=(-p.z/rl*sw + Math.sin(T*3.0+p.seed*7)*0.55)*dt;
+      p.vz+=( p.x/rl*sw + Math.cos(T*2.4+p.seed*5)*0.55)*dt;
+      p.vy+=(0.45+(p.seed%1)*0.5 + Math.sin(T*2.1+p.seed*3)*0.3)*dt;
+      if(p.y>1.5) p.vy-=(p.y-1.5)*5*dt;
+      p.vx*=damp; p.vy*=damp; p.vz*=damp;
+    }else{
+      p.vx+=(ax-p.x)*p.k*dt; p.vy+=(ay-p.y)*p.k*dt; p.vz+=(az-p.z)*p.k*dt;
+      p.vx*=sdamp; p.vy*=sdamp; p.vz*=sdamp;
+    }
+    p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt;
+    if(T>RET-0.35){
+      const m=(T-(RET-0.35))/0.35;
+      p.x+=(ax-p.x)*m; p.y+=(ay-p.y)*m; p.z+=(az-p.z)*m;
+    }
+  }
+}
+
+function keepOrbiters(){
+  if(!parts) return;
+  const n=8+((Math.random()*5)|0);
+  for(let i=0;i<n;i++){
+    const p=parts[(Math.random()*parts.length)|0];
+    orbiters.push({
+      ang:Math.random()*6.283,
+      r:1.05+Math.random()*0.55,
+      sp:(0.5+Math.random()*0.85)*(Math.random()<0.5?-1:1),
+      ti:Math.random()-0.5,
+      ph:Math.random()*6.283,
+      born:time, trail:[], spr:p.sp
+    });
+  }
+  while(orbiters.length>16) orbiters.shift();
+}
+
+/* ---------------- render ---------------- */
+let time=0, gdt=0;
+
+function drawOrbiters(){
+  for(const o of orbiters){
+    const fade=Math.min(1,(time-o.born)/1.2);
+    o.ang+=o.sp*gdt;
+    const x=Math.cos(o.ang)*o.r, z=Math.sin(o.ang)*o.r;
+    const y=Math.sin(o.ang*2+o.ph)*0.16 + x*o.ti*0.35 + bob*0.5;
+    const zc=DIST+z, k=F/zc*U, sx=CX+x*k, sy=CY-y*k;
+    o.trail.push(sx,sy);
+    if(o.trail.length>36) o.trail.splice(0,2);
+    const tr=o.trail;
+    for(let j=2;j<tr.length;j+=2){
+      const t=j/tr.length;
+      ctx.strokeStyle='rgba(255,150,95,'+(t*t*0.35*fade).toFixed(3)+')';
+      ctx.lineWidth=0.6+t*1.6;
+      ctx.beginPath(); ctx.moveTo(tr[j-2],tr[j-1]); ctx.lineTo(tr[j],tr[j+1]); ctx.stroke();
+    }
+    const s=Math.max(0.8, 1.1*U*0.012*(4.2/zc))*(1+0.15*Math.sin(time*6+o.ph));
+    ctx.globalAlpha=0.8*fade;
+    ctx.drawImage(sprites[0], sx-s, sy-s, s*2, s*2);
+    ctx.globalAlpha=1;
+  }
+}
+
+function drawParticles(){
+  const A=burstAlpha();
+  ctx.globalCompositeOperation='lighter';
+  if(parts&&A>0){
+    for(const p of parts){
+      const zc=DIST+p.z; if(zc<0.6) continue;
+      const al=A*(0.72+0.28*Math.sin(time*9+p.seed*11));
+      if(al<=0.02) continue;
+      const k=F/zc*U, sx=CX+p.x*k, sy=CY-p.y*k;
+      const s=Math.max(0.6, p.si*U*0.012*(4.2/zc));
+      ctx.globalAlpha=al;
+      ctx.drawImage(sprites[p.sp], sx-s, sy-s, s*2, s*2);
+    }
+    ctx.globalAlpha=1;
+  }
+  drawOrbiters();
+  ctx.globalCompositeOperation='source-over';
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+
+  /* ambient back-glow for depth */
+  let g=ctx.createRadialGradient(CX,CY-U*0.32,U*0.05,CX,CY-U*0.25,U*1.5);
+  g.addColorStop(0,'rgba(255,58,46,0.085)');
+  g.addColorStop(1,'rgba(255,58,46,0)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+
+  const solidA=solidAlpha();
+
+  /* soft floor shadow */
+  {
+    const gy=-1.15, y2=gy*CT, z2=-gy*ST, zc=DIST+z2;
+    const sy=CY - y2*F/zc*U;
+    const s=Math.max(0.7, 1-bob*1.6);
+    const rx=U*0.74*s, ry=rx*0.2;
+    const al=Math.max(0,(0.5-bob*2.4))*(0.25+0.75*solidA);
+    ctx.save(); ctx.translate(CX,sy); ctx.scale(1,ry/rx);
+    g=ctx.createRadialGradient(0,0,rx*0.1,0,0,rx);
+    g.addColorStop(0,'rgba(0,0,0,'+al.toFixed(3)+')');
+    g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(0,0,rx,0,7); ctx.fill();
+    ctx.restore();
+  }
+
+  /* hat */
+  for(let i=0;i<NV;i++){
+    xf(bx[i],by[i],bz[i],T0);
+    const zc=DIST+T0[2];
+    wx[i]=T0[0]; wy[i]=T0[1]; wz[i]=T0[2]; pd[i]=zc;
+    const k=F/zc*U;
+    px[i]=CX+wx[i]*k; py[i]=CY-wy[i]*k;
+  }
+  for(let qi=0;qi<quads.length;qi++){
+    const v=quads[qi].v;
+    dep[qi]=(pd[v[0]]+pd[v[1]]+pd[v[2]]+pd[v[3]])*0.25;
+  }
+  order.sort((a,b)=>dep[b]-dep[a]);
+
+  ctx.globalAlpha=solidA;
+  ctx.lineJoin='round'; ctx.lineWidth=1;
+  for(const qi of order){
+    const q=quads[qi], v=q.v, a=v[0], b=v[1], c=v[2], d=v[3];
+    let nx=(wy[b]-wy[a])*(wz[d]-wz[a])-(wz[b]-wz[a])*(wy[d]-wy[a]);
+    let ny=(wz[b]-wz[a])*(wx[d]-wx[a])-(wx[b]-wx[a])*(wz[d]-wz[a]);
+    let nz=(wx[b]-wx[a])*(wy[d]-wy[a])-(wy[b]-wy[a])*(wx[d]-wx[a]);
+    if(nz>0){ nx=-nx; ny=-ny; nz=-nz; }
+    const il=1/(Math.hypot(nx,ny,nz)||1);
+    const df=Math.max(0,(nx*L[0]+ny*L[1]+nz*L[2])*il);
+    let sp=df*df; sp=sp*sp*sp*sp*sp*0.5;
+    const fg=Math.min(1,Math.max(0,(dep[qi]-(DIST-1.4))/2.8))*0.45;
+    let r=q.cr*(0.34+0.78*df)+sp*230,
+        g2=q.cg*(0.34+0.78*df)+sp*180,
+        b2=q.cb*(0.34+0.78*df)+sp*140;
+    r+=(12-r)*fg; g2+=(13-g2)*fg; b2+=(19-b2)*fg;
+    const fs='rgb('+(r|0)+','+(g2|0)+','+(b2|0)+')';
+    ctx.fillStyle=fs; ctx.strokeStyle=fs;
+    ctx.beginPath();
+    ctx.moveTo(px[a],py[a]); ctx.lineTo(px[b],py[b]);
+    ctx.lineTo(px[c],py[c]); ctx.lineTo(px[d],py[d]);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+  ctx.globalAlpha=1;
+
+  drawParticles();
+}
+
+/* ---------------- main loop ---------------- */
+const BASE=0.5;
+let hover=false, last=performance.now(), speed=BASE;
+
+function frame(now){
+  if(!running) return;
+  requestAnimationFrame(frame);
+  let dt=(now-last)/1000; last=now;
+  if(dt>0.05) dt=0.05; if(dt<0) dt=0;
+  gdt=dt; time+=dt;
+  speed+=((hover?0.1:BASE)-speed)*Math.min(1,dt*3.5);
+  spin+=speed*dt; cs=Math.cos(spin); sn=Math.sin(spin);
+  bob=Math.sin(time*1.05)*0.035;
+  if(state!=='idle'){
+    effectT+=dt;
+    updateParticles(dt);
+    if(effectT>=RET){ keepOrbiters(); state='idle'; parts=null; }
+  }
+  draw();
+}
+
+/* ---------------- interaction ---------------- */
+function trigger(){
+  if(reduced||state!=='idle') return;
+  spawnParticles(); effectT=0; state='run';
+}
+let touchTimer=0;
+stage.addEventListener('pointerenter',()=>{ hover=true; trigger(); });
+stage.addEventListener('pointerleave',()=>{ hover=false; });
+stage.addEventListener('pointerdown',()=>{ hover=true; trigger(); });
+stage.addEventListener('pointerup',e=>{
+  if(e.pointerType!=='mouse'){
+    clearTimeout(touchTimer);
+    touchTimer=setTimeout(()=>{ hover=false; },(RET+0.2)*1000);
+  }
+});
+
+/* ---------------- go ---------------- */
+resize();
+if(reduced){ draw(0,0); }
+else { running=true; requestAnimationFrame(frame); }
+
+})();
+</script>
+</body>
+</html>
