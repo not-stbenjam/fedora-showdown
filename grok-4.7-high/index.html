@@ -1,0 +1,1110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fedora</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --ink: #09080b;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--ink);
+    overflow: hidden;
+  }
+  body {
+    background:
+      radial-gradient(ellipse 48% 40% at 50% 44%, rgba(255, 220, 204, 0.045), transparent 62%),
+      radial-gradient(ellipse 80% 46% at 50% 86%, rgba(86, 16, 26, 0.20), transparent 70%),
+      radial-gradient(ellipse 130% 90% at 50% -10%, #16151a 0%, #0c0b0e 48%, #08070a 100%);
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #stage {
+    position: fixed;
+    inset: 0;
+    outline: none;
+    cursor: pointer;
+  }
+  canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .veil {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse at 50% 46%, transparent 46%, rgba(0, 0, 0, 0.42) 100%);
+  }
+  figcaption {
+    position: absolute;
+    left: 50%;
+    top: min(calc(100dvh - 64px), calc(50% + 31vmin));
+    transform: translateX(-50%);
+    text-align: center;
+    pointer-events: none;
+    width: max-content;
+    max-width: 92vw;
+  }
+  .name {
+    display: block;
+    font-family: Palatino, "Palatino Linotype", "Book Antiqua", Georgia, "Times New Roman", serif;
+    font-weight: 500;
+    font-size: clamp(12px, 1.7vmin, 15px);
+    letter-spacing: 0.52em;
+    text-indent: 0.52em;
+    text-transform: uppercase;
+    color: #c9beb8;
+  }
+  .hint {
+    display: block;
+    margin-top: 0.7rem;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: clamp(9px, 1.15vmin, 11px);
+    letter-spacing: 0.34em;
+    text-indent: 0.34em;
+    text-transform: uppercase;
+    color: #6f6562;
+    opacity: 1;
+    transition: opacity 0.7s ease;
+  }
+  #stage.is-playing .hint { opacity: 0.28; }
+  #stage:focus-visible .hint { color: #e4d7d1; }
+  .fallback {
+    position: absolute;
+    left: 50%;
+    top: 46%;
+    transform: translate(-50%, -50%);
+    margin: 0;
+    font-family: Palatino, Georgia, serif;
+    color: #b7aaa4;
+    letter-spacing: 0.08em;
+    text-align: center;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hint { display: none; }
+    #stage { cursor: default; }
+    .hint, #stage.is-playing .hint { transition: none; }
+  }
+  @media (max-height: 520px) {
+    figcaption { top: auto; bottom: max(12px, 2.5vh); }
+  }
+</style>
+</head>
+<body>
+<figure id="stage" tabindex="0" aria-label="A red fedora, slowly turning. Activate to dissolve it into embers and watch it reform.">
+  <canvas id="c" aria-hidden="true"></canvas>
+  <div class="veil" aria-hidden="true"></div>
+  <figcaption>
+    <span class="name">fedora</span>
+    <span class="hint">hover or tap</span>
+  </figcaption>
+</figure>
+<script>
+(function () {
+  "use strict";
+
+  var stage = document.getElementById("stage");
+  var canvas = document.getElementById("c");
+  var gl = canvas.getContext("webgl", {
+    alpha: true,
+    antialias: false,
+    depth: false,
+    stencil: false,
+    premultipliedAlpha: true,
+    powerPreference: "high-performance"
+  });
+
+  if (!gl) {
+    var fail = document.createElement("p");
+    fail.className = "fallback";
+    fail.textContent = "WebGL is unavailable in this browser.";
+    stage.appendChild(fail);
+    return;
+  }
+
+  var motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+  var reduced = motionQuery.matches;
+
+  var TAU = Math.PI * 2;
+  var REST = 0.98;
+  var FOV = 33 * Math.PI / 180;
+  var LOOK_Y = 0.36;
+  var FLOOR_Y = -0.46;
+  var DUR = [0, 1.58, 2.12, 2.46];
+  var SPIN_IDLE = 0.46;
+  var TRAIL = 42;
+  var ORBIT_N = 8;
+
+  function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function smoothstep(e0, e1, x) {
+    var t = clamp01((x - e0) / (e1 - e0));
+    return t * t * (3 - 2 * t);
+  }
+  function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+  function easeInOutCubic(t) {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  }
+  function wrap01(u) {
+    u = u % 1;
+    return u < 0 ? u + 1 : u;
+  }
+  function hypot3(x, y, z) { return Math.sqrt(x * x + y * y + z * z); }
+
+  function mulberry32(seed) {
+    var a = seed >>> 0;
+    return function () {
+      a |= 0;
+      a = a + 0x6D2B79F5 | 0;
+      var t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rand = mulberry32(0x5EED);
+
+  function crownWall(u, v) {
+    var theta = u * TAU;
+    var st = Math.sin(theta);
+    var ct = Math.cos(theta);
+    var front = smoothstep(0.05, 0.95, ct);
+    var back = smoothstep(0.05, 0.95, -ct);
+    var y0 = 0.045;
+    var y1 = 1.2 - 0.16 * front + 0.05 * back;
+    var y = y0 + (y1 - y0) * v;
+    var taper = v;
+    var belly = Math.sin(v * Math.PI) * 0.028;
+    var rx = 0.50 - taper * 0.07 + belly;
+    var rz = 0.56 - taper * 0.05 + belly * 0.85;
+    rx *= 1 - front * (0.05 + 0.40 * v * v);
+    var dentA = Math.exp(-Math.pow((theta - 1.02) / 0.32, 2));
+    var dentB = Math.exp(-Math.pow((theta - (TAU - 1.02)) / 0.32, 2));
+    var dentV = Math.exp(-Math.pow((v - 0.6) / 0.18, 2));
+    rx *= 1 - 0.10 * (dentA + dentB) * dentV;
+    return [rx * st, y, rz * ct];
+  }
+
+  function crownTop(u, s) {
+    var edge = crownWall(u, 1);
+    var x = edge[0] * s;
+    var z = edge[2] * s;
+    var theta = u * TAU;
+    var side = Math.abs(Math.sin(theta));
+    var crease = 0.22 * (1 - s * s) * (0.4 + 0.6 * smoothstep(-0.2, 0.9, Math.cos(theta)));
+    var lobe = 0.055 * Math.sin(Math.min(1, s) * Math.PI) * side * (1 - s);
+    return [x, edge[1] + lobe - crease, z];
+  }
+
+  function brimPoint(u, t, under) {
+    var theta = u * TAU;
+    var st = Math.sin(theta);
+    var ct = Math.cos(theta);
+    var inner = 0.44;
+    var outer = 1.04 + 0.30 * smoothstep(-0.05, 0.92, ct) + 0.05 * Math.abs(st) - 0.06 * smoothstep(-0.05, 0.9, -ct);
+    var rad = inner + (outer - inner) * t;
+    var curl = t * t * (3 - 2 * t);
+    var y = 0.05;
+    y -= 0.32 * curl * smoothstep(-0.15, 0.95, ct);
+    y += 0.2 * curl * smoothstep(-0.15, 0.95, -ct);
+    y -= 0.055 * curl * Math.abs(st);
+    y -= 0.045 * smoothstep(0.8, 1, t);
+    if (under) y -= 0.034 + 0.012 * t;
+    return [st * rad, y, ct * rad];
+  }
+
+  function bandPoint(u, v) {
+    var p = crownWall(u, 0.05 + v * 0.095);
+    return [p[0] * 1.055, p[1], p[2] * 1.055];
+  }
+
+  function fdNormal(fn, u, v, hx, hy, hz) {
+    var e = 0.0032;
+    var p = fn(u, v);
+    var pu = fn(wrap01(u + e), v);
+    var mu = fn(wrap01(u - e), v);
+    var pv = fn(u, clamp01(v + e));
+    var mv = fn(u, clamp01(v - e));
+    var dux = pu[0] - mu[0], duy = pu[1] - mu[1], duz = pu[2] - mu[2];
+    var dvx = pv[0] - mv[0], dvy = pv[1] - mv[1], dvz = pv[2] - mv[2];
+    var nx = duy * dvz - duz * dvy;
+    var ny = duz * dvx - dux * dvz;
+    var nz = dux * dvy - duy * dvx;
+    var len = hypot3(nx, ny, nz);
+    if (len < 1e-5) {
+      nx = hx; ny = hy; nz = hz;
+      len = hypot3(nx, ny, nz) || 1;
+    }
+    nx /= len; ny /= len; nz /= len;
+    if (nx * hx + ny * hy + nz * hz < 0) {
+      nx = -nx; ny = -ny; nz = -nz;
+    }
+    return { p: p, nx: nx, ny: ny, nz: nz };
+  }
+
+  var homeX = [], homeY = [], homeZ = [];
+  var nrmX = [], nrmY = [], nrmZ = [];
+  var albR = [], albG = [], albB = [];
+  var sizeA = [];
+  var seedA = [];
+
+  function pushFelt(sample, ao, scale, jitterU) {
+    var s0 = rand();
+    var j = (s0 - 0.5) * 0.05;
+    var nx = sample.nx + (rand() - 0.5) * 0.1;
+    var ny = sample.ny + (rand() - 0.5) * 0.1;
+    var nz = sample.nz + (rand() - 0.5) * 0.1;
+    var nl = hypot3(nx, ny, nz) || 1;
+    homeX.push(sample.p[0]);
+    homeY.push(sample.p[1]);
+    homeZ.push(sample.p[2]);
+    nrmX.push(nx / nl);
+    nrmY.push(ny / nl);
+    nrmZ.push(nz / nl);
+    albR.push((0.94 + j) * ao);
+    albG.push((0.055 + j * 0.25) * ao);
+    albB.push((0.048 + j * 0.1) * ao);
+    sizeA.push(scale * (0.88 + rand() * 0.24));
+    seedA.push(jitterU == null ? s0 : jitterU);
+  }
+
+  function addSurface(fn, nu, nv, aoFn, scale, hintFn) {
+    var iu, iv, u, v, sample, p;
+    for (iu = 0; iu < nu; iu++) {
+      for (iv = 0; iv < nv; iv++) {
+        u = wrap01((iu + rand() * 0.72) / nu);
+        v = clamp01((iv + 0.18 + rand() * 0.64) / nv);
+        sample = fdNormal(fn, u, v, 0, 1, 0);
+        p = sample.p;
+        if (hintFn) {
+          var h = hintFn(p, u, v);
+          if (sample.nx * h[0] + sample.ny * h[1] + sample.nz * h[2] < 0) {
+            sample.nx = -sample.nx;
+            sample.ny = -sample.ny;
+            sample.nz = -sample.nz;
+          }
+        }
+        pushFelt(sample, aoFn(p, u, v), scale, rand());
+      }
+    }
+  }
+
+  addSurface(crownWall, 112, 38, function (p, u, v) {
+    var ao = 1 - 0.22 * (1 - v) * (1 - v);
+    return ao;
+  }, 1, function (p) { return [p[0], 0.15, p[2]]; });
+
+  addSurface(function (u, s) { return crownTop(u, Math.sqrt(clamp01(s))); }, 78, 16, function (p, u, s) {
+    var ss = Math.sqrt(clamp01(s));
+    var crease = (1 - ss) * Math.exp(-(p[0] * p[0]) / 0.018);
+    return 1 - 0.64 * crease;
+  }, 1.02, function () { return [0, 1, 0]; });
+
+  addSurface(function (u, t) { return brimPoint(u, t, false); }, 150, 22, function (p, u, t) {
+    return 1 - 0.18 * (1 - t);
+  }, 1.06, function () { return [0, 1, 0]; });
+
+  addSurface(function (u, t) {
+    var tt = 0.42 + 0.58 * t;
+    return brimPoint(u, tt, true);
+  }, 100, 8, function () { return 0.38; }, 1.08, function () { return [0, -1, 0]; });
+
+  addSurface(function (u, v) {
+    var theta = u * TAU;
+    var lip = brimPoint(u, 1, false);
+    var st = Math.sin(theta);
+    var ct = Math.cos(theta);
+    var ang = v * Math.PI;
+    var roll = 0.03;
+    return [
+      lip[0] + st * Math.sin(ang) * roll,
+      lip[1] - (1 - Math.cos(ang)) * roll,
+      lip[2] + ct * Math.sin(ang) * roll
+    ];
+  }, 210, 4, function (p, u, v) {
+    return lerp(1, 0.55, v);
+  }, 1.12, function (p, u) {
+    var theta = u * TAU;
+    return [Math.sin(theta), -0.2, Math.cos(theta)];
+  });
+
+  addSurface(function (u, s) {
+    var edge = crownWall(u, 0.02);
+    var k = Math.sqrt(clamp01(s)) * 0.98;
+    return [edge[0] * k, 0.18, edge[2] * k];
+  }, 72, 14, function () { return 0.5; }, 1.28, function () { return [0, 1, 0]; });
+
+  addSurface(function (u, v) {
+    var p = crownWall(u, 0.01 + v * 0.06);
+    var f = 1.01 + v * 0.03;
+    return [p[0] * f, p[1] - v * 0.01, p[2] * f];
+  }, 90, 4, function () { return 0.62; }, 1.18, function (p) { return [p[0], 0.25, p[2]]; });
+
+  addSurface(bandPoint, 96, 7, function (p, u, v) {
+    return v > 0.84 ? 0.58 : 0.24;
+  }, 1.22, function (p) { return [p[0], 0, p[2]]; });
+
+  var N = homeX.length;
+  var home = new Float32Array(N * 3);
+  var nrm = new Float32Array(N * 3);
+  var alb = new Float32Array(N * 3);
+  var psize = new Float32Array(N);
+  var seed = new Float32Array(N);
+  var orb = new Uint8Array(N);
+  var i, i3;
+  for (i = 0; i < N; i++) {
+    i3 = i * 3;
+    home[i3] = homeX[i];
+    home[i3 + 1] = homeY[i];
+    home[i3 + 2] = homeZ[i];
+    nrm[i3] = nrmX[i];
+    nrm[i3 + 1] = nrmY[i];
+    nrm[i3 + 2] = nrmZ[i];
+    alb[i3] = albR[i];
+    alb[i3 + 1] = albG[i];
+    alb[i3 + 2] = albB[i];
+    psize[i] = sizeA[i];
+    seed[i] = seedA[i];
+  }
+
+  var orbIndex = [];
+  var step = Math.floor(N / ORBIT_N);
+  for (i = 0; i < ORBIT_N; i++) orbIndex.push((i * step + Math.floor(step * 0.37)) % N);
+  for (i = 0; i < ORBIT_N; i++) orb[orbIndex[i]] = 1;
+  var orbSlot = new Int16Array(N);
+  for (i = 0; i < N; i++) orbSlot[i] = -1;
+  for (i = 0; i < ORBIT_N; i++) orbSlot[orbIndex[i]] = i;
+
+  var pos = new Float32Array(N * 3);
+  var vel = new Float32Array(N * 3);
+  var origin = new Float32Array(N * 3);
+  var burst = new Float32Array(N * 3);
+  var ang0 = new Float32Array(N);
+  var rad0 = new Float32Array(N);
+  var turns = new Float32Array(N);
+  var ySw = new Float32Array(N);
+  var shellR = new Float32Array(N);
+  var orbSpeed = new Float32Array(N);
+  var orbPhase = new Float32Array(N);
+  var orbRad = new Float32Array(N);
+  var orbY = new Float32Array(N);
+  var orbIncl = new Float32Array(N);
+  var depth = new Float32Array(N);
+  var order = new Uint32Array(N);
+  for (i = 0; i < N; i++) order[i] = i;
+
+  var trail = new Float32Array(ORBIT_N * TRAIL * 3);
+  var trailHead = new Int16Array(ORBIT_N);
+  var trailFill = new Int16Array(ORBIT_N);
+  var trailLast = new Float32Array(ORBIT_N);
+
+  function placeHome(idx, c, s) {
+    var o = idx * 3;
+    var x = home[o], y = home[o + 1], z = home[o + 2];
+    pos[o] = x * c + z * s;
+    pos[o + 1] = y;
+    pos[o + 2] = -x * s + z * c;
+    vel[o] = vel[o + 1] = vel[o + 2] = 0;
+  }
+
+  var spin = REST;
+  var spinVel = reduced ? 0 : SPIN_IDLE;
+  var mode = 0;
+  var modeTime = 0;
+  var orbitActive = false;
+  var time = 0;
+  var triggerTime = 0;
+  var trailAcc = new Float32Array(ORBIT_N);
+
+  (function initPose() {
+    var c = Math.cos(spin), s = Math.sin(spin);
+    for (i = 0; i < N; i++) placeHome(i, c, s);
+  })();
+
+  function linger(u) {
+    return u + 0.07 * Math.sin(u * TAU);
+  }
+
+  function trigger() {
+    if (reduced || mode !== 0) return;
+    mode = 1;
+    modeTime = 0;
+    orbitActive = true;
+    triggerTime = time;
+    var c = Math.cos(spin), s = Math.sin(spin);
+    var si;
+    for (si = 0; si < ORBIT_N; si++) {
+      trailFill[si] = 0;
+      trailHead[si] = 0;
+      trailLast[si] = time;
+    }
+    for (i = 0; i < N; i++) {
+      i3 = i * 3;
+      var ox = pos[i3], oy = pos[i3 + 1], oz = pos[i3 + 2];
+      origin[i3] = ox;
+      origin[i3 + 1] = oy;
+      origin[i3 + 2] = oz;
+      var nx = nrm[i3] * c + nrm[i3 + 2] * s;
+      var ny = nrm[i3 + 1];
+      var nz = -nrm[i3] * s + nrm[i3 + 2] * c;
+      var hr = Math.hypot(ox, oz) + 1e-4;
+      var rx = ox / hr, rz = oz / hr;
+      var s1 = seed[i];
+      var s2 = (s1 * 17.13) % 1;
+      var s3 = (s1 * 43.71) % 1;
+      var s4 = (s1 * 91.17) % 1;
+      var dist = orb[i] ? (1.55 + s2 * 0.7) : (0.85 + Math.pow(s2, 0.5) * 2.05);
+      var tx = -rz, tz = rx;
+      var vx = nx * 0.75 + rx * 0.6 + tx * (0.28 + s4 * 0.85);
+      var vy = ny * 0.3 + 0.42 + s3 * 0.85;
+      var vz = nz * 0.75 + rz * 0.6 + tz * (0.28 + s4 * 0.85);
+      var vl = hypot3(vx, vy, vz) || 1;
+      burst[i3] = vx / vl * dist;
+      burst[i3 + 1] = vy / vl * dist;
+      burst[i3 + 2] = vz / vl * dist;
+      var ex = ox + burst[i3];
+      var ey = oy + burst[i3 + 1];
+      var ez = oz + burst[i3 + 2];
+      var endR = Math.hypot(ex, ey - 0.3, ez);
+      if (endR > 2.7) {
+        var pull = 2.7 / endR;
+        burst[i3] = (ex * pull) - ox;
+        burst[i3 + 1] = ((ey - 0.3) * pull + 0.3) - oy;
+        burst[i3 + 2] = (ez * pull) - oz;
+        ex = ox + burst[i3];
+        ez = oz + burst[i3 + 2];
+      }
+      ang0[i] = Math.atan2(ex, ez);
+      rad0[i] = Math.hypot(ex, ez);
+      turns[i] = orb[i] ? (0.6 + s3 * 0.5) : (0.45 + s3 * 0.95);
+      ySw[i] = orb[i] ? (0.28 + s4 * 0.62) : (-0.05 + s4 * 1.35);
+      shellR[i] = orb[i] ? (1.72 + s2 * 0.28) : (1.2 + s1 * 1.25);
+      vel[i3] = vel[i3 + 1] = vel[i3 + 2] = 0;
+      if (orb[i]) {
+        var speed = 0.34 + s2 * 0.42;
+        var tPeel = DUR[1] + DUR[2] + 0.4 * DUR[3];
+        orbSpeed[i] = speed;
+        orbPhase[i] = (ang0[i] + turns[i] * TAU) - tPeel * speed;
+        orbRad[i] = 1.78 + s3 * 0.36;
+        orbY[i] = 0.18 + s4 * 0.62;
+        orbIncl[i] = (s1 - 0.5) * 0.42;
+      }
+    }
+    stage.classList.add("is-playing");
+  }
+
+  var hot = false;
+  document.documentElement.addEventListener("pointerenter", function () {
+    hot = true;
+    trigger();
+  });
+  document.documentElement.addEventListener("pointerleave", function () {
+    hot = false;
+  });
+  stage.addEventListener("pointerdown", function () { trigger(); });
+  stage.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      trigger();
+    }
+  });
+
+  function onMotionChange() {
+    reduced = motionQuery.matches;
+    if (reduced) {
+      mode = 0;
+      orbitActive = false;
+      spin = REST;
+      spinVel = 0;
+      stage.classList.remove("is-playing");
+      var c = Math.cos(spin), s = Math.sin(spin);
+      for (i = 0; i < N; i++) placeHome(i, c, s);
+    } else if (mode === 0) {
+      spinVel = SPIN_IDLE;
+    }
+    stage.setAttribute("aria-label", reduced
+      ? "A red fedora."
+      : "A red fedora, slowly turning. Activate to dissolve it into embers and watch it reform.");
+    requestDraw();
+  }
+  if (motionQuery.addEventListener) motionQuery.addEventListener("change", onMotionChange);
+  else if (motionQuery.addListener) motionQuery.addListener(onMotionChange);
+  if (reduced) {
+    stage.setAttribute("aria-label", "A red fedora.");
+  }
+
+  var pointRange = gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE);
+  var maxPoint = Math.max(8, Math.min(pointRange[1] || 64, 256));
+
+  function compile(type, src) {
+    var sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+      console.error(gl.getShaderInfoLog(sh));
+      return null;
+    }
+    return sh;
+  }
+
+  var pointVs = compile(gl.VERTEX_SHADER, [
+    "attribute vec3 aPos;",
+    "attribute vec3 aCol;",
+    "attribute float aSize;",
+    "attribute float aAlpha;",
+    "uniform mat4 uView;",
+    "uniform mat4 uProj;",
+    "uniform float uFocal;",
+    "uniform float uSizeMul;",
+    "uniform float uMaxPoint;",
+    "varying vec3 vCol;",
+    "varying float vAlpha;",
+    "void main() {",
+    "  vec4 eye = uView * vec4(aPos, 1.0);",
+    "  gl_Position = uProj * eye;",
+    "  float ps = aSize * uSizeMul * uFocal / max(0.25, -eye.z);",
+    "  gl_PointSize = clamp(ps, 1.0, uMaxPoint);",
+    "  vCol = aCol;",
+    "  vAlpha = aAlpha;",
+    "}"
+  ].join("\n"));
+
+  var pointFs = compile(gl.FRAGMENT_SHADER, [
+    "precision mediump float;",
+    "varying vec3 vCol;",
+    "varying float vAlpha;",
+    "uniform float uSoft;",
+    "uniform float uAlphaMul;",
+    "void main() {",
+    "  vec2 p = gl_PointCoord * 2.0 - 1.0;",
+    "  float d2 = dot(p, p);",
+    "  if (d2 > 1.0) discard;",
+    "  float hard = pow(clamp(1.0 - sqrt(d2), 0.0, 1.0), 0.62);",
+    "  float soft = exp(-d2 * 2.35);",
+    "  float a = mix(hard, soft, uSoft) * vAlpha * uAlphaMul;",
+    "  gl_FragColor = vec4(vCol * a, a);",
+    "}"
+  ].join("\n"));
+
+  var groundVs = compile(gl.VERTEX_SHADER, [
+    "attribute vec2 aXZ;",
+    "uniform mat4 uView;",
+    "uniform mat4 uProj;",
+    "uniform float uY;",
+    "uniform float uScale;",
+    "varying vec2 vUv;",
+    "void main() {",
+    "  vUv = aXZ;",
+    "  gl_Position = uProj * uView * vec4(aXZ.x * uScale, uY, aXZ.y * uScale, 1.0);",
+    "}"
+  ].join("\n"));
+
+  var groundFs = compile(gl.FRAGMENT_SHADER, [
+    "precision mediump float;",
+    "varying vec2 vUv;",
+    "uniform float uSpin;",
+    "uniform float uTight;",
+    "uniform float uStrength;",
+    "void main() {",
+    "  float pool = exp(-dot(vUv, vUv) * 1.45);",
+    "  float cs = cos(uSpin);",
+    "  float sn = sin(uSpin);",
+    "  float x = vUv.x * cs + vUv.y * sn;",
+    "  float z = -vUv.x * sn + vUv.y * cs;",
+    "  float e = (x * x) / 0.22 + (z * z) / 0.105;",
+    "  float shadow = exp(-e * uTight);",
+    "  vec3 warm = vec3(0.46, 0.13, 0.09) * pool;",
+    "  float shade = shadow * uStrength;",
+    "  warm *= 1.0 - shade * 0.93;",
+    "  float a = pool * 0.58 * (1.0 - shade * 0.5);",
+    "  a = clamp(a, 0.0, 0.75);",
+    "  gl_FragColor = vec4(warm * a, a);",
+    "}"
+  ].join("\n"));
+
+  if (!pointVs || !pointFs || !groundVs || !groundFs) {
+    var bad = document.createElement("p");
+    bad.className = "fallback";
+    bad.textContent = "This scene could not start.";
+    stage.appendChild(bad);
+    return;
+  }
+
+  function link(vs, fs) {
+    var p = gl.createProgram();
+    gl.attachShader(p, vs);
+    gl.attachShader(p, fs);
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+      console.error(gl.getProgramInfoLog(p));
+      return null;
+    }
+    return p;
+  }
+  var pointProg = link(pointVs, pointFs);
+  var groundProg = link(groundVs, groundFs);
+  if (!pointProg || !groundProg) return;
+
+  var pPos = gl.getAttribLocation(pointProg, "aPos");
+  var pCol = gl.getAttribLocation(pointProg, "aCol");
+  var pSize = gl.getAttribLocation(pointProg, "aSize");
+  var pAlpha = gl.getAttribLocation(pointProg, "aAlpha");
+  var pView = gl.getUniformLocation(pointProg, "uView");
+  var pProj = gl.getUniformLocation(pointProg, "uProj");
+  var pFocal = gl.getUniformLocation(pointProg, "uFocal");
+  var pSizeMul = gl.getUniformLocation(pointProg, "uSizeMul");
+  var pMaxPoint = gl.getUniformLocation(pointProg, "uMaxPoint");
+  var pSoft = gl.getUniformLocation(pointProg, "uSoft");
+  var pAlphaMul = gl.getUniformLocation(pointProg, "uAlphaMul");
+
+  var gXZ = gl.getAttribLocation(groundProg, "aXZ");
+  var gView = gl.getUniformLocation(groundProg, "uView");
+  var gProj = gl.getUniformLocation(groundProg, "uProj");
+  var gY = gl.getUniformLocation(groundProg, "uY");
+  var gScale = gl.getUniformLocation(groundProg, "uScale");
+  var gSpin = gl.getUniformLocation(groundProg, "uSpin");
+  var gTight = gl.getUniformLocation(groundProg, "uTight");
+  var gStrength = gl.getUniformLocation(groundProg, "uStrength");
+
+  var hatBuf = gl.createBuffer();
+  var hatData = new Float32Array(N * 8);
+  var trailBuf = gl.createBuffer();
+  var trailData = new Float32Array(ORBIT_N * TRAIL * 8);
+  var quadBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+
+  var proj = new Float32Array(16);
+  var view = new Float32Array(16);
+  var eye = [0, 0, 6];
+  var pxt = 0, pyt = 0, px = 0, py = 0;
+  var sortTick = 0;
+
+  window.addEventListener("pointermove", function (e) {
+    if (reduced) return;
+    var w = window.innerWidth || 1;
+    var h = window.innerHeight || 1;
+    pxt = (e.clientX / w - 0.5);
+    pyt = (e.clientY / h - 0.5);
+  });
+
+  function perspective(fovY, aspect, near, far) {
+    var f = 1 / Math.tan(fovY / 2);
+    var nf = 1 / (near - far);
+    proj[0] = f / aspect; proj[1] = 0; proj[2] = 0; proj[3] = 0;
+    proj[4] = 0; proj[5] = f; proj[6] = 0; proj[7] = 0;
+    proj[8] = 0; proj[9] = 0; proj[10] = (far + near) * nf; proj[11] = -1;
+    proj[12] = 0; proj[13] = 0; proj[14] = 2 * far * near * nf; proj[15] = 0;
+  }
+
+  function lookAt(ex, ey, ez, cx, cy, cz) {
+    var fx = cx - ex, fy = cy - ey, fz = cz - ez;
+    var fl = hypot3(fx, fy, fz) || 1;
+    fx /= fl; fy /= fl; fz /= fl;
+    var sx = -fz, sy = 0, sz = fx;
+    var sl = hypot3(sx, sy, sz) || 1;
+    sx /= sl; sy /= sl; sz /= sl;
+    var ux = sy * fz - sz * fy;
+    var uy = sz * fx - sx * fz;
+    var uz = sx * fy - sy * fx;
+    view[0] = sx; view[1] = ux; view[2] = -fx; view[3] = 0;
+    view[4] = sy; view[5] = uy; view[6] = -fy; view[7] = 0;
+    view[8] = sz; view[9] = uz; view[10] = -fz; view[11] = 0;
+    view[12] = -(sx * ex + sy * ey + sz * ez);
+    view[13] = -(ux * ex + uy * ey + uz * ez);
+    view[14] = fx * ex + fy * ey + fz * ez;
+    view[15] = 1;
+    return { fx: fx, fy: fy, fz: fz };
+  }
+
+  function resize() {
+    var dpr = Math.min(window.devicePixelRatio || 1, 1.75);
+    var w = Math.max(1, canvas.clientWidth);
+    var h = Math.max(1, canvas.clientHeight);
+    var W = Math.round(w * dpr);
+    var H = Math.round(h * dpr);
+    if (canvas.width !== W || canvas.height !== H) {
+      canvas.width = W;
+      canvas.height = H;
+    }
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    perspective(FOV, canvas.width / canvas.height, 0.08, 40);
+  }
+
+  function globalFreedom(u) {
+    if (mode === 1) return smoothstep(0.2, 1, u);
+    if (mode === 2) return 1;
+    if (mode === 3) return 1 - easeInOutCubic(u);
+    return 0;
+  }
+
+  function writeOrbit(i, tx) {
+    var elapsed = time - triggerTime;
+    var a = elapsed * orbSpeed[i] + orbPhase[i];
+    var r = orbRad[i];
+    var incl = orbIncl[i];
+    var x = Math.sin(a) * r;
+    var y = orbY[i] + Math.sin(a * 2 + orbPhase[i]) * 0.09;
+    var z = Math.cos(a) * r * 0.9;
+    var cy = Math.cos(incl), sy = Math.sin(incl);
+    tx[0] = x;
+    tx[1] = y * cy - z * sy;
+    tx[2] = y * sy + z * cy;
+  }
+
+  function effectTarget(i, u, c, s, tx) {
+    var o = i * 3;
+    var s1 = seed[i];
+    if (mode === 1) {
+      var k = smoothstep(0.2, 1, u);
+      k = k * k * (3 - 2 * k);
+      tx[0] = origin[o] + burst[o] * k;
+      tx[1] = origin[o + 1] + burst[o + 1] * k;
+      tx[2] = origin[o + 2] + burst[o + 2] * k;
+      return;
+    }
+    var endX = origin[o] + burst[o];
+    var endY = origin[o + 1] + burst[o + 1];
+    var endZ = origin[o + 2] + burst[o + 2];
+    var ang, rad, y, bob, su;
+    if (mode === 2) {
+      su = u;
+    } else {
+      su = 1;
+    }
+    var lk = mode === 2 ? linger(su) : 1;
+    ang = ang0[i] + lk * turns[i] * TAU;
+    var shellMix = smoothstep(0, 0.72, su);
+    rad = lerp(rad0[i], shellR[i], shellMix);
+    rad += (s1 - 0.5) * 0.72 * shellMix;
+    rad *= 1 + 0.045 * Math.sin(su * Math.PI);
+    y = lerp(endY, ySw[i], smoothstep(0, 0.6, su));
+    bob = Math.sin(su * TAU + s1 * 6.2) * 0.055 * Math.sin(su * Math.PI);
+    var sx = Math.sin(ang) * rad;
+    var syy = y + bob;
+    var sz = Math.cos(ang) * rad;
+    if (mode === 2) {
+      tx[0] = sx; tx[1] = syy; tx[2] = sz;
+      return;
+    }
+    var hx = home[o], hy = home[o + 1], hz = home[o + 2];
+    var gx = hx * c + hz * s;
+    var gy = hy;
+    var gz = -hx * s + hz * c;
+    var kk = easeInOutCubic(u);
+    var mx = lerp(sx, gx, kk);
+    var my = lerp(syy, gy, kk);
+    var mz = lerp(sz, gz, kk);
+    var w = Math.sin(u * Math.PI) * (1 - kk);
+    var ph = s1 * TAU + u * 4.1;
+    mx += Math.cos(ph) * 0.16 * w;
+    my += Math.sin(ph * 1.25) * 0.07 * w;
+    mz += Math.sin(ph) * 0.16 * w;
+    if (orb[i]) {
+      var peel = smoothstep(0.18, 0.78, u);
+      var ob = [0, 0, 0];
+      writeOrbit(i, ob);
+      mx = lerp(mx, ob[0], peel);
+      my = lerp(my, ob[1], peel);
+      mz = lerp(mz, ob[2], peel);
+    }
+    tx[0] = mx; tx[1] = my; tx[2] = mz;
+  }
+
+  function integrate(dt, u, c, s) {
+    var kSpring = mode === 3 && u > 0.72 ? 70 : 42;
+    if (mode === 0) kSpring = 26;
+    var damp = 2 * Math.sqrt(kSpring);
+    var tx = [0, 0, 0];
+    var snap = mode === 3 ? smoothstep(0.86, 1, u) : 0;
+    for (i = 0; i < N; i++) {
+      i3 = i * 3;
+      var locked = reduced || (mode === 0 && !(orbitActive && orb[i]));
+      if (locked) {
+        var x = home[i3], y = home[i3 + 1], z = home[i3 + 2];
+        pos[i3] = x * c + z * s;
+        pos[i3 + 1] = y;
+        pos[i3 + 2] = -x * s + z * c;
+        vel[i3] = vel[i3 + 1] = vel[i3 + 2] = 0;
+        continue;
+      }
+      if (mode === 0) writeOrbit(i, tx);
+      else effectTarget(i, u, c, s, tx);
+      var ax = (tx[0] - pos[i3]) * kSpring - vel[i3] * damp;
+      var ay = (tx[1] - pos[i3 + 1]) * kSpring - vel[i3 + 1] * damp;
+      var az = (tx[2] - pos[i3 + 2]) * kSpring - vel[i3 + 2] * damp;
+      vel[i3] += ax * dt;
+      vel[i3 + 1] += ay * dt;
+      vel[i3 + 2] += az * dt;
+      var sp = vel[i3] * vel[i3] + vel[i3 + 1] * vel[i3 + 1] + vel[i3 + 2] * vel[i3 + 2];
+      if (sp > 49) {
+        var inv = 7 / Math.sqrt(sp);
+        vel[i3] *= inv; vel[i3 + 1] *= inv; vel[i3 + 2] *= inv;
+      }
+      pos[i3] += vel[i3] * dt;
+      pos[i3 + 1] += vel[i3 + 1] * dt;
+      pos[i3 + 2] += vel[i3 + 2] * dt;
+      if (snap > 0 && !orb[i]) {
+        pos[i3] += (tx[0] - pos[i3]) * snap;
+        pos[i3 + 1] += (tx[1] - pos[i3 + 1]) * snap;
+        pos[i3 + 2] += (tx[2] - pos[i3 + 2]) * snap;
+        vel[i3] *= 1 - snap;
+        vel[i3 + 1] *= 1 - snap;
+        vel[i3 + 2] *= 1 - snap;
+      }
+    }
+  }
+
+  function recordTrails(trailAmt) {
+    if (!(orbitActive && trailAmt > 0.02)) return;
+    for (var s = 0; s < ORBIT_N; s++) {
+      var idx = orbIndex[s];
+      var o = idx * 3;
+      if (time - trailLast[s] < 0.012) continue;
+      trailLast[s] = time;
+      var h = trailHead[s];
+      var t = (s * TRAIL + h) * 3;
+      trail[t] = pos[o];
+      trail[t + 1] = pos[o + 1];
+      trail[t + 2] = pos[o + 2];
+      trailHead[s] = (h + 1) % TRAIL;
+      if (trailFill[s] < TRAIL) trailFill[s]++;
+    }
+  }
+
+  function advance(dt) {
+    time += dt;
+    if (!reduced && mode !== 0) {
+      modeTime += dt;
+      var guard = 0;
+      while (mode !== 0 && modeTime >= DUR[mode] && guard++ < 4) {
+        modeTime -= DUR[mode];
+        mode++;
+        if (mode > 3) {
+          mode = 0;
+          modeTime = 0;
+          stage.classList.remove("is-playing");
+          break;
+        }
+      }
+    }
+    var u = mode === 0 ? 0 : clamp01(modeTime / DUR[mode]);
+    var spinTarget = SPIN_IDLE;
+    if (reduced) spinTarget = 0;
+    else if (mode === 1) spinTarget = lerp(SPIN_IDLE, 0.045, easeOutCubic(u));
+    else if (mode === 2) spinTarget = 0.04;
+    else if (mode === 3) spinTarget = lerp(0.04, SPIN_IDLE, easeInOutCubic(u));
+    var follow = 1 - Math.exp(-3.1 * dt);
+    spinVel += (spinTarget - spinVel) * follow;
+    spin += spinVel * dt;
+    var c = Math.cos(spin), s = Math.sin(spin);
+    integrate(dt, u, c, s);
+    var trailAmt = 0;
+    if (orbitActive && !reduced) {
+      if (mode === 0) trailAmt = 1;
+      else if (mode === 3) trailAmt = smoothstep(0.62, 0.92, u);
+    }
+    recordTrails(trailAmt);
+    return { u: u, c: c, s: s, trailAmt: trailAmt };
+  }
+
+  function fillHat(c, s, fwd, ex, ey, ez, freedom) {
+    var halfX = keyX + vx, halfY = keyY + vy, halfZ = keyZ + vz;
+    var hl = hypot3(halfX, halfY, halfZ) || 1;
+    halfX /= hl; halfY /= hl; halfZ /= hl;
+    for (i = 0; i < N; i++) {
+      i3 = i * 3;
+      var wx = pos[i3], wy = pos[i3 + 1], wz = pos[i3 + 2];
+      depth[i] = (wx - ex) * fwd.fx + (wy - ey) * fwd.fy + (wz - ez) * fwd.fz;
+    }
+    sortTick++;
+    if (sortTick % 2 === 0 || mode !== 0) {
+      order.sort(function (a, b) { return depth[b] - depth[a]; });
+    }
+    for (var k = 0; k < N; k++) {
+      i = order[k];
+      i3 = i * 3;
+      var nx = nrm[i3] * c + nrm[i3 + 2] * s;
+      var ny = nrm[i3 + 1];
+      var nz = -nrm[i3] * s + nrm[i3 + 2] * c;
+      var nl = hypot3(nx, ny, nz) || 1;
+      nx /= nl; ny /= nl; nz /= nl;
+      var fr = freedom;
+      if (orb[i] && orbitActive && (mode === 0 || mode === 3)) {
+        var extra = mode === 0 ? 1 : smoothstep(0.2, 0.75, modeTime / DUR[3]);
+        if (extra > fr) fr = extra;
+      }
+      var ndk = nx * keyX + ny * keyY + nz * keyZ;
+      if (ndk < 0) ndk = 0;
+      var ndf = nx * fillX + ny * fillY + nz * fillZ;
+      if (ndf < 0) ndf = 0;
+      var ndv = nx * vx + ny * vy + nz * vz;
+      if (ndv < 0) ndv = 0;
+      if (ndv > 1) ndv = 1;
+      var diff = 0.2 + 0.92 * Math.pow(ndk, 0.8) + 0.16 * ndf;
+      var rim = (1 - ndv) * (1 - ndv);
+      var ndh = nx * halfX + ny * halfY + nz * halfZ;
+      if (ndh < 0) ndh = 0;
+      var sheen = (alb[i3] + alb[i3 + 1] + alb[i3 + 2]) > 0.45 ? 0.2 : 0.05;
+      var spec = Math.pow(ndh, 28) * sheen;
+      var lr = alb[i3] * diff + spec + rim * 0.32;
+      var lg = alb[i3 + 1] * diff + spec * 0.42 + rim * 0.07;
+      var lb = alb[i3 + 2] * diff + spec * 0.32 + rim * 0.05;
+      var glow = fr * 0.58;
+      var cr = lr + (1.02 - lr) * glow;
+      var cg = lg + (0.5 - lg) * glow;
+      var cb = lb + (0.22 - lb) * glow;
+      if (cr > 1.3) cr = 1.3;
+      if (cg > 1.05) cg = 1.05;
+      if (cb > 0.85) cb = 0.85;
+      var o = k * 8;
+      hatData[o] = pos[i3];
+      hatData[o + 1] = pos[i3 + 1];
+      hatData[o + 2] = pos[i3 + 2];
+      hatData[o + 3] = cr;
+      hatData[o + 4] = cg;
+      hatData[o + 5] = cb;
+      hatData[o + 6] = 0.09 * psize[i] * lerp(1, 0.4, fr);
+      hatData[o + 7] = lerp(0.97, 0.7, fr);
+    }
+  }
+
+  var keyX = 0, keyY = 0, keyZ = 0, fillX = 0, fillY = 0, fillZ = 0, vx = 0, vy = 0, vz = 0;
+
+  function fillTrails(trailAmt) {
+    var n = 0;
+    if (trailAmt <= 0.02) return 0;
+    for (var s = 0; s < ORBIT_N; s++) {
+      var filled = trailFill[s];
+      var head = trailHead[s];
+      for (var k = 1; k < filled; k++) {
+        var idx = (head - 1 - k + TRAIL * 8) % TRAIL;
+        var t = (s * TRAIL + idx) * 3;
+        var fade = 1 - k / TRAIL;
+        fade = fade * fade;
+        var a = fade * 0.11 * trailAmt;
+        var o = n * 8;
+        trailData[o] = trail[t];
+        trailData[o + 1] = trail[t + 1];
+        trailData[o + 2] = trail[t + 2];
+        trailData[o + 3] = 0.78;
+        trailData[o + 4] = 0.28;
+        trailData[o + 5] = 0.12;
+        trailData[o + 6] = 0.085 * (0.35 + 0.65 * fade);
+        trailData[o + 7] = a;
+        n++;
+      }
+    }
+    return n;
+  }
+
+  function drawPoints(buf, data, count, sizeMul, soft, alphaMul) {
+    if (count <= 0) return;
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, data.subarray(0, count * 8), gl.DYNAMIC_DRAW);
+    var stride = 32;
+    gl.enableVertexAttribArray(pPos);
+    gl.enableVertexAttribArray(pCol);
+    gl.enableVertexAttribArray(pSize);
+    gl.enableVertexAttribArray(pAlpha);
+    gl.vertexAttribPointer(pPos, 3, gl.FLOAT, false, stride, 0);
+    gl.vertexAttribPointer(pCol, 3, gl.FLOAT, false, stride, 12);
+    gl.vertexAttribPointer(pSize, 1, gl.FLOAT, false, stride, 24);
+    gl.vertexAttribPointer(pAlpha, 1, gl.FLOAT, false, stride, 28);
+    gl.uniform1f(pSizeMul, sizeMul);
+    gl.uniform1f(pSoft, soft);
+    gl.uniform1f(pAlphaMul, alphaMul);
+    gl.drawArrays(gl.POINTS, 0, count);
+  }
+
+  function render(state) {
+    resize();
+    var aspect = canvas.width / Math.max(1, canvas.height);
+    var tan = Math.tan(FOV / 2);
+    var brim = 2.62;
+    var fill = 0.56;
+    var dist = brim / (fill * 2 * tan * Math.min(1, aspect));
+    var camX = 0.22, camY = 0.46, camZ = 1;
+    var dirL = Math.hypot(camX, camY, camZ);
+    var parallax = reduced ? 0 : 1;
+    px += (pxt - px) * 0.06;
+    py += (pyt - py) * 0.06;
+    eye[0] = camX / dirL * dist + px * 0.28 * parallax;
+    eye[1] = LOOK_Y + camY / dirL * dist - py * 0.16 * parallax;
+    eye[2] = camZ / dirL * dist;
+
+    var fwd = lookAt(eye[0], eye[1], eye[2], 0, LOOK_Y, 0);
+    vx = eye[0]; vy = eye[1] - LOOK_Y; vz = eye[2];
+    var vl = hypot3(vx, vy, vz) || 1;
+    vx /= vl; vy /= vl; vz /= vl;
+    var kx = vx - 0.42, ky = vy + 0.72, kz = vz + 0.08;
+    var kl = hypot3(kx, ky, kz) || 1;
+    keyX = kx / kl; keyY = ky / kl; keyZ = kz / kl;
+    var fx = vx + 0.62, fy = vy + 0.08, fz = vz - 0.1;
+    var fl = hypot3(fx, fy, fz) || 1;
+    fillX = fx / fl; fillY = fy / fl; fillZ = fz / fl;
+
+    var freedom = globalFreedom(state.u);
+    fillHat(state.c, state.s, fwd, eye[0], eye[1], eye[2], freedom);
+    var trailCount = fillTrails(state.trailAmt);
+
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+
+    gl.useProgram(groundProg);
+    gl.uniformMatrix4fv(gView, false, view);
+    gl.uniformMatrix4fv(gProj, false, proj);
+    gl.uniform1f(gY, FLOOR_Y);
+    gl.uniform1f(gScale, 3.15);
+    gl.uniform1f(gSpin, spin);
+    gl.uniform1f(gTight, lerp(2.4, 0.85, freedom));
+    gl.uniform1f(gStrength, lerp(1, 0.35, freedom));
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+    gl.enableVertexAttribArray(gXZ);
+    gl.vertexAttribPointer(gXZ, 2, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    var focal = canvas.height / (2 * Math.tan(FOV / 2));
+    gl.useProgram(pointProg);
+    gl.uniformMatrix4fv(pView, false, view);
+    gl.uniformMatrix4fv(pProj, false, proj);
+    gl.uniform1f(pFocal, focal);
+    gl.uniform1f(pMaxPoint, maxPoint);
+
+    var haloA = 0.055 + freedom * 0.08;
+    var haloS = 2.05 + freedom * 0.35;
+    drawPoints(hatBuf, hatData, N, haloS, 1, haloA);
+    drawPoints(hatBuf, hatData, N, 1, 0, 1);
+    if (trailCount) drawPoints(trailBuf, trailData, trailCount, 1.15, 1, 1);
+  }
+
+  var raf = 0;
+  var last = 0;
+  function tick(now) {
+    raf = 0;
+    var dt = last ? Math.min(0.033, (now - last) / 1000) : 0.016;
+    last = now;
+    var state = advance(reduced ? 0 : dt);
+    render(state);
+    var moving = !reduced && (mode !== 0 || orbitActive || Math.abs(spinVel) > 0.0008 || Math.abs(px - pxt) > 0.001 || Math.abs(py - pyt) > 0.001);
+    if (moving) requestDraw();
+  }
+  function requestDraw() {
+    if (!raf) raf = requestAnimationFrame(tick);
+  }
+  window.addEventListener("resize", requestDraw);
+  requestDraw();
+})();
+</script>
+</body>
+</html>
