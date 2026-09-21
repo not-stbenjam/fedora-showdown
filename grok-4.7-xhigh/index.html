@@ -1,0 +1,1251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23070607'/%3E%3Cpath fill='%23ee0000' d='M5 19.5c2.2 2.2 6.4 4 11 4s8.8-1.8 11-4c-1.6 1.6-5.4 3.1-11 3.1S6.6 21.1 5 19.5zm3.4-2c.5-3.4 2.8-6.3 7.6-6.3s7.1 2.9 7.6 6.3c-2.2.7-4.8 1.1-7.6 1.1s-5.4-.4-7.6-1.1z'/%3E%3C/svg%3E">
+<title>Red Hat</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #070607;
+    --ink: #e6e0d8;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background:
+      radial-gradient(ellipse 70% 55% at 50% 42%, #1a0c0b 0%, var(--bg) 62%);
+    color: var(--ink);
+  }
+  body {
+    min-height: 100dvh;
+    overflow: hidden;
+  }
+  main {
+    position: relative;
+    height: 100dvh;
+    min-height: 100dvh;
+  }
+  canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    background: transparent;
+  }
+  canvas:focus { outline: none; }
+  canvas:focus-visible {
+    outline: 1px solid rgba(238, 0, 0, 0.55);
+    outline-offset: 6px;
+  }
+  .caption {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: max(22px, calc(env(safe-area-inset-bottom) + 14px));
+    margin: 0;
+    text-align: center;
+    pointer-events: none;
+    font-family: "Red Hat Display", "Red Hat Text", "Segoe UI", system-ui, sans-serif;
+    font-weight: 600;
+    font-size: clamp(12px, 1.45vw, 16px);
+    letter-spacing: 0.48em;
+    text-indent: 0.48em;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+  .fallback {
+    margin: 0;
+    font: 14px/1.5 system-ui, sans-serif;
+    color: rgba(230, 224, 216, 0.72);
+  }
+  ::selection { background: rgba(238, 0, 0, 0.35); color: #fff; }
+  @media (max-width: 540px) {
+    .caption { letter-spacing: 0.36em; text-indent: 0.36em; }
+  }
+  @media (max-aspect-ratio: 4/5) {
+    .caption {
+      bottom: max(28px, calc(env(safe-area-inset-bottom) + 18px));
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    canvas { cursor: default; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <canvas id="scene" tabindex="0" role="img" aria-label="A red fedora with a black band, turning slowly. Hover, tap, or press Enter to scatter it into embers."></canvas>
+  <p class="caption" id="caption">Red Hat</p>
+</main>
+<script>
+(() => {
+  "use strict";
+
+  const canvas = document.getElementById("scene");
+  const caption = document.getElementById("caption");
+  const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+  const FOV = 28 * Math.PI / 180;
+  const EYE0 = [0.62, 0.38, 3.15];
+  const TARGET = [0, 0.22, 0];
+  const PARTICLE_COUNT = 6200;
+  const KEEPERS = 34;
+  const TAU = Math.PI * 2;
+
+  const BAND_Y0 = 0.148;
+  const BAND_Y1 = 0.292;
+  const BAND_RX = 0.482;
+  const BAND_RZ = 0.524;
+
+  let reduceMotion = motionQuery.matches;
+  let width = 1, height = 1, dpr = 1;
+
+  const gl = canvas.getContext("webgl", {
+    alpha: false,
+    antialias: true,
+    depth: true,
+    stencil: false,
+    premultipliedAlpha: false,
+    powerPreference: "high-performance"
+  });
+
+  if (!gl) {
+    canvas.remove();
+    const note = document.createElement("p");
+    note.className = "fallback";
+    note.textContent = "This scene needs WebGL.";
+    caption.before(note);
+    return;
+  }
+
+  function rng32(seed) {
+    let s = seed >>> 0;
+    return () => {
+      s = (Math.imul(1664525, s) + 1013904223) >>> 0;
+      return s / 4294967296;
+    };
+  }
+  const rand = rng32(0x5eed21);
+
+  const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+  const mix = (a, b, t) => a + (b - a) * t;
+  const lerp3 = (a, b, t) => [mix(a[0], b[0], t), mix(a[1], b[1], t), mix(a[2], b[2], t)];
+  const sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const len3 = (a) => Math.hypot(a[0], a[1], a[2]);
+  const cross3 = (a, b) => [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0]
+  ];
+  function norm3(a) {
+    const L = len3(a) || 1;
+    return [a[0] / L, a[1] / L, a[2] / L];
+  }
+  function smoother(t) {
+    const x = clamp(t, 0, 1);
+    return x * x * x * (x * (x * 6 - 15) + 10);
+  }
+  function ramp(t, a, b) {
+    return smoother((t - a) / (b - a));
+  }
+
+  function sidePoint(u, v) {
+    const su = Math.sin(u);
+    const cu = Math.cos(u);
+    const k = smoother(v);
+    let rx = mix(0.46, 0.39, k);
+    let rz = mix(0.50, 0.43, k);
+    const belly = Math.sin(clamp(v, 0, 1) * Math.PI) * 0.012;
+    rx += belly;
+    rz += belly;
+    let y = 0.18 + v * 0.58;
+    y += 0.025 * v * Math.max(cu, 0);
+    y -= 0.04 * v * Math.max(-cu, 0);
+    const top = smoother(clamp((v - 0.58) / 0.42, 0, 1));
+    y += 0.028 * top * Math.pow(Math.abs(su), 1.35);
+    y -= 0.04 * top * Math.exp(-(su * su) / 0.2) * Math.max(cu, 0);
+    let x = su * rx;
+    let z = cu * rz;
+    const ang = Math.atan2(su, cu);
+    const dent = (center) => Math.exp(-((ang - center) ** 2) / 0.1 - ((v - 0.6) ** 2) / 0.045);
+    const w = dent(1.05) + dent(-1.05);
+    const fade = Math.sin(clamp(v, 0, 1) * Math.PI);
+    const rad = Math.hypot(x, z) || 1;
+    const push = 0.04 * w * fade;
+    x -= (x / rad) * push;
+    z -= (z / rad) * push;
+    return [x, y, z];
+  }
+
+  function capPoint(u, s) {
+    const rim = sidePoint(u, 1);
+    const sCl = clamp(s, 0, 1);
+    let x = rim[0] * sCl;
+    let y = mix(rim[1] - 0.055, rim[1], Math.pow(sCl, 0.78));
+    let z = rim[2] * sCl;
+    const channel = Math.exp(-(x * x) / (0.03 + 0.09 * sCl));
+    y -= 0.05 * channel * Math.pow(1 - sCl, 0.5);
+    return [x, y, z];
+  }
+
+  function crownPoint(u, v) {
+    const wall = 0.66;
+    if (v <= wall) return sidePoint(u, v / wall);
+    return capPoint(u, 1 - (v - wall) / (1 - wall));
+  }
+
+  function brimPoint(u, t) {
+    const su = Math.sin(u);
+    const cu = Math.cos(u);
+    const front = Math.max(cu, 0);
+    const back = Math.max(-cu, 0);
+    const side = Math.abs(su);
+    const tt = clamp(t, 0, 1);
+    const rx = mix(0.42, 0.80, tt);
+    const rz = mix(0.46, 0.86, tt * (1 + 0.03 * front));
+    const edge = tt * tt * (3 - 2 * tt);
+    let y = 0.162;
+    y += 0.075 * edge * side;
+    y -= 0.1 * edge * front;
+    y += 0.03 * edge * back;
+    const lip = smoother(clamp((tt - 0.8) / 0.2, 0, 1));
+    y += 0.026 * lip;
+    return [su * rx, y, cu * rz];
+  }
+
+  function brimNormal(u, t) {
+    const e = 0.025;
+    const du = sub3(brimPoint(u + e, t), brimPoint(u - e, t));
+    const dt = sub3(brimPoint(u, Math.min(1, t + e)), brimPoint(u, Math.max(0, t - e)));
+    let n = cross3(du, dt);
+    const L = len3(n);
+    if (L < 1e-6) return [0, 1, 0];
+    n = [n[0] / L, n[1] / L, n[2] / L];
+    if (n[1] < 0) n = [-n[0], -n[1], -n[2]];
+    return n;
+  }
+
+  const BRIM_TH = 0.022;
+  function brimUnder(u, t) {
+    const p = brimPoint(u, t);
+    const n = brimNormal(u, t);
+    return [p[0] - n[0] * BRIM_TH, p[1] - n[1] * BRIM_TH, p[2] - n[2] * BRIM_TH];
+  }
+
+  function brimEdge(u, v) {
+    const a = brimPoint(u, 1);
+    const b = brimUnder(u, 1);
+    const mid = lerp3(a, b, 0.5);
+    const out = [Math.sin(u), 0, Math.cos(u)];
+    const bevel = [mid[0] + out[0] * 0.016, mid[1], mid[2] + out[2] * 0.016];
+    if (v < 0.5) return lerp3(a, bevel, v / 0.5);
+    return lerp3(bevel, b, (v - 0.5) / 0.5);
+  }
+
+  function bandWall(u, v) {
+    const bulge = Math.sin(v * Math.PI) * 0.012;
+    return [
+      Math.sin(u) * (BAND_RX + bulge),
+      mix(BAND_Y0, BAND_Y1, v),
+      Math.cos(u) * (BAND_RZ + bulge)
+    ];
+  }
+  function bandFlange(u, v, top) {
+    const y = top ? BAND_Y1 : BAND_Y0;
+    const rx = mix(0.44, BAND_RX + 0.016, v);
+    const rz = mix(0.48, BAND_RZ + 0.016, v);
+    return [Math.sin(u) * rx, y, Math.cos(u) * rz];
+  }
+
+  const pos = [];
+  const idx = [];
+  const matA = [];
+  const aoA = [];
+  const welds = [];
+  const ranges = [];
+
+  function addGrid(nu, nv, sample, material, aoFn) {
+    const base = pos.length / 3;
+    const cols = nu + 1;
+    for (let j = 0; j <= nv; j++) {
+      for (let i = 0; i <= nu; i++) {
+        const u = (i / nu) * TAU;
+        const v = j / nv;
+        const p = sample(u, v, i, j);
+        pos.push(p[0], p[1], p[2]);
+        matA.push(material);
+        aoA.push(aoFn(u, v, p));
+      }
+    }
+    for (let j = 0; j < nv; j++) {
+      for (let i = 0; i < nu; i++) {
+        const a = base + j * cols + i;
+        const b = a + 1;
+        const c = a + cols;
+        const d = c + 1;
+        idx.push(a, b, c, b, d, c);
+      }
+    }
+    welds.push({ base, cols, rows: nv });
+    ranges.push({ base, count: (nu + 1) * (nv + 1) });
+    return ranges.length - 1;
+  }
+
+  const crownId = addGrid(120, 56, (u, v) => crownPoint(u, v), 0, (u, v, p) => {
+    let ao = 0.72 + 0.28 * Math.min(1, v * 1.3);
+    ao *= 0.82 + 0.18 * clamp(v * 2.2, 0, 1);
+    const crease = Math.exp(-(p[0] * p[0]) / 0.06);
+    ao *= 1 - 0.16 * crease * clamp((v - 0.45) / 0.4, 0, 1);
+    return ao;
+  });
+  const brimTopId = addGrid(120, 16, (u, v) => brimPoint(u, v), 0, (u, v) => mix(0.78, 0.98, v));
+  const brimBotId = addGrid(120, 12, (u, v) => brimUnder(u, v), 0, () => 0.42);
+  const brimEdgeId = addGrid(120, 4, (u, v) => brimEdge(u, v), 0, () => 0.9);
+  const bandId = addGrid(96, 8, (u, v) => bandWall(u, v), 1, () => 0.9);
+  const bandTopId = addGrid(96, 2, (u, v) => bandFlange(u, v, true), 1, () => 0.95);
+  const bandBotId = addGrid(96, 2, (u, v) => bandFlange(u, v, false), 1, () => 0.7);
+
+  const normals = new Float32Array(pos.length);
+  for (let t = 0; t < idx.length; t += 3) {
+    const ia = idx[t], ib = idx[t + 1], ic = idx[t + 2];
+    const ax = pos[ia * 3], ay = pos[ia * 3 + 1], az = pos[ia * 3 + 2];
+    const ab = [pos[ib * 3] - ax, pos[ib * 3 + 1] - ay, pos[ib * 3 + 2] - az];
+    const ac = [pos[ic * 3] - ax, pos[ic * 3 + 1] - ay, pos[ic * 3 + 2] - az];
+    const n = cross3(ab, ac);
+    if (len3(n) < 1e-10) continue;
+    for (const k of [ia, ib, ic]) {
+      normals[k * 3] += n[0];
+      normals[k * 3 + 1] += n[1];
+      normals[k * 3 + 2] += n[2];
+    }
+  }
+  for (const w of welds) {
+    for (let j = 0; j <= w.rows; j++) {
+      const i0 = (w.base + j * w.cols) * 3;
+      const i1 = (w.base + j * w.cols + (w.cols - 1)) * 3;
+      const nx = normals[i0] + normals[i1];
+      const ny = normals[i0 + 1] + normals[i1 + 1];
+      const nz = normals[i0 + 2] + normals[i1 + 2];
+      normals[i0] = normals[i1] = nx;
+      normals[i0 + 1] = normals[i1 + 1] = ny;
+      normals[i0 + 2] = normals[i1 + 2] = nz;
+    }
+  }
+  function flipRange(range) {
+    const end = (range.base + range.count) * 3;
+    for (let i = range.base * 3; i < end; i++) normals[i] = -normals[i];
+  }
+  function meanRadial(range) {
+    let s = 0, c = 0;
+    const end = range.base + range.count;
+    for (let i = range.base; i < end; i++) {
+      const x = pos[i * 3], z = pos[i * 3 + 2];
+      const rl = Math.hypot(x, z) || 1;
+      s += normals[i * 3] * (x / rl) + normals[i * 3 + 2] * (z / rl);
+      c++;
+    }
+    return s / c;
+  }
+  function meanY(range) {
+    let s = 0;
+    const end = range.base + range.count;
+    for (let i = range.base; i < end; i++) s += normals[i * 3 + 1];
+    return s / range.count;
+  }
+  if (meanRadial(ranges[crownId]) < 0) flipRange(ranges[crownId]);
+  if (meanY(ranges[brimTopId]) < 0) flipRange(ranges[brimTopId]);
+  if (meanY(ranges[brimBotId]) > 0) flipRange(ranges[brimBotId]);
+  if (meanRadial(ranges[brimEdgeId]) < 0) flipRange(ranges[brimEdgeId]);
+  if (meanRadial(ranges[bandId]) < 0) flipRange(ranges[bandId]);
+  if (meanY(ranges[bandTopId]) < 0) flipRange(ranges[bandTopId]);
+  if (meanY(ranges[bandBotId]) > 0) flipRange(ranges[bandBotId]);
+
+  for (let i = 0; i < normals.length; i += 3) {
+    const L = Math.hypot(normals[i], normals[i + 1], normals[i + 2]);
+    if (L < 1e-8) { normals[i + 1] = 1; continue; }
+    normals[i] /= L; normals[i + 1] /= L; normals[i + 2] /= L;
+  }
+
+  let minY = Infinity, maxY = -Infinity;
+  for (let i = 1; i < pos.length; i += 3) {
+    if (pos[i] < minY) minY = pos[i];
+    if (pos[i] > maxY) maxY = pos[i];
+  }
+
+  const meshStride = 8;
+  const meshData = new Float32Array((pos.length / 3) * meshStride);
+  for (let i = 0; i < pos.length / 3; i++) {
+    const o = i * meshStride;
+    meshData[o] = pos[i * 3];
+    meshData[o + 1] = pos[i * 3 + 1];
+    meshData[o + 2] = pos[i * 3 + 2];
+    meshData[o + 3] = normals[i * 3];
+    meshData[o + 4] = normals[i * 3 + 1];
+    meshData[o + 5] = normals[i * 3 + 2];
+    meshData[o + 6] = matA[i];
+    meshData[o + 7] = aoA[i];
+  }
+  const meshIndex = new Uint16Array(idx);
+
+  function vertAt(i) {
+    return [pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]];
+  }
+  function nrmAt(i) {
+    return [normals[i * 3], normals[i * 3 + 1], normals[i * 3 + 2]];
+  }
+
+  const triCount = idx.length / 3;
+  const cdf = new Float32Array(triCount);
+  let areaSum = 0;
+  for (let i = 0; i < triCount; i++) {
+    const a = vertAt(idx[i * 3]);
+    const b = vertAt(idx[i * 3 + 1]);
+    const c = vertAt(idx[i * 3 + 2]);
+    const area = len3(cross3(sub3(b, a), sub3(c, a))) * 0.5;
+    areaSum += area;
+    cdf[i] = areaSum;
+  }
+  function pickTri(r) {
+    let lo = 0, hi = triCount - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (cdf[mid] < r) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
+  const homes = new Float32Array(PARTICLE_COUNT * 3);
+  const nrms = new Float32Array(PARTICLE_COUNT * 3);
+  const seeds = new Float32Array(PARTICLE_COUNT * 4);
+  const keepers = new Float32Array(PARTICLE_COUNT);
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    const ti = pickTri(rand() * areaSum);
+    const ia = idx[ti * 3], ib = idx[ti * 3 + 1], ic = idx[ti * 3 + 2];
+    let u = rand(), v = rand();
+    if (u + v > 1) { u = 1 - u; v = 1 - v; }
+    const w = 1 - u - v;
+    const A = vertAt(ia), B = vertAt(ib), C = vertAt(ic);
+    const nA = nrmAt(ia), nB = nrmAt(ib), nC = nrmAt(ic);
+    const p = [
+      A[0] * w + B[0] * u + C[0] * v,
+      A[1] * w + B[1] * u + C[1] * v,
+      A[2] * w + B[2] * u + C[2] * v
+    ];
+    let n = [
+      nA[0] * w + nB[0] * u + nC[0] * v,
+      nA[1] * w + nB[1] * u + nC[1] * v,
+      nA[2] * w + nB[2] * u + nC[2] * v
+    ];
+    if (len3(n) < 1e-5) n = norm3(cross3(sub3(B, A), sub3(C, A)));
+    else n = norm3(n);
+    homes[i * 3] = p[0]; homes[i * 3 + 1] = p[1]; homes[i * 3 + 2] = p[2];
+    nrms[i * 3] = n[0]; nrms[i * 3 + 1] = n[1]; nrms[i * 3 + 2] = n[2];
+    seeds[i * 4] = rand();
+    seeds[i * 4 + 1] = rand();
+    seeds[i * 4 + 2] = rand();
+    seeds[i * 4 + 3] = rand();
+  }
+  const keeperPick = new Set();
+  while (keeperPick.size < KEEPERS) keeperPick.add(Math.floor(rand() * PARTICLE_COUNT));
+  for (const k of keeperPick) keepers[k] = 1;
+
+  const pStride = 11;
+  const particleData = new Float32Array(PARTICLE_COUNT * pStride);
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    const o = i * pStride;
+    particleData[o] = homes[i * 3];
+    particleData[o + 1] = homes[i * 3 + 1];
+    particleData[o + 2] = homes[i * 3 + 2];
+    particleData[o + 3] = nrms[i * 3];
+    particleData[o + 4] = nrms[i * 3 + 1];
+    particleData[o + 5] = nrms[i * 3 + 2];
+    particleData[o + 6] = seeds[i * 4];
+    particleData[o + 7] = seeds[i * 4 + 1];
+    particleData[o + 8] = seeds[i * 4 + 2];
+    particleData[o + 9] = seeds[i * 4 + 3];
+    particleData[o + 10] = keepers[i];
+  }
+
+  function discMesh(radius, y, segments) {
+    const p = [0, y, 0];
+    const ix = [];
+    for (let i = 0; i <= segments; i++) {
+      const a = (i / segments) * TAU;
+      p.push(Math.cos(a) * radius, y, Math.sin(a) * radius);
+    }
+    for (let i = 1; i <= segments; i++) ix.push(0, i, i + 1);
+    return { pos: new Float32Array(p), idx: new Uint16Array(ix) };
+  }
+  const stage = discMesh(3.6, 0, 72);
+  const shadow = discMesh(1, 0.001, 64);
+
+  function compile(type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      const log = gl.getShaderInfoLog(shader);
+      gl.deleteShader(shader);
+      throw new Error(log || "shader");
+    }
+    return shader;
+  }
+  function program(vs, fs) {
+    const p = gl.createProgram();
+    gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+    gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+      throw new Error(gl.getProgramInfoLog(p) || "link");
+    }
+    return p;
+  }
+
+  let bgProg, hatProg, floorProg, partProg;
+  try {
+    bgProg = program(`
+      attribute vec2 aClip;
+      varying vec2 vUv;
+      void main() {
+        vUv = aClip * 0.5 + 0.5;
+        gl_Position = vec4(aClip, 0.0, 1.0);
+      }
+    `, `
+      precision highp float;
+      varying vec2 vUv;
+      void main() {
+        vec2 p = vUv - vec2(0.5, 0.47);
+        float r = length(p * vec2(0.92, 1.08));
+        vec3 warm = vec3(0.16, 0.045, 0.038);
+        vec3 edge = vec3(0.027, 0.024, 0.026);
+        vec3 col = mix(warm, edge, smoothstep(0.0, 0.78, r));
+        float floorGlow = smoothstep(0.62, 0.18, vUv.y);
+        col = mix(col, vec3(0.05, 0.032, 0.032), floorGlow * 0.45);
+        float vig = smoothstep(0.95, 0.28, length((vUv - vec2(0.5)) * vec2(1.18, 1.08)));
+        col *= mix(0.42, 1.0, vig);
+        float dither = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+        col += (dither - 0.5) * (1.5 / 255.0);
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `);
+
+    hatProg = program(`
+      attribute vec3 aPos;
+      attribute vec3 aNrm;
+      attribute float aMat;
+      attribute float aAO;
+      uniform mat4 uVP;
+      uniform mat4 uModel;
+      uniform float uMirror;
+      uniform float uFloor;
+      varying vec3 vPos;
+      varying vec3 vNrm;
+      varying vec3 vLocal;
+      varying float vMat;
+      varying float vAO;
+      void main() {
+        vec3 p = (uModel * vec4(aPos, 1.0)).xyz;
+        vec3 n = mat3(uModel) * aNrm;
+        if (uMirror > 0.5) {
+          p.y = uFloor - (p.y - uFloor);
+          n.y = -n.y;
+        }
+        vPos = p;
+        vNrm = n;
+        vLocal = aPos;
+        vMat = aMat;
+        vAO = aAO;
+        gl_Position = uVP * vec4(p, 1.0);
+      }
+    `, `
+      precision highp float;
+      varying vec3 vPos;
+      varying vec3 vNrm;
+      varying vec3 vLocal;
+      varying float vMat;
+      varying float vAO;
+      uniform vec3 uCam;
+      uniform float uDissolve;
+      uniform float uAlpha;
+      uniform float uFloor;
+      float hash13(vec3 p) {
+        p = fract(p * 0.1031);
+        p += dot(p, p.zyx + 31.32);
+        return fract((p.x + p.y) * p.z);
+      }
+      float noise(vec3 p) {
+        vec3 i = floor(p);
+        vec3 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        float n000 = hash13(i);
+        float n100 = hash13(i + vec3(1.0, 0.0, 0.0));
+        float n010 = hash13(i + vec3(0.0, 1.0, 0.0));
+        float n110 = hash13(i + vec3(1.0, 1.0, 0.0));
+        float n001 = hash13(i + vec3(0.0, 0.0, 1.0));
+        float n101 = hash13(i + vec3(1.0, 0.0, 1.0));
+        float n011 = hash13(i + vec3(0.0, 1.0, 1.0));
+        float n111 = hash13(i + vec3(1.0, 1.0, 1.0));
+        float x00 = mix(n000, n100, f.x);
+        float x10 = mix(n010, n110, f.x);
+        float x01 = mix(n001, n101, f.x);
+        float x11 = mix(n011, n111, f.x);
+        return mix(mix(x00, x10, f.y), mix(x01, x11, f.y), f.z);
+      }
+      void main() {
+        float cell = noise(vLocal * 78.0);
+        float breaking = step(0.001, uDissolve);
+        if (breaking > 0.5 && cell < uDissolve) discard;
+        float fringe = mix(1.0, smoothstep(uDissolve, uDissolve + 0.045, cell), breaking);
+
+        vec3 N = normalize(vNrm);
+        vec3 V = normalize(uCam - vPos);
+        vec3 felt = vec3(0.78, 0.016, 0.02);
+        float fiber = hash13(vLocal * 47.0);
+        felt *= 0.94 + 0.06 * fiber;
+        vec3 band = vec3(0.02, 0.018, 0.019);
+        vec3 albedo = mix(felt, band, step(0.5, vMat));
+
+        vec3 L = normalize(vec3(-0.42, 0.86, 0.38));
+        vec3 Lrim = normalize(vec3(0.72, 0.28, -0.55));
+        vec3 Lfill = normalize(vec3(0.15, 0.05, 0.95));
+        float wrap = clamp((dot(N, L) + 0.42) / 1.42, 0.0, 1.0);
+        float fill = clamp(dot(N, Lfill), 0.0, 1.0);
+        float back = clamp(dot(N, Lrim), 0.0, 1.0);
+        float rim = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 2.5);
+        vec3 H = normalize(L + V);
+        float shiny = mix(16.0, 36.0, step(0.5, vMat));
+        float spec = pow(clamp(dot(N, H), 0.0, 1.0), shiny);
+        spec *= mix(0.035, 0.14, step(0.5, vMat));
+
+        vec3 col = albedo * (0.16 + wrap * 0.98 + fill * 0.14) * mix(0.72, 1.0, vAO);
+        col += vec3(1.0, 0.9, 0.84) * spec;
+        col += vec3(1.0, 0.34, 0.26) * rim * 0.18;
+        col += albedo * back * 0.22;
+        vec3 under = normalize(vec3(0.05, -0.55, 0.75));
+        col += albedo * clamp(dot(N, under), 0.0, 1.0) * 0.1;
+        col = mix(vec3(1.0, 0.38, 0.14), col, fringe);
+        float below = clamp(uFloor - vPos.y, 0.0, 2.0);
+        float fade = uAlpha * (uAlpha > 0.99 ? 1.0 : exp(-below * 2.4));
+        gl_FragColor = vec4(col, fade);
+      }
+    `);
+
+    floorProg = program(`
+      attribute vec3 aPos;
+      uniform mat4 uVP;
+      uniform float uScaleXZ;
+      uniform float uLift;
+      uniform vec2 uCenter;
+      varying vec2 vXZ;
+      void main() {
+        vec3 p = vec3(aPos.x * uScaleXZ + uCenter.x, aPos.y + uLift, aPos.z * uScaleXZ + uCenter.y);
+        vXZ = vec2(aPos.x, aPos.z);
+        gl_Position = uVP * vec4(p, 1.0);
+      }
+    `, `
+      precision highp float;
+      varying vec2 vXZ;
+      uniform vec3 uColor;
+      uniform float uAlpha;
+      uniform float uInner;
+      uniform float uWarm;
+      void main() {
+        float r = length(vXZ);
+        float a = smoothstep(1.0, uInner, r) * uAlpha;
+        vec3 col = uColor + vec3(0.22, 0.03, 0.02) * uWarm * exp(-r * r * 3.2);
+        gl_FragColor = vec4(col, a);
+      }
+    `);
+
+    partProg = program(`
+      attribute vec3 aHome;
+      attribute vec3 aNrm;
+      attribute vec4 aSeed;
+      attribute float aKeeper;
+      uniform mat4 uVP;
+      uniform float uAngle;
+      uniform float uRelease;
+      uniform float uScale;
+      uniform float uTime;
+      uniform float uDisp;
+      uniform float uSwirl;
+      uniform float uReform;
+      uniform float uOrbit;
+      uniform float uBulk;
+      uniform float uTrail;
+      uniform float uLag;
+      uniform float uPass;
+      uniform float uViewportH;
+      varying float vAlpha;
+      varying float vHeat;
+      varying float vKeeper;
+      vec3 rotY(vec3 p, float a) {
+        float c = cos(a), s = sin(a);
+        return vec3(c * p.x + s * p.z, p.y, -s * p.x + c * p.z);
+      }
+      void main() {
+        vKeeper = aKeeper;
+        vHeat = pow(aSeed.z, 1.65);
+        float alpha = 0.0;
+        if (uPass < 0.5) {
+          alpha = uBulk;
+          if (aKeeper > 0.5) alpha = max(uBulk * (1.0 - uOrbit), uOrbit * 0.92);
+        } else if (aKeeper > 0.5) {
+          alpha = uTrail;
+        }
+        vAlpha = alpha;
+        vec3 homeNow = rotY(aHome, uAngle) * uScale;
+        if (alpha < 0.004) {
+          gl_Position = vec4(2.0, 0.0, 0.0, 1.0);
+          gl_PointSize = 1.0;
+          return;
+        }
+        vec3 frozen = rotY(aHome, uRelease) * uScale;
+        vec3 n = normalize(rotY(aNrm, uRelease));
+        vec3 jitter = vec3(
+          sin(aSeed.x * 47.2 + aSeed.y * 19.0),
+          sin(aSeed.y * 31.7 + 1.9),
+          cos(aSeed.z * 43.1 + aSeed.w * 11.0)
+        );
+        vec3 dir = normalize(n * 0.85 + jitter * 0.62 + vec3(0.0, 0.38, 0.0));
+        float dist = mix(0.22, 0.72, aSeed.x) * uScale;
+        float lift = mix(-0.02, 0.34, pow(aSeed.y, 0.8)) * uScale;
+        vec3 ember = frozen + dir * dist;
+        ember.y += lift;
+
+        float sgn = aSeed.w > 0.5 ? 1.0 : -1.0;
+        float w = (uTime * mix(0.45, 1.25, aSeed.z) + aSeed.x * 6.28318) * sgn;
+        vec3 pivot = vec3(0.0, ember.y, 0.0);
+        vec3 around = pivot + rotY(ember - pivot, w * uSwirl);
+        around += vec3(
+          sin(uTime * 1.25 + aSeed.x * 19.0),
+          cos(uTime * 0.85 + aSeed.y * 15.0),
+          sin(uTime * 1.05 + aSeed.z * 17.0)
+        ) * (uSwirl * mix(0.03, 0.12, aSeed.y) * uScale);
+        vec3 loose = mix(ember, around, uSwirl);
+
+        float delay = aSeed.y * 0.2;
+        float disp = clamp((uDisp - delay) / 0.8, 0.0, 1.0);
+        disp = disp * disp * (3.0 - 2.0 * disp);
+        vec3 apart = mix(homeNow, loose, disp);
+
+        float ang = ((uTime - uLag) * mix(0.32, 0.78, aSeed.z) * sgn) + aSeed.w * 6.28318;
+        float rad = mix(1.12, 1.55, aSeed.x) * uScale;
+        float zrad = rad * mix(0.8, 1.08, aSeed.w);
+        float bob = sin(ang) * 0.07 * uScale;
+        vec3 orbit = vec3(cos(ang) * rad, mix(0.08, 0.78, aSeed.y) * uScale + bob, sin(ang) * zrad);
+
+        vec3 dest = mix(homeNow, orbit, aKeeper * uOrbit);
+        float sweep = aSeed.x * 0.28 + (atan(aHome.z, aHome.x) * 0.15915494 + 0.5) * 0.12;
+        float ref = clamp((uReform - sweep) / 0.6, 0.0, 1.0);
+        float refE = ref * ref * (3.0 - 2.0 * ref);
+        vec3 flow = mix(apart, dest, refE);
+        vec3 pull = dest - apart;
+        vec3 tangent = cross(vec3(0.0, 1.0, 0.0), pull);
+        float tlen = length(tangent);
+        if (tlen > 0.0001) tangent /= tlen;
+        flow += tangent * sin(refE * 3.14159) * mix(0.08, 0.34, aSeed.z) * uScale * (1.0 - refE);
+        flow += n * (0.01 * uScale);
+
+        vec4 clip = uVP * vec4(flow, 1.0);
+        gl_Position = clip;
+        float spark = mix(0.9, 1.7, vHeat);
+        float worldSize = uScale * mix(0.018, 0.036, aSeed.w) * spark * mix(0.85, 1.15, disp);
+        if (uPass > 0.5) worldSize *= 0.72;
+        gl_PointSize = clamp(worldSize * uViewportH / max(clip.w, 0.2), 1.4, 36.0);
+      }
+    `, `
+      precision highp float;
+      varying float vAlpha;
+      varying float vHeat;
+      varying float vKeeper;
+      uniform float uTime;
+      void main() {
+        vec2 pc = gl_PointCoord * 2.0 - 1.0;
+        float d = length(pc);
+        if (d > 1.0) discard;
+        float soft = pow(clamp(1.0 - d, 0.0, 1.0), 1.25);
+        float hot = pow(clamp(1.0 - d, 0.0, 1.0), 4.0);
+        vec3 deep = vec3(0.75, 0.08, 0.03);
+        vec3 midc = vec3(1.0, 0.36, 0.1);
+        vec3 spark = vec3(1.0, 0.84, 0.62);
+        vec3 col = mix(deep, midc, clamp(soft * 1.15, 0.0, 1.0));
+        col = mix(col, spark, hot * (0.08 + 0.55 * vHeat));
+        float flick = 0.84 + 0.16 * sin(uTime * (1.8 + vHeat * 2.8) + vHeat * 30.0);
+        float a = pow(soft, 1.15) * vAlpha * flick * 0.55;
+        gl_FragColor = vec4(col * a, a);
+      }
+    `);
+  } catch (err) {
+    caption.textContent = "Unable to show the scene";
+    console.error(err);
+    return;
+  }
+
+  const bgBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, bgBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+
+  const meshBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, meshData, gl.STATIC_DRAW);
+  const meshIdx = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, meshIdx);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, meshIndex, gl.STATIC_DRAW);
+
+  const partBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, partBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, particleData, gl.STATIC_DRAW);
+
+  const stageBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, stageBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, stage.pos, gl.STATIC_DRAW);
+  const stageIdx = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, stageIdx);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, stage.idx, gl.STATIC_DRAW);
+
+  const shadowBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, shadowBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, shadow.pos, gl.STATIC_DRAW);
+  const shadowIdx = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, shadowIdx);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, shadow.idx, gl.STATIC_DRAW);
+
+  function loc(prog, name) { return gl.getAttribLocation(prog, name); }
+  function uni(prog, name) { return gl.getUniformLocation(prog, name); }
+
+  const bgClip = loc(bgProg, "aClip");
+
+  const hatPos = loc(hatProg, "aPos");
+  const hatNrm = loc(hatProg, "aNrm");
+  const hatMat = loc(hatProg, "aMat");
+  const hatAO = loc(hatProg, "aAO");
+  const hatVP = uni(hatProg, "uVP");
+  const hatModel = uni(hatProg, "uModel");
+  const hatMirror = uni(hatProg, "uMirror");
+  const hatFloor = uni(hatProg, "uFloor");
+  const hatCam = uni(hatProg, "uCam");
+  const hatDissolve = uni(hatProg, "uDissolve");
+  const hatAlpha = uni(hatProg, "uAlpha");
+
+  const flPos = loc(floorProg, "aPos");
+  const flVP = uni(floorProg, "uVP");
+  const flScale = uni(floorProg, "uScaleXZ");
+  const flLift = uni(floorProg, "uLift");
+  const flCenter = uni(floorProg, "uCenter");
+  const flColor = uni(floorProg, "uColor");
+  const flAlpha = uni(floorProg, "uAlpha");
+  const flInner = uni(floorProg, "uInner");
+  const flWarm = uni(floorProg, "uWarm");
+
+  const pHome = loc(partProg, "aHome");
+  const pNrm = loc(partProg, "aNrm");
+  const pSeed = loc(partProg, "aSeed");
+  const pKeep = loc(partProg, "aKeeper");
+  const pVP = uni(partProg, "uVP");
+  const pAngle = uni(partProg, "uAngle");
+  const pRelease = uni(partProg, "uRelease");
+  const pScale = uni(partProg, "uScale");
+  const pTime = uni(partProg, "uTime");
+  const pDisp = uni(partProg, "uDisp");
+  const pSwirl = uni(partProg, "uSwirl");
+  const pReform = uni(partProg, "uReform");
+  const pOrbit = uni(partProg, "uOrbit");
+  const pBulk = uni(partProg, "uBulk");
+  const pTrail = uni(partProg, "uTrail");
+  const pLag = uni(partProg, "uLag");
+  const pPass = uni(partProg, "uPass");
+  const pViewH = uni(partProg, "uViewportH");
+
+  function identity() {
+    return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+  }
+  function multiply(a, b) {
+    const o = new Float32Array(16);
+    for (let c = 0; c < 4; c++) {
+      for (let r = 0; r < 4; r++) {
+        o[c * 4 + r] =
+          a[r] * b[c * 4] +
+          a[4 + r] * b[c * 4 + 1] +
+          a[8 + r] * b[c * 4 + 2] +
+          a[12 + r] * b[c * 4 + 3];
+      }
+    }
+    return o;
+  }
+  function perspective(fov, aspect, near, far) {
+    const f = 1 / Math.tan(fov / 2);
+    const nf = 1 / (near - far);
+    return new Float32Array([
+      f / aspect, 0, 0, 0,
+      0, f, 0, 0,
+      0, 0, (far + near) * nf, -1,
+      0, 0, 2 * far * near * nf, 0
+    ]);
+  }
+  function lookAt(eye, target, up) {
+    const zx = eye[0] - target[0], zy = eye[1] - target[1], zz = eye[2] - target[2];
+    let fl = Math.hypot(zx, zy, zz) || 1;
+    const fx = -zx / fl, fy = -zy / fl, fz = -zz / fl;
+    let sx = fy * up[2] - fz * up[1];
+    let sy = fz * up[0] - fx * up[2];
+    let sz = fx * up[1] - fy * up[0];
+    fl = Math.hypot(sx, sy, sz) || 1;
+    sx /= fl; sy /= fl; sz /= fl;
+    const ux = sy * fz - sz * fy;
+    const uy = sz * fx - sx * fz;
+    const uz = sx * fy - sy * fx;
+    return new Float32Array([
+      sx, ux, -fx, 0,
+      sy, uy, -fy, 0,
+      sz, uz, -fz, 0,
+      -(sx * eye[0] + sy * eye[1] + sz * eye[2]),
+      -(ux * eye[0] + uy * eye[1] + uz * eye[2]),
+      fx * eye[0] + fy * eye[1] + fz * eye[2],
+      1
+    ]);
+  }
+  function modelMatrix(angle, scale) {
+    const c = Math.cos(angle), s = Math.sin(angle);
+    return new Float32Array([
+      c * scale, 0, -s * scale, 0,
+      0, scale, 0, 0,
+      s * scale, 0, c * scale, 0,
+      0, 0, 0, 1
+    ]);
+  }
+
+  const anim = { disp: 0, swirl: 0, reform: 0, dissolve: 0, bulk: 0, orbit: 0 };
+  let angle = 0.72;
+  let omega = reduceMotion ? 0 : 0.46;
+  let time = 0;
+  let phase = "idle";
+  let playT = 0;
+  let releaseAngle = angle;
+  let lookX = 0, lookY = 0, camX = 0, camY = 0;
+
+  function burstParams(t) {
+    return {
+      disp: ramp(t, 0.18, 1.12),
+      swirl: ramp(t, 0.72, 1.25) * (1 - ramp(t, 2.15, 3.15)),
+      reform: ramp(t, 2.35, 4.05),
+      dissolve: ramp(t, 0.16, 0.92) * (1 - ramp(t, 3.45, 4.2)),
+      bulk: ramp(t, 0.12, 0.42) * (1 - ramp(t, 3.85, 4.45)),
+      orbit: ramp(t, 3.7, 4.6)
+    };
+  }
+
+  function trigger() {
+    if (reduceMotion || phase !== "idle") return;
+    releaseAngle = angle;
+    if (anim.orbit > 0.03) phase = "recall";
+    else {
+      anim.disp = 0;
+      anim.swirl = 0;
+      anim.reform = 0;
+      anim.dissolve = 0;
+      anim.bulk = 0;
+      anim.orbit = 0;
+      playT = 0;
+      phase = "burst";
+    }
+  }
+
+  canvas.addEventListener("pointerenter", (e) => {
+    if (e.pointerType === "mouse") trigger();
+  });
+  canvas.addEventListener("pointerleave", () => {
+    lookX = 0;
+    lookY = 0;
+  });
+  canvas.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "mouse") trigger();
+    canvas.focus({ preventScroll: true });
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (reduceMotion || e.pointerType !== "mouse") return;
+    const r = canvas.getBoundingClientRect();
+    lookX = ((e.clientX - r.left) / r.width - 0.5) * 0.22;
+    lookY = ((e.clientY - r.top) / r.height - 0.5) * -0.12;
+  });
+  canvas.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      trigger();
+    }
+  });
+
+  function applyReduced() {
+    reduceMotion = motionQuery.matches;
+    if (reduceMotion) {
+      phase = "idle";
+      angle = 0.78;
+      omega = 0;
+      anim.disp = anim.swirl = anim.reform = anim.dissolve = anim.bulk = anim.orbit = 0;
+      lookX = lookY = camX = camY = 0;
+      canvas.setAttribute("aria-label", "A red fedora with a black band.");
+    } else {
+      canvas.setAttribute("aria-label", "A red fedora with a black band, turning slowly. Hover, tap, or press Enter to scatter it into embers.");
+      startLoop();
+    }
+  }
+  if (motionQuery.addEventListener) motionQuery.addEventListener("change", applyReduced);
+  else if (motionQuery.addListener) motionQuery.addListener(applyReduced);
+
+  let loopOn = false;
+  let last = performance.now();
+
+  function resize() {
+    const rect = canvas.getBoundingClientRect();
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = Math.max(2, Math.round(rect.width * dpr));
+    const h = Math.max(2, Math.round(rect.height * dpr));
+    if (w !== canvas.width || h !== canvas.height) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+    width = w;
+    height = h;
+  }
+
+  function disableAttribs() {
+    for (let i = 0; i < 8; i++) gl.disableVertexAttribArray(i);
+  }
+
+  function draw(dt) {
+    resize();
+    if (!reduceMotion) {
+      camX += (lookX - camX) * (1 - Math.exp(-dt * 4.5));
+      camY += (lookY - camY) * (1 - Math.exp(-dt * 4.5));
+      if (phase === "recall") {
+        anim.orbit += (0 - anim.orbit) * (1 - Math.exp(-dt * 7.5));
+        omega += (0.05 - omega) * (1 - Math.exp(-dt * 3));
+        if (anim.orbit < 0.02) {
+          anim.orbit = 0;
+          anim.disp = 0;
+          anim.swirl = 0;
+          anim.reform = 0;
+          anim.dissolve = 0;
+          anim.bulk = 0;
+          playT = 0;
+          releaseAngle = angle;
+          phase = "burst";
+        }
+      } else if (phase === "burst") {
+        playT += dt;
+        const p = burstParams(playT);
+        anim.disp = p.disp;
+        anim.swirl = p.swirl;
+        anim.reform = p.reform;
+        anim.dissolve = p.dissolve;
+        anim.bulk = p.bulk;
+        anim.orbit = p.orbit;
+        const targetW = playT < 4.25 ? 0.045 : 0.46;
+        const k = playT < 4.25 ? 3.1 : 1.35;
+        omega += (targetW - omega) * (1 - Math.exp(-dt * k));
+        if (playT >= 5.05) phase = "idle";
+      } else {
+        omega += (0.46 - omega) * (1 - Math.exp(-dt * 1.4));
+      }
+      angle += omega * dt;
+      time += dt;
+    }
+
+    const aspect = width / Math.max(height, 1);
+    const eyeDist = Math.hypot(EYE0[0], EYE0[2]);
+    const halfW = eyeDist * Math.tan(FOV / 2) * aspect;
+    const hatScale = Math.min(1, (halfW * 0.9) / 1.02);
+    const floor = (minY - 0.2) * hatScale;
+    const targetY = aspect < 0.85 ? -0.08 : TARGET[1];
+    const eye = [EYE0[0] + camX, EYE0[1] + camY, EYE0[2]];
+    const proj = perspective(FOV, aspect, 0.08, 40);
+    const view = lookAt(eye, [TARGET[0], targetY, TARGET[2]], [0, 1, 0]);
+    const vp = multiply(proj, view);
+    const model = modelMatrix(angle, hatScale);
+
+    gl.viewport(0, 0, width, height);
+    gl.clearColor(0.027, 0.024, 0.026, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.BLEND);
+    gl.useProgram(bgProg);
+    disableAttribs();
+    gl.bindBuffer(gl.ARRAY_BUFFER, bgBuf);
+    gl.enableVertexAttribArray(bgClip);
+    gl.vertexAttribPointer(bgClip, 2, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
+    gl.depthMask(false);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+    const spread = anim.disp * (1 - anim.reform);
+    const presence = 1 - spread * 0.82;
+
+    gl.useProgram(floorProg);
+    disableAttribs();
+    gl.enableVertexAttribArray(flPos);
+    gl.uniformMatrix4fv(flVP, false, vp);
+    gl.uniform1f(flLift, floor);
+    gl.uniform2f(flCenter, 0, 0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, stageBuf);
+    gl.vertexAttribPointer(flPos, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, stageIdx);
+    gl.uniform1f(flScale, 1);
+    gl.uniform3f(flColor, 0.02, 0.016, 0.018);
+    gl.uniform1f(flAlpha, 0.55);
+    gl.uniform1f(flInner, 0.15);
+    gl.uniform1f(flWarm, (1 - spread) * 0.55);
+    gl.drawElements(gl.TRIANGLES, stage.idx.length, gl.UNSIGNED_SHORT, 0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, shadowBuf);
+    gl.vertexAttribPointer(flPos, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, shadowIdx);
+    gl.uniform3f(flColor, 0.0, 0.0, 0.0);
+    gl.uniform1f(flWarm, 0);
+    gl.uniform1f(flInner, 0.05);
+    gl.uniform1f(flScale, (0.62 + spread * 0.55) * hatScale);
+    gl.uniform1f(flAlpha, 0.28 * presence);
+    gl.drawElements(gl.TRIANGLES, shadow.idx.length, gl.UNSIGNED_SHORT, 0);
+    gl.uniform1f(flScale, (1.05 + spread * 0.7) * hatScale);
+    gl.uniform1f(flAlpha, 0.22 * presence);
+    gl.uniform1f(flInner, 0.0);
+    gl.drawElements(gl.TRIANGLES, shadow.idx.length, gl.UNSIGNED_SHORT, 0);
+
+    gl.useProgram(hatProg);
+    disableAttribs();
+    gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf);
+    const stride = meshStride * 4;
+    gl.enableVertexAttribArray(hatPos);
+    gl.enableVertexAttribArray(hatNrm);
+    gl.enableVertexAttribArray(hatMat);
+    gl.enableVertexAttribArray(hatAO);
+    gl.vertexAttribPointer(hatPos, 3, gl.FLOAT, false, stride, 0);
+    gl.vertexAttribPointer(hatNrm, 3, gl.FLOAT, false, stride, 12);
+    gl.vertexAttribPointer(hatMat, 1, gl.FLOAT, false, stride, 24);
+    gl.vertexAttribPointer(hatAO, 1, gl.FLOAT, false, stride, 28);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, meshIdx);
+    gl.uniformMatrix4fv(hatVP, false, vp);
+    gl.uniformMatrix4fv(hatModel, false, model);
+    gl.uniform1f(hatFloor, floor);
+    gl.uniform3f(hatCam, eye[0], eye[1], eye[2]);
+    gl.uniform1f(hatDissolve, reduceMotion ? 0 : anim.dissolve);
+
+    const reflect = (reduceMotion ? 0.06 : 0.07) * (1 - spread * 0.9);
+    gl.uniform1f(hatMirror, 1);
+    gl.uniform1f(hatAlpha, reflect);
+    gl.drawElements(gl.TRIANGLES, meshIndex.length, gl.UNSIGNED_SHORT, 0);
+
+    gl.disable(gl.BLEND);
+    gl.depthMask(true);
+    gl.uniform1f(hatMirror, 0);
+    gl.uniform1f(hatAlpha, 1);
+    gl.drawElements(gl.TRIANGLES, meshIndex.length, gl.UNSIGNED_SHORT, 0);
+
+    if (!reduceMotion && (anim.bulk > 0.004 || anim.orbit > 0.004)) {
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE);
+      gl.depthMask(false);
+      gl.useProgram(partProg);
+      disableAttribs();
+      gl.bindBuffer(gl.ARRAY_BUFFER, partBuf);
+      const ps = pStride * 4;
+      gl.enableVertexAttribArray(pHome);
+      gl.enableVertexAttribArray(pNrm);
+      gl.enableVertexAttribArray(pSeed);
+      gl.enableVertexAttribArray(pKeep);
+      gl.vertexAttribPointer(pHome, 3, gl.FLOAT, false, ps, 0);
+      gl.vertexAttribPointer(pNrm, 3, gl.FLOAT, false, ps, 12);
+      gl.vertexAttribPointer(pSeed, 4, gl.FLOAT, false, ps, 24);
+      gl.vertexAttribPointer(pKeep, 1, gl.FLOAT, false, ps, 40);
+      gl.uniformMatrix4fv(pVP, false, vp);
+      gl.uniform1f(pAngle, angle);
+      gl.uniform1f(pRelease, releaseAngle);
+      gl.uniform1f(pScale, hatScale);
+      gl.uniform1f(pTime, time);
+      gl.uniform1f(pDisp, anim.disp);
+      gl.uniform1f(pSwirl, anim.swirl);
+      gl.uniform1f(pReform, anim.reform);
+      gl.uniform1f(pOrbit, anim.orbit);
+      gl.uniform1f(pViewH, height);
+
+      if (anim.orbit > 0.03) {
+        gl.uniform1f(pPass, 1);
+        gl.uniform1f(pBulk, 0);
+        const steps = 12;
+        for (let i = steps; i >= 1; i--) {
+          const f = i / steps;
+          gl.uniform1f(pLag, f * 0.62);
+          gl.uniform1f(pTrail, anim.orbit * (1 - f) * (1 - f) * 0.28);
+          gl.drawArrays(gl.POINTS, 0, PARTICLE_COUNT);
+        }
+      }
+      gl.uniform1f(pPass, 0);
+      gl.uniform1f(pLag, 0);
+      gl.uniform1f(pTrail, 0);
+      gl.uniform1f(pBulk, anim.bulk);
+      gl.drawArrays(gl.POINTS, 0, PARTICLE_COUNT);
+    }
+
+    gl.depthMask(true);
+  }
+
+  function frame(now) {
+    if (!loopOn) return;
+    let dt = (now - last) / 1000;
+    last = now;
+    if (dt < 0) dt = 0;
+    if (dt > 0.05) dt = 0.05;
+    if (document.hidden) {
+      loopOn = false;
+      return;
+    }
+    draw(reduceMotion ? 0 : dt);
+    if (reduceMotion) {
+      loopOn = false;
+      return;
+    }
+    requestAnimationFrame(frame);
+  }
+  function startLoop() {
+    if (loopOn) return;
+    loopOn = true;
+    last = performance.now();
+    requestAnimationFrame(frame);
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && !reduceMotion) startLoop();
+  });
+  window.addEventListener("resize", () => {
+    resize();
+    if (reduceMotion) draw(0);
+  });
+
+  if (reduceMotion) {
+    angle = 0.78;
+    omega = 0;
+    canvas.setAttribute("aria-label", "A red fedora with a black band.");
+    draw(0);
+  } else {
+    startLoop();
+  }
+})();
+</script>
+</body>
+</html>
