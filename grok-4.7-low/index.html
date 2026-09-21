@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Red Hat</title>
+<style>
+  html, body { height: 100%; margin: 0; }
+  body {
+    background:
+      radial-gradient(ellipse 58% 46% at 50% 40%, #2a1214 0%, #14090c 46%, #070608 80%);
+    color: #f3e7e4;
+    overflow: hidden;
+  }
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 42%, rgba(0,0,0,.58) 100%);
+  }
+  canvas {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    touch-action: manipulation;
+  }
+  .caption {
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: calc(50% + min(36vh, 18.5rem));
+    margin: 0;
+    text-align: center;
+    pointer-events: none;
+    font-family: Palatino, "Palatino Linotype", Georgia, serif;
+    font-size: clamp(0.72rem, 1.6vw, 0.95rem);
+    letter-spacing: 0.42em;
+    text-indent: 0.42em;
+    text-transform: uppercase;
+    color: rgba(243, 231, 228, 0.82);
+  }
+  .fallback {
+    position: fixed;
+    inset: 0;
+    display: none;
+    place-items: center;
+    font-family: Palatino, Georgia, serif;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+  }
+  @media (max-height: 520px) {
+    .caption { top: auto; bottom: 1.25rem; }
+  }
+</style>
+</head>
+<body>
+<canvas id="scene" aria-label="A red fedora, slowly turning. Hover or tap to scatter it into embers."></canvas>
+<p class="caption">Red Hat</p>
+<p class="fallback" id="fallback">Red Hat</p>
+<script>
+(() => {
+  const canvas = document.getElementById("scene");
+  const gl = canvas.getContext("webgl", {
+    alpha: true,
+    antialias: true,
+    premultipliedAlpha: true
+  });
+  if (!gl) {
+    document.getElementById("fallback").style.display = "grid";
+    return;
+  }
+
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const vsMesh = `
+    precision mediump float;
+    attribute vec3 aPos;
+    attribute vec3 aNrm;
+    attribute float aBand;
+    uniform mat4 uProj, uView, uModel;
+    varying vec3 vN;
+    varying vec3 vW;
+    varying float vBand;
+    void main() {
+      vec4 w = uModel * vec4(aPos, 1.0);
+      vW = w.xyz;
+      vN = mat3(uModel) * aNrm;
+      vBand = aBand;
+      gl_Position = uProj * uView * w;
+    }
+  `;
+  const fsMesh = `
+    precision mediump float;
+    varying vec3 vN;
+    varying vec3 vW;
+    varying float vBand;
+    uniform vec3 uEye;
+    uniform float uAlpha;
+    void main() {
+      vec3 N = normalize(vN);
+      vec3 V = normalize(uEye - vW);
+      vec3 L = normalize(vec3(0.35, 0.85, 0.42));
+      vec3 L2 = normalize(vec3(-0.55, 0.15, -0.35));
+      float wrap = clamp(dot(N, L) * 0.55 + 0.45, 0.0, 1.0);
+      float fill = clamp(dot(N, L2) * 0.5 + 0.5, 0.0, 1.0);
+      float fres = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 2.4);
+      float spec = pow(max(dot(reflect(-L, N), V), 0.0), 48.0);
+      vec3 felt = vec3(0.78, 0.045, 0.055);
+      vec3 band = vec3(0.28, 0.02, 0.025);
+      vec3 albedo = mix(felt, band, vBand);
+      float ao = mix(0.62, 1.0, smoothstep(-0.35, 0.75, N.y));
+      ao *= mix(0.78, 1.0, smoothstep(0.0, 0.35, vW.y));
+      vec3 col = albedo * (0.16 + wrap * 0.92 + fill * 0.18) * ao;
+      col += vec3(1.0, 0.62, 0.55) * spec * (1.0 - vBand) * 0.18;
+      col += vec3(1.0, 0.32, 0.28) * fres * 0.22 * (1.0 - vBand * 0.5);
+      float a = uAlpha;
+      gl_FragColor = vec4(col * a, a);
+    }
+  `;
+  const vsPt = `
+    precision mediump float;
+    attribute vec3 aPos;
+    attribute float aSeed;
+    attribute float aTrail;
+    uniform mat4 uProj, uView;
+    uniform float uSize;
+    uniform float uHeight;
+    varying float vSeed;
+    varying float vTrail;
+    void main() {
+      vec4 eye = uView * vec4(aPos, 1.0);
+      gl_Position = uProj * eye;
+      float dist = max(0.25, -eye.z);
+      gl_PointSize = uSize * (1.0 - aTrail * 0.65) * uHeight / dist;
+      vSeed = aSeed;
+      vTrail = aTrail;
+    }
+  `;
+  const fsPt = `
+    precision mediump float;
+    varying float vSeed;
+    varying float vTrail;
+    uniform float uAlpha;
+    void main() {
+      vec2 p = gl_PointCoord - vec2(0.5);
+      float d = length(p);
+      if (d > 0.5) discard;
+      float core = smoothstep(0.5, 0.0, d);
+      float hot = smoothstep(0.22, 0.0, d);
+      vec3 ember = mix(vec3(0.72, 0.12, 0.08), vec3(1.0, 0.55, 0.28), hot);
+      ember = mix(ember, vec3(1.0, 0.78, 0.55), vSeed * hot * 0.35);
+      float a = core * uAlpha * (1.0 - vTrail);
+      a *= mix(0.55, 1.0, hot);
+      gl_FragColor = vec4(ember * a, a);
+    }
+  `;
+  const vsSh = `
+    precision mediump float;
+    attribute vec2 aPos;
+    uniform mat4 uProj, uView;
+    uniform float uY;
+    uniform float uClip;
+    varying vec2 vUv;
+    void main() {
+      vUv = aPos;
+      if (uClip > 0.5) {
+        gl_Position = vec4(aPos, 0.0, 1.0);
+      } else {
+        gl_Position = uProj * uView * vec4(aPos.x, uY, aPos.y, 1.0);
+      }
+    }
+  `;
+  const fsSh = `
+    precision mediump float;
+    varying vec2 vUv;
+    uniform float uStrength;
+    uniform float uWarm;
+    uniform float uClip;
+    void main() {
+      if (uClip > 0.5) {
+        vec2 q = vUv * 0.5 + 0.5;
+        float d = distance(q, vec2(0.5, 0.58));
+        vec3 col = mix(vec3(0.09, 0.035, 0.04), vec3(0.028, 0.024, 0.03), smoothstep(0.0, 0.85, d));
+        gl_FragColor = vec4(col, 1.0);
+        return;
+      }
+      vec2 p = vUv / vec2(1.05, 0.62);
+      float d = length(p);
+      float soft = smoothstep(1.0, 0.2, d);
+      float a = soft * soft * uStrength;
+      gl_FragColor = vec4(0.0, 0.0, 0.0, a);
+    }
+  `;
+
+  function compile(type, src) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+      throw new Error(gl.getShaderInfoLog(s));
+    }
+    return s;
+  }
+  function program(vs, fs) {
+    const p = gl.createProgram();
+    gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+    gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+      throw new Error(gl.getProgramInfoLog(p));
+    }
+    return p;
+  }
+
+  const meshProg = program(vsMesh, fsMesh);
+  const ptProg = program(vsPt, fsPt);
+  const shProg = program(vsSh, fsSh);
+
+  const positions = [];
+  const bands = [];
+  const indices = [];
+
+  function addGrid(nu, nv, fn, band, flip) {
+    const start = positions.length / 3;
+    for (let j = 0; j < nv; j++) {
+      for (let i = 0; i < nu; i++) {
+        const p = fn(i / (nu - 1), j / (nv - 1));
+        positions.push(p[0], p[1], p[2]);
+        bands.push(band);
+      }
+    }
+    for (let j = 0; j < nv - 1; j++) {
+      for (let i = 0; i < nu - 1; i++) {
+        const a = start + j * nu + i;
+        const b = a + 1;
+        const c = a + nu;
+        const d = c + 1;
+        if (!flip) indices.push(a, c, b, b, c, d);
+        else indices.push(a, b, c, b, d, c);
+      }
+    }
+  }
+
+  function crownPoint(u, v) {
+    const theta = u * Math.PI * 2;
+    const y01 = v;
+    const taper = 1 - 0.05 * y01;
+    let rx = 0.50 * taper;
+    let rz = 0.54 * taper;
+    const pinch = Math.pow(y01, 2.4);
+    rz *= 1 - 0.1 * pinch;
+    const side = Math.abs(Math.sin(theta));
+    let y = 0.02 + y01 * 0.78;
+    y -= pinch * (1 - side) * 0.055;
+    return [Math.sin(theta) * rx, y, Math.cos(theta) * rz - y01 * 0.035];
+  }
+
+  function brimTop(u, v) {
+    const theta = u * Math.PI * 2;
+    const t = v;
+    const front = Math.max(0, Math.cos(theta));
+    const back = Math.max(0, -Math.cos(theta));
+    const side = Math.abs(Math.sin(theta));
+    const outer = 1.42 + front * 0.34 - back * 0.16;
+    const k = 1 + (outer - 1) * Math.pow(t, 0.92);
+    const x = Math.sin(theta) * 0.50 * k;
+    const z = Math.cos(theta) * 0.54 * k;
+    let y = 0.02;
+    y += side * 0.14 * Math.pow(t, 1.45);
+    y -= front * 0.11 * Math.pow(t, 1.12);
+    y += back * 0.035 * t;
+    y += Math.pow(t, 4) * 0.03;
+    return [x, y, z];
+  }
+
+  const SLICES = 80;
+  addGrid(SLICES + 1, 22, crownPoint, 0, false);
+  addGrid(SLICES + 1, 2, (u, v) => {
+    const p = crownPoint(u, 0);
+    const k = 1 - v;
+    return [p[0] * k, p[1], p[2] * k];
+  }, 0, true);
+  addGrid(SLICES + 1, 14, (u, v) => {
+    const p = brimTop(u, v);
+    return [p[0], p[1] - 0.028 - v * 0.012, p[2]];
+  }, 0, true);
+  addGrid(SLICES + 1, 14, brimTop, 0, false);
+  addGrid(SLICES + 1, 3, (u, v) => {
+    const a = brimTop(u, 1);
+    const b = brimTop(u, 1);
+    b[1] -= 0.04;
+    return [
+      a[0] * (1 - v) + b[0] * v,
+      a[1] * (1 - v) + b[1] * v,
+      a[2] * (1 - v) + b[2] * v
+    ];
+  }, 0, false);
+
+  addGrid(SLICES + 1, 4, (u, v) => {
+    const theta = u * Math.PI * 2;
+    const y = 0.1 + v * 0.09;
+    const p = crownPoint(u, (y - 0.02) / 0.78);
+    const s = 1.012;
+    return [p[0] * s, y, p[2] * s];
+  }, 1, false);
+
+  const normals = new Float32Array(positions.length);
+  for (let i = 0; i < indices.length; i += 3) {
+    const ia = indices[i] * 3, ib = indices[i + 1] * 3, ic = indices[i + 2] * 3;
+    const ax = positions[ia], ay = positions[ia + 1], az = positions[ia + 2];
+    const bx = positions[ib], by = positions[ib + 1], bz = positions[ib + 2];
+    const cx = positions[ic], cy = positions[ic + 1], cz = positions[ic + 2];
+    const abx = bx - ax, aby = by - ay, abz = bz - az;
+    const acx = cx - ax, acy = cy - ay, acz = cz - az;
+    const nx = aby * acz - abz * acy;
+    const ny = abz * acx - abx * acz;
+    const nz = abx * acy - aby * acx;
+    normals[ia] += nx; normals[ia + 1] += ny; normals[ia + 2] += nz;
+    normals[ib] += nx; normals[ib + 1] += ny; normals[ib + 2] += nz;
+    normals[ic] += nx; normals[ic + 1] += ny; normals[ic + 2] += nz;
+  }
+  for (let i = 0; i < normals.length; i += 3) {
+    const x = normals[i], y = normals[i + 1], z = normals[i + 2];
+    const len = Math.hypot(x, y, z) || 1;
+    normals[i] = x / len; normals[i + 1] = y / len; normals[i + 2] = z / len;
+  }
+
+  function buffer(target, data, usage) {
+    const b = gl.createBuffer();
+    gl.bindBuffer(target, b);
+    gl.bufferData(target, data, usage || gl.STATIC_DRAW);
+    return b;
+  }
+
+  const posBuf = buffer(gl.ARRAY_BUFFER, new Float32Array(positions));
+  const nrmBuf = buffer(gl.ARRAY_BUFFER, normals);
+  const bandBuf = buffer(gl.ARRAY_BUFFER, new Float32Array(bands));
+  const idxBuf = buffer(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(indices));
+  const useUint = !!gl.getExtension("OES_element_index_uint");
+  let indexType = gl.UNSIGNED_INT;
+  let indexCount = indices.length;
+  if (!useUint) {
+    const shortIdx = new Uint16Array(indices);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, shortIdx, gl.STATIC_DRAW);
+    indexType = gl.UNSIGNED_SHORT;
+  }
+
+  const tris = [];
+  let areaSum = 0;
+  for (let i = 0; i < indices.length; i += 3) {
+    const ia = indices[i] * 3, ib = indices[i + 1] * 3, ic = indices[i + 2] * 3;
+    if (bands[indices[i]] > 0.5) continue;
+    const ax = positions[ia], ay = positions[ia + 1], az = positions[ia + 2];
+    const bx = positions[ib], by = positions[ib + 1], bz = positions[ib + 2];
+    const cx = positions[ic], cy = positions[ic + 1], cz = positions[ic + 2];
+    const abx = bx - ax, aby = by - ay, abz = bz - az;
+    const acx = cx - ax, acy = cy - ay, acz = cz - az;
+    const area = 0.5 * Math.hypot(
+      aby * acz - abz * acy,
+      abz * acx - abx * acz,
+      abx * acy - aby * acx
+    );
+    if (area < 1e-7) continue;
+    areaSum += area;
+    tris.push({ ax, ay, az, bx, by, bz, cx, cy, cz, area, acc: areaSum });
+  }
+
+  function pickTri(r) {
+    let lo = 0, hi = tris.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (tris[mid].acc < r) lo = mid + 1;
+      else hi = mid;
+    }
+    return tris[lo];
+  }
+
+  const CLOUD = 6400;
+  const ORBITS = 22;
+  const homes = new Float32Array(CLOUD * 3);
+  const scatters = new Float32Array(CLOUD * 3);
+  const seeds = new Float32Array(CLOUD);
+  for (let i = 0; i < CLOUD; i++) {
+    const t = pickTri(Math.random() * areaSum);
+    let u = Math.random(), v = Math.random();
+    if (u + v > 1) { u = 1 - u; v = 1 - v; }
+    const w = 1 - u - v;
+    const x = t.ax * w + t.bx * u + t.cx * v;
+    const y = t.ay * w + t.by * u + t.cy * v;
+    const z = t.az * w + t.bz * u + t.cz * v;
+    homes[i * 3] = x; homes[i * 3 + 1] = y; homes[i * 3 + 2] = z;
+    const jx = (Math.random() - 0.5) * 0.55;
+    const jy = Math.random() * 1.15 + 0.15;
+    const jz = (Math.random() - 0.5) * 0.55;
+    const outward = 1.6 + Math.random() * 1.5;
+    scatters[i * 3] = x * outward + jx;
+    scatters[i * 3 + 1] = jy + y * 0.25;
+    scatters[i * 3 + 2] = z * outward + jz;
+    seeds[i] = Math.random();
+  }
+
+  const orbitHome = new Float32Array(ORBITS * 3);
+  const orbitSeed = new Float32Array(ORBITS);
+  for (let i = 0; i < ORBITS; i++) {
+    const s = Math.floor(Math.random() * CLOUD);
+    orbitHome[i * 3] = homes[s * 3];
+    orbitHome[i * 3 + 1] = homes[s * 3 + 1];
+    orbitHome[i * 3 + 2] = homes[s * 3 + 2];
+    orbitSeed[i] = Math.random();
+  }
+
+  const cloudPos = new Float32Array(CLOUD * 3);
+  const cloudSeed = seeds;
+  const cloudTrail = new Float32Array(CLOUD);
+  const ptBuf = buffer(gl.ARRAY_BUFFER, cloudPos, gl.DYNAMIC_DRAW);
+  const seedBuf = buffer(gl.ARRAY_BUFFER, cloudSeed);
+  const trailAttr = buffer(gl.ARRAY_BUFFER, cloudTrail, gl.DYNAMIC_DRAW);
+
+  const TRAIL = 16;
+  const trailPos = new Float32Array(ORBITS * TRAIL * 3);
+  const trailSeed = new Float32Array(ORBITS * TRAIL);
+  const trailFade = new Float32Array(ORBITS * TRAIL);
+  for (let i = 0; i < ORBITS; i++) {
+    for (let k = 0; k < TRAIL; k++) {
+      trailSeed[i * TRAIL + k] = orbitSeed[i];
+      trailFade[i * TRAIL + k] = k / (TRAIL - 1);
+    }
+  }
+  const trBuf = buffer(gl.ARRAY_BUFFER, trailPos, gl.DYNAMIC_DRAW);
+  const trSeedBuf = buffer(gl.ARRAY_BUFFER, trailSeed);
+  const trFadeBuf = buffer(gl.ARRAY_BUFFER, trailFade);
+
+  const shBuf = buffer(gl.ARRAY_BUFFER, new Float32Array([
+    -1.7, -1.35, 1.7, -1.35, -1.7, 1.35, 1.7, 1.35
+  ]));
+
+  function mul(a, b, out) {
+    for (let c = 0; c < 4; c++) {
+      for (let r = 0; r < 4; r++) {
+        out[c * 4 + r] =
+          a[r] * b[c * 4] +
+          a[4 + r] * b[c * 4 + 1] +
+          a[8 + r] * b[c * 4 + 2] +
+          a[12 + r] * b[c * 4 + 3];
+      }
+    }
+  }
+  function perspective(fovy, aspect, near, far) {
+    const out = new Float32Array(16);
+    const f = 1 / Math.tan(fovy / 2);
+    out[0] = f / aspect;
+    out[5] = f;
+    out[10] = (far + near) / (near - far);
+    out[11] = -1;
+    out[14] = (2 * far * near) / (near - far);
+    return out;
+  }
+  function lookAt(eye, center) {
+    let fx = center[0] - eye[0], fy = center[1] - eye[1], fz = center[2] - eye[2];
+    let fl = Math.hypot(fx, fy, fz) || 1;
+    fx /= fl; fy /= fl; fz /= fl;
+    let xx = fy * 0 - fz * 1, xy = fz * 0 - fx * 0, xz = fx * 1 - fy * 0;
+    let xl = Math.hypot(xx, xy, xz) || 1;
+    xx /= xl; xy /= xl; xz /= xl;
+    const yx = xy * fz - xz * fy;
+    const yy = xz * fx - xx * fz;
+    const yz = xx * fy - xy * fx;
+    const out = new Float32Array(16);
+    out[0] = xx; out[1] = yx; out[2] = -fx;
+    out[4] = xy; out[5] = yy; out[6] = -fy;
+    out[8] = xz; out[9] = yz; out[10] = -fz;
+    out[12] = -(xx * eye[0] + xy * eye[1] + xz * eye[2]);
+    out[13] = -(yx * eye[0] + yy * eye[1] + yz * eye[2]);
+    out[14] = fx * eye[0] + fy * eye[1] + fz * eye[2];
+    out[15] = 1;
+    return out;
+  }
+
+  const loc = {
+    mesh: {
+      pos: gl.getAttribLocation(meshProg, "aPos"),
+      nrm: gl.getAttribLocation(meshProg, "aNrm"),
+      band: gl.getAttribLocation(meshProg, "aBand"),
+      proj: gl.getUniformLocation(meshProg, "uProj"),
+      view: gl.getUniformLocation(meshProg, "uView"),
+      model: gl.getUniformLocation(meshProg, "uModel"),
+      eye: gl.getUniformLocation(meshProg, "uEye"),
+      alpha: gl.getUniformLocation(meshProg, "uAlpha")
+    },
+    pt: {
+      pos: gl.getAttribLocation(ptProg, "aPos"),
+      seed: gl.getAttribLocation(ptProg, "aSeed"),
+      trail: gl.getAttribLocation(ptProg, "aTrail"),
+      proj: gl.getUniformLocation(ptProg, "uProj"),
+      view: gl.getUniformLocation(ptProg, "uView"),
+      size: gl.getUniformLocation(ptProg, "uSize"),
+      height: gl.getUniformLocation(ptProg, "uHeight"),
+      alpha: gl.getUniformLocation(ptProg, "uAlpha")
+    },
+    sh: {
+      pos: gl.getAttribLocation(shProg, "aPos"),
+      proj: gl.getUniformLocation(shProg, "uProj"),
+      view: gl.getUniformLocation(shProg, "uView"),
+      y: gl.getUniformLocation(shProg, "uY"),
+      strength: gl.getUniformLocation(shProg, "uStrength"),
+      warm: gl.getUniformLocation(shProg, "uWarm"),
+      clip: gl.getUniformLocation(shProg, "uClip")
+    }
+  };
+
+  let width = 1, height = 1, dpr = 1;
+  function resize() {
+    dpr = Math.min(devicePixelRatio || 1, 2);
+    width = canvas.clientWidth;
+    height = canvas.clientHeight;
+    canvas.width = Math.max(1, Math.floor(width * dpr));
+    canvas.height = Math.max(1, Math.floor(height * dpr));
+    gl.viewport(0, 0, canvas.width, canvas.height);
+  }
+  resize();
+  addEventListener("resize", resize);
+
+  let angle = 0.62;
+  let omega = reduced ? 0 : 0.38;
+  let omegaTarget = omega;
+  let scatter = 0;
+  let gather = 1;
+  let swirl = 0;
+  let form = 1;
+  let orbit = 0;
+  let warm = 0;
+  let mode = "idle";
+  let modeT = 0;
+  let pointerX = 0, pointerY = 0;
+  const clock = { last: performance.now(), time: 0 };
+
+  function smooth(t) {
+    t = Math.max(0, Math.min(1, t));
+    return t * t * (3 - 2 * t);
+  }
+
+  function trigger() {
+    if (reduced || mode !== "idle") return;
+    mode = "wind";
+    modeT = 0;
+    omegaTarget = 0.05;
+  }
+
+  canvas.addEventListener("pointerenter", trigger);
+  canvas.addEventListener("pointerdown", (e) => {
+    trigger();
+    e.preventDefault();
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    const r = canvas.getBoundingClientRect();
+    pointerX = ((e.clientX - r.left) / r.width) * 2 - 1;
+    pointerY = ((e.clientY - r.top) / r.height) * 2 - 1;
+  });
+
+  function rotY(x, z, a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    return [x * c + z * s, -x * s + z * c];
+  }
+
+  function step(dt) {
+    clock.time += dt;
+    if (!reduced) {
+      if (mode === "wind") {
+        modeT += dt;
+        if (modeT > 0.48) { mode = "scatter"; modeT = 0; }
+      } else if (mode === "scatter") {
+        modeT += dt;
+        const k = smooth(modeT / 1.15);
+        scatter = k;
+        gather = 0;
+        swirl += dt * (0.4 + k * 1.5);
+        form = 1 - smooth(Math.min(1, modeT / 0.55));
+        warm = k;
+        if (modeT > 1.15) { mode = "swirl"; modeT = 0; scatter = 1; }
+      } else if (mode === "swirl") {
+        modeT += dt;
+        swirl += dt * 1.35;
+        warm = 1;
+        if (modeT > 0.95) { mode = "gather"; modeT = 0; }
+      } else if (mode === "gather") {
+        modeT += dt;
+        const k = smooth(modeT / 1.45);
+        gather = k;
+        scatter = 1;
+        swirl += dt * (1.1 * (1 - k) + 0.15);
+        form = smooth(Math.max(0, (k - 0.62) / 0.38));
+        warm = 1 - k;
+        orbit = smooth(Math.max(0, (k - 0.45) / 0.55));
+        if (modeT > 1.45) {
+          mode = "idle";
+          scatter = 0;
+          gather = 1;
+          form = 1;
+          warm = 0;
+          orbit = 1;
+          omegaTarget = 0.34;
+        }
+      } else if (orbit > 0) {
+        omegaTarget = 0.34;
+      }
+      omega += (omegaTarget - omega) * Math.min(1, dt * 2.4);
+      angle += omega * dt;
+    }
+  }
+
+  function writeCloud(spin) {
+    const sw = swirl;
+    const sc = scatter;
+    const ga = gather;
+    for (let i = 0; i < CLOUD; i++) {
+      const sd = seeds[i];
+      const hx = homes[i * 3], hy = homes[i * 3 + 1], hz = homes[i * 3 + 2];
+      let x = hx + scatters[i * 3] * sc;
+      let y = hy + (scatters[i * 3 + 1]) * sc;
+      let z = hz + scatters[i * 3 + 2] * sc;
+      const ang = sw * (0.55 + sd) * (1 - ga);
+      const c = Math.cos(ang), s = Math.sin(ang);
+      const xr = x * c - z * s;
+      const zr = x * s + z * c;
+      x = xr; z = zr;
+      y += Math.sin(clock.time * 1.7 + sd * 6.283) * 0.07 * sc * (1 - ga);
+      x = x * (1 - ga) + hx * ga;
+      y = y * (1 - ga) + hy * ga;
+      z = z * (1 - ga) + hz * ga;
+      const r = rotY(x, z, spin);
+      cloudPos[i * 3] = r[0];
+      cloudPos[i * 3 + 1] = y;
+      cloudPos[i * 3 + 2] = r[1];
+    }
+  }
+
+  function orbitPosition(i, time) {
+    const sd = orbitSeed[i];
+    const ang = time * (0.28 + sd * 0.22) + sd * 6.283;
+    const rad = 1.25 + sd * 0.48;
+    const y = 0.22 + Math.sin(ang * 1.7 + sd * 4) * 0.22 + (sd - 0.5) * 0.18;
+    return [Math.cos(ang) * rad, y, Math.sin(ang) * rad * 0.78];
+  }
+
+  function writeOrbits(spin) {
+    for (let i = 0; i < ORBITS; i++) {
+      const hx = orbitHome[i * 3], hy = orbitHome[i * 3 + 1], hz = orbitHome[i * 3 + 2];
+      const burst = Math.max(scatter, 1 - gather);
+      let x = hx, y = hy, z = hz;
+      if (burst > 0.001) {
+        const sd = orbitSeed[i];
+        x = hx + Math.cos(sd * 12) * 1.4 * burst;
+        y = hy + (0.4 + sd) * burst;
+        z = hz + Math.sin(sd * 9) * 1.4 * burst;
+        const ang = swirl * (0.7 + sd);
+        const c = Math.cos(ang), s = Math.sin(ang);
+        const xr = x * c - z * s;
+        const zr = x * s + z * c;
+        x = xr; z = zr;
+      }
+      const homeR = rotY(hx, hz, spin);
+      const br = rotY(x, z, spin);
+      const o = orbitPosition(i, clock.time);
+      const stay = orbit * (1 - Math.min(1, burst));
+      const px = br[0] * (1 - stay) + o[0] * stay * (burst < 0.5 ? 1 : 0);
+      let fx, fy, fz;
+      if (mode === "idle" && orbit > 0.99) {
+        fx = o[0]; fy = o[1]; fz = o[2];
+      } else {
+        const back = gather;
+        fx = (br[0] * (1 - back) + homeR[0] * back) * (1 - stay) + o[0] * stay;
+        fy = (y * (1 - back) + hy * back) * (1 - stay) + o[1] * stay;
+        fz = (br[1] * (1 - back) + homeR[1] * back) * (1 - stay) + o[2] * stay;
+      }
+      for (let k = TRAIL - 1; k > 0; k--) {
+        const dst = (i * TRAIL + k) * 3;
+        const src = (i * TRAIL + k - 1) * 3;
+        trailPos[dst] = trailPos[src];
+        trailPos[dst + 1] = trailPos[src + 1];
+        trailPos[dst + 2] = trailPos[src + 2];
+      }
+      trailPos[i * TRAIL * 3] = fx;
+      trailPos[i * TRAIL * 3 + 1] = fy;
+      trailPos[i * TRAIL * 3 + 2] = fz;
+    }
+  }
+
+  const model = new Float32Array(16);
+  function modelSpin(a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    model.fill(0);
+    model[0] = c; model[2] = -s;
+    model[5] = 1;
+    model[8] = s; model[10] = c;
+    model[15] = 1;
+  }
+
+  function draw() {
+    const now = performance.now();
+    let dt = (now - clock.last) / 1000;
+    clock.last = now;
+    if (dt > 0.05) dt = 0.05;
+    step(dt);
+
+    const parallax = reduced ? 0 : 1;
+    const aspect = width / Math.max(1, height);
+    const dist = Math.max(3.25, 1.35 / (Math.tan(Math.PI / 5.2 / 2) * Math.max(0.42, aspect)));
+    const eye = [
+      pointerX * 0.18 * parallax,
+      dist * 0.34 - pointerY * 0.05 * parallax,
+      dist
+    ];
+    const proj = perspective(Math.PI / 5.2, width / Math.max(1, height), 0.08, 20);
+    const view = lookAt(eye, [0, 0.22, 0]);
+    modelSpin(angle);
+
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST);
+    gl.enable(gl.CULL_FACE);
+    gl.cullFace(gl.BACK);
+
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.BLEND);
+    gl.useProgram(shProg);
+    gl.bindBuffer(gl.ARRAY_BUFFER, shBuf);
+    gl.enableVertexAttribArray(loc.sh.pos);
+    gl.vertexAttribPointer(loc.sh.pos, 2, gl.FLOAT, false, 0, 0);
+    gl.uniformMatrix4fv(loc.sh.proj, false, proj);
+    gl.uniformMatrix4fv(loc.sh.view, false, view);
+    gl.uniform1f(loc.sh.y, 0.0);
+    gl.uniform1f(loc.sh.strength, 0.0);
+    gl.uniform1f(loc.sh.warm, 0.0);
+    gl.uniform1f(loc.sh.clip, 1.0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    gl.enable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.uniform1f(loc.sh.clip, 0.0);
+    gl.uniform1f(loc.sh.y, -0.02);
+    gl.uniform1f(loc.sh.strength, 0.62 * form + warm * 0.25);
+    gl.uniform1f(loc.sh.warm, 0.35 + warm * 0.65);
+    gl.depthMask(false);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.depthMask(true);
+
+    if (form > 0.01) {
+      gl.useProgram(meshProg);
+      gl.uniformMatrix4fv(loc.mesh.proj, false, proj);
+      gl.uniformMatrix4fv(loc.mesh.view, false, view);
+      gl.uniformMatrix4fv(loc.mesh.model, false, model);
+      gl.uniform3f(loc.mesh.eye, eye[0], eye[1], eye[2]);
+      gl.uniform1f(loc.mesh.alpha, form);
+      gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+      gl.enableVertexAttribArray(loc.mesh.pos);
+      gl.vertexAttribPointer(loc.mesh.pos, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, nrmBuf);
+      gl.enableVertexAttribArray(loc.mesh.nrm);
+      gl.vertexAttribPointer(loc.mesh.nrm, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, bandBuf);
+      gl.enableVertexAttribArray(loc.mesh.band);
+      gl.vertexAttribPointer(loc.mesh.band, 1, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
+      gl.drawElements(gl.TRIANGLES, indexCount, indexType, 0);
+    }
+
+    const showCloud = !reduced && (mode !== "idle" || scatter > 0.001);
+    if (showCloud) {
+      writeCloud(angle);
+      gl.bindBuffer(gl.ARRAY_BUFFER, ptBuf);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, cloudPos);
+      gl.bindBuffer(gl.ARRAY_BUFFER, trailAttr);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, cloudTrail);
+      gl.useProgram(ptProg);
+      gl.uniformMatrix4fv(loc.pt.proj, false, proj);
+      gl.uniformMatrix4fv(loc.pt.view, false, view);
+      gl.uniform1f(loc.pt.size, 0.055);
+      gl.uniform1f(loc.pt.height, canvas.height / 2);
+      const cloudA = (1 - gather * 0.85) * Math.min(1, scatter * 1.35) * (1 - form * 0.75);
+      gl.uniform1f(loc.pt.alpha, Math.max(0, Math.min(0.62, cloudA)));
+      gl.bindBuffer(gl.ARRAY_BUFFER, ptBuf);
+      gl.enableVertexAttribArray(loc.pt.pos);
+      gl.vertexAttribPointer(loc.pt.pos, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, seedBuf);
+      gl.enableVertexAttribArray(loc.pt.seed);
+      gl.vertexAttribPointer(loc.pt.seed, 1, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, trailAttr);
+      gl.enableVertexAttribArray(loc.pt.trail);
+      gl.vertexAttribPointer(loc.pt.trail, 1, gl.FLOAT, false, 0, 0);
+      gl.depthMask(false);
+      gl.blendFunc(gl.ONE, gl.ONE);
+      gl.drawArrays(gl.POINTS, 0, CLOUD);
+    }
+
+    if (!reduced && orbit > 0.02) {
+      writeOrbits(angle);
+      gl.bindBuffer(gl.ARRAY_BUFFER, trBuf);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, trailPos);
+      gl.useProgram(ptProg);
+      gl.uniformMatrix4fv(loc.pt.proj, false, proj);
+      gl.uniformMatrix4fv(loc.pt.view, false, view);
+      gl.uniform1f(loc.pt.size, 0.07);
+      gl.uniform1f(loc.pt.height, canvas.height / 2);
+      gl.uniform1f(loc.pt.alpha, 0.55 * orbit);
+      gl.bindBuffer(gl.ARRAY_BUFFER, trBuf);
+      gl.enableVertexAttribArray(loc.pt.pos);
+      gl.vertexAttribPointer(loc.pt.pos, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, trSeedBuf);
+      gl.enableVertexAttribArray(loc.pt.seed);
+      gl.vertexAttribPointer(loc.pt.seed, 1, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, trFadeBuf);
+      gl.enableVertexAttribArray(loc.pt.trail);
+      gl.vertexAttribPointer(loc.pt.trail, 1, gl.FLOAT, false, 0, 0);
+      gl.depthMask(false);
+      gl.blendFunc(gl.ONE, gl.ONE);
+      gl.drawArrays(gl.POINTS, 0, ORBITS * TRAIL);
+    }
+
+    gl.depthMask(true);
+    requestAnimationFrame(draw);
+  }
+
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>
