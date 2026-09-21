@@ -1,0 +1,1084 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Fedora</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #070506;
+    --ink: rgba(255, 236, 232, 0.88);
+    --muted: rgba(232, 198, 192, 0.5);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+  }
+  body {
+    overflow: hidden;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    user-select: none;
+  }
+  canvas {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .cap {
+    position: fixed;
+    z-index: 1;
+    left: 0;
+    right: 0;
+    bottom: max(28px, calc(env(safe-area-inset-bottom) + 6.5vh));
+    text-align: center;
+    pointer-events: none;
+  }
+  .word {
+    display: block;
+    font-family: Palatino, "Palatino Linotype", "Iowan Old Style", "Times New Roman", serif;
+    font-weight: 400;
+    font-size: clamp(0.95rem, 2.2vw, 1.4rem);
+    letter-spacing: 0.48em;
+    text-indent: 0.48em;
+    color: var(--ink);
+  }
+  .hint {
+    display: block;
+    margin-top: 0.75rem;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: clamp(0.62rem, 1.4vw, 0.72rem);
+    font-weight: 400;
+    letter-spacing: 0.34em;
+    text-indent: 0.34em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  @media (max-height: 520px) {
+    .cap { bottom: max(14px, env(safe-area-inset-bottom)); }
+    .hint { margin-top: 0.4rem; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    body { cursor: default; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c" aria-hidden="true"></canvas>
+<p class="cap">
+  <span class="word">fedora</span>
+  <span class="hint" id="hint">hover or tap</span>
+</p>
+<p class="sr" id="sr">A red fedora on a dark field. It spins slowly. Hover or tap and it scatters into embers, then gathers back into the hat.</p>
+<script>
+(() => {
+  "use strict";
+
+  const canvas = document.getElementById("c");
+  const hint = document.getElementById("hint");
+  const sr = document.getElementById("sr");
+  const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+  let reduce = motionQuery.matches;
+
+  const gl = canvas.getContext("webgl2", {
+    alpha: false,
+    antialias: true,
+    depth: true,
+    stencil: false,
+    powerPreference: "high-performance",
+    premultipliedAlpha: true
+  });
+  if (!gl) {
+    hint.textContent = "WebGL unavailable";
+    return;
+  }
+
+  const FELT = [0.78, 0.04, 0.06];
+  const BAND = [0.34, 0.035, 0.05];
+
+  function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+  function add(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
+  function mul(a, s) { return [a[0] * s, a[1] * s, a[2] * s]; }
+  function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+  function cross(a, b) {
+    return [
+      a[1] * b[2] - a[2] * b[1],
+      a[2] * b[0] - a[0] * b[2],
+      a[0] * b[1] - a[1] * b[0]
+    ];
+  }
+  function len(a) { return Math.hypot(a[0], a[1], a[2]); }
+  function norm(a) {
+    const l = len(a) || 1;
+    return [a[0] / l, a[1] / l, a[2] / l];
+  }
+  function mulberry32(seed) {
+    let s = seed >>> 0;
+    return () => {
+      s = (s + 0x6D2B79F5) >>> 0;
+      let t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  /* Crown sits slightly back; front brim (+X) is the long point of the mark. */
+  const RAKE = 0.07;
+  const CROWN_PROFILE = [
+    [0.33, 0.04],
+    [0.358, 0.15],
+    [0.368, 0.32],
+    [0.36, 0.48],
+    [0.345, 0.58],
+    [0.28, 0.68],
+    [0.16, 0.745],
+    [0.0, 0.758]
+  ];
+
+  function smoothstep01(t) {
+    const x = Math.max(0, Math.min(1, t));
+    return x * x * (3 - 2 * x);
+  }
+
+  function catmull(pts, t) {
+    const n = pts.length - 1;
+    const x = Math.max(0, Math.min(0.9999, t)) * n;
+    const i = Math.min(n - 1, Math.floor(x));
+    const f = x - i;
+    const pick = (k) => pts[Math.max(0, Math.min(n, k))];
+    const p0 = pick(i - 1);
+    const p1 = pick(i);
+    const p2 = pick(i + 1);
+    const p3 = pick(i + 2);
+    const mix = (a, b, c, d) => 0.5 * (
+      (2 * b) +
+      (-a + c) * f +
+      (2 * a - 5 * b + 4 * c - d) * f * f +
+      (-a + 3 * b - 3 * c + d) * f * f * f
+    );
+    return [mix(p0[0], p1[0], p2[0], p3[0]), mix(p0[1], p1[1], p2[1], p3[1])];
+  }
+
+  function crownSurface(u, th) {
+    const pr = catmull(CROWN_PROFILE, u);
+    let r = Math.max(0, pr[0]);
+    let y = pr[1];
+    const c = Math.cos(th);
+    const s = Math.sin(th);
+    const pinch = 0.18 * Math.pow(Math.max(c, 0), 1.25) * Math.pow(u, 0.65);
+    const rx = r * (1 - pinch);
+    const rz = r * 0.9;
+    const x = c * rx - RAKE * u * u;
+    const z = s * rz;
+    const top = smoothstep01((u - 0.42) / 0.58);
+    const dent = Math.exp(-(z * z) / 0.02) * 0.06 * top;
+    y -= dent;
+    y -= Math.pow(Math.max(c, 0), 1.2) * u * u * 0.05;
+    return [x, y, z];
+  }
+
+  function outerBrim(th) {
+    const c = Math.cos(th);
+    const s = Math.sin(th);
+    const lobe = c >= 0 ? 1.16 : 0.7;
+    const side = 0.6;
+    const denom = Math.sqrt((c * c) / (lobe * lobe) + (s * s) / (side * side));
+    return 1 / denom;
+  }
+
+  function brimTop(u, th) {
+    const foot = crownSurface(0, th);
+    const c = Math.cos(th);
+    const s = Math.sin(th);
+    const rad = outerBrim(th);
+    const tip = [c * rad, 0, s * rad * 0.97];
+    const uu = Math.pow(u, 0.98);
+    const x = foot[0] + (tip[0] - foot[0]) * uu;
+    const z = foot[2] + (tip[2] - foot[2]) * uu;
+    const front = Math.pow(Math.max(c, 0), 1.15);
+    const back = Math.pow(Math.max(-c, 0), 1.15);
+    const side = Math.pow(Math.abs(s), 1.15);
+    const amp = -0.22 * front + 0.1 * side + 0.05 * back;
+    const y = foot[1] + amp * uu * uu;
+    return [x, y, z];
+  }
+
+  function brimBot(u, th) {
+    const p = brimTop(u, th);
+    p[1] -= 0.02 + u * 0.016;
+    return p;
+  }
+
+  function brimRim(v, th) {
+    const top = brimTop(1, th);
+    const bot = brimBot(1, th);
+    return [
+      top[0] + (bot[0] - top[0]) * v,
+      top[1] + (bot[1] - top[1]) * v,
+      top[2] + (bot[2] - top[2]) * v
+    ];
+  }
+
+  function bandPoint(v, th) {
+    const p = crownSurface(0.07 + v * 0.1, th);
+    const bulge = Math.sin(v * Math.PI) * 0.016;
+    p[0] += Math.cos(th) * bulge;
+    p[2] += Math.sin(th) * bulge * 0.92;
+    return p;
+  }
+
+  const meshPos = [];
+  const meshNor = [];
+  const meshAo = [];
+  const meshBand = [];
+  const meshIdx = [];
+
+  function pushVertex(p, n, ao, band) {
+    meshPos.push(p[0], p[1], p[2]);
+    meshNor.push(n[0], n[1], n[2]);
+    meshAo.push(ao);
+    meshBand.push(band);
+  }
+
+  function addSurface(nu, nv, wrapU, sample, prefer, aoOf, band) {
+    const base = meshPos.length / 3;
+    const pts = new Array(nu * nv);
+    for (let j = 0; j < nv; j++) {
+      for (let i = 0; i < nu; i++) {
+        const u = wrapU ? i / nu : i / (nu - 1);
+        const v = j / (nv - 1);
+        pts[j * nu + i] = sample(v, u);
+      }
+    }
+    const at = (i, j) => {
+      if (wrapU) i = ((i % nu) + nu) % nu;
+      else i = Math.max(0, Math.min(nu - 1, i));
+      j = Math.max(0, Math.min(nv - 1, j));
+      return pts[j * nu + i];
+    };
+    for (let j = 0; j < nv; j++) {
+      for (let i = 0; i < nu; i++) {
+        const i0 = wrapU ? (i - 1 + nu) % nu : Math.max(i - 1, 0);
+        const i1 = wrapU ? (i + 1) % nu : Math.min(i + 1, nu - 1);
+        const j0 = Math.max(j - 1, 0);
+        const j1 = Math.min(j + 1, nv - 1);
+        const p = pts[j * nu + i];
+        let n = cross(sub(at(i1, j), at(i0, j)), sub(at(i, j1), at(i, j0)));
+        if (len(n) < 1e-8) n = [0, 1, 0];
+        else n = norm(n);
+        if (dot(n, prefer(p)) < 0) n = mul(n, -1);
+        const u = wrapU ? i / nu : i / (nu - 1);
+        const v = j / (nv - 1);
+        pushVertex(p, n, aoOf(u, v, p), band);
+      }
+    }
+    const vert = (i, j) => base + j * nu + (wrapU ? ((i % nu) + nu) % nu : i);
+    const uCount = wrapU ? nu : nu - 1;
+    for (let j = 0; j < nv - 1; j++) {
+      for (let i = 0; i < uCount; i++) {
+        const a = vert(i, j);
+        const b = vert(i + 1, j);
+        const c = vert(i, j + 1);
+        const d = vert(i + 1, j + 1);
+        const pa = [meshPos[a * 3], meshPos[a * 3 + 1], meshPos[a * 3 + 2]];
+        const pb = [meshPos[b * 3], meshPos[b * 3 + 1], meshPos[b * 3 + 2]];
+        const pc = [meshPos[c * 3], meshPos[c * 3 + 1], meshPos[c * 3 + 2]];
+        const na = [meshNor[a * 3], meshNor[a * 3 + 1], meshNor[a * 3 + 2]];
+        const fn = cross(sub(pb, pa), sub(pc, pa));
+        if (dot(fn, na) >= 0) meshIdx.push(a, b, c, b, d, c);
+        else meshIdx.push(a, c, b, b, c, d);
+      }
+    }
+  }
+
+  const preferOut = (p) => norm([p[0] + RAKE * 0.3, 0.15, p[2]]);
+  const preferUp = () => [0, 1, 0];
+  const preferDown = () => [0, -1, 0];
+  const preferRim = (p) => norm([p[0], 0, p[2]]);
+  const aoPlain = () => 1;
+  const aoUnder = () => 0.62;
+
+  addSurface(128, 48, true, (v, u) => crownSurface(Math.pow(v, 0.92), u * Math.PI * 2), preferOut, (u, v) => 0.78 + 0.22 * (1 - v * 0.35), 0);
+  addSurface(128, 18, true, (v, u) => brimTop(v, u * Math.PI * 2), preferUp, aoPlain, 0);
+  addSurface(128, 6, true, (v, u) => brimBot(v, u * Math.PI * 2), preferDown, aoUnder, 0);
+  addSurface(128, 3, true, (v, u) => brimRim(v, u * Math.PI * 2), preferRim, aoPlain, 0);
+  addSurface(96, 8, true, (v, u) => bandPoint(v, u * Math.PI * 2), preferOut, () => 0.8, 1);
+
+  /* Sit the brim on the floor and spin about the visual center. */
+  let minY = Infinity;
+  let sumX = 0;
+  let sumZ = 0;
+  const vcount = meshPos.length / 3;
+  for (let i = 0; i < vcount; i++) {
+    minY = Math.min(minY, meshPos[i * 3 + 1]);
+    sumX += meshPos[i * 3];
+    sumZ += meshPos[i * 3 + 2];
+  }
+  const ox = sumX / vcount;
+  const oz = sumZ / vcount;
+  for (let i = 0; i < vcount; i++) {
+    meshPos[i * 3] -= ox;
+    meshPos[i * 3 + 1] -= minY;
+    meshPos[i * 3 + 2] -= oz;
+  }
+
+  function shift(p) {
+    return [p[0] - ox, p[1] - minY, p[2] - oz];
+  }
+
+  const rng = mulberry32(0x5eed12);
+  const parts = [];
+  function pushPart(p, n, ao, band, kind, trail, seed) {
+    const d = norm([
+      n[0] * 0.9 + (rng() - 0.5) * 0.55,
+      0.45 + rng() * 0.7 + Math.abs(n[1]) * 0.15,
+      n[2] * 0.9 + (rng() - 0.5) * 0.55
+    ]);
+    parts.push(
+      p[0], p[1], p[2],
+      d[0], d[1], d[2],
+      n[0], n[1], n[2],
+      seed, kind, trail, ao, band
+    );
+  }
+
+  function sampleSurface(sample, prefer, aoOf, band, count, uBias) {
+    for (let k = 0; k < count; k++) {
+      const u = wrap01(uBias ? Math.pow(rng(), 0.65) : rng());
+      const v = rng();
+      const th = v * Math.PI * 2;
+      const e = 0.004;
+      const p = shift(sample(u, th));
+      const pu = shift(sample(Math.min(1, u + e), th));
+      const pv = shift(sample(u, th + e));
+      let n = cross(sub(pv, p), sub(pu, p));
+      if (len(n) < 1e-8) n = [0, 1, 0];
+      else n = norm(n);
+      const pref = prefer(p);
+      if (dot(n, pref) < 0) n = mul(n, -1);
+      pushPart(p, n, aoOf(u), band, 0, 0, rng());
+    }
+  }
+  function wrap01(t) { return Math.min(0.999, Math.max(0.001, t)); }
+
+  sampleSurface((u, th) => crownSurface(Math.pow(u, 0.85), th), preferOut, () => 1, 0, 2800, false);
+  sampleSurface((u, th) => brimTop(u, th), preferUp, () => 1, 0, 2300, true);
+  sampleSurface((u, th) => brimBot(0.15 + u * 0.85, th), preferDown, () => 0.7, 0, 500, false);
+  sampleSurface((u, th) => brimRim(u, th), preferRim, () => 1, 0, 420, false);
+  sampleSurface((u, th) => bandPoint(u, th), preferOut, () => 0.8, 1, 640, false);
+
+  const ORBITERS = 7;
+  const TRAIL = 14;
+  const headStart = parts.length / 14;
+  for (let i = 0; i < ORBITERS; i++) {
+    const src = Math.floor(rng() * headStart);
+    const base = src * 14;
+    const seed = 0.02 + (i + 0.5) / ORBITERS;
+    for (let t = 0; t < TRAIL; t++) {
+      parts.push(
+        parts[base], parts[base + 1], parts[base + 2],
+        parts[base + 3], parts[base + 4], parts[base + 5],
+        parts[base + 6], parts[base + 7], parts[base + 8],
+        seed, 1, t / (TRAIL - 1), parts[base + 12], parts[base + 13]
+      );
+    }
+  }
+
+  function compile(type, src) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+      const log = gl.getShaderInfoLog(sh);
+      gl.deleteShader(sh);
+      throw new Error(log);
+    }
+    return sh;
+  }
+  function program(vs, fs) {
+    const p = gl.createProgram();
+    gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+    gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    return p;
+  }
+
+  const bgProg = program(`#version 300 es
+    layout(location=0) in vec2 aClip;
+    out vec2 vUv;
+    void main() {
+      vUv = aClip * 0.5 + 0.5;
+      gl_Position = vec4(aClip, 0.999, 1.0);
+    }`, `#version 300 es
+    precision highp float;
+    in vec2 vUv;
+    uniform vec2 uRes;
+    uniform float uWarm;
+    out vec4 frag;
+    void main() {
+      vec2 p = (gl_FragCoord.xy / uRes) - 0.5;
+      p.x *= uRes.x / uRes.y;
+      float vign = smoothstep(1.22, 0.18, length(p * vec2(1.05, 1.2)));
+      vec3 col = mix(vec3(0.012, 0.008, 0.01), vec3(0.075, 0.018, 0.022), vign);
+      float spot = smoothstep(0.62, 0.0, length((p - vec2(0.0, 0.06)) * vec2(1.05, 1.2)));
+      col += vec3(0.20, 0.035, 0.04) * spot * (0.55 + uWarm * 0.45);
+      float g = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+      col += (g - 0.5) * 0.018;
+      frag = vec4(col, 1.0);
+    }`);
+
+  const shadowProg = program(`#version 300 es
+    layout(location=0) in vec2 aXZ;
+    uniform mat4 uVP;
+    uniform float uLift;
+    out vec2 vXZ;
+    void main() {
+      vXZ = aXZ;
+      gl_Position = uVP * vec4(aXZ.x, uLift, aXZ.y, 1.0);
+    }`, `#version 300 es
+    precision highp float;
+    in vec2 vXZ;
+    uniform float uScale;
+    uniform float uScatter;
+    uniform float uStrength;
+    out vec4 frag;
+    void main() {
+      vec2 q = vXZ / uScale;
+      vec2 stretch = mix(vec2(1.22, 0.96), vec2(2.15, 1.7), uScatter);
+      float r = length(q / stretch);
+      float soft = exp(-r * r * 2.15);
+      float tight = exp(-pow(length(q / mix(vec2(0.72, 0.58), vec2(1.4, 1.1), uScatter)), 2.0) * 3.2);
+      float a = (soft * 0.34 + tight * 0.28) * uStrength;
+      frag = vec4(vec3(0.0) * a, a);
+    }`);
+
+  const meshProg = program(`#version 300 es
+    layout(location=0) in vec3 aPos;
+    layout(location=1) in vec3 aNor;
+    layout(location=2) in float aAo;
+    layout(location=3) in float aBand;
+    uniform mat4 uVP;
+    uniform mat4 uModel;
+    uniform mat3 uNormal;
+    uniform float uReflect;
+    out vec3 vN;
+    out vec3 vW;
+    out float vAo;
+    out float vBand;
+    void main() {
+      vec4 w = uModel * vec4(aPos, 1.0);
+      if (uReflect > 0.5) w.y = -w.y * 0.38 + 0.01;
+      vW = w.xyz;
+      vec3 n = normalize(uNormal * aNor);
+      if (uReflect > 0.5) n.y = -n.y;
+      vN = n;
+      vAo = aAo;
+      vBand = aBand;
+      gl_Position = uVP * w;
+    }`, `#version 300 es
+    precision highp float;
+    in vec3 vN;
+    in vec3 vW;
+    in float vAo;
+    in float vBand;
+    uniform vec3 uCam;
+    uniform vec3 uFelt;
+    uniform vec3 uBand;
+    uniform float uAlpha;
+    uniform float uReflect;
+    out vec4 frag;
+    void main() {
+      vec3 n = normalize(vN);
+      vec3 V = normalize(uCam - vW);
+      if (dot(n, V) < 0.0) n = -n;
+      vec3 L = normalize(vec3(0.78, 0.74, 0.32));
+      vec3 L2 = normalize(vec3(-0.62, 0.36, -0.55));
+      float wrap = clamp((dot(n, L) + 0.55) / 1.55, 0.0, 1.0);
+      float rimL = clamp(dot(n, L2), 0.0, 1.0);
+      float facing = clamp(dot(n, V), 0.0, 1.0);
+      vec3 albedo = mix(uFelt, uBand, clamp(vBand, 0.0, 1.0));
+      vec3 col = albedo * (0.15 + wrap * 1.05);
+      col += albedo * rimL * 0.32;
+      col += albedo * facing * 0.1;
+      float rim = pow(1.0 - facing, 2.35);
+      col += vec3(1.0, 0.5, 0.46) * rim * 0.2;
+      vec3 H = normalize(L + V);
+      float spec = pow(clamp(dot(n, H), 0.0, 1.0), 36.0);
+      col += vec3(1.0, 0.86, 0.8) * spec * mix(0.045, 0.1, clamp(vBand, 0.0, 1.0));
+      col *= mix(0.78, 1.0, clamp(n.y * 0.45 + 0.62, 0.0, 1.0));
+      col *= mix(0.86, 1.0, clamp(vAo, 0.0, 1.0));
+      float mottle = fract(sin(dot(vW.xz, vec2(19.7, 73.1))) * 41.13);
+      col *= 0.95 + 0.05 * mottle;
+      float alpha = uAlpha;
+      if (uReflect > 0.5) {
+        float fade = smoothstep(0.85, -0.05, vW.y);
+        float dist = smoothstep(1.8, 0.15, length(vW.xz));
+        alpha *= 0.07 * fade * dist;
+        col *= 0.55;
+      }
+      if (alpha < 0.01) discard;
+      frag = vec4(col * alpha, alpha);
+    }`);
+
+  const partProg = program(`#version 300 es
+    layout(location=0) in vec3 aHome;
+    layout(location=1) in vec3 aDir;
+    layout(location=2) in vec3 aNor;
+    layout(location=3) in float aSeed;
+    layout(location=4) in float aKind;
+    layout(location=5) in float aTrail;
+    layout(location=6) in float aAo;
+    layout(location=7) in float aBand;
+    uniform mat4 uVP;
+    uniform mat4 uModel;
+    uniform mat3 uNormal;
+    uniform float uTime;
+    uniform float uBurst;
+    uniform float uSwirl;
+    uniform float uReform;
+    uniform float uCover;
+    uniform float uPlaying;
+    uniform float uOrbitAmt;
+    uniform float uScale;
+    uniform vec2 uViewport;
+    uniform vec3 uCam;
+    uniform vec3 uFelt;
+    uniform vec3 uBand;
+    out vec3 vColor;
+    out float vAlpha;
+    out float vHeat;
+    out float vCore;
+
+    vec3 orbitAt(float t, float seed) {
+      float ang = t * (0.42 + fract(seed * 4.7) * 0.38) + seed * 6.2831853;
+      float rad = uScale * (1.35 + fract(seed * 8.2) * 0.38);
+      float incl = (fract(seed * 5.9) - 0.5) * 0.8;
+      vec3 p = vec3(cos(ang) * rad, sin(ang) * rad * 0.28, sin(ang) * rad * 0.86);
+      float c = cos(incl), s = sin(incl);
+      float y = p.y * c - p.z * s;
+      float z = p.y * s + p.z * c;
+      p.y = max(y + uScale * 0.52, uScale * 0.2);
+      p.z = z;
+      return p;
+    }
+
+    void main() {
+      vec3 home = (uModel * vec4(aHome, 1.0)).xyz;
+      vec3 dir = normalize((uModel * vec4(aDir, 0.0)).xyz);
+      vec3 nrm = normalize(uNormal * aNor);
+      float seed = aSeed;
+
+      float b0 = seed * 0.42;
+      float b = smoothstep(b0, b0 + 0.58, uBurst);
+      vec3 outP = home + dir * uScale * (0.22 + 0.55 * seed) * b;
+      outP.y += b * uScale * (0.03 + 0.14 * seed);
+
+      float ang = uSwirl * (1.15 + seed * 2.15) * (fract(seed * 5.1) > 0.5 ? 1.0 : -1.0);
+      ang += uTime * 0.22 * uSwirl;
+      float cs = cos(ang), sn = sin(ang);
+      vec3 sw = outP;
+      vec2 xz = sw.xz;
+      sw.x = cs * xz.x - sn * xz.y;
+      sw.z = sn * xz.x + cs * xz.y;
+      float shell = uScale * (1.05 + seed * 0.55);
+      float r = length(sw.xz);
+      float desired = mix(max(r, 0.0001), shell, uSwirl * 0.8);
+      sw.xz *= desired / max(r, 0.0001);
+      sw.y = mix(outP.y, uScale * (0.28 + seed * 0.42) + sin(seed * 18.0 + uTime * 0.65) * uScale * 0.16, uSwirl);
+      vec3 scattered = mix(outP, sw, smoothstep(0.0, 1.0, uSwirl));
+
+      float r0 = (1.0 - seed) * 0.32;
+      float rf = smoothstep(r0, min(r0 + 0.68, 1.0), uReform);
+      vec3 back = mix(scattered, home, rf);
+      vec3 tang = vec3(-scattered.z, 0.0, scattered.x);
+      float tl = length(tang);
+      if (tl > 1e-4) tang /= tl;
+      back += tang * sin(rf * 3.14159265) * uScale * (0.16 + 0.22 * seed) * (1.0 - rf);
+      back.y += sin(rf * 3.14159265) * uScale * 0.1 * (seed - 0.25);
+
+      float turb = b * (1.0 - rf);
+      back.x += sin(uTime * 0.7 + seed * 30.0) * uScale * 0.055 * turb;
+      back.z += cos(uTime * 0.55 + seed * 21.0) * uScale * 0.055 * turb;
+      back.y += sin(uTime * 0.5 + seed * 14.0) * uScale * 0.04 * turb;
+
+      vec3 pos = back;
+      float alpha = uCover;
+      float heat = smoothstep(0.0, 0.4, b) * (1.0 - rf);
+      heat = max(heat, uSwirl * (1.0 - rf) * 0.85);
+      float sizeK = mix(0.85, 1.25, heat);
+
+      if (aKind > 0.5) {
+        vec3 orb = orbitAt(uTime, seed);
+        vec3 orbLag = orbitAt(uTime - aTrail * 0.26, seed);
+        if (uOrbitAmt > 0.5) {
+          pos = (aTrail > 0.001) ? orbLag : orb;
+          alpha = (aTrail > 0.001) ? pow(1.0 - aTrail, 1.2) * 0.72 : 1.0;
+          heat = 1.0;
+          sizeK = mix(1.15, 0.45, aTrail);
+        } else if (uPlaying > 0.5) {
+          float peel = smoothstep(0.0, 0.88, uReform);
+          vec3 head = mix(scattered, orb, peel);
+          pos = (aTrail > 0.001) ? mix(head, orbLag, peel) : head;
+          float show = smoothstep(0.0, 0.1, uBurst);
+          if (aTrail > 0.001) {
+            alpha = show * peel * pow(1.0 - aTrail, 1.2) * 0.72;
+            sizeK = mix(1.15, 0.45, aTrail);
+          } else {
+            alpha = show;
+            sizeK = mix(0.9, 1.35, heat);
+          }
+          heat = mix(heat, 1.0, peel);
+        } else {
+          alpha = 0.0;
+          pos = home;
+        }
+      } else {
+        alpha *= smoothstep(0.0, 0.08, max(uCover, uBurst));
+        alpha *= 1.0 - smoothstep(0.9, 1.0, rf);
+      }
+
+      vec3 V = normalize(uCam - home);
+      vec3 L = normalize(vec3(0.78, 0.74, 0.32));
+      float wrap = clamp((dot(nrm, L) + 0.48) / 1.48, 0.0, 1.0);
+      vec3 albedo = mix(uFelt, uBand, clamp(aBand, 0.0, 1.0));
+      vec3 felt = albedo * (0.18 + wrap * 1.0) * mix(0.86, 1.0, aAo);
+      float spark = pow(fract(seed * 7.13), 1.4);
+      vec3 ember = mix(vec3(1.0, 0.32, 0.1), vec3(1.0, 0.84, 0.48), spark);
+      ember *= 0.92 + 0.08 * sin(uTime * 2.2 + seed * 34.0);
+      vColor = mix(felt, ember, clamp(heat, 0.0, 1.0));
+      vHeat = clamp(heat, 0.0, 1.0);
+      vAlpha = alpha;
+      vCore = (aKind > 0.5 && aTrail < 0.001) ? 1.0 : 0.72;
+
+      vec4 clip = uVP * vec4(pos, 1.0);
+      gl_Position = clip;
+      float px = sizeK * 4.6 * (uViewport.y / 900.0) * (5.4 / max(clip.w, 0.25));
+      gl_PointSize = clamp(px, 1.4, 14.0);
+      if (alpha < 0.004) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    }`, `#version 300 es
+    precision highp float;
+    in vec3 vColor;
+    in float vAlpha;
+    in float vHeat;
+    in float vCore;
+    out vec4 frag;
+    void main() {
+      if (vAlpha < 0.004) discard;
+      vec2 p = gl_PointCoord * 2.0 - 1.0;
+      float d = length(p);
+      if (d > 1.0) discard;
+      float core = smoothstep(0.55, 0.0, d);
+      float halo = smoothstep(1.0, 0.15, d);
+      float a = core * vAlpha * mix(0.8, 1.0, vCore);
+      float glow = halo * vAlpha * (0.1 + 0.34 * vHeat) * vCore;
+      frag = vec4(vColor * (a + glow), a * 0.92);
+    }`);
+
+  function loc(prog, name) { return gl.getUniformLocation(prog, name); }
+
+  const bgLoc = { res: loc(bgProg, "uRes"), warm: loc(bgProg, "uWarm") };
+  const shLoc = {
+    vp: loc(shadowProg, "uVP"), lift: loc(shadowProg, "uLift"), scale: loc(shadowProg, "uScale"),
+    scatter: loc(shadowProg, "uScatter"), strength: loc(shadowProg, "uStrength")
+  };
+  const meshLoc = {
+    vp: loc(meshProg, "uVP"), model: loc(meshProg, "uModel"), normal: loc(meshProg, "uNormal"),
+    reflect: loc(meshProg, "uReflect"), cam: loc(meshProg, "uCam"), felt: loc(meshProg, "uFelt"),
+    band: loc(meshProg, "uBand"), alpha: loc(meshProg, "uAlpha")
+  };
+  const ptLoc = {
+    vp: loc(partProg, "uVP"), model: loc(partProg, "uModel"), normal: loc(partProg, "uNormal"),
+    time: loc(partProg, "uTime"), burst: loc(partProg, "uBurst"), swirl: loc(partProg, "uSwirl"),
+    reform: loc(partProg, "uReform"), cover: loc(partProg, "uCover"), playing: loc(partProg, "uPlaying"),
+    orbit: loc(partProg, "uOrbitAmt"), scale: loc(partProg, "uScale"), view: loc(partProg, "uViewport"),
+    cam: loc(partProg, "uCam"), felt: loc(partProg, "uFelt"), band: loc(partProg, "uBand")
+  };
+
+  const bgVao = gl.createVertexArray();
+  gl.bindVertexArray(bgVao);
+  const bgBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, bgBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+  const shadowVao = gl.createVertexArray();
+  gl.bindVertexArray(shadowVao);
+  const shBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, shBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-2.4, -1.8, 2.4, -1.8, -2.4, 1.8, 2.4, 1.8]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+  function interleaveMesh() {
+    const n = meshPos.length / 3;
+    const data = new Float32Array(n * 8);
+    for (let i = 0; i < n; i++) {
+      data.set(meshPos.slice(i * 3, i * 3 + 3), i * 8);
+      data.set(meshNor.slice(i * 3, i * 3 + 3), i * 8 + 3);
+      data[i * 8 + 6] = meshAo[i];
+      data[i * 8 + 7] = meshBand[i];
+    }
+    return data;
+  }
+
+  const meshVao = gl.createVertexArray();
+  gl.bindVertexArray(meshVao);
+  const meshBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, interleaveMesh(), gl.STATIC_DRAW);
+  const mStride = 8 * 4;
+  for (let i = 0; i < 4; i++) gl.enableVertexAttribArray(i);
+  gl.vertexAttribPointer(0, 3, gl.FLOAT, false, mStride, 0);
+  gl.vertexAttribPointer(1, 3, gl.FLOAT, false, mStride, 12);
+  gl.vertexAttribPointer(2, 1, gl.FLOAT, false, mStride, 24);
+  gl.vertexAttribPointer(3, 1, gl.FLOAT, false, mStride, 28);
+  const meshIndex = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, meshIndex);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(meshIdx), gl.STATIC_DRAW);
+  const meshCount = meshIdx.length;
+
+  const partVao = gl.createVertexArray();
+  gl.bindVertexArray(partVao);
+  const partBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, partBuf);
+  const partData = new Float32Array(parts);
+  gl.bufferData(gl.ARRAY_BUFFER, partData, gl.STATIC_DRAW);
+  const pStride = 14 * 4;
+  for (let i = 0; i < 8; i++) gl.enableVertexAttribArray(i);
+  gl.vertexAttribPointer(0, 3, gl.FLOAT, false, pStride, 0);
+  gl.vertexAttribPointer(1, 3, gl.FLOAT, false, pStride, 12);
+  gl.vertexAttribPointer(2, 3, gl.FLOAT, false, pStride, 24);
+  gl.vertexAttribPointer(3, 1, gl.FLOAT, false, pStride, 36);
+  gl.vertexAttribPointer(4, 1, gl.FLOAT, false, pStride, 40);
+  gl.vertexAttribPointer(5, 1, gl.FLOAT, false, pStride, 44);
+  gl.vertexAttribPointer(6, 1, gl.FLOAT, false, pStride, 48);
+  gl.vertexAttribPointer(7, 1, gl.FLOAT, false, pStride, 52);
+  const partCount = partData.length / 14;
+  gl.bindVertexArray(null);
+
+  function perspective(fovy, aspect, near, far) {
+    const f = 1 / Math.tan(fovy / 2);
+    const nf = 1 / (near - far);
+    return new Float32Array([
+      f / aspect, 0, 0, 0,
+      0, f, 0, 0,
+      0, 0, (far + near) * nf, -1,
+      0, 0, (2 * far * near) * nf, 0
+    ]);
+  }
+  function lookAt(eye, target, up) {
+    const z = norm(sub(eye, target));
+    const x = norm(cross(up, z));
+    const y = cross(z, x);
+    return new Float32Array([
+      x[0], y[0], z[0], 0,
+      x[1], y[1], z[1], 0,
+      x[2], y[2], z[2], 0,
+      -dot(x, eye), -dot(y, eye), -dot(z, eye), 1
+    ]);
+  }
+  function multiply(a, b) {
+    const o = new Float32Array(16);
+    for (let c = 0; c < 4; c++) {
+      for (let r = 0; r < 4; r++) {
+        o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+      }
+    }
+    return o;
+  }
+  function modelOf(angle, scale) {
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    const m = new Float32Array([
+      c * scale, 0, -s * scale, 0,
+      0, scale, 0, 0,
+      s * scale, 0, c * scale, 0,
+      0, 0.02, 0, 1
+    ]);
+    return m;
+  }
+  function normalOf(angle) {
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    return new Float32Array([
+      c, 0, -s,
+      0, 1, 0,
+      s, 0, c
+    ]);
+  }
+
+  const SEG = [0.62, 1.85, 1.4, 2.3];
+  const CYCLE = SEG[0] + SEG[1] + SEG[2] + SEG[3];
+
+  let angle = 0.95;
+  let omega = reduce ? 0 : 0.3;
+  let time = 0;
+  let mode = "idle";
+  let playT = 0;
+  let pointerHot = false;
+  let cooldown = 0;
+  let orbitAmt = 0;
+  let panX = 0;
+  let panY = 0;
+  let aimX = 0;
+  let aimY = 0;
+
+  function weights(t) {
+    const w = { burst: 0, swirl: 0, reform: 0, mesh: 1, cover: 0, scatter: 0, slowSpin: 0, playing: 0 };
+    if (t <= 0) return w;
+    w.playing = 1;
+    let x = t;
+    if (x < SEG[0]) {
+      const k = x / SEG[0];
+      w.slowSpin = k;
+      w.cover = smooth(0.62, 1, k);
+      return w;
+    }
+    x -= SEG[0];
+    w.slowSpin = 1;
+    w.cover = 1;
+    if (x < SEG[1]) {
+      w.burst = x / SEG[1];
+      w.mesh = w.burst < 0.14 ? 1 : 0;
+      w.scatter = w.burst;
+      return w;
+    }
+    x -= SEG[1];
+    w.burst = 1;
+    w.mesh = 0;
+    w.scatter = 1;
+    if (x < SEG[2]) {
+      w.swirl = x / SEG[2];
+      return w;
+    }
+    x -= SEG[2];
+    w.swirl = 1;
+    w.reform = Math.min(1, x / SEG[3]);
+    w.scatter = 1 - w.reform;
+    if (w.reform > 0.72) w.mesh = 1;
+    return w;
+  }
+  function smooth(a, b, x) {
+    const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+    return t * t * (3 - 2 * t);
+  }
+
+  function startCycle() {
+    if (reduce || mode === "play") return;
+    mode = "play";
+    playT = 0;
+  }
+
+  const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+  window.addEventListener("pointermove", (e) => {
+    aimX = e.clientX / Math.max(1, window.innerWidth) - 0.5;
+    aimY = e.clientY / Math.max(1, window.innerHeight) - 0.5;
+  });
+  if (finePointer) {
+    window.addEventListener("pointerenter", () => { pointerHot = true; startCycle(); });
+    document.documentElement.addEventListener("pointerleave", () => { pointerHot = false; });
+    window.addEventListener("pointerleave", () => { pointerHot = false; });
+  }
+  window.addEventListener("pointerdown", (e) => {
+    pointerHot = true;
+    if (!finePointer || e.pointerType === "touch") startCycle();
+  });
+  window.addEventListener("pointerup", () => {
+    if (!finePointer) pointerHot = false;
+  });
+
+  function applyReduce() {
+    reduce = motionQuery.matches;
+    if (reduce) {
+      omega = 0;
+      mode = "idle";
+      playT = 0;
+      orbitAmt = 0;
+      hint.textContent = "at rest";
+      sr.textContent = "A red fedora, held still.";
+      document.body.style.cursor = "default";
+    } else {
+      if (omega === 0) omega = 0.3;
+      hint.textContent = "hover or tap";
+      sr.textContent = "A red fedora on a dark field. It spins slowly. Hover or tap and it scatters into embers, then gathers back into the hat.";
+      document.body.style.cursor = "pointer";
+    }
+  }
+  applyReduce();
+  if (motionQuery.addEventListener) motionQuery.addEventListener("change", applyReduce);
+  else if (motionQuery.addListener) motionQuery.addListener(applyReduce);
+
+  let viewW = 1;
+  let viewH = 1;
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    viewW = Math.max(1, Math.floor(canvas.clientWidth * dpr));
+    viewH = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+    if (canvas.width !== viewW || canvas.height !== viewH) {
+      canvas.width = viewW;
+      canvas.height = viewH;
+    }
+    gl.viewport(0, 0, viewW, viewH);
+  }
+  window.addEventListener("resize", resize);
+
+  gl.enable(gl.DEPTH_TEST);
+  gl.enable(gl.CULL_FACE);
+  gl.cullFace(gl.BACK);
+  gl.clearColor(0.027, 0.02, 0.024, 1);
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.033, (now - last) / 1000);
+    last = now;
+    resize();
+
+    if (!reduce) {
+      time += dt;
+      const spinningSlow = mode === "play" && playT < SEG[0] + SEG[1] + SEG[2] + SEG[3] * 0.62;
+      const target = spinningSlow ? 0.045 : 0.3;
+      omega += (target - omega) * (1 - Math.exp(-dt * 1.7));
+      angle += omega * dt;
+      if (mode === "play") {
+        playT += dt;
+        if (playT >= CYCLE) {
+          mode = "idle";
+          playT = 0;
+          orbitAmt = 1;
+          cooldown = pointerHot ? 1.2 : 0;
+        }
+      } else if (cooldown > 0) {
+        cooldown -= dt;
+        if (cooldown <= 0 && pointerHot) startCycle();
+      }
+    }
+
+    panX += (aimX - panX) * (reduce ? 1 : 0.06);
+    panY += (aimY - panY) * (reduce ? 1 : 0.06);
+
+    const aspect = viewW / viewH;
+    const short = Math.min(viewW, viewH);
+    let dist = 5.55;
+    if (aspect < 0.9) dist = 6.35;
+    if (aspect < 0.7) dist = 6.9;
+    if (aspect < 0.5) dist = 7.35;
+    if (aspect > 1.9) dist = 6.2;
+    if (short < 520) dist += 0.7;
+    const fov = (aspect < 0.75 ? 25 : 23) * Math.PI / 180;
+    const parallax = reduce ? 0 : 1;
+    const eye = [0.22 + panX * 0.38 * parallax, 0.86 - panY * 0.22 * parallax, dist];
+    const target = [0, 0.34, 0];
+    const proj = perspective(fov, aspect, 0.08, 40);
+    const view = lookAt(eye, target, [0, 1, 0]);
+    const vp = multiply(proj, view);
+    const scale = aspect < 0.72 ? 0.88 : 0.92;
+    const model = modelOf(angle, scale);
+    const normal = normalOf(angle);
+    const w = weights(mode === "play" ? playT : 0);
+
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.CULL_FACE);
+    gl.useProgram(bgProg);
+    gl.uniform2f(bgLoc.res, viewW, viewH);
+    gl.uniform1f(bgLoc.warm, reduce ? 0 : w.scatter * 0.18);
+    gl.bindVertexArray(bgVao);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.useProgram(shadowProg);
+    gl.uniformMatrix4fv(shLoc.vp, false, vp);
+    gl.uniform1f(shLoc.lift, 0.008);
+    gl.uniform1f(shLoc.scale, scale);
+    gl.uniform1f(shLoc.scatter, w.scatter);
+    const formed = w.mesh > 0.5 ? 1 : 0.35;
+    gl.uniform1f(shLoc.strength, 0.72 * (0.45 + 0.55 * (1 - w.scatter * 0.65)) * (w.playing ? 1 : 1) * (0.55 + 0.45 * formed));
+    gl.bindVertexArray(shadowVao);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthMask(true);
+    if (w.mesh > 0.5 && orbitAmt >= 0) {
+      gl.enable(gl.CULL_FACE);
+      gl.useProgram(meshProg);
+      gl.uniformMatrix4fv(meshLoc.vp, false, vp);
+      gl.uniformMatrix4fv(meshLoc.model, false, model);
+      gl.uniformMatrix3fv(meshLoc.normal, false, normal);
+      gl.uniform3fv(meshLoc.cam, eye);
+      gl.uniform3fv(meshLoc.felt, FELT);
+      gl.uniform3fv(meshLoc.band, BAND);
+      gl.uniform1f(meshLoc.reflect, 1);
+      gl.uniform1f(meshLoc.alpha, 1);
+      gl.depthMask(false);
+      gl.disable(gl.CULL_FACE);
+      gl.bindVertexArray(meshVao);
+      gl.drawElements(gl.TRIANGLES, meshCount, gl.UNSIGNED_INT, 0);
+
+      gl.uniform1f(meshLoc.reflect, 0);
+      gl.depthMask(true);
+      gl.enable(gl.CULL_FACE);
+      gl.drawElements(gl.TRIANGLES, meshCount, gl.UNSIGNED_INT, 0);
+    }
+
+    const showParts = w.playing > 0.5 || orbitAmt > 0.5;
+    if (showParts) {
+      gl.disable(gl.CULL_FACE);
+      gl.depthMask(false);
+      gl.useProgram(partProg);
+      gl.uniformMatrix4fv(ptLoc.vp, false, vp);
+      gl.uniformMatrix4fv(ptLoc.model, false, model);
+      gl.uniformMatrix3fv(ptLoc.normal, false, normal);
+      gl.uniform1f(ptLoc.time, time);
+      gl.uniform1f(ptLoc.burst, w.burst);
+      gl.uniform1f(ptLoc.swirl, w.swirl);
+      gl.uniform1f(ptLoc.reform, w.reform);
+      gl.uniform1f(ptLoc.cover, w.playing ? w.cover : 0);
+      gl.uniform1f(ptLoc.playing, w.playing);
+      gl.uniform1f(ptLoc.orbit, orbitAmt);
+      gl.uniform1f(ptLoc.scale, scale);
+      gl.uniform2f(ptLoc.view, viewW, viewH);
+      gl.uniform3fv(ptLoc.cam, eye);
+      gl.uniform3fv(ptLoc.felt, FELT);
+      gl.uniform3fv(ptLoc.band, BAND);
+      gl.bindVertexArray(partVao);
+      gl.drawArrays(gl.POINTS, 0, partCount);
+      gl.depthMask(true);
+    }
+
+    gl.enable(gl.DEPTH_TEST);
+    gl.enable(gl.CULL_FACE);
+    requestAnimationFrame(frame);
+  }
+
+  try {
+    requestAnimationFrame(frame);
+  } catch (err) {
+    hint.textContent = "Unable to draw";
+    console.error(err);
+  }
+})();
+</script>
+</body>
+</html>
