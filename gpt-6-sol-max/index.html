@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#090b10">
+  <title>Form in Motion — A Fedora Study</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html { min-height: 100%; background: #090b10; }
+    body {
+      min-width: 280px;
+      min-height: 100vh;
+      min-height: 100svh;
+      margin: 0;
+      color: #f1e9e9;
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .hero {
+      position: relative;
+      isolation: isolate;
+      display: flex;
+      min-height: 100vh;
+      min-height: 100svh;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      padding: clamp(28px, 5vh, 54px) 20px;
+      background:
+        radial-gradient(ellipse 50% 38% at 50% 45%, rgba(104, 24, 32, .14), transparent 75%),
+        radial-gradient(ellipse 65% 50% at 50% 110%, rgba(32, 36, 48, .28), transparent 70%),
+        #090b10;
+    }
+    .hero::before {
+      position: absolute;
+      z-index: -1;
+      inset: 0;
+      content: "";
+      pointer-events: none;
+      background: linear-gradient(135deg, rgba(255,255,255,.025), transparent 29%, transparent 72%, rgba(255,255,255,.012));
+    }
+    .kicker {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      margin: 0 0 4px;
+      color: #aa9b9e;
+      font-size: 10px;
+      font-weight: 650;
+      letter-spacing: .27em;
+      text-transform: uppercase;
+      user-select: none;
+    }
+    .kicker::before {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #e2464c;
+      box-shadow: 0 0 12px rgba(226, 70, 76, .6);
+      content: "";
+    }
+    .scene {
+      display: block;
+      width: min(1200px, 100%);
+      height: clamp(310px, 45vw, 540px);
+      min-height: 0;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      appearance: none;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    .scene:focus-visible {
+      border-radius: 18px;
+      outline: 1px solid rgba(231, 89, 94, .7);
+      outline-offset: -10px;
+    }
+    canvas { display: block; width: 100%; height: 100%; }
+    .caption {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 11px;
+      margin-top: -8px;
+      text-align: center;
+    }
+    .caption::before {
+      width: 28px;
+      height: 1px;
+      margin-bottom: 8px;
+      background: linear-gradient(90deg, transparent, rgba(232, 105, 109, .8), transparent);
+      content: "";
+    }
+    .caption p {
+      margin: 0;
+      color: #e4d9da;
+      font-size: clamp(16px, 2vw, 19px);
+      font-weight: 400;
+      letter-spacing: -.025em;
+    }
+    .caption small {
+      color: #817a81;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .2em;
+      line-height: 1.5;
+      text-transform: uppercase;
+    }
+    @media (max-width: 600px) {
+      .hero { padding-inline: 12px; }
+      .scene { height: max(310px, 66vw); }
+      .caption { margin-top: -4px; }
+    }
+    @media (max-height: 650px) {
+      .hero { padding-block: 16px; }
+      .scene { height: min(58vh, 400px); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .scene { cursor: default; }
+    }
+  </style>
+</head>
+<body>
+  <main class="hero">
+    <div class="kicker" aria-hidden="true">Form in motion</div>
+    <button class="scene" type="button" aria-label="Animate a red fedora as it scatters into glowing particles and reforms" aria-describedby="hint">
+      <canvas aria-hidden="true"></canvas>
+    </button>
+    <div class="caption">
+      <p>Some things always find their way back.</p>
+      <small id="hint">Hover or tap to see it unfold</small>
+    </div>
+  </main>
+
+  <script>
+    (() => {
+      const button = document.querySelector('.scene');
+      const canvas = button.querySelector('canvas');
+      const hint = document.querySelector('#hint');
+      const ctx = canvas.getContext('2d', { alpha: true });
+      const media = matchMedia('(prefers-reduced-motion: reduce)');
+      const TAU = Math.PI * 2;
+      const ELEVATION = .32;
+      const ROLL = -.045;
+      const tiltCos = Math.cos(ELEVATION);
+      const tiltSin = Math.sin(ELEVATION);
+      const rollCos = Math.cos(ROLL);
+      const rollSin = Math.sin(ROLL);
+      const surfaces = [];
+      const particles = [];
+      const orbiters = [];
+      const material = {
+        crown: [197, 37, 46],
+        top: [207, 42, 50],
+        brim: [187, 29, 40],
+        underside: [104, 20, 30],
+        edge: [151, 25, 37],
+        band: [32, 25, 30],
+        bandEdge: [83, 39, 44]
+      };
+      const shadeCache = new Map();
+      let seed = 21631;
+      let width = 0, height = 0, scale = 1, centerX = 0, centerY = 0;
+      let yaw = -.38, yawCos = Math.cos(yaw), yawSin = Math.sin(yaw);
+      let speed = .38, previous = 0, frameId = 0;
+      let effectStart = -1, orbitStart = 0, orbiting = false;
+
+      function random() {
+        seed = (1664525 * seed + 1013904223) >>> 0;
+        return seed / 4294967296;
+      }
+      function smooth(a, b, x) {
+        const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+        return t * t * (3 - 2 * t);
+      }
+      function point(x, y, z) { return { x, y, z }; }
+      function normal(x, y, z) {
+        const length = Math.hypot(x, y, z) || 1;
+        return point(x / length, y / length, z / length);
+      }
+      function triangleArea(a, b, c) {
+        const ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z;
+        const vx = c.x - a.x, vy = c.y - a.y, vz = c.z - a.z;
+        return Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) * .5;
+      }
+      function addQuad(a, b, c, d, n, type) {
+        const area = triangleArea(a, b, c) + triangleArea(a, c, d);
+        if (area > .00001) surfaces.push({ points: [a, b, c, d], normal: n, type, area });
+      }
+
+      function topPoint(radius, angle) {
+        const x = .95 * radius * Math.cos(angle);
+        const z = .68 * radius * Math.sin(angle);
+        const crease = .265 * Math.exp(-Math.pow(x / .23, 2) - Math.pow((z + .015) / .51, 2));
+        const pinchL = .115 * Math.exp(-Math.pow((x + .57) / .18, 2) - Math.pow((z - .26) / .23, 2));
+        const pinchR = .115 * Math.exp(-Math.pow((x - .57) / .18, 2) - Math.pow((z - .26) / .23, 2));
+        return point(x, 1.45 - crease - pinchL - pinchR, z);
+      }
+      function crownPoint(level, angle, offset = 0) {
+        const xRadius = 1.13 - .18 * level + offset;
+        const zRadius = .82 - .14 * level + offset;
+        const upper = topPoint(1, angle).y;
+        return point(xRadius * Math.cos(angle), .145 + (upper - .145) * level, zRadius * Math.sin(angle));
+      }
+      function brimPoint(radius, angle, underside = false) {
+        const x = (1.055 + 1.20 * radius) * Math.cos(angle);
+        const z = (.75 + .61 * radius) * Math.sin(angle);
+        const outerY = .02 + .15 * Math.cos(angle) ** 2
+          - .155 * Math.max(0, Math.sin(angle))
+          + .045 * Math.max(0, -Math.sin(angle));
+        const slope = smooth(0, 1, radius);
+        const y = .105 + (outerY - .105) * slope - (underside ? .075 : 0);
+        return point(x, y, z);
+      }
+
+      function buildHat() {
+        const around = 64;
+        for (let i = 0; i < around; i++) {
+          const a = TAU * i / around, b = TAU * (i + 1) / around;
+          const middle = (a + b) * .5;
+          for (let j = 0; j < 9; j++) {
+            const r0 = j / 9, r1 = (j + 1) / 9;
+            addQuad(brimPoint(r0, a), brimPoint(r1, a), brimPoint(r1, b), brimPoint(r0, b),
+              normal(-.07 * Math.cos(middle), 1, .12 * Math.sin(middle)), 'brim');
+            addQuad(brimPoint(r0, a, true), brimPoint(r0, b, true), brimPoint(r1, b, true), brimPoint(r1, a, true),
+              normal(0, -1, 0), 'underside');
+          }
+          addQuad(brimPoint(1, a), brimPoint(1, b), brimPoint(1, b, true), brimPoint(1, a, true),
+            normal(Math.cos(middle), 0, Math.sin(middle)), 'edge');
+          for (let j = 0; j < 12; j++) {
+            const v0 = .24 + .76 * j / 12, v1 = .24 + .76 * (j + 1) / 12;
+            addQuad(crownPoint(v0, a), crownPoint(v0, b), crownPoint(v1, b), crownPoint(v1, a),
+              normal(Math.cos(middle), .13, Math.sin(middle)), 'crown');
+          }
+          for (let j = 0; j < 3; j++) {
+            const v0 = -.025 + j * (.253 / 3), v1 = v0 + .253 / 3;
+            addQuad(crownPoint(v0, a, .017), crownPoint(v0, b, .017), crownPoint(v1, b, .017), crownPoint(v1, a, .017),
+              normal(Math.cos(middle), .08, Math.sin(middle)), 'band');
+          }
+          addQuad(crownPoint(.228, a, .018), crownPoint(.228, b, .018), crownPoint(.24, b, .018), crownPoint(.24, a, .018),
+            normal(Math.cos(middle), .08, Math.sin(middle)), 'bandEdge');
+          for (let j = 0; j < 8; j++) {
+            const r0 = j / 8, r1 = (j + 1) / 8;
+            addQuad(topPoint(r0, a), topPoint(r1, a), topPoint(r1, b), topPoint(r0, b),
+              normal(0, 1, 0), 'top');
+          }
+        }
+      }
+
+      function buildParticles() {
+        const totals = [];
+        let total = 0;
+        for (const surface of surfaces) {
+          total += surface.area;
+          totals.push(total);
+        }
+        for (let i = 0; i < 4300; i++) {
+          const target = random() * total;
+          let low = 0, high = totals.length - 1;
+          while (low < high) {
+            const middle = (low + high) >> 1;
+            if (totals[middle] < target) low = middle + 1;
+            else high = middle;
+          }
+          const surface = surfaces[low];
+          const [a, b, c, d] = surface.points;
+          const u = random(), v = random();
+          const x = a.x * (1-u)*(1-v) + b.x*u*(1-v) + c.x*u*v + d.x*(1-u)*v;
+          const y = a.y * (1-u)*(1-v) + b.y*u*(1-v) + c.y*u*v + d.y*(1-u)*v;
+          const z = a.z * (1-u)*(1-v) + b.z*u*(1-v) + c.z*u*v + d.z*(1-u)*v;
+          const direction = normal(x * .55 + (random() - .5) * 1.2,
+            (y - .45) * .75 + (random() - .37) * 1.05,
+            z * .62 + (random() - .5) * 1.2);
+          const reach = .7 + Math.pow(random(), .65) * 2.8;
+          const palette = surface.type === 'band' || surface.type === 'bandEdge'
+            ? ['#c66a70', '#e07874', '#b7505c']
+            : ['#f34f58', '#ec6262', '#ff8070', '#dc3947', '#ff9d72'];
+          const color = palette[Math.floor(random() * palette.length)];
+          particles.push({ x, y, z, dx: direction.x * reach, dy: direction.y * reach,
+            dz: direction.z * reach, size: .65 + random() * 1.25,
+            phase: random() * TAU, color, glint: random() < .105,
+            alpha: .58 + random() * .42 });
+        }
+        for (let i = 0; i < 17; i++) orbiters.push(particles[Math.floor(i * particles.length / 17)]);
+      }
+
+      function project(p) {
+        const x = p.x * yawCos + p.z * yawSin;
+        const z = p.z * yawCos - p.x * yawSin;
+        const vertical = p.y * tiltCos - z * tiltSin;
+        const depth = z * tiltCos + p.y * tiltSin;
+        const perspective = 7.8 / (7.8 - depth);
+        const horizontal = x * scale * perspective;
+        const screenY = -vertical * scale * perspective;
+        return { x: centerX + horizontal * rollCos - screenY * rollSin,
+          y: centerY + horizontal * rollSin + screenY * rollCos,
+          depth, perspective };
+      }
+      function surfaceColor(surface) {
+        const n = surface.normal;
+        const nx = n.x * yawCos + n.z * yawSin;
+        const nz = n.z * yawCos - n.x * yawSin;
+        const light = Math.max(0, nx * -.48 + n.y * .77 + nz * .43);
+        const rim = Math.pow(Math.max(0, nx * .67 + n.y * .16 - nz * .65), 3);
+        const p = surface.points;
+        const center = point((p[0].x + p[1].x + p[2].x + p[3].x) * .25,
+          (p[0].y + p[1].y + p[2].y + p[3].y) * .25,
+          (p[0].z + p[1].z + p[2].z + p[3].z) * .25);
+        const screenX = center.x * yawCos + center.z * yawSin;
+        const softLight = .11 * Math.exp(-Math.pow((screenX + .7) / 1.4, 2)
+          - Math.pow((center.y - .92) / 1.25, 2));
+        const brightness = .48 + .5 * light + .13 * rim + softLight;
+        const bucket = Math.round(brightness * 70);
+        const key = surface.type + ':' + bucket;
+        if (!shadeCache.has(key)) {
+          const base = material[surface.type];
+          const color = base.map(value => Math.min(255, Math.round(value * bucket / 70)));
+          shadeCache.set(key, `rgb(${color[0]} ${color[1]} ${color[2]})`);
+        }
+        return shadeCache.get(key);
+      }
+      function drawShadow(strength) {
+        ctx.save();
+        ctx.translate(centerX, centerY + 1.48 * scale);
+        ctx.scale(2.8 * scale, .48 * scale);
+        const reflected = ctx.createRadialGradient(0, 0, .05, 0, 0, 1);
+        reflected.addColorStop(0, `rgba(125, 41, 48, ${.29 * strength})`);
+        reflected.addColorStop(.55, `rgba(79, 30, 39, ${.14 * strength})`);
+        reflected.addColorStop(1, 'rgba(75, 29, 37, 0)');
+        ctx.fillStyle = reflected;
+        ctx.beginPath();
+        ctx.arc(0, 0, 1, 0, TAU);
+        ctx.fill();
+        ctx.restore();
+        ctx.save();
+        ctx.translate(centerX, centerY + 1.48 * scale);
+        ctx.scale(2.35 * scale, .36 * scale);
+        const shadow = ctx.createRadialGradient(0, 0, .07, 0, 0, 1);
+        shadow.addColorStop(0, `rgba(0, 0, 0, ${.41 * strength})`);
+        shadow.addColorStop(.48, `rgba(0, 0, 0, ${.19 * strength})`);
+        shadow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = shadow;
+        ctx.beginPath();
+        ctx.arc(0, 0, 1, 0, TAU);
+        ctx.fill();
+        ctx.restore();
+        const line = ctx.createLinearGradient(centerX - 2.6 * scale, 0, centerX + 2.6 * scale, 0);
+        line.addColorStop(0, 'rgba(150, 70, 75, 0)');
+        line.addColorStop(.5, `rgba(150, 70, 75, ${.13 * strength})`);
+        line.addColorStop(1, 'rgba(150, 70, 75, 0)');
+        ctx.strokeStyle = line;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(centerX - 2.6 * scale, centerY + 1.58 * scale);
+        ctx.lineTo(centerX + 2.6 * scale, centerY + 1.58 * scale);
+        ctx.stroke();
+      }
+      function drawHat(opacity) {
+        if (opacity <= 0) return;
+        const visible = [];
+        for (const surface of surfaces) {
+          const corners = surface.points.map(project);
+          visible.push({ corners, surface,
+            depth: (corners[0].depth + corners[1].depth + corners[2].depth + corners[3].depth) * .25 });
+        }
+        visible.sort((a, b) => a.depth - b.depth);
+        ctx.save();
+        ctx.globalAlpha = opacity;
+        for (const item of visible) {
+          const p = item.corners;
+          ctx.fillStyle = surfaceColor(item.surface);
+          ctx.strokeStyle = ctx.fillStyle;
+          ctx.lineWidth = 1.1;
+          ctx.lineJoin = 'round';
+          ctx.beginPath();
+          ctx.moveTo(p[0].x, p[0].y);
+          ctx.lineTo(p[1].x, p[1].y);
+          ctx.lineTo(p[2].x, p[2].y);
+          ctx.lineTo(p[3].x, p[3].y);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      function drawParticles(time) {
+        const visibility = smooth(.32, .96, time) * (1 - smooth(3.47, 4.12, time));
+        if (visibility <= 0) return;
+        const responsiveSpread = Math.min(1, Math.max(.55, width / 760));
+        const spread = responsiveSpread * smooth(.47, 1.43, time) * (1 - smooth(2.38, 3.83, time));
+        const swirl = (time - .45) * .68 * spread;
+        const swirlCos = Math.cos(swirl), swirlSin = Math.sin(swirl);
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        for (const p of particles) {
+          const expandedX = p.x + p.dx * spread;
+          const expandedZ = p.z + p.dz * spread;
+          const x = expandedX * swirlCos - expandedZ * swirlSin;
+          const z = expandedX * swirlSin + expandedZ * swirlCos;
+          const y = p.y + p.dy * spread + .17 * Math.sin(time * 3 + p.phase) * spread;
+          const projected = project({ x, y, z });
+          const edgeDistance = Math.min(projected.x, width - projected.x, projected.y, height - projected.y);
+          if (edgeDistance <= 0) continue;
+          const edgeFade = smooth(0, Math.min(65, width * .12, height * .19), edgeDistance);
+          const size = p.size * (.84 + .16 * projected.perspective);
+          if (p.glint) {
+            ctx.globalAlpha = visibility * edgeFade * .12 * p.alpha;
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(projected.x, projected.y, size * 3.7, 0, TAU);
+            ctx.fill();
+          }
+          ctx.globalAlpha = visibility * edgeFade * p.alpha;
+          ctx.fillStyle = p.color;
+          ctx.fillRect(projected.x - size * .5, projected.y - size * .5, size, size);
+        }
+        ctx.restore();
+      }
+
+      function orbitPoint(index, time) {
+        const p = orbiters[index];
+        const angle = time * (.48 + (index % 4) * .055) + p.phase + index * 1.8;
+        const radius = 2.04 + (index % 5) * .17;
+        const arrival = smooth(0, .9, time);
+        return point(p.x * (1 - arrival) + radius * Math.cos(angle) * arrival,
+          p.y * (1 - arrival) + (.5 + .38 * Math.sin(angle * 1.35 + p.phase)) * arrival,
+          p.z * (1 - arrival) + (1.27 + (index % 3) * .13) * Math.sin(angle) * arrival);
+      }
+      function drawOrbit(back, time, fade) {
+        if (!orbiting || fade <= 0) return;
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        for (let i = 0; i < orbiters.length; i++) {
+          const head = project(orbitPoint(i, time));
+          if ((head.depth < 0) !== back) continue;
+          const color = orbiters[i].color;
+          for (let j = 11; j > 0; j--) {
+            const a = project(orbitPoint(i, time - j * .047));
+            const b = project(orbitPoint(i, time - (j - 1) * .047));
+            ctx.globalAlpha = fade * .12 * (1 - j / 12) ** 2;
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1.15;
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.stroke();
+          }
+          ctx.globalAlpha = fade * .10;
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.arc(head.x, head.y, 4.5, 0, TAU);
+          ctx.fill();
+          ctx.globalAlpha = fade * .8;
+          ctx.beginPath();
+          ctx.arc(head.x, head.y, 1.15, 0, TAU);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      function render(time = 0, now = 0) {
+        if (!width || !height) return;
+        ctx.clearRect(0, 0, width, height);
+        yawCos = Math.cos(yaw);
+        yawSin = Math.sin(yaw);
+        const dissolving = 1 - smooth(.4, 1.07, time);
+        const reforming = smooth(3.52, 4.1, time);
+        const solid = Math.max(dissolving, reforming);
+        drawShadow(.58 + .42 * solid);
+        const orbitFade = orbiting ? smooth(0, .8, now - orbitStart) : 0;
+        drawOrbit(true, now - orbitStart, orbitFade);
+        drawHat(solid);
+        drawParticles(time);
+        drawOrbit(false, now - orbitStart, orbitFade);
+      }
+
+      function resize() {
+        const rect = canvas.getBoundingClientRect();
+        const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+        width = rect.width;
+        height = rect.height;
+        canvas.width = Math.max(1, Math.round(width * pixelRatio));
+        canvas.height = Math.max(1, Math.round(height * pixelRatio));
+        ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+        centerX = width * .5;
+        centerY = height * .46;
+        scale = Math.min(width / 5.55, height / 3.78);
+        render(effectStart < 0 ? 0 : (performance.now() / 1000 - effectStart), performance.now() / 1000);
+      }
+      function play() {
+        if (media.matches || effectStart >= 0) return;
+        effectStart = performance.now() / 1000;
+        orbiting = false;
+        hint.textContent = 'Watch it find its shape again';
+      }
+      function animate(timestamp) {
+        const now = timestamp / 1000;
+        const dt = previous ? Math.min(.05, now - previous) : 0;
+        previous = now;
+        const time = effectStart < 0 ? 0 : now - effectStart;
+        if (effectStart >= 0 && time >= 4.14) {
+          effectStart = -1;
+          orbiting = true;
+          orbitStart = now;
+          hint.textContent = 'Hover or tap to watch it again';
+        }
+        const targetSpeed = effectStart >= 0 ? .095 : .38;
+        speed += (targetSpeed - speed) * Math.min(1, dt * 3.4);
+        yaw += speed * dt;
+        render(effectStart < 0 ? 0 : time, now);
+        frameId = requestAnimationFrame(animate);
+      }
+      function motionChanged() {
+        cancelAnimationFrame(frameId);
+        previous = 0;
+        button.disabled = media.matches;
+        button.setAttribute('aria-label', media.matches
+          ? 'A still red fedora with a dark band'
+          : 'Animate a red fedora as it scatters into glowing particles and reforms');
+        if (media.matches) {
+          effectStart = -1;
+          orbiting = false;
+          yaw = -.38;
+          hint.textContent = 'A study in shape and light';
+          render();
+        } else {
+          hint.textContent = 'Hover or tap to see it unfold';
+          frameId = requestAnimationFrame(animate);
+        }
+      }
+
+      buildHat();
+      buildParticles();
+      resize();
+      button.addEventListener('pointerenter', event => {
+        if (event.pointerType === 'mouse' || event.pointerType === 'pen') play();
+      });
+      button.addEventListener('click', play);
+      if ('ResizeObserver' in window) new ResizeObserver(resize).observe(button);
+      else window.addEventListener('resize', resize);
+      if (media.addEventListener) media.addEventListener('change', motionChanged);
+      else media.addListener(motionChanged);
+      motionChanged();
+    })();
+  </script>
+</body>
+</html>
