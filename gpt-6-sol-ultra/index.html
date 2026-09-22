@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#090b10">
+  <title>Fedora — A Study in Motion</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html { min-height: 100%; background: #090b10; }
+    body {
+      min-width: 280px;
+      min-height: 100vh;
+      min-height: 100svh;
+      margin: 0;
+      overflow-x: hidden;
+      color: #f3e9e8;
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(ellipse 47% 39% at 50% 44%, rgba(112, 36, 48, .17), transparent 74%),
+        radial-gradient(ellipse 60% 65% at 50% 12%, #17151f 0%, transparent 76%),
+        linear-gradient(155deg, #0c0e15 0%, #090b10 60%, #08090e 100%);
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(ellipse 78% 72% at 50% 47%, transparent 45%, rgba(0, 0, 0, .32) 100%);
+    }
+    .page {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      min-height: 100svh;
+      isolation: isolate;
+    }
+    .masthead {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      width: 100%;
+      padding: clamp(24px, 4vw, 45px) clamp(24px, 5vw, 76px);
+      color: #aaa1a5;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .23em;
+      line-height: 1.3;
+      text-transform: uppercase;
+    }
+    .brand { display: inline-flex; align-items: center; gap: 12px; color: #e9dddd; }
+    .brand-mark {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border: 1px solid #f25957;
+      border-radius: 2px;
+      box-shadow: 0 0 14px rgba(242, 89, 87, .22);
+      transform: rotate(45deg);
+    }
+    .issue { white-space: nowrap; }
+    main {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      padding: 5px 18px 45px;
+      text-align: center;
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 15px;
+      margin-bottom: -8px;
+      color: #aa989b;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .29em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .eyebrow::before, .eyebrow::after {
+      content: "";
+      display: block;
+      width: 26px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, #805059);
+    }
+    .eyebrow::after { transform: rotate(180deg); }
+    .scene {
+      position: relative;
+      width: min(760px, 100%);
+      height: clamp(305px, 57svh, 550px);
+      margin: 0 auto;
+      cursor: pointer;
+      outline: none;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+    .scene::before {
+      content: "";
+      position: absolute;
+      z-index: -1;
+      top: 7%;
+      left: 50%;
+      width: 75%;
+      height: 82%;
+      border-radius: 50%;
+      background: radial-gradient(ellipse, rgba(182, 43, 56, .10) 0%, rgba(97, 26, 44, .045) 39%, transparent 70%);
+      filter: blur(13px);
+      transform: translateX(-50%);
+      pointer-events: none;
+    }
+    .scene:focus-visible {
+      border-radius: 28px;
+      outline: 1px solid rgba(240, 103, 105, .68);
+      outline-offset: -8px;
+    }
+    .ground-glow, .ground-shadow {
+      position: absolute;
+      left: 50%;
+      top: 77%;
+      width: 65%;
+      height: 12%;
+      border-radius: 50%;
+      pointer-events: none;
+      transform: translateX(-50%);
+    }
+    .ground-glow {
+      background: radial-gradient(ellipse, rgba(161, 34, 42, .19), transparent 70%);
+      filter: blur(17px);
+    }
+    .ground-shadow {
+      top: 78%;
+      width: 52%;
+      height: 7%;
+      background: radial-gradient(ellipse, rgba(0, 0, 0, .58), transparent 73%);
+      filter: blur(9px);
+    }
+    canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+    .caption {
+      margin: -6px 0 0;
+      color: #f4e9e7;
+      font-size: clamp(17px, 2.2vw, 22px);
+      font-weight: 400;
+      letter-spacing: -.035em;
+      line-height: 1.4;
+    }
+    .hint {
+      margin: 11px 0 0;
+      color: #8f8287;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .21em;
+      line-height: 1.5;
+      text-transform: uppercase;
+    }
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    @media (max-width: 600px) {
+      .masthead { padding: 25px 23px; font-size: 9px; letter-spacing: .16em; }
+      .issue { color: #81777d; }
+      main { padding: 12px 0 48px; }
+      .scene { height: clamp(300px, 53svh, 430px); }
+      .eyebrow { font-size: 9px; letter-spacing: .2em; }
+      .caption { margin-top: -2px; }
+    }
+    @media (max-width: 380px) {
+      .issue { display: none; }
+      .scene { height: 310px; }
+    }
+    @media (max-height: 650px) {
+      .masthead { padding-top: 18px; padding-bottom: 18px; }
+      main { padding-bottom: 24px; }
+      .scene { height: clamp(180px, 48svh, 320px); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .scene { cursor: default; }
+      .hint { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="masthead" aria-label="Page heading">
+      <span class="brand"><span class="brand-mark" aria-hidden="true"></span> Form &amp; Fire</span>
+      <span class="issue">Interactive study &nbsp; / &nbsp; 01</span>
+    </header>
+    <main>
+      <h1 class="visually-hidden">A fedora in motion</h1>
+      <div class="eyebrow" aria-hidden="true">A study in motion</div>
+      <div class="scene" id="scene" role="button" tabindex="0" aria-label="Animate the red fedora into glowing particles">
+        <div class="ground-glow" aria-hidden="true"></div>
+        <div class="ground-shadow" aria-hidden="true"></div>
+        <canvas id="hat" aria-hidden="true"></canvas>
+      </div>
+      <p class="caption">Every form finds its way home.</p>
+      <p class="hint">Hover or tap to transform</p>
+    </main>
+  </div>
+  <script>
+    (() => {
+      'use strict';
+
+      const scene = document.getElementById('scene');
+      const canvas = document.getElementById('hat');
+      const ctx = canvas.getContext('2d', { alpha: true });
+      const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
+      const TAU = Math.PI * 2;
+      const SEGMENTS = 64;
+      const vertices = [];
+      const faces = [];
+      const projected = [];
+      const materials = {
+        brim: [184, 34, 43],
+        piping: [214, 53, 58],
+        underside: [103, 24, 34],
+        edge: [125, 27, 36],
+        crown: [193, 37, 46],
+        top: [202, 42, 50],
+        band: [62, 25, 34],
+        trim: [129, 31, 41]
+      };
+      const colorCache = Object.fromEntries(Object.keys(materials).map(key => [key, []]));
+      let seed = 65029;
+      const random = () => {
+        seed = (seed + 0x6D2B79F5) | 0;
+        let x = Math.imul(seed ^ seed >>> 15, 1 | seed);
+        x ^= x + Math.imul(x ^ x >>> 7, 61 | x);
+        return ((x ^ x >>> 14) >>> 0) / 4294967296;
+      };
+      const smooth = (a, b, x) => {
+        const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+        return t * t * (3 - 2 * t);
+      };
+      const vertex = (x, y, z) => {
+        vertices.push({ x, y, z });
+        projected.push({ x: 0, y: 0, depth: 0 });
+        return vertices.length - 1;
+      };
+      const addFace = (a, b, c, material, kind) => {
+        const p = vertices[a], q = vertices[b], r = vertices[c];
+        const ux = q.x - p.x, uy = q.y - p.y, uz = q.z - p.z;
+        const vx = r.x - p.x, vy = r.y - p.y, vz = r.z - p.z;
+        let nx = uy * vz - uz * vy;
+        let ny = uz * vx - ux * vz;
+        let nz = ux * vy - uy * vx;
+        const cx = (p.x + q.x + r.x) / 3;
+        const cy = (p.y + q.y + r.y) / 3;
+        const wrongSide = kind === 'side' || kind === 'edge'
+          ? nx * cx + ny * cy < 0
+          : kind === 'down' ? nz > 0 : nz < 0;
+        if (wrongSide) { nx = -nx; ny = -ny; nz = -nz; }
+        const length = Math.hypot(nx, ny, nz) || 1;
+        const layer = kind === 'down' ? 0 : kind === 'edge' ? 1 :
+          material === 'brim' || material === 'piping' ? 2 : 3;
+        faces.push({ a, b, c, material, layer, cx, cy, nx: nx / length, ny: ny / length, nz: nz / length, depth: 0 });
+      };
+
+      function brimPoint(angle, radius, underside = false) {
+        const front = Math.max(0, -Math.sin(angle));
+        const back = Math.max(0, Math.sin(angle));
+        const flare = radius - .78;
+        const z = .15 + .09 * flare * flare - .19 * flare * front + .055 * flare * back;
+        return [radius * Math.cos(angle), radius * .66 * Math.sin(angle), z - (underside ? .055 : 0)];
+      }
+      function crownPoint(angle, t) {
+        const front = Math.max(0, -Math.sin(angle));
+        let rx = .805 - .075 * t + .035 * Math.sin(Math.PI * t);
+        let ry = .535 - .05 * t + .035 * Math.sin(Math.PI * t);
+        rx *= 1 - .18 * t * t * front;
+        ry *= 1 - .10 * t * front;
+        return [rx * Math.cos(angle), ry * Math.sin(angle), .15 + 1.24 * t - .075 * front * t * t];
+      }
+      function topPoint(angle, radius) {
+        const rim = crownPoint(angle, 1);
+        const x = rim[0] * radius;
+        const y = rim[1] * radius;
+        const core = 1 - radius * radius;
+        const crease = .24 * core * Math.exp(-Math.pow(x / .24, 2));
+        const pinch = .13 * core * Math.exp(-Math.pow((Math.abs(x) - .38) / .16, 2) - Math.pow((y + .25) / .25, 2));
+        const z = rim[2] * radius * radius + 1.39 * core - crease - pinch;
+        return [x, y, z];
+      }
+      function addRingGrid(radii, point, materialForStrip, kind) {
+        const grid = radii.map(radius => {
+          const ring = [];
+          for (let i = 0; i < SEGMENTS; i++) {
+            const xyz = point(i * TAU / SEGMENTS, radius);
+            ring.push(vertex(...xyz));
+          }
+          return ring;
+        });
+        for (let j = 0; j < radii.length - 1; j++) {
+          for (let i = 0; i < SEGMENTS; i++) {
+            const n = (i + 1) % SEGMENTS;
+            const material = materialForStrip(j);
+            addFace(grid[j][i], grid[j + 1][i], grid[j + 1][n], material, kind);
+            addFace(grid[j][i], grid[j + 1][n], grid[j][n], material, kind);
+          }
+        }
+        return grid;
+      }
+
+      // The brim, crown, dark hatband, and indented top are actual 3D surfaces.
+      const brimRadii = [.78, .96, 1.17, 1.40, 1.62, 1.81, 1.95, 1.985];
+      addRingGrid(brimRadii, (a, r) => brimPoint(a, r), j => j === brimRadii.length - 2 ? 'piping' : 'brim', 'up');
+      addRingGrid([.78, 1.12, 1.52, 1.985], (a, r) => brimPoint(a, r, true), () => 'underside', 'down');
+      for (let i = 0; i < SEGMENTS; i++) {
+        const a = i * TAU / SEGMENTS, b = (i + 1) * TAU / SEGMENTS;
+        const v1 = vertex(...brimPoint(a, 1.985));
+        const v2 = vertex(...brimPoint(b, 1.985));
+        const v3 = vertex(...brimPoint(a, 1.985, true));
+        const v4 = vertex(...brimPoint(b, 1.985, true));
+        addFace(v1, v3, v4, 'edge', 'edge');
+        addFace(v1, v4, v2, 'edge', 'edge');
+      }
+      const levels = [0, .07, .105, .115, .125, .275, .285, .295, .37, .49, .62, .75, .87, 1];
+      addRingGrid(levels, crownPoint, j => {
+        const middle = (levels[j] + levels[j + 1]) / 2;
+        if (middle >= .125 && middle <= .275) return 'band';
+        if (middle >= .105 && middle <= .125 || middle >= .275 && middle <= .295) return 'trim';
+        return 'crown';
+      }, 'side');
+      const topCenter = vertex(0, 0, 1.15);
+      const topRadii = [.18, .35, .52, .69, .84, 1];
+      const topRings = topRadii.map(radius => {
+        const ring = [];
+        for (let i = 0; i < SEGMENTS; i++) ring.push(vertex(...topPoint(i * TAU / SEGMENTS, radius)));
+        return ring;
+      });
+      for (let i = 0; i < SEGMENTS; i++) addFace(topCenter, topRings[0][i], topRings[0][(i + 1) % SEGMENTS], 'top', 'up');
+      for (let j = 0; j < topRings.length - 1; j++) {
+        for (let i = 0; i < SEGMENTS; i++) {
+          const n = (i + 1) % SEGMENTS;
+          addFace(topRings[j][i], topRings[j + 1][i], topRings[j + 1][n], 'top', 'up');
+          addFace(topRings[j][i], topRings[j + 1][n], topRings[j][n], 'top', 'up');
+        }
+      }
+
+      // Sampling the same triangles gives every ember an exact place to return to.
+      const cumulative = [];
+      let areaTotal = 0;
+      for (const face of faces) {
+        const a = vertices[face.a], b = vertices[face.b], c = vertices[face.c];
+        const ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z;
+        const vx = c.x - a.x, vy = c.y - a.y, vz = c.z - a.z;
+        areaTotal += Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) * .5;
+        cumulative.push(areaTotal);
+      }
+      const particles = [];
+      for (let i = 0; i < 3400; i++) {
+        const pick = random() * areaTotal;
+        let low = 0, high = cumulative.length - 1;
+        while (low < high) {
+          const mid = (low + high) >>> 1;
+          if (cumulative[mid] < pick) low = mid + 1;
+          else high = mid;
+        }
+        const face = faces[low];
+        const a = vertices[face.a], b = vertices[face.b], c = vertices[face.c];
+        const r1 = Math.sqrt(random()), r2 = random();
+        const w0 = 1 - r1, w1 = r1 * (1 - r2), w2 = r1 * r2;
+        const x = a.x * w0 + b.x * w1 + c.x * w2;
+        const y = a.y * w0 + b.y * w1 + c.y * w2;
+        const z = a.z * w0 + b.z * w1 + c.z * w2;
+        const direction = Math.atan2(y, x) + (random() - .5) * .8;
+        particles.push({
+          x, y, z,
+          dx: Math.cos(direction), dy: Math.sin(direction),
+          dz: (random() - .5) * 1.7,
+          reach: .32 + random() * 1.18,
+          phase: random() * TAU,
+          pace: .7 + random() * .55,
+          size: .55 + random() * .95,
+          brightness: .38 + random() * .62,
+          sprite: face.material === 'band' ? 2 : random() > .91 ? 1 : 0
+        });
+      }
+
+      function glowSprite(core, halo) {
+        const sprite = document.createElement('canvas');
+        sprite.width = sprite.height = 40;
+        const g = sprite.getContext('2d');
+        const gradient = g.createRadialGradient(20, 20, 0, 20, 20, 19);
+        gradient.addColorStop(0, core);
+        gradient.addColorStop(.12, halo);
+        gradient.addColorStop(.42, halo.replace(/, ?[\d.]+\)$/, ', .16)'));
+        gradient.addColorStop(1, 'rgba(255, 74, 67, 0)');
+        g.fillStyle = gradient;
+        g.fillRect(0, 0, 40, 40);
+        return sprite;
+      }
+      const sprites = [
+        glowSprite('rgba(255, 239, 222, .9)', 'rgba(255, 93, 82, .68)'),
+        glowSprite('rgba(255, 245, 208, .95)', 'rgba(255, 166, 92, .72)'),
+        glowSprite('rgba(255, 207, 205, .68)', 'rgba(174, 55, 70, .5)')
+      ];
+
+      let width = 0, height = 0, scale = 1, cx = 0, cy = 0;
+      let spin = -.36, spinSpeed = .49;
+      let active = false, activeAt = 0, orbitAt = 0, hasOrbit = false;
+      let pointerInside = false, hoverArmed = true;
+      let frameId = 0, lastFrame = 0;
+      const reduced = () => motionPreference.matches;
+
+      function fit() {
+        const bounds = scene.getBoundingClientRect();
+        width = bounds.width;
+        height = bounds.height;
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.max(1, Math.round(width * dpr));
+        canvas.height = Math.max(1, Math.round(height * dpr));
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        scale = Math.min(width / 5.15, height / 3.4);
+        cx = width / 2;
+        cy = height * .61;
+        if (reduced()) render(performance.now());
+      }
+      function projectPoint(x, y, z, cos, sin, shrink = 1) {
+        const rx = (x * cos - y * sin) * shrink;
+        const ry = (x * sin + y * cos) * shrink;
+        const perspective = 1 / (1 + ry * .075 - z * .012);
+        return {
+          x: cx + rx * scale * perspective,
+          y: cy + (-ry * .48 - z * .95) * scale * perspective,
+          depth: ry * .92 - z * .3
+        };
+      }
+      function shadeColor(material, shade) {
+        const step = Math.max(0, Math.min(47, Math.round(shade * 36)));
+        const cache = colorCache[material];
+        if (!cache[step]) {
+          const base = materials[material];
+          const amount = step / 36;
+          cache[step] = `rgb(${Math.min(255, Math.round(base[0] * amount))} ${Math.min(255, Math.round(base[1] * amount))} ${Math.min(255, Math.round(base[2] * amount))})`;
+        }
+        return cache[step];
+      }
+      function drawHat(alpha) {
+        if (alpha <= 0) return;
+        const cos = Math.cos(spin), sin = Math.sin(spin);
+        for (let i = 0; i < vertices.length; i++) {
+          const v = vertices[i];
+          const p = projectPoint(v.x, v.y, v.z, cos, sin);
+          projected[i].x = p.x;
+          projected[i].y = p.y;
+          projected[i].depth = p.depth;
+        }
+        for (const face of faces) face.depth = (projected[face.a].depth + projected[face.b].depth + projected[face.c].depth) / 3;
+        faces.sort((a, b) => a.layer - b.layer || b.depth - a.depth);
+        ctx.globalAlpha = alpha;
+        ctx.lineWidth = .95;
+        ctx.lineJoin = 'round';
+        for (const face of faces) {
+          const a = projected[face.a], b = projected[face.b], c = projected[face.c];
+          const nx = face.nx * cos - face.ny * sin;
+          const ny = face.nx * sin + face.ny * cos;
+          const light = Math.max(0, nx * -.48 + ny * -.64 + face.nz * .60);
+          const softRim = Math.pow(1 - Math.min(1, Math.abs(ny * -.91 + face.nz * .32)), 2) * .10;
+          const worldX = face.cx * cos - face.cy * sin;
+          const worldY = face.cx * sin + face.cy * cos;
+          const sheen = face.material === 'band' || face.material === 'underside' ? 0 :
+            .075 * Math.exp(-Math.pow((worldX + .48) / .56, 2) - Math.pow((worldY + .28) / 1.0, 2));
+          const shade = .55 + light * .49 + softRim + sheen;
+          const color = shadeColor(face.material, shade);
+          ctx.fillStyle = color;
+          ctx.strokeStyle = color;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.lineTo(c.x, c.y);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      }
+      function drawParticles(elapsed, alpha, scatter) {
+        if (alpha <= 0) return;
+        const cos = Math.cos(spin), sin = Math.sin(spin);
+        const shrink = 1 - .19 * scatter;
+        ctx.globalCompositeOperation = 'screen';
+        for (const p of particles) {
+          const spread = p.reach * scatter;
+          let x = p.x + p.dx * spread + scatter * .14 * Math.sin(elapsed * 2.3 + p.phase);
+          let y = p.y + p.dy * spread + scatter * .14 * Math.cos(elapsed * 2 + p.phase);
+          const turn = Math.max(0, elapsed - .65) * p.pace * .72 * scatter;
+          const ct = Math.cos(turn), st = Math.sin(turn);
+          const swirledX = x * ct - y * st;
+          y = x * st + y * ct;
+          x = swirledX;
+          const driftZ = p.z + scatter * (p.dz * p.reach * .65 + .16 * Math.sin(elapsed * 2 + p.phase));
+          const z = .62 + (driftZ - .62) * (1 - .28 * scatter);
+          const position = projectPoint(x, y, z, cos, sin, shrink);
+          const size = (5.5 + p.size * 5.5) * (1 + .16 * scatter);
+          ctx.globalAlpha = alpha * p.brightness * (.86 + .14 * Math.sin(elapsed * 6 + p.phase));
+          ctx.drawImage(sprites[p.sprite], position.x - size / 2, position.y - size / 2, size, size);
+        }
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = 'source-over';
+      }
+      const orbiters = Array.from({ length: 8 }, (_, i) => ({
+        phase: i * TAU / 8 + random() * .25,
+        radius: 1.78 + random() * .42,
+        height: .18 + random() * 1.05,
+        speed: .35 + random() * .28,
+        size: 7 + random() * 4,
+        sprite: random() > .7 ? 1 : 0
+      }));
+      function orbitPosition(o, angle) {
+        return projectPoint(o.radius * Math.cos(angle), o.radius * .67 * Math.sin(angle),
+          o.height + .09 * Math.sin(angle * 2 + o.phase), 1, 0);
+      }
+      function drawOrbit(now, foreground) {
+        if (!hasOrbit || reduced()) return;
+        const age = (now - orbitAt) / 1000;
+        const fade = smooth(0, .9, age);
+        if (fade <= 0) return;
+        ctx.globalCompositeOperation = 'screen';
+        for (const o of orbiters) {
+          const angle = o.phase + age * o.speed;
+          const front = Math.sin(angle) < 0;
+          if (front !== foreground) continue;
+          const head = orbitPosition(o, angle);
+          for (let i = 12; i > 0; i--) {
+            const p1 = orbitPosition(o, angle - i * .032);
+            const p2 = orbitPosition(o, angle - (i - 1) * .032);
+            ctx.strokeStyle = `rgba(255, 99, 91, ${fade * (13 - i) / 12 * .18})`;
+            ctx.lineWidth = .6 + (13 - i) / 12 * .65;
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.stroke();
+          }
+          ctx.globalAlpha = fade * .72;
+          ctx.drawImage(sprites[o.sprite], head.x - o.size / 2, head.y - o.size / 2, o.size, o.size);
+          ctx.globalAlpha = 1;
+        }
+        ctx.globalCompositeOperation = 'source-over';
+      }
+      function render(now) {
+        ctx.clearRect(0, 0, width, height);
+        let solid = 1, sparks = 0, scatter = 0;
+        if (active) {
+          const t = (now - activeAt) / 1000;
+          scatter = smooth(.25, 1.35, t) * (1 - smooth(3.05, 5.05, t));
+          solid = t < 2 ? 1 - smooth(.3, 1.18, t) : smooth(4.05, 5.18, t);
+          sparks = smooth(.32, .85, t) * (1 - smooth(4.72, 5.4, t));
+          drawHat(solid);
+          drawParticles(t, sparks, scatter);
+        } else {
+          drawOrbit(now, false);
+          drawHat(1);
+          drawOrbit(now, true);
+        }
+      }
+      function tick(now) {
+        frameId = 0;
+        if (reduced()) { render(now); return; }
+        const dt = Math.min(.05, Math.max(0, (now - (lastFrame || now)) / 1000));
+        lastFrame = now;
+        if (active && now - activeAt >= 5500) {
+          active = false;
+          hasOrbit = true;
+          orbitAt = now;
+        }
+        const targetSpeed = active ? .085 : .49;
+        spinSpeed += (targetSpeed - spinSpeed) * Math.min(1, dt * 4);
+        spin += spinSpeed * dt;
+        render(now);
+        frameId = requestAnimationFrame(tick);
+      }
+      function startAnimation() {
+        if (reduced() || active) return;
+        active = true;
+        activeAt = performance.now();
+        hasOrbit = false;
+      }
+      scene.addEventListener('pointerenter', event => {
+        if (event.pointerType === 'touch') return;
+        pointerInside = true;
+        if (hoverArmed) {
+          hoverArmed = false;
+          startAnimation();
+        }
+      });
+      scene.addEventListener('pointerleave', () => {
+        pointerInside = false;
+        hoverArmed = true;
+      });
+      scene.addEventListener('pointerdown', event => {
+        if (event.pointerType !== 'mouse' || pointerInside) startAnimation();
+      });
+      scene.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          startAnimation();
+        }
+      });
+      motionPreference.addEventListener('change', () => {
+        if (reduced()) {
+          active = false;
+          hasOrbit = false;
+          spin = -.36;
+          scene.setAttribute('role', 'img');
+          scene.setAttribute('aria-label', 'A softly lit red fedora');
+          scene.removeAttribute('tabindex');
+          if (frameId) cancelAnimationFrame(frameId);
+          frameId = 0;
+          render(performance.now());
+        } else {
+          scene.setAttribute('role', 'button');
+          scene.setAttribute('aria-label', 'Animate the red fedora into glowing particles');
+          scene.setAttribute('tabindex', '0');
+          lastFrame = 0;
+          if (!frameId) frameId = requestAnimationFrame(tick);
+        }
+      });
+      if (reduced()) {
+        scene.setAttribute('role', 'img');
+        scene.setAttribute('aria-label', 'A softly lit red fedora');
+        scene.removeAttribute('tabindex');
+      }
+      fit();
+      window.addEventListener('resize', fit, { passive: true });
+      if (!reduced()) frameId = requestAnimationFrame(tick);
+    })();
+  </script>
+</body>
+</html>

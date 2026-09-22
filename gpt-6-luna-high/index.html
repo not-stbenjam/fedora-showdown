@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#090a0e">
+  <title>Made of light</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #f4f1ef;
+      --muted: #9c999f;
+      --red: #d8202f;
+      --night: #090a0e;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; min-height: 100%; margin: 0; }
+    body {
+      min-height: 100svh;
+      overflow: hidden;
+      background: var(--night);
+      color: var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .scene {
+      position: relative;
+      isolation: isolate;
+      display: grid;
+      min-height: 100svh;
+      place-items: center;
+      overflow: hidden;
+      background:
+        radial-gradient(ellipse at 50% 42%, rgba(79, 36, 43, .18), transparent 38%),
+        radial-gradient(ellipse at 50% 100%, rgba(42, 43, 52, .17), transparent 46%),
+        linear-gradient(155deg, #101116 0%, #090a0e 58%, #08090d 100%);
+    }
+    .scene::before, .scene::after {
+      position: absolute;
+      z-index: -1;
+      content: "";
+      pointer-events: none;
+    }
+    .scene::before {
+      inset: 0;
+      opacity: .22;
+      background-image: radial-gradient(rgba(255,255,255,.55) .55px, transparent .7px);
+      background-size: 5px 5px;
+      mask-image: linear-gradient(transparent, #000 30%, #000 75%, transparent);
+    }
+    .scene::after {
+      inset: 0;
+      background: radial-gradient(ellipse at center, transparent 38%, rgba(0,0,0,.38) 100%);
+    }
+    .hero {
+      position: relative;
+      display: flex;
+      width: min(100%, 900px);
+      min-height: min(820px, 100svh);
+      padding: clamp(28px, 7vh, 72px) 20px 34px;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      outline: none;
+      -webkit-tap-highlight-color: transparent;
+      cursor: default;
+    }
+    .canvas-wrap {
+      position: relative;
+      width: min(86vw, 690px);
+      height: min(65svh, 520px);
+      min-height: 300px;
+      display: grid;
+      place-items: center;
+    }
+    .canvas-wrap::before {
+      position: absolute;
+      content: "";
+      width: 56%;
+      height: 14%;
+      bottom: 10%;
+      border-radius: 50%;
+      background: rgba(0,0,0,.66);
+      filter: blur(30px);
+      transform: perspective(260px) rotateX(58deg);
+    }
+    canvas {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: block;
+      overflow: visible;
+    }
+    .copy { margin-top: clamp(-8px, -1vh, 0px); padding: 0 18px; }
+    .eyebrow {
+      margin: 0 0 13px;
+      color: #c9a6a8;
+      font-size: 10px;
+      font-weight: 650;
+      letter-spacing: .28em;
+      line-height: 1.4;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0;
+      color: #f1eeec;
+      font-size: clamp(22px, 3vw, 30px);
+      font-weight: 450;
+      letter-spacing: -.035em;
+      line-height: 1.2;
+    }
+    .hint {
+      margin: 13px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 400;
+      letter-spacing: .015em;
+      line-height: 1.6;
+      transition: opacity .5s ease;
+    }
+    .hero.is-active .hint { opacity: .45; }
+    @media (max-width: 600px) {
+      .hero { min-height: 100svh; padding: 24px 12px 28px; }
+      .canvas-wrap { width: 100vw; height: min(57svh, 440px); min-height: 280px; }
+      .copy { margin-top: 0; }
+    }
+    @media (max-height: 620px) and (min-width: 601px) {
+      .hero { padding-top: 18px; padding-bottom: 18px; }
+      .canvas-wrap { height: min(61svh, 390px); min-height: 250px; }
+      .copy { margin-top: -2px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="scene">
+    <section class="hero" aria-label="A red felt fedora floating in a dark, softly lit space">
+      <div class="canvas-wrap">
+        <canvas id="hat" aria-hidden="true"></canvas>
+      </div>
+      <div class="copy">
+        <p class="eyebrow">A small study in motion</p>
+        <h1>Made of light.</h1>
+        <p class="hint" id="hint">Hover or tap to watch it come apart.</p>
+      </div>
+    </section>
+  </main>
+  <script>
+    (() => {
+      'use strict';
+      const canvas = document.getElementById('hat');
+      const ctx = canvas.getContext('2d', { alpha: true });
+      const hero = document.querySelector('.hero');
+      const hint = document.getElementById('hint');
+      const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+      const TAU = Math.PI * 2;
+      const slices = 48;
+      const geometry = [];
+      const particles = [];
+      const orbiters = [];
+      let width = 0, height = 0, dpr = 1, scale = 1;
+      let rotation = -.24, last = 0, sequenceStart = -1, sequence = false;
+      let armed = true, pointerInside = false;
+      let staticFrame = false;
+
+      const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+      const smooth = (a, b, v) => { const t = clamp((v-a)/(b-a), 0, 1); return t*t*(3-2*t); };
+      const rnd = (n) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+      const rgb = (hex) => [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)];
+
+      function vertex(x,y,z, material) { return {x,y,z,material}; }
+      function addTri(a,b,c, material) { geometry.push({a,b,c,material}); }
+      function meshGrid(rows, material, fn, wrap = true) {
+        const cols = slices;
+        const grid = rows.map((_, ri) => Array.from({length: cols}, (_, j) => fn(rows[ri], j / cols * TAU, ri)));
+        for (let i=0;i<rows.length-1;i++) for(let j=0;j<cols;j++) {
+          const k=(j+1)%cols, a=grid[i][j], b=grid[i][k], c=grid[i+1][j], d=grid[i+1][k];
+          addTri(a,c,b,material); addTri(b,c,d,material);
+        }
+        if (!wrap) return;
+      }
+
+      // Elliptical felt brim, with a softly dipped front edge and lifted sides.
+      const brimRows = Array.from({length: 9}, (_,i)=>i/8);
+      meshGrid(brimRows, 'felt', (r, a) => {
+        const innerX=.43, innerZ=.37, outerX=1.48, outerZ=1.02;
+        const rx=innerX+(outerX-innerX)*r, rz=innerZ+(outerZ-innerZ)*r;
+        const x=rx*Math.cos(a), z=rz*Math.sin(a);
+        const front=Math.max(0,-Math.sin(a));
+        const side=Math.pow(Math.abs(Math.cos(a)), 2.5);
+        const y=-.025 - .16*front*r + .11*side*r + .018*Math.cos(a*2);
+        return vertex(x,y,z,'felt');
+      });
+
+      // Tapered, slightly pinched crown with the characteristic shallow top crease.
+      const crownRows = Array.from({length: 13}, (_,i)=>i/12);
+      meshGrid(crownRows, 'felt', (t,a) => {
+        const eased=t*t*(3-2*t);
+        const rx=.72-.19*eased, rz=.59-.14*eased;
+        const pinch=1-.095*Math.pow(Math.max(0,t-.72)/.28, 1.6)*(1+Math.cos(a*2));
+        const x=rx*Math.cos(a)*pinch + .055*t;
+        const z=rz*Math.sin(a)*pinch;
+        const crownY=.02 + .88*t - .095*Math.exp(-Math.pow((t-.94)/.055,2))*(.7+.3*Math.cos(a*2));
+        return vertex(x,crownY,z,'felt');
+      });
+      // Dark woven band wraps the lower crown.
+      meshGrid([.045,.075,.255,.285], 'band', (t,a) => {
+        const y=.02+.88*t, rx=.722-.19*t, rz=.593-.14*t;
+        return vertex(rx*Math.cos(a)+.055*t,y,rz*Math.sin(a),'band');
+      });
+      // Small folded band detail at the front.
+      const knot = [vertex(-.16,.105,.584,'trim'),vertex(.16,.105,.584,'trim'),vertex(.15,.215,.574,'trim'),vertex(-.15,.215,.574,'trim')];
+      addTri(knot[0],knot[1],knot[2],'trim'); addTri(knot[0],knot[2],knot[3],'trim');
+      // A narrow highlight seam follows the crown's base.
+      meshGrid([.035,.05], 'seam', (t,a) => {
+        const y=.02+.88*t, rx=.724-.19*t, rz=.595-.14*t;
+        return vertex(rx*Math.cos(a)+.055*t,y,rz*Math.sin(a),'seam');
+      });
+
+      const palettes = {
+        felt: ['#71121c','#961824','#bd1c2a','#d92835','#ed4b4f','#c5222e'],
+        band: ['#241316','#35181c','#4b1b20','#301519'],
+        trim: ['#591820','#8b1d26','#ad252e'],
+        seam: ['#ef6561','#bd3037','#e0494b']
+      };
+      const colors = Object.fromEntries(Object.entries(palettes).map(([k,v])=>[k,v.map(rgb)]));
+
+      function point3(p, angle) {
+        const ca=Math.cos(angle), sa=Math.sin(angle);
+        return {x:p.x*ca-p.z*sa, y:p.y, z:p.x*sa+p.z*ca};
+      }
+      function project(p) {
+        const focal=4.6, depth=focal/(focal-p.z);
+        return {x:width*.5+p.x*scale*depth, y:height*.49-p.y*scale*depth, z:p.z, depth};
+      }
+      function shadeTri(tri, angle) {
+        const a=point3(tri.a,angle), b=point3(tri.b,angle), c=point3(tri.c,angle);
+        const ux=b.x-a.x, uy=b.y-a.y, uz=b.z-a.z, vx=c.x-a.x, vy=c.y-a.y, vz=c.z-a.z;
+        let nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+        const len=Math.hypot(nx,ny,nz)||1; nx/=len; ny/=len; nz/=len;
+        // Two broad studio lights and a little ambient fill keep the felt dimensional.
+        const l1=Math.max(0,nx*(-.38)+ny*.7+nz*.61);
+        const l2=Math.max(0,nx*.58+ny*.24+nz*.78);
+        const light=clamp(.48 + .38*l1 + .17*l2, .32, 1.06);
+        const base=colors[tri.material][Math.floor((Math.abs(nx)*.32+Math.abs(ny)*.5+Math.abs(nz)*.18)*colors[tri.material].length)%colors[tri.material].length];
+        const r=Math.round(base[0]*light), g=Math.round(base[1]*light), bl=Math.round(base[2]*light);
+        return {a:project(a),b:project(b),c:project(c),z:(a.z+b.z+c.z)/3,color:`rgb(${r},${g},${bl})`};
+      }
+      function drawHat(angle, alpha=1) {
+        const faces=geometry.map(t=>shadeTri(t,angle)).sort((a,b)=>a.z-b.z);
+        ctx.save(); ctx.globalAlpha=alpha;
+        for(const f of faces) {
+          ctx.beginPath(); ctx.moveTo(f.a.x,f.a.y); ctx.lineTo(f.b.x,f.b.y); ctx.lineTo(f.c.x,f.c.y); ctx.closePath();
+          ctx.fillStyle=f.color; ctx.fill();
+        }
+        // Fine, low contrast edge gives the silhouette a soft studio rim.
+        ctx.globalAlpha=alpha*.2; ctx.strokeStyle='#ff9b91'; ctx.lineWidth=Math.max(.45,scale*.0018);
+        for(const f of faces) if(f.z>.45) { ctx.beginPath(); ctx.moveTo(f.a.x,f.a.y); ctx.lineTo(f.b.x,f.b.y); ctx.lineTo(f.c.x,f.c.y); ctx.closePath(); ctx.stroke(); }
+        ctx.restore();
+      }
+
+      // Weighted random samples on the actual hat surface become the return map.
+      const weighted=[]; let totalArea=0;
+      for(const tri of geometry) {
+        const ab=[tri.b.x-tri.a.x,tri.b.y-tri.a.y,tri.b.z-tri.a.z], ac=[tri.c.x-tri.a.x,tri.c.y-tri.a.y,tri.c.z-tri.a.z];
+        const area=Math.hypot(ab[1]*ac[2]-ab[2]*ac[1],ab[2]*ac[0]-ab[0]*ac[2],ab[0]*ac[1]-ab[1]*ac[0])*.5;
+        totalArea+=area; weighted.push({tri,total:totalArea});
+      }
+      function surfaceSample(seed) {
+        const pick=rnd(seed*3.17)*totalArea;
+        let lo=0,hi=weighted.length-1;
+        while(lo<hi){const mid=(lo+hi)>>1;if(weighted[mid].total<pick)lo=mid+1;else hi=mid;}
+        const tri=weighted[lo].tri, u=Math.sqrt(rnd(seed*8.21)), v=rnd(seed*13.47);
+        const wa=1-u, wb=u*(1-v), wc=u*v;
+        return {x:tri.a.x*wa+tri.b.x*wb+tri.c.x*wc,y:tri.a.y*wa+tri.b.y*wb+tri.c.y*wc,z:tri.a.z*wa+tri.b.z*wb+tri.c.z*wc, material:tri.material,seed};
+      }
+      const particleCount=2200;
+      for(let i=0;i<particleCount;i++) {
+        const p=surfaceSample(i+1), a=rnd(i+101)*TAU, mag=.45+rnd(i+203)*1.8;
+        particles.push({...p,dx:Math.cos(a)*mag,dy:(rnd(i+307)-.34)*1.9,dz:Math.sin(a)*mag,phase:rnd(i+409)*TAU,size:.65+rnd(i+503)*1.25,twinkle:rnd(i+601)});
+      }
+      for(let i=0;i<28;i++) orbiters.push({angle:rnd(i+800)*TAU,radius:.9+rnd(i+900)*.8,speed:(.12+rnd(i+1000)*.2)*(i%2?1:-1),y:(rnd(i+1100)-.45)*.85,size:.7+rnd(i+1200)*1.1,alpha:.18+rnd(i+1300)*.4});
+
+      function resize() {
+        const rect=canvas.getBoundingClientRect();
+        dpr=Math.min(window.devicePixelRatio||1,2);
+        width=rect.width; height=rect.height;
+        canvas.width=Math.round(width*dpr); canvas.height=Math.round(height*dpr);
+        ctx.setTransform(dpr,0,0,dpr,0,0);
+        scale=Math.min(width*.56,height*.83);
+        staticFrame=false;
+      }
+      function drawShadow() {
+        const y=height*.71;
+        const g=ctx.createRadialGradient(width/2,y,2,width/2,y,scale*.8);
+        g.addColorStop(0,'rgba(0,0,0,.38)'); g.addColorStop(.52,'rgba(0,0,0,.13)'); g.addColorStop(1,'rgba(0,0,0,0)');
+        ctx.fillStyle=g; ctx.beginPath(); ctx.ellipse(width/2,y,scale*.82,scale*.17,0,0,TAU); ctx.fill();
+        const halo=ctx.createRadialGradient(width/2,height*.45,0,width/2,height*.45,scale*.9);
+        halo.addColorStop(0,'rgba(188,44,53,.055)'); halo.addColorStop(1,'rgba(188,44,53,0)');
+        ctx.fillStyle=halo; ctx.fillRect(0,0,width,height);
+      }
+      function drawParticles(now, progress) {
+        const dissolve=smooth(0,.28,progress), reform=smooth(.68,1,progress);
+        const spread=dissolve*(1-reform);
+        ctx.save(); ctx.globalCompositeOperation='lighter';
+        for(const p of particles) {
+          const q=point3(p,rotation);
+          const t=progress;
+          const swirl=(t*2.7+p.phase), amp=spread;
+          const wobble=Math.sin(swirl+p.seed*.018)*.075;
+          const x=q.x + (p.dx*Math.max(.16,Math.min(1,spread*1.15))+Math.cos(swirl)*wobble)*amp;
+          const y=q.y + p.dy*amp + Math.sin(swirl*1.12+p.phase)*.12*amp;
+          const z=q.z + p.dz*amp + Math.cos(swirl)*.22*amp;
+          const s=project({x,y,z});
+          const twinkle=.58+.42*Math.sin(now*.004+p.phase);
+          const radius=p.size*(.42+spread*.78)*s.depth;
+          const alpha=(.3+.54*twinkle)*(1-.15*spread);
+          const warm=p.material==='band'?'rgba(255,176,112,':'rgba(255,104,91,';
+          if(p.twinkle>.88) { ctx.beginPath(); ctx.fillStyle=`${warm}${alpha*.16})`; ctx.arc(s.x,s.y,radius*3.4,0,TAU); ctx.fill(); }
+          ctx.beginPath(); ctx.fillStyle=`${warm}${alpha})`; ctx.arc(s.x,s.y,Math.max(.42,radius),0,TAU); ctx.fill();
+        }
+        ctx.restore();
+      }
+      function drawOrbiters(now) {
+        ctx.save(); ctx.globalCompositeOperation='lighter';
+        for(const p of orbiters) {
+          const a=p.angle+now*.00015*p.speed*7;
+          const x=Math.cos(a)*p.radius, z=Math.sin(a)*p.radius*.68;
+          const s=project({x,y:p.y+Math.sin(a*1.7)*.08,z});
+          ctx.globalAlpha=p.alpha;
+          const grad=ctx.createRadialGradient(s.x,s.y,0,s.x,s.y,p.size*4);
+          grad.addColorStop(0,'rgba(255,168,128,.75)'); grad.addColorStop(.35,'rgba(242,83,75,.28)'); grad.addColorStop(1,'rgba(242,83,75,0)');
+          ctx.fillStyle=grad; ctx.beginPath(); ctx.arc(s.x,s.y,p.size*4,0,TAU); ctx.fill();
+          ctx.globalAlpha=p.alpha*.85; ctx.fillStyle='#ffd2b3'; ctx.beginPath(); ctx.arc(s.x,s.y,p.size,0,TAU); ctx.fill();
+        }
+        ctx.restore();
+      }
+      function frame(now) {
+        if(!width || !height) return;
+        const dt=last ? Math.min(.04,(now-last)/1000) : 0; last=now;
+        ctx.clearRect(0,0,width,height);
+        drawShadow();
+        if(reduced.matches) {
+          if(!staticFrame) { drawHat(-.24,1); staticFrame=true; }
+          return;
+        }
+        let progress=-1;
+        if(sequence) {
+          progress=clamp((now-sequenceStart)/4300,0,1);
+          if(progress>=1) { sequence=false; sequenceStart=-1; hero.classList.remove('is-active'); hint.textContent='Hover or tap to watch it come apart.'; armed=!pointerInside; }
+        }
+        const targetSpeed=sequence ? .035 : .23;
+        rotation += targetSpeed*dt;
+        if(sequence) {
+          const fade=1-smooth(.02,.3,progress);
+          if(fade>.005) drawHat(rotation,fade);
+          drawParticles(now,progress);
+        } else drawHat(rotation,1);
+        drawOrbiters(now);
+        requestAnimationFrame(frame);
+      }
+      function startSequence() {
+        if(reduced.matches || sequence || !armed) return;
+        sequence=true; sequenceStart=performance.now(); armed=false;
+        hero.classList.add('is-active'); hint.textContent='';
+      }
+      hero.addEventListener('pointerenter', e => { if(e.pointerType==='mouse') { pointerInside=true; startSequence(); } });
+      hero.addEventListener('pointerleave', e => { if(e.pointerType==='mouse') { pointerInside=false; if(!sequence) armed=true; } });
+      hero.addEventListener('click', () => startSequence());
+      hero.addEventListener('keydown', e => { if(e.key==='Enter' || e.key===' ') { e.preventDefault(); startSequence(); } });
+      hero.tabIndex=0;
+      function motionChange() { staticFrame=false; last=0; if(!reduced.matches) requestAnimationFrame(frame); }
+      if(reduced.addEventListener) reduced.addEventListener('change',motionChange); else reduced.addListener(motionChange);
+      new ResizeObserver(resize).observe(canvas);
+      resize(); requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>

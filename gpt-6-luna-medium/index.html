@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101113">
+  <title>Ember — Fedora in Motion</title>
+  <style>
+    :root { color-scheme: dark; --red: #e51b23; --paper: #ece9e4; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; min-height: 100%; margin: 0; }
+    body {
+      min-height: 100svh; overflow: hidden; display: grid; place-items: center;
+      color: var(--paper); background: #101113;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .scene {
+      position: relative; isolation: isolate; width: 100%; min-height: 100svh;
+      display: grid; place-items: center; overflow: hidden; cursor: pointer;
+      background: radial-gradient(ellipse 38% 32% at 50% 45%, #28282a 0%, #19191b 44%, #101113 100%);
+      -webkit-tap-highlight-color: transparent;
+    }
+    .scene::before {
+      content: ""; position: absolute; z-index: -1; width: min(76vw, 760px); aspect-ratio: 1;
+      border-radius: 50%; border: 1px solid #ffffff08;
+      box-shadow: 0 0 0 68px #ffffff03, 0 0 0 136px #ffffff02;
+      transform: scaleY(.43); top: 20%;
+    }
+    .scene::after {
+      content: ""; position: absolute; z-index: -1; width: min(68vw, 650px); height: 60px;
+      left: 50%; top: 59%; transform: translateX(-50%); border-radius: 50%;
+      background: #000; filter: blur(32px); opacity: .45;
+    }
+    .composition { position: relative; width: min(84vw, 680px); display: grid; justify-items: center; transform: translateY(-1.5vh); }
+    .hat-wrap { width: 100%; aspect-ratio: 600 / 360; perspective: 900px; position: relative; z-index: 2; }
+    .hat {
+      width: 100%; height: 100%; overflow: visible; transform-style: preserve-3d;
+      filter: drop-shadow(0 20px 25px #0009) drop-shadow(0 0 24px #e51b2319);
+      animation: turn 12s linear infinite; will-change: transform;
+    }
+    @keyframes turn {
+      0% { transform: rotateY(-13deg) rotateX(5deg) rotateZ(-1deg); }
+      25% { transform: rotateY(0deg) rotateX(1deg) rotateZ(0deg); }
+      50% { transform: rotateY(13deg) rotateX(-4deg) rotateZ(1deg); }
+      75% { transform: rotateY(0deg) rotateX(1deg) rotateZ(0deg); }
+      100% { transform: rotateY(-13deg) rotateX(5deg) rotateZ(-1deg); }
+    }
+    canvas { position: absolute; z-index: 3; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    .caption { margin-top: clamp(6px, 2vw, 18px); text-align: center; z-index: 4; }
+    .caption h1 { margin: 0; font-size: clamp(11px, 1.3vw, 13px); font-weight: 550; letter-spacing: .24em; text-transform: uppercase; }
+    .caption p { margin: 9px 0 0; font-size: clamp(11px, 1.15vw, 12px); color: #939194; letter-spacing: .045em; }
+    .hint { position: fixed; bottom: max(28px, env(safe-area-inset-bottom)); left: 0; width: 100%; text-align: center; color: #666569; font-size: 10px; letter-spacing: .16em; text-transform: uppercase; }
+    .scene.active .hat { animation-play-state: paused; animation-duration: 35s; }
+    @media (max-width: 540px) {
+      .composition { width: min(94vw, 580px); }
+      .scene::after { top: 55%; width: 85vw; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
+      .hint { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="scene" id="scene" aria-label="An animated red fedora. Tap or hover to watch it dissolve into embers and reform.">
+    <div class="composition">
+      <div class="hat-wrap" id="hatWrap">
+        <svg class="hat" id="hat" viewBox="0 0 600 360" role="img" aria-label="A red fedora hat">
+          <defs>
+            <linearGradient id="crown" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#fa302e"/><stop offset=".42" stop-color="#d71920"/><stop offset="1" stop-color="#991016"/></linearGradient>
+            <linearGradient id="brim" x1=".1" y1="0" x2=".78" y2="1"><stop stop-color="#f22b2c"/><stop offset=".48" stop-color="#cb171e"/><stop offset="1" stop-color="#850d14"/></linearGradient>
+            <linearGradient id="band" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#aa1118"/><stop offset=".46" stop-color="#721016"/><stop offset="1" stop-color="#4a0a10"/></linearGradient>
+            <linearGradient id="shine" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#fff" stop-opacity="0"/><stop offset=".45" stop-color="#ffb0a6" stop-opacity=".25"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+          </defs>
+          <!-- Broad, softly sculpted brim -->
+          <path d="M300 210 C390 194 491 198 552 229 C585 246 570 275 535 293 C470 326 357 330 267 316 C167 323 79 302 47 276 C20 254 42 231 91 219 C151 204 233 205 300 210Z" fill="url(#brim)"/>
+          <path d="M67 261 C146 290 220 293 286 284 C390 302 493 286 557 251 C549 273 486 301 405 310 C322 321 251 310 198 309 C135 308 83 292 57 276Z" fill="#650b11" opacity=".48"/>
+          <path d="M67 251 C147 224 226 228 300 237 C391 224 475 222 543 244" fill="none" stroke="#ff7770" stroke-opacity=".4" stroke-width="2"/>
+          <path d="M94 267 C176 293 236 289 298 282 C383 296 480 281 529 255" fill="none" stroke="#fa5a54" stroke-opacity=".36" stroke-width="1.5"/>
+          <!-- Crown -->
+          <path d="M164 221 C169 194 185 166 197 141 C207 120 200 92 214 69 C230 42 266 31 298 36 C331 30 372 44 386 69 C400 94 389 122 404 148 C420 176 431 198 436 221 C357 244 236 244 164 221Z" fill="url(#crown)"/>
+          <path d="M209 80 C226 51 267 43 298 47 C329 42 367 52 383 79 C350 95 322 103 297 103 C269 102 238 94 209 80Z" fill="#f23130" opacity=".55"/>
+          <path d="M216 83 C244 99 271 106 298 106 C326 105 351 98 378 83" fill="none" stroke="#ff8279" stroke-opacity=".42" stroke-width="2"/>
+          <path d="M199 143 C263 161 340 162 400 143" fill="none" stroke="#ff716b" stroke-opacity=".22" stroke-width="2"/>
+          <!-- Fedora band and folded bow -->
+          <path d="M170 203 C241 220 359 222 428 202 L436 227 C357 250 240 247 163 226Z" fill="url(#band)"/>
+          <path d="M385 207 C400 196 416 196 427 205 C421 216 407 222 391 219 C400 227 412 235 418 243 C401 248 385 238 376 228Z" fill="#8d1117" stroke="#ef3734" stroke-opacity=".42" stroke-width="2"/>
+          <path d="M386 211 C397 216 406 222 416 239" fill="none" stroke="#ff746b" stroke-opacity=".4" stroke-width="1.5"/>
+          <path d="M193 72 C221 43 266 34 298 38 C333 33 368 44 389 73" fill="none" stroke="url(#shine)" stroke-width="14" opacity=".7"/>
+        </svg>
+        <canvas id="embers" aria-hidden="true"></canvas>
+      </div>
+      <div class="caption"><h1>Made of motion</h1><p>A little magic in the familiar.</p></div>
+    </div>
+    <div class="hint" id="hint">Hover or tap to stir the embers</div>
+  </main>
+  <script>
+    (() => {
+      const scene = document.getElementById('scene');
+      const wrap = document.getElementById('hatWrap');
+      const hat = document.getElementById('hat');
+      const canvas = document.getElementById('embers');
+      const ctx = canvas.getContext('2d');
+      const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+      const shape = new Path2D('M300 210 C390 194 491 198 552 229 C585 246 570 275 535 293 C470 326 357 330 267 316 C167 323 79 302 47 276 C20 254 42 231 91 219 C151 204 233 205 300 210Z M164 221 C169 194 185 166 197 141 C207 120 200 92 214 69 C230 42 266 31 298 36 C331 30 372 44 386 69 C400 94 389 122 404 148 C420 176 431 198 436 221 C357 244 236 244 164 221Z M170 203 C241 220 359 222 428 202 L436 227 C357 250 240 247 163 226Z');
+      let width = 0, height = 0, dpr = 1, particles = [], mode = 'idle', start = 0, last = 0, orbit = [], active = false;
+      const colors = ['255,91,61', '255,145,83', '255,198,123', '255,67,52'];
+      function resize() {
+        const r = wrap.getBoundingClientRect(); dpr = Math.min(devicePixelRatio || 1, 2);
+        width = r.width; height = r.height; canvas.width = Math.round(width*dpr); canvas.height = Math.round(height*dpr);
+        ctx.setTransform(dpr,0,0,dpr,0,0);
+      }
+      function makeParticles() {
+        particles = []; const scale = width/600; const count = Math.min(2600, Math.max(1000, Math.round(width*3.7)));
+        const sample = document.createElement('canvas'); sample.width = 600; sample.height = 360;
+        const sctx = sample.getContext('2d'); sctx.fillStyle = '#fff'; sctx.fill(shape);
+        const pixels = sctx.getImageData(0,0,600,360).data; const points = [];
+        for (let y=0; y<360; y+=2) for (let x=0; x<600; x+=2) if (pixels[(y*600+x)*4+3] > 0) points.push([x,y]);
+        for (let i=0; i<count; i++) {
+          const p = points[Math.random()*points.length|0]; const x=(p[0]+Math.random()*2)*scale, y=(p[1]+Math.random()*2)*scale;
+          particles.push({x,y,tx:x,ty:y,vx:0,vy:0,size:.65+Math.random()*1.2,c:colors[Math.random()*colors.length|0],phase:Math.random()*6.28,spin:(Math.random()-.5)*2.4});
+        }
+        orbit = Array.from({length: 32}, (_,i)=>({a:i/32*Math.PI*2,r:width*(.2+Math.random()*.18),y:height*.46+(Math.random()-.5)*height*.13,phase:Math.random()*6.28,size:.7+Math.random()*1.1,c:colors[Math.random()*colors.length|0]}));
+      }
+      function begin() {
+        if (reduce.matches || mode !== 'idle') return;
+        mode='out'; start=performance.now(); active=true; scene.classList.add('active');
+        particles.forEach(p=>{p.vx=(Math.random()-.5)*width*.7;p.vy=(Math.random()-.5)*height*.8;p.spin=(Math.random()-.5)*4;});
+      }
+      function finish() { mode='idle'; active=false; scene.classList.remove('active'); }
+      function pointerDown(e) { if (e.type==='pointerdown') { e.preventDefault(); begin(); } }
+      scene.addEventListener('pointerenter', e=>{if(e.pointerType==='mouse')begin();});
+      scene.addEventListener('pointerleave', e=>{if(e.pointerType==='mouse' && mode==='idle') { active=false; scene.classList.remove('active'); }});
+      scene.addEventListener('pointerdown', pointerDown);
+      scene.addEventListener('keydown', e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();begin();}});
+      scene.tabIndex=0;
+      reduce.addEventListener?.('change',()=>{if(reduce.matches){finish();ctx.clearRect(0,0,width,height);}});
+      let ready=false;
+      function frame(now) {
+        requestAnimationFrame(frame); if(reduce.matches) return;
+        const dt=Math.min((now-last)/1000,.04)||.016; last=now;
+        if (!ready) { resize(); makeParticles(); ready=true; }
+        ctx.clearRect(0,0,width,height);
+        if(mode==='out' && now-start>1250){mode='swirl';start=now;}
+        if(mode==='swirl' && now-start>1350){mode='in';start=now;hat.style.opacity='0';}
+        if(mode==='in' && now-start>1150){finish();hat.style.opacity='1';}
+        const elapsed=now-start;
+        for(const p of particles){
+          if(mode==='out') { p.x+=p.vx*dt; p.y+=p.vy*dt; p.vx*=.992; p.vy*=.992; }
+          else if(mode==='swirl') { const cx=width*.5,cy=height*.48,dx=p.x-cx,dy=p.y-cy,ang=Math.atan2(dy,dx)+p.spin*dt*.4,rad=Math.hypot(dx,dy)*.992+Math.sin(elapsed*.003+p.phase)*.18; p.x=cx+Math.cos(ang)*rad;p.y=cy+Math.sin(ang)*rad; }
+          else if(mode==='in') { const t=Math.min(1,elapsed/1100),ease=1-Math.pow(1-t,3); p.x+=(p.tx-p.x)*(.025+ease*.2);p.y+=(p.ty-p.y)*(.025+ease*.2); }
+          else { p.x+=(p.tx-p.x)*.08;p.y+=(p.ty-p.y)*.08; }
+          let alpha=mode==='idle' ? .09+Math.max(0,Math.sin(now*.001+p.phase))*.15 : (mode==='in'?Math.max(.1,1-elapsed/1600):Math.max(.08,1-elapsed/3500));
+          ctx.beginPath();ctx.fillStyle=`rgba(${p.c},${alpha})`;ctx.shadowColor=`rgba(${p.c},${alpha*.8})`;ctx.shadowBlur=mode==='idle'?5:8;ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fill();
+        }
+        if(mode==='idle') for(const o of orbit){o.phase+=dt*.36;const x=width*.5+Math.cos(o.phase)*o.r,y=o.y+Math.sin(o.phase*1.4)*height*.025;ctx.beginPath();ctx.fillStyle=`rgba(${o.c},${.12+Math.max(0,Math.sin(o.phase*2))*.22})`;ctx.shadowColor=`rgba(${o.c},.5)`;ctx.shadowBlur=9;ctx.arc(x,y,o.size,0,6.283);ctx.fill();}
+      }
+      new ResizeObserver(()=>{resize();ready=false;}).observe(wrap);
+      requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>

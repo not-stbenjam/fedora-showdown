@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#090b10">
+  <title>In Motion — A Fedora Study</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html { min-height: 100%; background: #090b10; }
+    body {
+      min-width: 280px;
+      min-height: 100svh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      overflow-x: hidden;
+      color: #f5eef0;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(ellipse 49% 40% at 50% 47%, rgba(102, 31, 47, .23), transparent 76%),
+        radial-gradient(ellipse 85% 78% at 50% 40%, #17141d 0%, #0d0e15 55%, #080a0e 100%);
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: .28;
+      background: repeating-linear-gradient(90deg, transparent 0 79px, rgba(255, 255, 255, .014) 80px),
+                  repeating-linear-gradient(0deg, transparent 0 79px, rgba(255, 255, 255, .01) 80px);
+      mask-image: radial-gradient(ellipse at center, black 0%, transparent 78%);
+    }
+    main {
+      width: min(100%, 1120px);
+      padding: clamp(28px, 5vh, 62px) clamp(18px, 4vw, 48px) clamp(32px, 6vh, 68px);
+      text-align: center;
+    }
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 13px;
+      margin: 0;
+      color: #bc9ca4;
+      font-size: 10px;
+      font-weight: 650;
+      letter-spacing: .29em;
+      text-transform: uppercase;
+    }
+    .eyebrow::before, .eyebrow::after {
+      content: "";
+      width: 23px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, #8b4b59);
+    }
+    .eyebrow::after { transform: rotate(180deg); }
+    .scene {
+      display: block;
+      position: relative;
+      width: 100%;
+      height: clamp(330px, 54vw, 560px);
+      margin: 4px auto 0;
+      padding: 0;
+      overflow: hidden;
+      border: 0;
+      border-radius: 50%;
+      outline: none;
+      background: transparent;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+    .scene::before {
+      content: "";
+      position: absolute;
+      inset: 11% 11% 3%;
+      border-radius: 50%;
+      pointer-events: none;
+      background: radial-gradient(ellipse at 50% 51%, rgba(160, 45, 64, .1), transparent 64%);
+      filter: blur(25px);
+    }
+    .scene:focus-visible { box-shadow: inset 0 0 0 1px rgba(243, 128, 139, .7); }
+    canvas { display: block; position: relative; width: 100%; height: 100%; }
+    .caption { margin: -10px auto 0; }
+    .caption h1 {
+      margin: 0;
+      font-size: clamp(21px, 3vw, 31px);
+      font-weight: 430;
+      letter-spacing: -.035em;
+      line-height: 1.2;
+    }
+    .caption p {
+      margin: 10px 0 0;
+      color: #9f929d;
+      font-size: clamp(12px, 1.4vw, 13px);
+      letter-spacing: .025em;
+    }
+    .caption .dot { padding: 0 8px; color: #a9485a; }
+    @media (max-width: 550px) {
+      main { padding-inline: 10px; }
+      .scene { height: clamp(310px, 84vw, 390px); margin-top: 17px; }
+      .caption { margin-top: -8px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .scene { cursor: default; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">An interactive study</p>
+    <button class="scene" id="scene" type="button" aria-label="Spinning red fedora. Hover, tap, or press Enter to see it turn into glowing particles and reform.">
+      <canvas id="art" aria-hidden="true"></canvas>
+    </button>
+    <div class="caption">
+      <h1>A moment in motion.</h1>
+      <p id="hint">Hover or tap to let it unfold<span class="dot" aria-hidden="true">·</span>Watch it return</p>
+    </div>
+  </main>
+  <script>
+    (() => {
+      'use strict';
+
+      const button = document.getElementById('scene');
+      const canvas = document.getElementById('art');
+      const ctx = canvas.getContext('2d', { alpha: true });
+      const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
+      const TAU = Math.PI * 2;
+      const segments = 68;
+      const faces = [];
+      const particles = [];
+      const orbiters = [];
+      const light = normalize({ x: -0.56, y: 0.91, z: 0.83 });
+      const palettes = {
+        red: [175, 33, 47],
+        edge: [119, 22, 36],
+        band: [43, 23, 32],
+        bandEdge: [99, 27, 40],
+        top: [190, 41, 53]
+      };
+      const emberColors = ['#db4250', '#f26a6d', '#b82b3f', '#ff9c7d', '#ffd0a2', '#8e2438'];
+      let seed = 14721;
+      let width = 0, height = 0, dpr = 1, scale = 1, centerX = 0, centerY = 0;
+      let angle = -0.32, lastFrame = 0, cycleStart = null, formedOnce = false, hoverReady = true;
+      let reduced = motionPreference.matches;
+
+      function random() {
+        seed = (seed + 0x6D2B79F5) | 0;
+        let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+        t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      }
+      function normalize(v) {
+        const length = Math.hypot(v.x, v.y, v.z) || 1;
+        return { x: v.x / length, y: v.y / length, z: v.z / length };
+      }
+      function smooth(a, b, x) {
+        const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+        return t * t * (3 - 2 * t);
+      }
+      function clamp(x, a = 0, b = 1) { return Math.max(a, Math.min(b, x)); }
+      function topHeight(x, z) {
+        const centerDent = .24 * Math.exp(-((x / .49) ** 4 + (z / .37) ** 4));
+        const leftPinch = .08 * Math.exp(-(((x + .60) / .20) ** 2 + ((z - .07) / .28) ** 2));
+        const rightPinch = .08 * Math.exp(-(((x - .60) / .20) ** 2 + ((z - .07) / .28) ** 2));
+        return .76 - centerDent - leftPinch - rightPinch;
+      }
+      function brimPoint(t, a, lower = false) {
+        const x = (1.08 + .93 * t) * Math.cos(a);
+        const z = (.76 + .42 * t) * Math.sin(a);
+        const curl = t * t * (.07 * Math.cos(2 * a) - .095 * Math.sin(a));
+        return { x, y: -.42 + curl - (lower ? .072 : 0), z };
+      }
+      function crownPoint(rx, rz, y, a) {
+        const x = rx * Math.cos(a), z = rz * Math.sin(a);
+        return { x, y: y === null ? topHeight(x, z) : y, z };
+      }
+      function addFace(a, b, c, type, outward) {
+        const ab = { x: b.x - a.x, y: b.y - a.y, z: b.z - a.z };
+        const ac = { x: c.x - a.x, y: c.y - a.y, z: c.z - a.z };
+        let normal = normalize({
+          x: ab.y * ac.z - ab.z * ac.y,
+          y: ab.z * ac.x - ab.x * ac.z,
+          z: ab.x * ac.y - ab.y * ac.x
+        });
+        const mid = { x: (a.x + b.x + c.x) / 3, y: (a.y + b.y + c.y) / 3, z: (a.z + b.z + c.z) / 3 };
+        const guide = outward === 'up' ? { x: 0, y: 1, z: 0 } : outward === 'down' ? { x: 0, y: -1, z: 0 } : { x: mid.x, y: 0, z: mid.z };
+        if (normal.x * guide.x + normal.y * guide.y + normal.z * guide.z < 0) {
+          normal = { x: -normal.x, y: -normal.y, z: -normal.z };
+        }
+        const area = Math.hypot(
+          ab.y * ac.z - ab.z * ac.y,
+          ab.z * ac.x - ab.x * ac.z,
+          ab.x * ac.y - ab.y * ac.x
+        ) * .5;
+        faces.push({ a, b, c, type, normal, area });
+      }
+      function bridge(ringA, ringB, type, outward) {
+        for (let i = 0; i < segments; i++) {
+          const j = (i + 1) % segments;
+          addFace(ringA[i], ringA[j], ringB[j], type, outward);
+          addFace(ringA[i], ringB[j], ringB[i], type, outward);
+        }
+      }
+      function makeRing(fn) {
+        return Array.from({ length: segments }, (_, i) => fn(i * TAU / segments));
+      }
+      function buildHat() {
+        const brimLevels = [0, .36, .7, 1].map(t => makeRing(a => brimPoint(t, a)));
+        for (let i = 0; i < brimLevels.length - 1; i++) bridge(brimLevels[i], brimLevels[i + 1], 'red', 'up');
+        const lowerOuter = makeRing(a => brimPoint(1, a, true));
+        bridge(brimLevels[3], lowerOuter, 'edge', 'side');
+
+        const levels = [
+          [1.08, .76, -.43], [1.075, .765, -.27], [1.064, .756, -.23],
+          [1.055, .748, -.04], [1.047, .74, .005],
+          [.95, .68, .40], [.82, .60, null]
+        ].map(([rx, rz, y]) => makeRing(a => crownPoint(rx, rz, y, a)));
+        const colors = ['red', 'bandEdge', 'band', 'bandEdge', 'red', 'red'];
+        for (let i = 0; i < levels.length - 1; i++) bridge(levels[i], levels[i + 1], colors[i], 'side');
+
+        let previous = levels[levels.length - 1];
+        for (const radius of [.78, .54, .31, .11]) {
+          const next = makeRing(a => {
+            const x = .82 * radius * Math.cos(a);
+            const z = .60 * radius * Math.sin(a);
+            return { x, y: topHeight(x, z), z };
+          });
+          bridge(previous, next, 'top', 'up');
+          previous = next;
+        }
+        const center = { x: 0, y: topHeight(0, 0), z: 0 };
+        for (let i = 0; i < segments; i++) addFace(previous[i], previous[(i + 1) % segments], center, 'top', 'up');
+      }
+      function buildParticles() {
+        const cumulative = [];
+        let total = 0;
+        for (const face of faces) { total += face.area; cumulative.push(total); }
+        for (let i = 0; i < 3900; i++) {
+          const pick = random() * total;
+          let lo = 0, hi = cumulative.length - 1;
+          while (lo < hi) { const mid = (lo + hi) >>> 1; if (cumulative[mid] < pick) lo = mid + 1; else hi = mid; }
+          const f = faces[lo];
+          const r1 = Math.sqrt(random()), r2 = random();
+          const u = 1 - r1, v = r1 * (1 - r2), w = r1 * r2;
+          particles.push({
+            x: u * f.a.x + v * f.b.x + w * f.c.x,
+            y: u * f.a.y + v * f.b.y + w * f.c.y,
+            z: u * f.a.z + v * f.b.z + w * f.c.z,
+            radial: 1.0 + random() * 1.5,
+            drift: (random() - .5) * 2.5,
+            lift: (random() - .42) * 2.9,
+            phase: random() * TAU,
+            size: .5 + random() * 1.1,
+            color: f.type === 'band' ? 5 : Math.floor(random() * 5)
+          });
+        }
+        for (let i = 0; i < 38; i++) orbiters.push({
+          radius: 1.46 + random() * 1.0,
+          depth: .72 + random() * .53,
+          y: -.29 + random() * 1.18,
+          phase: random() * TAU,
+          speed: .00018 + random() * .00032,
+          size: .7 + random() * 1.15,
+          color: i % 4 === 0 ? '#ffbe92' : '#dc5960'
+        });
+      }
+      function resize() {
+        const rect = button.getBoundingClientRect();
+        width = rect.width;
+        height = rect.height;
+        dpr = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.max(1, Math.round(width * dpr));
+        canvas.height = Math.max(1, Math.round(height * dpr));
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        scale = Math.min(width / 5.2, height / 3.16);
+        centerX = width * .5;
+        centerY = height * .49;
+        if (reduced) draw(0, 0);
+      }
+      function viewPoint(x, y, z, rotation = angle) {
+        const c = Math.cos(rotation), s = Math.sin(rotation);
+        const rx = c * x + s * z;
+        const rz = -s * x + c * z;
+        const tilt = .34;
+        const vy = Math.cos(tilt) * y - Math.sin(tilt) * rz;
+        const depth = Math.sin(tilt) * y + Math.cos(tilt) * rz;
+        const perspective = 1 / (1 - depth * .085);
+        return { x: centerX + rx * scale * perspective, y: centerY - vy * scale * perspective, depth, perspective };
+      }
+      function shade(face, rotation) {
+        const c = Math.cos(rotation), s = Math.sin(rotation);
+        const nx = c * face.normal.x + s * face.normal.z;
+        const nz = -s * face.normal.x + c * face.normal.z;
+        const ny = Math.cos(.34) * face.normal.y - Math.sin(.34) * nz;
+        const vz = Math.sin(.34) * face.normal.y + Math.cos(.34) * nz;
+        const diffuse = Math.max(0, nx * light.x + ny * light.y + vz * light.z);
+        const rim = Math.pow(Math.max(0, 1 - Math.abs(vz)), 3) * .11;
+        const glow = Math.pow(diffuse, 9) * .13;
+        const level = .50 + diffuse * .50 + rim + glow;
+        const base = palettes[face.type];
+        return `rgb(${Math.min(255, base[0] * level) | 0} ${Math.min(255, base[1] * level) | 0} ${Math.min(255, base[2] * level) | 0})`;
+      }
+      function background() {
+        ctx.clearRect(0, 0, width, height);
+        const glow = ctx.createRadialGradient(centerX, centerY + scale * .18, scale * .16, centerX, centerY + scale * .18, scale * 2.75);
+        glow.addColorStop(0, 'rgba(154,46,65,.13)');
+        glow.addColorStop(.46, 'rgba(107,35,53,.045)');
+        glow.addColorStop(1, 'rgba(60,26,46,0)');
+        ctx.fillStyle = glow;
+        ctx.fillRect(0, 0, width, height);
+
+        ctx.save();
+        ctx.translate(centerX, centerY + scale * 1.11);
+        ctx.scale(1, .19);
+        const shadow = ctx.createRadialGradient(0, 0, scale * .2, 0, 0, scale * 2.1);
+        shadow.addColorStop(0, 'rgba(1,2,6,.48)');
+        shadow.addColorStop(.52, 'rgba(5,4,10,.25)');
+        shadow.addColorStop(1, 'rgba(6,5,11,0)');
+        ctx.fillStyle = shadow;
+        ctx.beginPath();
+        ctx.arc(0, 0, scale * 2.1, 0, TAU);
+        ctx.fill();
+        ctx.restore();
+
+        ctx.save();
+        ctx.strokeStyle = 'rgba(214,116,132,.075)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.ellipse(centerX, centerY + scale * 1.18, scale * 2.17, scale * .28, 0, .12, Math.PI - .12);
+        ctx.stroke();
+        ctx.restore();
+      }
+      function drawHat(alpha, rotation) {
+        if (alpha <= .001) return;
+        const projected = faces.filter(face => {
+          if (face.type !== 'edge') return true;
+          const depthNormal = -Math.sin(rotation) * face.normal.x + Math.cos(rotation) * face.normal.z;
+          return Math.sin(.34) * face.normal.y + Math.cos(.34) * depthNormal > 0;
+        }).map(face => {
+          const a = viewPoint(face.a.x, face.a.y, face.a.z, rotation);
+          const b = viewPoint(face.b.x, face.b.y, face.b.z, rotation);
+          const c = viewPoint(face.c.x, face.c.y, face.c.z, rotation);
+          return { a, b, c, face, depth: (a.depth + b.depth + c.depth) / 3 };
+        });
+        projected.sort((a, b) => a.depth - b.depth);
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.lineWidth = .85;
+        ctx.lineJoin = 'round';
+        for (const triangle of projected) {
+          ctx.fillStyle = shade(triangle.face, rotation);
+          ctx.strokeStyle = ctx.fillStyle;
+          ctx.beginPath();
+          ctx.moveTo(triangle.a.x, triangle.a.y);
+          ctx.lineTo(triangle.b.x, triangle.b.y);
+          ctx.lineTo(triangle.c.x, triangle.c.y);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+      function drawParticles(amount, scatter, swirl, clock) {
+        if (amount <= .001) return;
+        const groups = Array.from({ length: emberColors.length }, () => []);
+        const sparks = [];
+        const shimmer = clock * .002;
+        for (let i = 0; i < particles.length; i++) {
+          const p = particles[i];
+          const baseAngle = Math.atan2(p.z, p.x);
+          const radius = Math.hypot(p.x, p.z) + scatter * p.radial;
+          const twist = swirl * (1.25 + .22 * Math.sin(p.phase + shimmer));
+          const a = baseAngle + twist;
+          const x = Math.cos(a) * radius + scatter * p.drift * .35;
+          const z = Math.sin(a) * radius + scatter * Math.sin(p.phase) * .3;
+          const y = p.y + scatter * p.lift + swirl * .24 * Math.sin(p.phase * 2 + shimmer * 2);
+          const pos = viewPoint(x, y, z);
+          const point = { x: pos.x, y: pos.y, size: p.size * Math.max(.75, pos.perspective) * (width < 500 ? .78 : 1) };
+          groups[p.color].push(point);
+          if (i % 19 === 0) sparks.push({ ...point, color: emberColors[p.color] });
+        }
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        ctx.globalAlpha = amount * .88;
+        for (let i = 0; i < groups.length; i++) {
+          ctx.fillStyle = emberColors[i];
+          ctx.beginPath();
+          for (const p of groups[i]) {
+            ctx.moveTo(p.x + p.size, p.y);
+            ctx.arc(p.x, p.y, p.size, 0, TAU);
+          }
+          ctx.fill();
+        }
+        ctx.globalAlpha = amount * .65;
+        ctx.shadowBlur = 11;
+        for (const spark of sparks) {
+          ctx.shadowColor = spark.color;
+          ctx.fillStyle = spark.color;
+          ctx.beginPath();
+          ctx.arc(spark.x, spark.y, spark.size * 1.12, 0, TAU);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+      function orbitPoint(orbiter, clock, offset) {
+        const a = orbiter.phase + (clock - offset) * orbiter.speed;
+        return viewPoint(Math.cos(a) * orbiter.radius, orbiter.y + Math.sin(a * 1.8) * .08, Math.sin(a) * orbiter.depth);
+      }
+      function drawOrbiters(clock, alpha, front) {
+        if (alpha <= .001) return;
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        for (const orbiter of orbiters) {
+          const head = orbitPoint(orbiter, clock, 0);
+          if ((head.depth >= 0) !== front) continue;
+          ctx.strokeStyle = orbiter.color;
+          ctx.fillStyle = orbiter.color;
+          ctx.lineWidth = Math.max(.4, orbiter.size * .68);
+          ctx.globalAlpha = alpha * (front ? .23 : .11);
+          ctx.beginPath();
+          for (let i = 8; i >= 0; i--) {
+            const p = orbitPoint(orbiter, clock, i * 17);
+            if (i === 8) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+          }
+          ctx.stroke();
+          ctx.globalAlpha = alpha * (front ? .73 : .37);
+          ctx.shadowColor = orbiter.color;
+          ctx.shadowBlur = front ? 8 : 4;
+          ctx.beginPath();
+          ctx.arc(head.x, head.y, orbiter.size * (front ? 1 : .75), 0, TAU);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+      function draw(clock, seconds) {
+        background();
+        const active = cycleStart !== null;
+        const spread = active ? smooth(.38, 1.52, seconds) * (1 - smooth(2.55, 4.05, seconds)) : 0;
+        const swirl = active ? spread * smooth(1.05, 1.9, seconds) * (1 - smooth(2.55, 3.85, seconds)) : 0;
+        const hatAlpha = active ? clamp(1 - smooth(.25, .92, seconds) + smooth(3.39, 4.2, seconds)) : 1;
+        const particleAlpha = active ? smooth(.18, .78, seconds) * (1 - smooth(3.52, 4.23, seconds)) : 0;
+        const orbitAlpha = formedOnce ? 1 : active ? smooth(3.66, 4.32, seconds) : 0;
+        drawOrbiters(clock, orbitAlpha, false);
+        drawHat(hatAlpha, angle);
+        drawOrbiters(clock, orbitAlpha, true);
+        drawParticles(particleAlpha, spread, swirl, clock);
+      }
+      function animate(now) {
+        const delta = Math.min(50, now - (lastFrame || now));
+        lastFrame = now;
+        const elapsed = cycleStart === null ? 0 : (now - cycleStart) / 1000;
+        const slowdown = cycleStart !== null ? smooth(0, .48, elapsed) * (1 - smooth(3.6, 4.5, elapsed)) : 0;
+        angle += delta * (.00052 * (1 - slowdown) + .000085 * slowdown);
+        if (cycleStart !== null && elapsed > 4.4) {
+          cycleStart = null;
+          formedOnce = true;
+        }
+        draw(now, elapsed);
+        if (!reduced) requestAnimationFrame(animate);
+      }
+      function trigger() {
+        if (reduced || cycleStart !== null) return;
+        cycleStart = performance.now();
+      }
+      function setMotion() {
+        const wasReduced = reduced;
+        reduced = motionPreference.matches;
+        button.disabled = reduced;
+        button.setAttribute('aria-label', reduced
+          ? 'A red fedora illustration with motion reduced.'
+          : 'Spinning red fedora. Hover, tap, or press Enter to see it turn into glowing particles and reform.');
+        document.getElementById('hint').innerHTML = reduced
+          ? 'A study in form and light'
+          : 'Hover or tap to let it unfold<span class="dot" aria-hidden="true">·</span>Watch it return';
+        if (reduced) {
+          cycleStart = null;
+          draw(0, 0);
+        } else if (wasReduced) {
+          lastFrame = 0;
+          requestAnimationFrame(animate);
+        }
+      }
+
+      buildHat();
+      buildParticles();
+      new ResizeObserver(resize).observe(button);
+      resize();
+      button.addEventListener('pointerenter', event => {
+        if (event.pointerType === 'mouse' && hoverReady) { hoverReady = false; trigger(); }
+      });
+      button.addEventListener('pointerleave', () => { hoverReady = true; });
+      button.addEventListener('pointerdown', trigger);
+      button.addEventListener('click', trigger);
+      motionPreference.addEventListener('change', setMotion);
+      setMotion();
+      if (!reduced) requestAnimationFrame(animate);
+    })();
+  </script>
+</body>
+</html>
