@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0d12">
+  <title>Fedora in Motion</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; margin: 0; }
+    body {
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      background:
+        radial-gradient(ellipse at 50% 43%, #25212b 0%, #15151c 35%, #0b0d12 72%);
+      color: #e9e3e2;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: .28;
+      background: radial-gradient(circle at 50% 48%, transparent 18%, #050609 86%);
+    }
+    main {
+      position: relative;
+      width: min(100%, 1100px);
+      padding: 24px;
+      text-align: center;
+    }
+    .scene {
+      position: relative;
+      width: min(100%, 760px);
+      height: min(66vh, 560px);
+      min-height: 330px;
+      margin: auto;
+      touch-action: manipulation;
+      cursor: pointer;
+    }
+    canvas { display: block; width: 100%; height: 100%; }
+    .caption {
+      margin: -6px 0 0;
+      color: #bcb2b5;
+      font-size: clamp(.75rem, 1.4vw, .88rem);
+      font-weight: 400;
+      letter-spacing: .22em;
+      text-transform: uppercase;
+    }
+    .hint {
+      margin: 12px 0 0;
+      color: #777079;
+      font-size: .76rem;
+      letter-spacing: .04em;
+    }
+    @media (max-width: 520px) {
+      main { padding: 12px; }
+      .scene { height: min(58vh, 440px); min-height: 290px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .hint { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="scene" id="scene" role="img" aria-label="A softly lit red fedora surrounded by a few glowing embers.">
+      <canvas id="hat"></canvas>
+    </div>
+    <p class="caption">A little magic in the making</p>
+    <p class="hint">Hover or tap the hat</p>
+  </main>
+
+  <script>
+    (() => {
+      const canvas = document.getElementById("hat");
+      const scene = document.getElementById("scene");
+      const ctx = canvas.getContext("2d", { alpha: true });
+      const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+      const points = [];
+      const orbiters = [];
+      const TAU = Math.PI * 2;
+      let seed = 41729;
+      let width = 0, height = 0, scale = 1, dpr = 1;
+      let spin = -.35, last = 0, start = -100, phase = "idle";
+      let lastTrigger = -100;
+      let frame;
+
+      function random() {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+        return seed / 4294967296;
+      }
+      function add(x, y, z, kind, size = 1) {
+        const n = points.length;
+        const a = random() * TAU;
+        const r = 1 + random() * .8;
+        points.push({
+          x, y, z, kind, size,
+          dx: Math.cos(a) * r * (95 + random() * 190),
+          dy: (random() - .5) * 205,
+          dz: Math.sin(a) * r * (95 + random() * 190),
+          swirl: random() * TAU,
+          delay: random() * .23,
+          twinkle: random() * TAU,
+          n
+        });
+      }
+
+      // The brim is an elliptical, gently curled surface.
+      for (let i = 0; i < 4600; i++) {
+        const a = random() * TAU;
+        const r = Math.sqrt(random());
+        const x = Math.cos(a) * 174 * r;
+        const z = Math.sin(a) * 83 * r;
+        const edge = Math.pow(r, 3);
+        const y = 38 - 13 * edge + 5 * Math.cos(2 * a) * edge;
+        add(x, y, z, "felt", 1.05);
+      }
+      for (let i = 0; i < 1050; i++) {
+        const a = random() * TAU;
+        const r = .975 + random() * .025;
+        const x = Math.cos(a) * 174 * r;
+        const z = Math.sin(a) * 83 * r;
+        const y = 38 - 13 * Math.pow(r, 3) + 5 * Math.cos(2 * a);
+        add(x, y, z, "edge", 1.15);
+      }
+
+      // Crown, dark ribbon, and pinched top of the fedora.
+      for (let i = 0; i < 6000; i++) {
+        const a = random() * TAU;
+        const t = random();
+        const y = 35 - 113 * t;
+        const taper = 1 - .13 * t + .035 * Math.sin(t * Math.PI);
+        const pinch = Math.pow(t, 5);
+        const x = Math.cos(a) * (111 * taper - 13 * pinch * Math.cos(2 * a));
+        const z = Math.sin(a) * (58 * taper + 7 * pinch * Math.cos(2 * a));
+        const kind = y > 13 && y < 34 ? "band" : "felt";
+        add(x, y + 4 * pinch * Math.cos(2 * a), z, kind, 1.2);
+      }
+      for (let i = 0; i < 2600; i++) {
+        const a = random() * TAU;
+        const r = Math.sqrt(random());
+        const x = Math.cos(a) * 91 * r;
+        const z = Math.sin(a) * 48 * r;
+        const crease = 13 * Math.exp(-Math.pow(x / 30, 2));
+        add(x, -78 + crease + 3 * Math.cos(a * 2), z, "top", 1.2);
+      }
+
+      for (let i = 0; i < 34; i++) {
+        orbiters.push({
+          a: random() * TAU,
+          radius: 155 + random() * 90,
+          lift: (random() - .5) * 145,
+          speed: .24 + random() * .35,
+          size: .5 + random() * 1.1,
+          offset: random() * TAU
+        });
+      }
+
+      function resize() {
+        const box = scene.getBoundingClientRect();
+        width = box.width;
+        height = box.height;
+        dpr = Math.min(devicePixelRatio || 1, 2);
+        canvas.width = Math.round(width * dpr);
+        canvas.height = Math.round(height * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        scale = Math.min(width / 470, height / 360, 1.55);
+        if (reduced.matches) draw(0);
+      }
+
+      function project(x, y, z, angle) {
+        const ca = Math.cos(angle), sa = Math.sin(angle);
+        const xx = x * ca + z * sa;
+        const zz = -x * sa + z * ca;
+        const tilt = -.20;
+        const yy = y * Math.cos(tilt) - zz * Math.sin(tilt);
+        const depth = y * Math.sin(tilt) + zz * Math.cos(tilt);
+        const perspective = 570 / (570 - depth);
+        return {
+          x: width / 2 + xx * perspective * scale,
+          y: height * .46 + yy * perspective * scale,
+          depth,
+          perspective
+        };
+      }
+
+      function smooth(t) {
+        t = Math.max(0, Math.min(1, t));
+        return t * t * (3 - 2 * t);
+      }
+
+      function trigger() {
+        if (reduced.matches) return;
+        const now = performance.now() / 1000;
+        if (phase !== "idle" || now - lastTrigger < 1) return;
+        lastTrigger = now;
+        start = now;
+        phase = "burst";
+      }
+      scene.addEventListener("pointerenter", trigger);
+      scene.addEventListener("pointerdown", trigger);
+      scene.addEventListener("click", trigger);
+
+      function draw(time) {
+        ctx.clearRect(0, 0, width, height);
+        const now = time / 1000;
+        const elapsed = now - start;
+        if (!reduced.matches && phase !== "idle" && elapsed >= 4.6) phase = "idle";
+
+        let scatter = 0;
+        if (phase !== "idle") {
+          if (elapsed < 1.05) scatter = smooth(elapsed / 1.05);
+          else if (elapsed < 2.9) scatter = 1;
+          else scatter = 1 - smooth((elapsed - 2.9) / 1.7);
+        }
+
+        // A soft pool of light grounds the floating form.
+        const shadowY = height * .79;
+        const shadow = ctx.createRadialGradient(width / 2, shadowY, 0, width / 2, shadowY, 170 * scale);
+        shadow.addColorStop(0, "rgba(0,0,0,.32)");
+        shadow.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = shadow;
+        ctx.save();
+        ctx.translate(width / 2, shadowY);
+        ctx.scale(1, .25);
+        ctx.beginPath();
+        ctx.arc(0, 0, 170 * scale, 0, TAU);
+        ctx.fill();
+        ctx.restore();
+
+        const angle = reduced.matches ? -.48 : spin;
+        const visible = [];
+        for (const p of points) {
+          const local = smooth((scatter - p.delay) / (1 - p.delay));
+          let x = p.x, y = p.y, z = p.z;
+          if (local > 0) {
+            const swirl = elapsed * (.6 + p.n % 7 * .045) + p.swirl;
+            const cs = Math.cos(swirl), sn = Math.sin(swirl);
+            x += (p.dx * cs - p.dz * sn) * local;
+            z += (p.dx * sn + p.dz * cs) * local;
+            y += (p.dy + Math.sin(swirl * 2 + p.twinkle) * 35) * local;
+          }
+          const q = project(x, y, z, angle);
+          visible.push({ p, q, local });
+        }
+        visible.sort((a, b) => a.q.depth - b.q.depth);
+
+        for (const { p, q, local } of visible) {
+          const light = Math.max(0, Math.min(1,
+            .50 + q.depth / 440 - p.x / 850 - p.y / 800
+          ));
+          let color;
+          if (p.kind === "band") {
+            color = `rgb(${28 + light * 25},${16 + light * 14},${20 + light * 15})`;
+          } else {
+            const edge = p.kind === "edge" ? 10 : 0;
+            color = `rgb(${Math.round(135 + light * 95 + edge)},${Math.round(24 + light * 34 + edge / 3)},${Math.round(31 + light * 36 + edge / 3)})`;
+          }
+          const size = p.size * q.perspective * scale * (1 + local * .1);
+          ctx.globalAlpha = .92 - local * .13;
+          ctx.fillStyle = local > .18
+            ? `rgb(${Math.round(210 + light * 45)},${Math.round(60 + light * 75)},${Math.round(56 + light * 56)})`
+            : color;
+          ctx.beginPath();
+          ctx.arc(q.x, q.y, size, 0, TAU);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+
+        // A sparse orbit of embers remains once the hat has reformed.
+        if (!reduced.matches && (phase === "idle" || elapsed > 3.8)) {
+          ctx.save();
+          ctx.globalCompositeOperation = "screen";
+          for (const o of orbiters) {
+            const a = o.a + now * o.speed;
+            const x = Math.cos(a) * o.radius;
+            const z = Math.sin(a) * o.radius * .55;
+            const y = o.lift + Math.sin(a * 1.7 + o.offset) * 15;
+            const head = project(x, y, z, angle);
+            const tail = project(
+              Math.cos(a - .12) * o.radius,
+              y + 2,
+              Math.sin(a - .12) * o.radius * .55,
+              angle
+            );
+            const grad = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
+            grad.addColorStop(0, "rgba(255,91,67,0)");
+            grad.addColorStop(1, "rgba(255,111,82,.42)");
+            ctx.strokeStyle = grad;
+            ctx.lineWidth = o.size * scale;
+            ctx.beginPath();
+            ctx.moveTo(tail.x, tail.y);
+            ctx.lineTo(head.x, head.y);
+            ctx.stroke();
+            ctx.fillStyle = "rgba(255,166,121,.75)";
+            ctx.shadowColor = "rgba(255,81,55,.8)";
+            ctx.shadowBlur = 9 * scale;
+            ctx.beginPath();
+            ctx.arc(head.x, head.y, o.size * scale, 0, TAU);
+            ctx.fill();
+          }
+          ctx.restore();
+        }
+      }
+
+      function animate(time) {
+        if (!last) last = time;
+        const dt = Math.min((time - last) / 1000, .05);
+        last = time;
+        const elapsed = time / 1000 - start;
+        const slow = phase !== "idle" ? 1 - .82 * smooth(elapsed / .65) : 1;
+        spin += dt * .35 * slow;
+        draw(time);
+        frame = requestAnimationFrame(animate);
+      }
+
+      const observer = new ResizeObserver(resize);
+      observer.observe(scene);
+      reduced.addEventListener("change", () => {
+        cancelAnimationFrame(frame);
+        phase = "idle";
+        last = 0;
+        if (reduced.matches) draw(0);
+        else frame = requestAnimationFrame(animate);
+      });
+      resize();
+      if (!reduced.matches) frame = requestAnimationFrame(animate);
+    })();
+  </script>
+</body>
+</html>
