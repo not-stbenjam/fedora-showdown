@@ -1,0 +1,596 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#090b10">
+  <title>Red Hat — Form in Motion</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #090b10;
+      color: #f3f0ec;
+      font-synthesis: none;
+      text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    html, body { width: 100%; min-width: 320px; height: 100%; margin: 0; }
+
+    body {
+      overflow: hidden;
+      background:
+        radial-gradient(ellipse 52% 45% at 50% 45%, rgba(70, 37, 43, .22), transparent 76%),
+        radial-gradient(ellipse 90% 75% at 50% 50%, #11141b 0%, #0a0c12 54%, #080a0f 100%);
+    }
+
+    .hero {
+      position: relative;
+      display: grid;
+      width: 100%;
+      height: 100%;
+      min-height: 520px;
+      place-items: center;
+      isolation: isolate;
+      overflow: hidden;
+    }
+
+    .hero::before, .hero::after {
+      position: absolute;
+      z-index: -1;
+      content: "";
+      pointer-events: none;
+    }
+
+    .hero::before {
+      inset: 0;
+      opacity: .19;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.88' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.17'/%3E%3C/svg%3E");
+      mix-blend-mode: soft-light;
+    }
+
+    .hero::after {
+      inset: 0;
+      background: linear-gradient(90deg, rgba(3, 5, 9, .3), transparent 22%, transparent 78%, rgba(3, 5, 9, .3));
+    }
+
+    .masthead {
+      position: absolute;
+      top: clamp(30px, 7.2vh, 76px);
+      left: 50%;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      transform: translateX(-50%);
+      color: #8d919a;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .21em;
+      white-space: nowrap;
+    }
+
+    .masthead-mark {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #ef3d3a;
+      box-shadow: 0 0 12px rgba(239, 61, 58, .55);
+    }
+
+    .stage {
+      position: absolute;
+      inset: 0;
+      display: block;
+      width: 100%;
+      height: 100%;
+      outline: none;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .stage:focus-visible::after {
+      position: absolute;
+      inset: 18px;
+      border: 1px solid rgba(244, 235, 229, .3);
+      border-radius: 16px;
+      content: "";
+      pointer-events: none;
+    }
+
+    canvas { display: block; width: 100%; height: 100%; }
+
+    .caption {
+      position: absolute;
+      bottom: clamp(34px, 8.2vh, 76px);
+      left: 50%;
+      width: max-content;
+      max-width: calc(100% - 40px);
+      transform: translateX(-50%);
+      text-align: center;
+      pointer-events: none;
+    }
+
+    .caption-main {
+      margin: 0;
+      color: #d8d5d2;
+      font-size: clamp(13px, 1.4vw, 15px);
+      font-weight: 400;
+      letter-spacing: .035em;
+    }
+
+    .caption-hint {
+      margin: 12px 0 0;
+      color: #757982;
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: .2em;
+    }
+
+    @media (max-height: 600px) {
+      .hero { min-height: 0; }
+      .masthead { top: 24px; }
+      .caption { bottom: 25px; }
+      .caption-hint { margin-top: 8px; }
+    }
+
+    @media (max-width: 520px) {
+      .masthead { top: 6.5vh; font-size: 9px; }
+      .caption-main { font-size: 13px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        scroll-behavior: auto !important;
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
+      }
+      .stage { cursor: default; }
+    }
+  </style>
+</head>
+<body>
+  <main class="hero">
+    <div class="masthead" aria-hidden="true"><span class="masthead-mark"></span><span>FORM STUDY&nbsp; / &nbsp;01</span></div>
+    <div class="stage" id="stage" role="button" tabindex="0" aria-label="Red Hat fedora. Hover or activate to scatter and reform the hat.">
+      <canvas id="scene" aria-hidden="true"></canvas>
+    </div>
+    <div class="caption" aria-hidden="true">
+      <p class="caption-main">A familiar silhouette, set in motion.</p>
+      <p class="caption-hint">HOVER OR TAP TO TRANSFORM</p>
+    </div>
+  </main>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const canvas = document.getElementById("scene");
+      const stage = document.getElementById("stage");
+      const ctx = canvas.getContext("2d", { alpha: true });
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+      const sourceSize = { width: 440, height: 260, cx: 220, cy: 130 };
+      const colors = ["#ff7060", "#f3413d", "#ffad87"];
+      let width = 0;
+      let height = 0;
+      let pixelRatio = 1;
+      let scale = 1;
+      let centerX = 0;
+      let centerY = 0;
+      let angle = 0;
+      let previousTime = 0;
+      let animationFrame = 0;
+      let mode = "idle";
+      let interactionAge = 0;
+      let resumeEase = 1;
+      let particles = [];
+      let orbiters = [];
+
+      const TAU = Math.PI * 2;
+      const clamp = (n, a = 0, b = 1) => Math.max(a, Math.min(b, n));
+      const smooth = (t) => { t = clamp(t); return t * t * (3 - 2 * t); };
+      const random01 = (n) => {
+        const x = Math.sin(n * 127.1 + 311.7) * 43758.5453123;
+        return x - Math.floor(x);
+      };
+
+      function brimPath(c) {
+        c.beginPath();
+        c.moveTo(-178, 37);
+        c.bezierCurveTo(-171, 16, -124, 4, -76, 9);
+        c.bezierCurveTo(-39, 13, -11, 10, 18, 8);
+        c.bezierCurveTo(77, 4, 143, 17, 177, 39);
+        c.bezierCurveTo(162, 63, 121, 78, 73, 82);
+        c.bezierCurveTo(12, 88, -53, 84, -103, 73);
+        c.bezierCurveTo(-147, 64, -169, 52, -178, 37);
+        c.closePath();
+      }
+
+      function crownPath(c) {
+        c.beginPath();
+        c.moveTo(-101, 33);
+        c.bezierCurveTo(-91, 11, -79, -28, -70, -61);
+        c.bezierCurveTo(-65, -80, -43, -89, -20, -84);
+        c.bezierCurveTo(-2, -80, 14, -72, 30, -78);
+        c.bezierCurveTo(51, -86, 66, -78, 71, -61);
+        c.bezierCurveTo(78, -32, 84, 5, 92, 32);
+        c.bezierCurveTo(40, 39, -48, 40, -101, 33);
+        c.closePath();
+      }
+
+      function drawLayer(x, y, s, turn, depth, alpha, draw) {
+        const cosine = Math.cos(turn);
+        const visibleWidth = Math.sign(cosine || 1) * Math.max(.035, Math.abs(cosine));
+        ctx.save();
+        ctx.translate(x + Math.sin(turn) * depth * s, y);
+        ctx.scale(s * visibleWidth, s);
+        ctx.globalAlpha *= alpha;
+        draw(ctx);
+        ctx.restore();
+      }
+
+      function drawHat(x, y, s, turn, alpha = 1) {
+        const facing = .5 + .5 * Math.cos(turn);
+        drawLayer(x, y, s, turn, 0, alpha, (c) => {
+          c.save();
+          c.translate(0, 93);
+          c.scale(1, .18);
+          const shadow = c.createRadialGradient(0, 0, 18, 0, 0, 190);
+          shadow.addColorStop(0, "rgba(0,0,0,.68)");
+          shadow.addColorStop(.55, "rgba(0,0,0,.34)");
+          shadow.addColorStop(1, "rgba(0,0,0,0)");
+          c.fillStyle = shadow;
+          c.beginPath();
+          c.ellipse(0, 0, 190, 64, 0, 0, TAU);
+          c.fill();
+          c.restore();
+        });
+
+        drawLayer(x, y, s, turn, -7, alpha, (c) => {
+          const underside = c.createLinearGradient(0, 26, 0, 82);
+          underside.addColorStop(0, "#a32024");
+          underside.addColorStop(1, "#65191c");
+          c.fillStyle = underside;
+          brimPath(c);
+          c.fill();
+          c.strokeStyle = "rgba(36, 7, 9, .45)";
+          c.lineWidth = 2;
+          c.stroke();
+        });
+
+        drawLayer(x, y, s, turn, 0, alpha, (c) => {
+          const brim = c.createLinearGradient(-30, 0, 35, 92);
+          brim.addColorStop(0, "#f14a43");
+          brim.addColorStop(.4, "#dc292f");
+          brim.addColorStop(1, "#a91f25");
+          c.fillStyle = brim;
+          brimPath(c);
+          c.fill();
+          c.strokeStyle = "rgba(255, 132, 112, .25)";
+          c.lineWidth = 1.35;
+          c.stroke();
+
+          c.beginPath();
+          c.moveTo(-160, 39);
+          c.bezierCurveTo(-104, 22, -58, 24, -15, 29);
+          c.bezierCurveTo(51, 36, 112, 32, 159, 43);
+          c.strokeStyle = "rgba(255, 151, 126, .19)";
+          c.lineWidth = 1.2;
+          c.stroke();
+        });
+
+        drawLayer(x, y, s, turn, 18, alpha, (c) => {
+          const crown = c.createLinearGradient(-108, -71, 83, 28);
+          crown.addColorStop(0, "#f04b43");
+          crown.addColorStop(.3, "#e83435");
+          crown.addColorStop(.72, "#d6262e");
+          crown.addColorStop(1, "#a51e24");
+          c.fillStyle = crown;
+          crownPath(c);
+          c.fill();
+
+          c.save();
+          crownPath(c);
+          c.clip();
+          const light = c.createLinearGradient(-84, -68, 26, -20);
+          light.addColorStop(0, "rgba(255, 174, 143, .43)");
+          light.addColorStop(.55, "rgba(255, 105, 86, .12)");
+          light.addColorStop(1, "rgba(255, 105, 86, 0)");
+          c.fillStyle = light;
+          c.fillRect(-110, -100, 150, 135);
+          c.restore();
+
+          c.beginPath();
+          c.moveTo(-100, 32);
+          c.bezierCurveTo(-50, 39, 44, 39, 91, 31);
+          c.strokeStyle = "rgba(104, 15, 20, .56)";
+          c.lineWidth = 3.5;
+          c.stroke();
+
+          c.beginPath();
+          c.moveTo(-55, -65);
+          c.bezierCurveTo(-36, -78, -15, -77, 2, -70);
+          c.bezierCurveTo(21, -63, 34, -70, 48, -74);
+          c.strokeStyle = `rgba(255, 181, 150, ${.34 * facing + .1})`;
+          c.lineWidth = 2;
+          c.lineCap = "round";
+          c.stroke();
+
+          c.beginPath();
+          c.moveTo(-67, -52);
+          c.bezierCurveTo(-49, -42, -31, -38, -13, -41);
+          c.strokeStyle = "rgba(255, 130, 111, .22)";
+          c.lineWidth = 1;
+          c.stroke();
+        });
+      }
+
+      function buildParticles() {
+        const source = document.createElement("canvas");
+        source.width = sourceSize.width;
+        source.height = sourceSize.height;
+        const sourceContext = source.getContext("2d", { willReadFrequently: true });
+        // The source is the same vector drawing used in the scene, sampled once for the dissolve.
+        drawSourceHat(sourceContext);
+        const pixels = sourceContext.getImageData(0, 0, source.width, source.height).data;
+        const step = 2.7;
+        let id = 1;
+        const result = [];
+        for (let py = 18; py < source.height - 14; py += step) {
+          for (let px = 24; px < source.width - 24; px += step) {
+            const offset = (Math.floor(py) * source.width + Math.floor(px)) * 4;
+            if (pixels[offset + 3] < 110) continue;
+            const seed = id++;
+            result.push({
+              x: px - sourceSize.cx,
+              y: py - sourceSize.cy,
+              z: (py - sourceSize.cy < 25 ? 18 : 0) + (random01(seed * 1.73) - .5) * 2,
+              direction: random01(seed * 2.19) * TAU,
+              radius: 46 + random01(seed * 3.91) * 222,
+              curl: random01(seed * 4.43) * TAU,
+              drift: (random01(seed * 5.37) - .5) * 48,
+              size: .55 + random01(seed * 6.83) * 1.15,
+              tone: random01(seed * 7.31) < .68 ? 1 : (random01(seed * 8.17) < .56 ? 0 : 2)
+            });
+          }
+        }
+        particles = result;
+      }
+
+      function drawSourceHat(c) {
+        c.save();
+        c.translate(sourceSize.cx, sourceSize.cy);
+        // Keep particles true to the glowing red mark, without the ground shadow.
+        c.fillStyle = "#d93636";
+        brimPath(c);
+        c.fill();
+        c.fillStyle = "#e83b37";
+        crownPath(c);
+        c.fill();
+        c.restore();
+      }
+
+      function buildOrbiters() {
+        orbiters = Array.from({ length: 26 }, (_, i) => ({
+          phase: random01(i + 91) * TAU,
+          speed: (.13 + random01(i + 194) * .13) * (i % 2 ? 1 : -1),
+          rx: 202 + random01(i + 42) * 74,
+          ry: 108 + random01(i + 251) * 55,
+          size: .65 + random01(i + 63) * .75,
+          tone: random01(i + 122) < .72 ? 1 : 2,
+          trail: []
+        }));
+      }
+
+      function resize() {
+        const rect = stage.getBoundingClientRect();
+        width = rect.width;
+        height = rect.height;
+        pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.round(width * pixelRatio);
+        canvas.height = Math.round(height * pixelRatio);
+        ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+        scale = Math.min(width * .82 / 380, height * .43 / 190, 1.35);
+        centerX = width * .5;
+        centerY = height * .435;
+        ctx.clearRect(0, 0, width, height);
+        if (mode === "idle") {
+          drawHat(centerX, centerY, scale, reducedMotion.matches ? 0 : angle, 1);
+          if (!reducedMotion.matches) drawOrbiters(0);
+        } else {
+          drawParticles();
+        }
+      }
+
+      function trigger() {
+        if (reducedMotion.matches || mode !== "idle") return;
+        mode = "burst";
+        interactionAge = 0;
+        resumeEase = 0;
+        for (const orbiter of orbiters) orbiter.trail.length = 0;
+        if (!animationFrame) animationFrame = requestAnimationFrame(tick);
+      }
+
+      function scatterPosition(particle, rotation, amount, swirlProgress) {
+        const direction = particle.direction + rotation * (particle.direction % 2 < 1 ? 1 : -1);
+        const radius = particle.radius * amount;
+        const curl = Math.sin(swirlProgress * TAU + particle.curl) * particle.drift * amount;
+        return {
+          x: Math.cos(direction) * radius + Math.cos(direction + Math.PI / 2) * curl,
+          y: Math.sin(direction) * radius * .62 + Math.sin(direction + Math.PI / 2) * curl * .72
+        };
+      }
+
+      function drawParticles() {
+        const elapsed = interactionAge;
+        let hatAlpha = 0;
+        let particleAlpha = 1;
+        let returnAmount = 0;
+        let spread = 1;
+        let rotation = 1.2;
+        let swirlProgress = 1;
+
+        if (elapsed < 1.1) {
+          const p = smooth(elapsed / 1.1);
+          spread = p;
+          rotation = 1.2 * p;
+          swirlProgress = p;
+          hatAlpha = 1 - smooth(elapsed / .62);
+          particleAlpha = smooth(elapsed / .26);
+        } else if (elapsed < 2.75) {
+          const p = (elapsed - 1.1) / 1.65;
+          rotation = 1.2 + p * 2.6;
+          swirlProgress = 1 + p;
+          particleAlpha = 1;
+        } else {
+          const p = smooth((elapsed - 2.75) / 1.25);
+          rotation = 3.8;
+          swirlProgress = 2;
+          returnAmount = p;
+          hatAlpha = p;
+          particleAlpha = 1 - p * .93;
+        }
+
+        drawHat(centerX, centerY, scale, angle, hatAlpha);
+
+        const cosine = Math.cos(angle);
+        const sine = Math.sin(angle);
+        const groups = [[], [], []];
+        const glows = [[], [], []];
+        for (let i = 0; i < particles.length; i++) {
+          const p = particles[i];
+          const startX = p.x * cosine + p.z * sine;
+          const startY = p.y - p.z * .035;
+          const displaced = scatterPosition(p, rotation, spread, swirlProgress);
+          const x = centerX + (startX + (displaced.x - startX) * (1 - returnAmount)) * scale;
+          const y = centerY + (startY + (displaced.y - startY) * (1 - returnAmount)) * scale;
+          const size = (p.size + (1 - spread) * .15) * scale;
+          groups[p.tone].push([x, y, size]);
+          if (i % 19 === 0) glows[p.tone].push([x, y, size * 2.4]);
+        }
+
+        ctx.save();
+        ctx.globalAlpha = particleAlpha;
+        for (let tone = 0; tone < groups.length; tone++) {
+          ctx.fillStyle = colors[tone];
+          ctx.beginPath();
+          for (const [x, y, r] of groups[tone]) {
+            ctx.moveTo(x + r, y);
+            ctx.arc(x, y, Math.max(.55, r), 0, TAU);
+          }
+          ctx.fill();
+        }
+        ctx.globalAlpha = particleAlpha * .58;
+        ctx.shadowBlur = 8 * pixelRatio;
+        for (let tone = 0; tone < glows.length; tone++) {
+          ctx.fillStyle = colors[tone];
+          ctx.shadowColor = colors[tone];
+          ctx.beginPath();
+          for (const [x, y, r] of glows[tone]) {
+            ctx.moveTo(x + r, y);
+            ctx.arc(x, y, Math.max(.8, r), 0, TAU);
+          }
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      function drawOrbiters(dt) {
+        for (let i = 0; i < orbiters.length; i++) {
+          const orbiter = orbiters[i];
+          orbiter.phase += orbiter.speed * dt;
+          const x = centerX + Math.cos(orbiter.phase) * orbiter.rx * scale;
+          const y = centerY + Math.sin(orbiter.phase * .83) * orbiter.ry * scale;
+          orbiter.trail.push([x, y]);
+          if (orbiter.trail.length > 9) orbiter.trail.shift();
+          if (orbiter.trail.length > 1) {
+            ctx.beginPath();
+            ctx.moveTo(orbiter.trail[0][0], orbiter.trail[0][1]);
+            for (let j = 1; j < orbiter.trail.length; j++) ctx.lineTo(orbiter.trail[j][0], orbiter.trail[j][1]);
+            ctx.strokeStyle = orbiter.tone === 1 ? "rgba(244, 83, 67, .16)" : "rgba(255, 166, 125, .13)";
+            ctx.lineWidth = .75;
+            ctx.stroke();
+          }
+          ctx.beginPath();
+          ctx.fillStyle = orbiter.tone === 1 ? "rgba(255, 117, 88, .78)" : "rgba(255, 191, 149, .7)";
+          ctx.shadowColor = orbiter.tone === 1 ? "#fa5748" : "#ffb788";
+          ctx.shadowBlur = 8;
+          ctx.arc(x, y, orbiter.size * scale, 0, TAU);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        }
+      }
+
+      function tick(time) {
+        animationFrame = 0;
+        if (reducedMotion.matches) {
+          previousTime = time;
+          ctx.clearRect(0, 0, width, height);
+          drawHat(centerX, centerY, scale, 0, 1);
+          return;
+        }
+        const dt = previousTime ? Math.min((time - previousTime) / 1000, .04) : 0;
+        previousTime = time;
+        if (mode === "idle") {
+          const speed = .34 + .66 * resumeEase;
+          angle += dt * .54 * speed;
+          resumeEase = Math.min(1, resumeEase + dt * .65);
+          ctx.clearRect(0, 0, width, height);
+          drawHat(centerX, centerY, scale, angle, 1);
+          drawOrbiters(dt);
+        } else {
+          const spinDown = smooth(interactionAge / .82);
+          angle += dt * .54 * (1 - .82 * spinDown);
+          interactionAge += dt;
+          ctx.clearRect(0, 0, width, height);
+          drawParticles();
+          if (interactionAge >= 4) {
+            mode = "idle";
+            resumeEase = 0;
+          }
+        }
+        if (mode !== "idle" || !reducedMotion.matches) animationFrame = requestAnimationFrame(tick);
+      }
+
+      function handleMotionChange() {
+        if (reducedMotion.matches) {
+          mode = "idle";
+          interactionAge = 0;
+          angle = 0;
+          if (animationFrame) cancelAnimationFrame(animationFrame);
+          animationFrame = 0;
+          ctx.clearRect(0, 0, width, height);
+          drawHat(centerX, centerY, scale, 0, 1);
+        } else {
+          previousTime = 0;
+          if (!animationFrame) animationFrame = requestAnimationFrame(tick);
+        }
+      }
+
+      stage.addEventListener("pointerenter", (event) => {
+        if (event.pointerType !== "touch") trigger();
+      });
+      stage.addEventListener("click", trigger);
+      stage.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          trigger();
+        }
+      });
+      window.addEventListener("resize", resize, { passive: true });
+      if (reducedMotion.addEventListener) reducedMotion.addEventListener("change", handleMotionChange);
+      else reducedMotion.addListener(handleMotionChange);
+
+      buildParticles();
+      buildOrbiters();
+      resize();
+      previousTime = performance.now();
+      if (!reducedMotion.matches) animationFrame = requestAnimationFrame(tick);
+    })();
+  </script>
+</body>
+</html>
