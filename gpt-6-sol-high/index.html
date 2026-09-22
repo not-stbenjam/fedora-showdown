@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#090b10">
+  <title>Fedora — a study in motion</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    html { min-height: 100%; background: #090b10; }
+    body {
+      min-height: 100svh; margin: 0; overflow-x: hidden; color: #f5f2ee;
+      background:
+        radial-gradient(ellipse 54% 43% at 50% 49%, rgba(105, 31, 40, .13), transparent 76%),
+        radial-gradient(ellipse 85% 60% at 50% 85%, rgba(32, 40, 58, .22), transparent 76%),
+        #090b10;
+    }
+    body::before {
+      content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .28;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.68' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.12'/%3E%3C/svg%3E");
+      mix-blend-mode: screen;
+    }
+    .page { position: relative; min-height: 100svh; display: flex; flex-direction: column; padding: clamp(22px, 4vw, 48px) clamp(22px, 5vw, 72px) 25px; }
+    .masthead, .footer { display: flex; align-items: center; justify-content: space-between; gap: 20px; color: #858894; font-size: 10px; font-weight: 650; letter-spacing: .19em; text-transform: uppercase; }
+    .mark { display: inline-flex; align-items: center; gap: 11px; color: #d9d9df; }
+    .mark::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: #d52a36; box-shadow: 0 0 16px rgba(220, 39, 56, .5); }
+    main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; padding: 25px 0 18px; text-align: center; }
+    .eyebrow { margin: 0 0 15px; color: #c96269; font-size: 10px; font-weight: 700; letter-spacing: .33em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: clamp(37px, 5.8vw, 78px); line-height: 1.04; font-weight: 570; letter-spacing: -.065em; }
+    h1 em { color: #dd4651; font-style: normal; }
+    .subhead { max-width: 430px; margin: 19px 20px 0; color: #92949f; font-size: clamp(13px, 1.45vw, 15px); line-height: 1.7; }
+    .scene {
+      position: relative; display: block; width: min(100%, 680px); aspect-ratio: 1.37;
+      margin: clamp(0px, 1.8vh, 20px) auto 0; padding: 0; border: 0; border-radius: 30px;
+      background: none; color: inherit; cursor: pointer; isolation: isolate; touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .scene::before {
+      content: ""; position: absolute; z-index: -1; left: 18%; right: 18%; top: 16%; bottom: 14%; border-radius: 50%;
+      background: radial-gradient(circle, rgba(168, 28, 44, .105), transparent 66%); filter: blur(20px);
+      transition: opacity 500ms ease, transform 800ms ease;
+    }
+    .scene:hover::before, .scene:focus-visible::before { opacity: 1.7; transform: scale(1.12); }
+    .scene:focus-visible { outline: 1px solid rgba(226, 91, 103, .75); outline-offset: -7px; }
+    canvas { display: block; width: 100%; height: 100%; }
+    .caption { display: flex; align-items: center; gap: 12px; margin: -13px 0 0; color: #a6a4ae; font-size: 12px; font-weight: 450; letter-spacing: .02em; }
+    .caption::before, .caption::after { content: ""; display: block; width: 25px; height: 1px; background: linear-gradient(90deg, transparent, #784048); }
+    .caption::after { transform: rotate(180deg); }
+    .footer { padding-top: 19px; border-top: 1px solid rgba(255, 255, 255, .075); letter-spacing: .14em; }
+    .footer span:last-child { color: #6c6e78; }
+    @media (max-width: 620px) {
+      .page { padding: 23px 20px 21px; }
+      .masthead, .footer { font-size: 9px; letter-spacing: .1em; }
+      .masthead span:last-child { display: none; }
+      main { padding: 34px 0 26px; }
+      h1 { max-width: 370px; }
+      .subhead { max-width: 320px; margin-top: 15px; }
+      .scene { width: min(116%, 530px); max-width: none; aspect-ratio: 1.05; margin: 2px -8% 0; }
+      .caption { margin-top: -2px; }
+    }
+    @media (prefers-reduced-motion: reduce) { .scene::before { transition: none; } }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="masthead" aria-label="Page heading"><span class="mark">FORM / 001</span><span>An interactive study</span></header>
+    <main>
+      <p class="eyebrow">Shape · light · motion</p>
+      <h1>A moment, <em>undone.</em></h1>
+      <p class="subhead">A familiar silhouette, held together by a thousand little points of light.</p>
+      <button class="scene" id="scene" type="button" aria-label="Dissolve and reform the spinning red fedora">
+        <canvas id="hat" aria-hidden="true"></canvas>
+      </button>
+      <p class="caption" id="caption">Hover or tap to let it drift apart</p>
+    </main>
+    <footer class="footer"><span>Fedora in motion</span><span>Made of light</span></footer>
+  </div>
+  <script>
+    (() => {
+      'use strict';
+
+      const button = document.getElementById('scene');
+      const canvas = document.getElementById('hat');
+      const caption = document.getElementById('caption');
+      const ctx = canvas.getContext('2d', { alpha: true });
+      const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+      const TAU = Math.PI * 2;
+      const segments = 72;
+      const faces = [];
+      const particles = [];
+      const orbiters = [];
+
+      let width = 0, height = 0, scale = 1, dpr = 1;
+      let yaw = -.48, lastTime = 0, startTime = -1, hovered = false, frame = 0;
+      let reduced = motionQuery.matches;
+
+      function clamp(value, low, high) { return Math.max(low, Math.min(high, value)); }
+      function smooth(a, b, value) { const t = clamp((value - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); }
+      function rand(a, b) { return a + Math.random() * (b - a); }
+      function vertex(x, y, z) { return { x, y, z }; }
+
+      function normal(a, b, c, material) {
+        let x = (b.y-a.y)*(c.z-a.z) - (b.z-a.z)*(c.y-a.y);
+        let y = (b.z-a.z)*(c.x-a.x) - (b.x-a.x)*(c.z-a.z);
+        let z = (b.x-a.x)*(c.y-a.y) - (b.y-a.y)*(c.x-a.x);
+        const cx = (a.x+b.x+c.x)/3, cz = (a.z+b.z+c.z)/3;
+        const shouldFlip = material === 'underside' ? y > 0 :
+          (material === 'top' || material === 'brim') ? y < 0 : x*cx + z*cz < 0;
+        if (shouldFlip) { x=-x; y=-y; z=-z; }
+        const length = Math.hypot(x,y,z) || 1;
+        return vertex(x/length,y/length,z/length);
+      }
+
+      function triangle(a, b, c, material) {
+        const n = normal(a,b,c,material);
+        const area = Math.hypot(
+          (b.y-a.y)*(c.z-a.z) - (b.z-a.z)*(c.y-a.y),
+          (b.z-a.z)*(c.x-a.x) - (b.x-a.x)*(c.z-a.z),
+          (b.x-a.x)*(c.y-a.y) - (b.y-a.y)*(c.x-a.x)
+        ) / 2;
+        faces.push({ a,b,c,n,material,area });
+      }
+      function quad(a,b,c,d,material) { triangle(a,b,c,material); triangle(a,c,d,material); }
+
+      function brimPoint(r, t, underside = false) {
+        const spread = r-1;
+        const y = -.53 + .17*spread*spread*Math.abs(Math.cos(t)) - .155*spread*Math.sin(t) + .018*Math.sin(2*t);
+        return vertex(.94*r*Math.cos(t), y-(underside ? .075 : 0), .72*r*Math.sin(t));
+      }
+      function crownPoint(level, t) {
+        const profile = [
+          [-.53,.94,.72],[-.42,.94,.72],[-.17,.925,.705],[-.11,.91,.695],
+          [.12,.885,.68],[.40,.84,.665],[.65,.80,.655],[.78,.78,.65]
+        ][level];
+        return vertex(profile[1]*Math.cos(t), profile[0], profile[2]*Math.sin(t));
+      }
+      function topPoint(r,t) {
+        const x = .78*r*Math.cos(t), z = .65*r*Math.sin(t);
+        const envelope = 1 - Math.pow(r,4);
+        const ridge = .13*Math.exp(-Math.pow((Math.abs(x)-.39)/.23,2));
+        const crease = .13*Math.exp(-Math.pow(x/.22,2));
+        const frontPinch = .045*Math.exp(-Math.pow((z-.30)/.22,2))*Math.exp(-Math.pow(x/.34,2));
+        return vertex(x, .78 + envelope*(ridge-crease-frontPinch), z);
+      }
+
+      function makeMesh() {
+        for (let j=0; j<7; j++) {
+          const r0=1+(j/7)*.82, r1=1+((j+1)/7)*.82;
+          for (let i=0; i<segments; i++) {
+            const t0=i*TAU/segments, t1=(i+1)*TAU/segments;
+            quad(brimPoint(r0,t0),brimPoint(r1,t0),brimPoint(r1,t1),brimPoint(r0,t1),'brim');
+            quad(brimPoint(r0,t1,true),brimPoint(r1,t1,true),brimPoint(r1,t0,true),brimPoint(r0,t0,true),'underside');
+          }
+        }
+        for (let i=0; i<segments; i++) {
+          const t0=i*TAU/segments, t1=(i+1)*TAU/segments;
+          quad(brimPoint(1.82,t0),brimPoint(1.82,t0,true),brimPoint(1.82,t1,true),brimPoint(1.82,t1),'edge');
+          for (let j=0; j<7; j++) {
+            const material = j===1 ? 'band' : j===2 ? 'seam' : 'crown';
+            quad(crownPoint(j,t0),crownPoint(j+1,t0),crownPoint(j+1,t1),crownPoint(j,t1),material);
+          }
+        }
+        for (let j=0; j<7; j++) {
+          const r0=j/7, r1=(j+1)/7;
+          for (let i=0; i<segments; i++) {
+            const t0=i*TAU/segments, t1=(i+1)*TAU/segments;
+            quad(topPoint(r0,t0),topPoint(r1,t0),topPoint(r1,t1),topPoint(r0,t1),'top');
+          }
+        }
+      }
+
+      function makeParticles() {
+        const totalArea = faces.reduce((sum,face)=>sum+face.area,0);
+        const cumulative=[];
+        let running=0;
+        for (const face of faces) { running+=face.area; cumulative.push(running); }
+        for (let i=0; i<5400; i++) {
+          const choice=Math.random()*totalArea;
+          let lo=0, hi=cumulative.length-1;
+          while (lo<hi) { const mid=(lo+hi)>>1; if (cumulative[mid]<choice) lo=mid+1; else hi=mid; }
+          const face=faces[lo];
+          let u=Math.random(), v=Math.random();
+          if (u+v>1) { u=1-u; v=1-v; }
+          const w=1-u-v;
+          const x=face.a.x*w+face.b.x*u+face.c.x*v;
+          const y=face.a.y*w+face.b.y*u+face.c.y*v;
+          const z=face.a.z*w+face.b.z*u+face.c.z*v;
+          const angle=Math.atan2(z,x)+rand(-.55,.55);
+          const distance=rand(.28,1.95)*(.55+Math.random()*.75);
+          particles.push({
+            x,y,z, angle, distance, lift:rand(-1.25,1.25),
+            phase:rand(0,TAU), speed:rand(.65,1.45),
+            size:rand(.42,1.45), brightness:Math.random(),
+            material:face.material
+          });
+        }
+        for (let i=0; i<22; i++) orbiters.push({
+          angle:rand(0,TAU), radius:rand(1.55,2.25), y:rand(-.55,.95),
+          speed:rand(.11,.35)*(Math.random()<.5?-1:1), size:rand(.7,1.7), phase:rand(0,TAU)
+        });
+      }
+
+      function transform(point, sinYaw, cosYaw) {
+        const x=point.x*cosYaw+point.z*sinYaw;
+        const z=point.z*cosYaw-point.x*sinYaw;
+        const pitch=.17, cp=Math.cos(pitch), sp=Math.sin(pitch);
+        return { x, y:point.y*cp-z*sp, z:z*cp+point.y*sp };
+      }
+      function project(point) {
+        const perspective=4.9/(4.9-point.z*.12);
+        return { x:width*.5+point.x*scale*perspective,
+          y:height*.51-point.y*scale*perspective, z:point.z };
+      }
+      function drawAtmosphere(time) {
+        const cx=width*.5, floor=height*.80;
+        ctx.save();
+        ctx.translate(cx,floor); ctx.scale(1,.20);
+        let g=ctx.createRadialGradient(0,0,5,0,0,scale*2.55);
+        g.addColorStop(0,'rgba(5,4,7,.64)');
+        g.addColorStop(.42,'rgba(7,5,10,.34)');
+        g.addColorStop(1,'rgba(7,5,10,0)');
+        ctx.fillStyle=g; ctx.beginPath(); ctx.arc(0,0,scale*2.55,0,TAU); ctx.fill();
+        ctx.restore();
+        g=ctx.createRadialGradient(cx,height*.47,0,cx,height*.47,scale*2.35);
+        g.addColorStop(0,'rgba(182,31,47,.055)'); g.addColorStop(1,'rgba(182,31,47,0)');
+        ctx.fillStyle=g; ctx.fillRect(0,0,width,height);
+        // A restrained pool of reflected light anchors the model above the floor.
+        ctx.save(); ctx.translate(cx,floor+scale*.08); ctx.scale(1,.13);
+        g=ctx.createRadialGradient(0,0,0,0,0,scale*1.85);
+        g.addColorStop(0,'rgba(170,37,49,.13)'); g.addColorStop(1,'rgba(170,37,49,0)');
+        ctx.fillStyle=g; ctx.beginPath(); ctx.arc(0,0,scale*1.85,0,TAU); ctx.fill(); ctx.restore();
+      }
+
+      function drawMesh(sinYaw,cosYaw,opacity) {
+        if (opacity<=0) return;
+        function gradient(x0,y0,x1,y1,stops) {
+          const g=ctx.createLinearGradient(x0,y0,x1,y1);
+          for (const [at,shade] of stops) g.addColorStop(at,shade);
+          return g;
+        }
+        const fills={
+          crown:gradient(width*.34,height*.34,width*.68,height*.72,[[0,'#f75260'],[.5,'#d82b3d'],[1,'#8e1828']]),
+          top:gradient(width*.31,height*.33,width*.71,height*.53,[[0,'#ff6068'],[.52,'#dc3042'],[1,'#ad1a2e']]),
+          brim:gradient(width*.25,height*.53,width*.78,height*.75,[[0,'#f2414e'],[.48,'#cb2034'],[1,'#861728']]),
+          edge:gradient(0,height*.60,width,height*.77,[[0,'#981827'],[1,'#6d1421']]),
+          underside:'#581b26', band:gradient(width*.32,height*.50,width*.77,height*.75,[[0,'#31252c'],[1,'#100f16']]),
+          seam:'#751b29'
+        };
+        const visible=[];
+        for (const face of faces) {
+          const a=transform(face.a,sinYaw,cosYaw), b=transform(face.b,sinYaw,cosYaw), c=transform(face.c,sinYaw,cosYaw);
+          const n=transform(face.n,sinYaw,cosYaw);
+          // The reverse side of a surface cannot be seen through the solid hat.
+          if (n.z < -.035 && face.material !== 'underside') continue;
+          if (n.z > .035 && face.material === 'underside') continue;
+          const depth=(a.z+b.z+c.z)/3;
+          visible.push({ a:project(a), b:project(b), c:project(c), depth, fill:fills[face.material] });
+        }
+        visible.sort((a,b)=>a.depth-b.depth);
+        ctx.save(); ctx.globalAlpha=opacity; ctx.lineJoin='round';
+        for (const face of visible) {
+          ctx.beginPath(); ctx.moveTo(face.a.x,face.a.y); ctx.lineTo(face.b.x,face.b.y);
+          ctx.lineTo(face.c.x,face.c.y); ctx.closePath();
+          ctx.fillStyle=face.fill; ctx.fill();
+          // A hairline stroke closes antialiasing seams between adjacent facets.
+          ctx.strokeStyle=face.fill; ctx.lineWidth=1.2; ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      function particlePosition(p, time, amount) {
+        const twist=time*.9*p.speed+p.phase*.12;
+        const angle=p.angle+twist;
+        const radius=p.distance*amount;
+        return vertex(
+          p.x+Math.cos(angle)*radius + Math.sin(time*2+p.phase)*.11*amount,
+          p.y+p.lift*amount + Math.sin(time*1.8+p.phase)*.16*amount,
+          p.z+Math.sin(angle)*radius
+        );
+      }
+      function drawParticles(sinYaw,cosYaw,time,amount,opacity) {
+        if (opacity<=0) return;
+        ctx.save(); ctx.globalCompositeOperation='screen';
+        const glows=[];
+        for (let i=0; i<particles.length; i++) {
+          const p=particles[i];
+          const at=project(transform(particlePosition(p,time,amount),sinYaw,cosYaw));
+          if (at.x<0 || at.x>width || at.y<0 || at.y>height) continue;
+          const isBand=p.material==='band' || p.material==='underside';
+          const alpha=opacity*(.32+p.brightness*.53);
+          const size=p.size*(.7+at.z*.075)*Math.max(.65,scale/160);
+          ctx.fillStyle=isBand ? `rgba(244,116,108,${alpha*.55})` : `rgba(255,${Math.round(99+p.brightness*72)},${Math.round(92+p.brightness*55)},${alpha})`;
+          ctx.fillRect(at.x,at.y,Math.max(.65,size),Math.max(.65,size));
+          if (p.brightness>.987 && i%2===0) glows.push({x:at.x,y:at.y,size,alpha});
+        }
+        for (const g of glows) {
+          const gradient=ctx.createRadialGradient(g.x,g.y,0,g.x,g.y,g.size*8);
+          gradient.addColorStop(0,`rgba(255,177,143,${g.alpha*.33})`);
+          gradient.addColorStop(1,'rgba(255,90,80,0)');
+          ctx.fillStyle=gradient; ctx.beginPath(); ctx.arc(g.x,g.y,g.size*8,0,TAU); ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      function drawOrbiters(sinYaw,cosYaw,time,opacity) {
+        if (opacity<=0) return;
+        ctx.save(); ctx.globalCompositeOperation='screen';
+        for (let i=0; i<orbiters.length; i++) {
+          const o=orbiters[i];
+          const angle=o.angle+time*o.speed;
+          function pointAt(a) {
+            return project(transform(vertex(
+              Math.cos(a)*o.radius,
+              o.y+Math.sin(a*1.7+o.phase)*.16,
+              Math.sin(a)*o.radius*.73
+            ),sinYaw,cosYaw));
+          }
+          const p=pointAt(angle), tail=pointAt(angle-o.speed*.35);
+          const gradient=ctx.createLinearGradient(tail.x,tail.y,p.x,p.y);
+          gradient.addColorStop(0,'rgba(255,95,84,0)');
+          gradient.addColorStop(1,`rgba(255,153,130,${opacity*.35})`);
+          ctx.strokeStyle=gradient; ctx.lineWidth=o.size*.65;
+          ctx.beginPath(); ctx.moveTo(tail.x,tail.y); ctx.lineTo(p.x,p.y); ctx.stroke();
+          ctx.fillStyle=`rgba(255,181,151,${opacity*.62})`;
+          ctx.beginPath(); ctx.arc(p.x,p.y,o.size,0,TAU); ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      function render(now) {
+        const elapsed=startTime<0 ? Infinity : (now-startTime)/1000;
+        const active=elapsed<3.55;
+        const speed=active ? .00013 : hovered ? .00019 : .00043;
+        if (!reduced) yaw+=(now-lastTime)*speed;
+        lastTime=now;
+        ctx.clearRect(0,0,width,height);
+        drawAtmosphere(now/1000);
+        const sinYaw=Math.sin(yaw), cosYaw=Math.cos(yaw);
+        let meshOpacity=1, particleOpacity=0, amount=0;
+        if (active) {
+          amount=elapsed<.83 ? smooth(0,.83,elapsed) : elapsed<2.17 ? 1 : 1-smooth(2.17,3.33,elapsed);
+          meshOpacity=1-smooth(.05,.64,elapsed)+smooth(3.07,3.51,elapsed);
+          particleOpacity=smooth(.06,.47,elapsed)*(1-smooth(3.10,3.52,elapsed));
+        }
+        drawMesh(sinYaw,cosYaw,clamp(meshOpacity,0,1));
+        if (active) drawParticles(sinYaw,cosYaw,elapsed,amount,particleOpacity);
+        if (startTime>=0) drawOrbiters(sinYaw,cosYaw,now/1000,smooth(2.8,3.6,elapsed)*.72);
+        if (!reduced) frame=requestAnimationFrame(render);
+      }
+
+      function resize() {
+        const rect=canvas.getBoundingClientRect();
+        width=rect.width; height=rect.height; dpr=Math.min(window.devicePixelRatio||1,2);
+        canvas.width=Math.round(width*dpr); canvas.height=Math.round(height*dpr);
+        ctx.setTransform(dpr,0,0,dpr,0,0);
+        scale=Math.min(width/3.95,height/2.75);
+        cancelAnimationFrame(frame);
+        lastTime=performance.now();
+        render(lastTime);
+      }
+      function trigger() {
+        if (reduced || (startTime>=0 && performance.now()-startTime<3550)) return;
+        startTime=performance.now();
+      }
+      function motionChange(event) {
+        reduced=event.matches;
+        caption.textContent=reduced ? 'A quiet study in shape and light' : 'Hover or tap to let it drift apart';
+        button.setAttribute('aria-label',reduced ? 'Red fedora illustration' : 'Dissolve and reform the spinning red fedora');
+        if (reduced) { cancelAnimationFrame(frame); startTime=-1; render(performance.now()); }
+        else { lastTime=performance.now(); frame=requestAnimationFrame(render); }
+      }
+
+      makeMesh(); makeParticles();
+      button.addEventListener('pointerenter',event=>{ if (event.pointerType==='mouse') { hovered=true; trigger(); } });
+      button.addEventListener('pointerleave',()=>{ hovered=false; });
+      button.addEventListener('click',trigger);
+      motionQuery.addEventListener('change',motionChange);
+      new ResizeObserver(resize).observe(canvas);
+      resize();
+      if (reduced) motionChange(motionQuery);
+    })();
+  </script>
+</body>
+</html>
