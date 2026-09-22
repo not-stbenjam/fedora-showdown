@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080a0e">
+  <title>Red Hat — Ember</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --red: #ee202d;
+      --ink: #080a0e;
+      --muted: #9298a5;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; min-height: 100%; margin: 0; }
+    body {
+      min-height: 100svh;
+      overflow: hidden;
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(ellipse at 50% 44%, rgba(35, 39, 48, .62) 0%, rgba(17, 20, 26, .4) 27%, transparent 60%),
+        radial-gradient(ellipse at 50% 100%, rgba(16, 19, 26, .85), transparent 53%),
+        var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #f4f4f5;
+      -webkit-font-smoothing: antialiased;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: .15;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.19'/%3E%3C/svg%3E");
+      mix-blend-mode: soft-light;
+    }
+    main {
+      position: relative;
+      width: min(100%, 920px);
+      min-height: 100svh;
+      display: grid;
+      place-items: center;
+      padding: 28px 20px;
+      isolation: isolate;
+    }
+    .scene {
+      position: relative;
+      width: min(100%, 760px);
+      display: grid;
+      justify-items: center;
+      transform: translateY(-1.5vh);
+      outline: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .scene::after {
+      content: "";
+      position: absolute;
+      z-index: -1;
+      width: min(68vw, 530px);
+      height: min(30vw, 230px);
+      top: 39%;
+      border-radius: 50%;
+      background: radial-gradient(ellipse, rgba(238,32,45,.12), rgba(238,32,45,.035) 37%, transparent 70%);
+      filter: blur(25px);
+      pointer-events: none;
+    }
+    .visual {
+      position: relative;
+      width: min(86vw, 620px);
+      aspect-ratio: 1.28;
+      display: grid;
+      place-items: center;
+      perspective: 900px;
+      cursor: pointer;
+    }
+    canvas { width: 100%; height: 100%; display: block; overflow: visible; }
+    .caption {
+      position: relative;
+      margin-top: -1px;
+      text-align: center;
+      user-select: none;
+    }
+    .wordmark {
+      display: flex;
+      justify-content: center;
+      align-items: baseline;
+      gap: 7px;
+      letter-spacing: -.045em;
+      font-size: clamp(19px, 2.6vw, 25px);
+      line-height: 1.2;
+      font-weight: 580;
+      color: #f3f3f4;
+    }
+    .wordmark .red { color: var(--red); font-weight: 690; }
+    .hint {
+      margin: 11px 0 0;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 550;
+      line-height: 1.5;
+      letter-spacing: .21em;
+      text-transform: uppercase;
+      opacity: .8;
+      transition: opacity .4s ease;
+    }
+    .scene:hover .hint { opacity: 1; }
+    .scene:focus-visible .visual { outline: 1px solid rgba(255,255,255,.3); outline-offset: 9px; border-radius: 50%; }
+    @media (max-width: 520px) {
+      .scene { transform: translateY(-1vh); }
+      .visual { width: min(94vw, 520px); }
+      .hint { margin-top: 9px; font-size: 9px; letter-spacing: .17em; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="scene" id="scene" tabindex="0" role="button" aria-label="Red Hat fedora. Activate to watch it dissolve into embers and reform." aria-pressed="false">
+      <div class="visual"><canvas id="art" aria-hidden="true"></canvas></div>
+      <div class="caption" aria-hidden="true">
+        <div class="wordmark"><span class="red">Red</span><span>Hat</span></div>
+        <p class="hint" id="hint">A little spark of open source</p>
+      </div>
+    </section>
+  </main>
+  <script>
+  (() => {
+    const canvas = document.getElementById('art');
+    const ctx = canvas.getContext('2d', { alpha: true });
+    const scene = document.getElementById('scene');
+    const hint = document.getElementById('hint');
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+    const TAU = Math.PI * 2;
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    const ease = t => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
+    let W = 1, H = 1, dpr = 1, last = 0, now = 0, spin = 0, slow = 0, cycle = 0;
+    let active = false, hover = false, pointerX = 0, pointerY = 0, targetX = 0, targetY = 0;
+    let particles = [], stars = [], raf;
+    const reducedMotion = () => reduced.matches;
+
+    function resize() {
+      const rect = canvas.getBoundingClientRect();
+      W = Math.max(1, rect.width); H = Math.max(1, rect.height);
+      dpr = Math.min(devicePixelRatio || 1, 2);
+      canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      makeStars();
+      if (!particles.length) makeParticles();
+    }
+    function rand(seed) {
+      let x = Math.sin(seed * 127.1 + 311.7) * 43758.5453123;
+      return x - Math.floor(x);
+    }
+    function makeStars() {
+      stars = [];
+      const count = Math.max(32, Math.round(W * H / 4600));
+      for (let i = 0; i < count; i++) stars.push({x: rand(i+4)*W, y:rand(i+83)*H, r:.35+rand(i+55)*.8, a:.08+rand(i+22)*.2, p:rand(i+102)*TAU});
+    }
+
+    // The hat is described in normalized front-facing coordinates, then projected
+    // through a real 3D rotation for the smooth, shaded turn.
+    const outline = [
+      [-.81,.37],[-.78,.23],[-.68,.11],[-.54,.03],[-.4,-.05],[-.26,-.13],[-.14,-.24],[-.08,-.39],[-.02,-.5],[.08,-.56],[.23,-.58],[.34,-.56],[.45,-.51],[.56,-.43],[.66,-.33],[.76,-.22],[.83,-.11],[.87,0],[.88,.1],[.84,.2],[.78,.3],[.77,.39],[.84,.44],[.91,.49],[.91,.54],[.83,.58],[.64,.62],[.4,.64],[.12,.64],[-.18,.62],[-.46,.58],[-.68,.53],[-.81,.48],[-.86,.43]
+    ];
+    const crown = [
+      [-.52,.1],[-.43,.03],[-.29,-.08],[-.16,-.2],[-.08,-.37],[-.01,-.49],[.09,-.54],[.22,-.55],[.34,-.52],[.45,-.47],[.57,-.37],[.67,-.27],[.76,-.16]
+    ];
+    const band = [[-.5,.17],[-.28,.15],[-.03,.16],[.22,.17],[.48,.19],[.72,.21]];
+
+    function project(point, angle, tilt, scale) {
+      const [x,y] = point;
+      const z = 0;
+      const xr = x*Math.cos(angle) - z*Math.sin(angle);
+      const zr = x*Math.sin(angle) + z*Math.cos(angle);
+      const yr = y*Math.cos(tilt) - zr*Math.sin(tilt);
+      const zz = y*Math.sin(tilt) + zr*Math.cos(tilt);
+      const perspective = 1 / (1 + zz*.16);
+      return [W*.5 + xr*scale*perspective, H*.49 + yr*scale*perspective, zz];
+    }
+    function hatPath(angle, tilt, scale, shape=outline) {
+      const pts = shape.map(p => project(p, angle, tilt, scale));
+      ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i=0;i<pts.length;i++) {
+        const a=pts[i], b=pts[(i+1)%pts.length];
+        const mx=(a[0]+b[0])/2, my=(a[1]+b[1])/2;
+        ctx.quadraticCurveTo(a[0],a[1],mx,my);
+      }
+      ctx.closePath();
+      return pts;
+    }
+    function bezierLine(points, angle, tilt, scale) {
+      const pts=points.map(p=>project(p,angle,tilt,scale));
+      ctx.beginPath(); ctx.moveTo(...pts[0].slice(0,2));
+      for(let i=1;i<pts.length-1;i++) {
+        const mid=[(pts[i][0]+pts[i+1][0])/2,(pts[i][1]+pts[i+1][1])/2];
+        ctx.quadraticCurveTo(pts[i][0],pts[i][1],...mid);
+      }
+      ctx.lineTo(...pts[pts.length-1].slice(0,2));
+    }
+    function scaleNow() { return Math.min(W*.51, H*.71, 256); }
+    function drawHat(angle, tilt, opacity=1, scale=scaleNow()) {
+      const pts=hatPath(angle,tilt,scale);
+      const minX=Math.min(...pts.map(p=>p[0])), maxX=Math.max(...pts.map(p=>p[0]));
+      const minY=Math.min(...pts.map(p=>p[1])), maxY=Math.max(...pts.map(p=>p[1]));
+      ctx.save(); ctx.globalAlpha=opacity;
+      // restrained pool of red light behind the felt
+      ctx.save(); ctx.shadowColor='rgba(233,20,39,.36)'; ctx.shadowBlur=30;
+      const fill=ctx.createLinearGradient(minX,minY,maxX,maxY);
+      fill.addColorStop(0,'#fa3842'); fill.addColorStop(.4,'#e51d2b'); fill.addColorStop(.76,'#c61524'); fill.addColorStop(1,'#8d111b');
+      ctx.fillStyle=fill; ctx.fill(); ctx.restore();
+      // velvet-like highlight across the dome
+      ctx.save(); hatPath(angle,tilt,scale);
+      ctx.clip();
+      const sheen=ctx.createLinearGradient(minX,minY,maxX,maxY);
+      sheen.addColorStop(0,'rgba(255,169,163,.38)'); sheen.addColorStop(.28,'rgba(255,78,83,.12)'); sheen.addColorStop(.7,'rgba(55,0,5,.08)'); sheen.addColorStop(1,'rgba(12,0,2,.3)');
+      ctx.fillStyle=sheen; ctx.fillRect(minX,minY,maxX-minX,maxY-minY);
+      const ridge=project([-.1,-.45],angle,tilt,scale);
+      const rg=ctx.createRadialGradient(ridge[0],ridge[1],0,ridge[0],ridge[1],scale*.58);
+      rg.addColorStop(0,'rgba(255,151,146,.24)'); rg.addColorStop(1,'rgba(255,151,146,0)');
+      ctx.fillStyle=rg; ctx.fillRect(minX,minY,maxX-minX,maxY-minY);
+      ctx.restore();
+      // soft inset edge, no hard outline
+      ctx.save(); hatPath(angle,tilt,scale); ctx.strokeStyle='rgba(255,148,146,.2)'; ctx.lineWidth=1.2; ctx.stroke(); ctx.restore();
+      // red hat band across crown
+      bezierLine(band,angle,tilt,scale);
+      const b=ctx.createLinearGradient(minX,minY,maxX,maxY);
+      b.addColorStop(0,'rgba(110,8,17,.28)'); b.addColorStop(.45,'rgba(70,4,12,.48)'); b.addColorStop(1,'rgba(48,2,8,.27)');
+      ctx.strokeStyle=b; ctx.lineCap='round'; ctx.lineWidth=scale*.047; ctx.stroke();
+      // a narrow glint along the top edge of the band
+      ctx.save(); ctx.globalAlpha=.43; bezierLine(band,angle,tilt,scale); ctx.strokeStyle='rgba(255,115,117,.55)'; ctx.lineWidth=1; ctx.stroke(); ctx.restore();
+      // subtle fold seam on the side of the crown
+      bezierLine(crown.slice(1,6),angle,tilt,scale);
+      ctx.strokeStyle='rgba(97,8,17,.19)'; ctx.lineWidth=1.1; ctx.stroke();
+      ctx.restore();
+    }
+
+    function pointOnHat(u, v) {
+      // Uniform samples in the silhouette's bounding region; rejection by polygon.
+      // A small deterministic grid jitter yields thousands of fine, even particles.
+      const minX=-.87,maxX=.92,minY=-.59,maxY=.65;
+      for(let tries=0;tries<60;tries++) {
+        const x=minX+u*(maxX-minX), y=minY+v*(maxY-minY);
+        if (inside(x,y,outline)) return [x,y];
+        u=(u+.037)%1; v=(v+.061)%1;
+      }
+      return [u*(maxX-minX)+minX,v*(maxY-minY)+minY];
+    }
+    function inside(x,y,poly) {
+      let c=false;
+      for(let i=0,j=poly.length-1;i<poly.length;j=i++) {
+        const a=poly[i],b=poly[j];
+        if(((a[1]>y)!==(b[1]>y))&&(x<(b[0]-a[0])*(y-a[1])/(b[1]-a[1])+a[0])) c=!c;
+      }
+      return c;
+    }
+    function makeParticles() {
+      particles=[];
+      const count=Math.round(clamp(W*H/18, 1500, 3900));
+      for(let i=0;i<count;i++) {
+        const u=rand(i*4+17),v=rand(i*4+29), p=pointOnHat(u,v);
+        particles.push({p,seed:i*19.3, size:.45+rand(i+73)*1.25, phase:rand(i+223)*TAU, orbit:i<36, color:rand(i+92)});
+      }
+    }
+    function progress() { return active ? clamp((now-cycle)/5.15,0,1) : 0; }
+    function start() {
+      if(active) return;
+      active=true; cycle=now; scene.setAttribute('aria-pressed','true');
+      hint.textContent='Gathering the sparks';
+      if(reducedMotion()) { active=false; scene.setAttribute('aria-pressed','false'); hint.textContent='A little spark of open source'; }
+    }
+    function maybeStart() { if(!reducedMotion()) start(); }
+    function orbitDust(t, scale) {
+      ctx.save(); ctx.globalCompositeOperation='lighter';
+      for(let i=0;i<22;i++) {
+        const a=t*(.19+(i%5)*.023)+i*2.399;
+        const rx=scale*(.66+(i%4)*.07), ry=scale*(.28+(i%6)*.035);
+        const x=W*.5+Math.cos(a)*rx, y=H*.49+Math.sin(a)*ry;
+        const alpha=.13+.22*(.5+.5*Math.sin(t*1.25+i*1.7));
+        const radius=.7+(i%3)*.35;
+        ctx.beginPath(); ctx.arc(x,y,radius,0,TAU);
+        ctx.fillStyle=`rgba(255,${90+Math.round((i%3)*22)},${72+Math.round((i%4)*12)},${alpha})`;
+        ctx.shadowColor='rgba(255,65,49,.5)'; ctx.shadowBlur=7; ctx.fill();
+        ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x-Math.cos(a)*4,y-Math.sin(a)*4);
+        ctx.strokeStyle=`rgba(255,83,63,${alpha*.38})`; ctx.lineWidth=.65; ctx.stroke();
+      }
+      ctx.restore();
+    }
+    function drawParticles(t, amount, angle, tilt, scale) {
+      const scatter=ease(amount/.42), reform=ease((amount-.53)/.4);
+      ctx.save(); ctx.globalCompositeOperation='lighter';
+      for(const q of particles) {
+        const [hx,hy]=project(q.p,angle,tilt,scale);
+        const a=q.seed;
+        const spread=scale*(.3+scatter*.9);
+        const swirl=t*(.4+(q.seed%11)*.018)+q.phase;
+        const driftX=Math.cos(swirl)*spread*(.35+rand(q.seed)*.7)+Math.sin(q.phase*2+t*.31)*scale*.13;
+        const driftY=Math.sin(swirl*1.17)*spread*.62+Math.cos(q.phase+t*.26)*scale*.12;
+        const scatterMix=scatter*(1-reform);
+        let x=hx+driftX*scatterMix, y=hy+driftY*scatterMix;
+        if(q.orbit && amount<.12) {
+          const aa=t*(.21+(q.seed%7)*.025)+q.phase;
+          x=W*.5+Math.cos(aa)*scale*(.56+(q.seed%3)*.09);
+          y=H*.49+Math.sin(aa)*scale*(.25+(q.seed%5)*.035);
+        }
+        const burstFade=amount>.05&&amount<.97 ? .82 : 1;
+        const alpha=(.42+rand(a+3)*.55)*burstFade;
+        const radius=q.size*(.75+scatterMix*.5);
+        ctx.beginPath(); ctx.arc(x,y,radius,0,TAU);
+        const warmth=Math.floor(q.color*65);
+        ctx.fillStyle=`rgba(255,${128+warmth},${105+Math.floor(q.color*52)},${alpha})`;
+        ctx.shadowColor='rgba(255,75,49,.65)'; ctx.shadowBlur=2.5+radius*2.4; ctx.fill();
+      }
+      ctx.restore();
+    }
+    function draw(time) {
+      const dt=Math.min(.05,(time-last)/1000||0); last=time; now=time/1000;
+      ctx.clearRect(0,0,W,H);
+      ctx.save();
+      // floating pinpricks in the dark, barely brighter than the grain
+      for(const s of stars) {
+        const tw=.72+.28*Math.sin(now*.6+s.p);
+        ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,TAU);
+        ctx.fillStyle=`rgba(188,198,218,${s.a*tw})`; ctx.fill();
+      }
+      const p=progress();
+      const slowTarget=(active||hover)?1:0;
+      slow += (slowTarget-slow)*(1-Math.exp(-dt*2.2));
+      spin += dt*(reducedMotion()?0:.42*(1-slow*.78));
+      const tilt=.23+Math.sin(spin*.7)*.035+pointerY*.055;
+      const angle=spin+pointerX*.09;
+      const s=scaleNow();
+      // a low elliptical shadow anchors the hat and fades into the scene
+      const shadowAlpha=1-ease((p-.04)/.27);
+      ctx.save(); ctx.globalAlpha=.56*shadowAlpha;
+      const sh=ctx.createRadialGradient(W*.5,H*.68,2,W*.5,H*.68,s*.73);
+      sh.addColorStop(0,'rgba(0,0,0,.64)'); sh.addColorStop(.55,'rgba(0,0,0,.25)'); sh.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.fillStyle=sh; ctx.beginPath(); ctx.ellipse(W*.5,H*.68,s*.8,s*.15,0,0,TAU); ctx.fill(); ctx.restore();
+      if(p<.19) drawHat(angle,tilt,1-ease(p/.19),s);
+      if(p>=.08) drawParticles(now,p,angle,tilt,s);
+      if(!active || p>=1) orbitDust(now,s);
+      if(active&&p>=1) {
+        active=false; scene.setAttribute('aria-pressed','false'); hint.textContent='A little spark of open source';
+      }
+      pointerX+=(targetX-pointerX)*(1-Math.exp(-dt*3));
+      pointerY+=(targetY-pointerY)*(1-Math.exp(-dt*3));
+      ctx.restore();
+      raf=requestAnimationFrame(draw);
+    }
+    scene.addEventListener('pointerenter', e=>{hover=true; if(e.pointerType==='mouse') maybeStart();});
+    scene.addEventListener('pointerleave',()=>{hover=false;targetX=targetY=0;});
+    scene.addEventListener('pointermove',e=>{
+      const r=scene.getBoundingClientRect(); targetX=clamp((e.clientX-r.left-r.width/2)/(r.width/2),-1,1); targetY=clamp((e.clientY-r.top-r.height/2)/(r.height/2),-1,1);
+    });
+    scene.addEventListener('pointerdown',e=>{if(e.pointerType!=='mouse') maybeStart();});
+    scene.addEventListener('click',()=>{if(!active) maybeStart();});
+    scene.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();if(!active)maybeStart();}});
+    reduced.addEventListener?.('change',()=>{if(reducedMotion()){active=false;slow=0;scene.setAttribute('aria-pressed','false');hint.textContent='A little spark of open source';}});
+    new ResizeObserver(resize).observe(canvas);
+    resize();
+    raf=requestAnimationFrame(t=>{last=t;raf=requestAnimationFrame(draw);});
+  })();
+  </script>
+</body>
+</html>
