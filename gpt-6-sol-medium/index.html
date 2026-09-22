@@ -1,0 +1,519 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0d12">
+  <title>Fedora in Motion</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { min-height: 100%; }
+
+    body {
+      margin: 0;
+      overflow: hidden;
+      color: #f5f0ed;
+      background:
+        radial-gradient(ellipse 52% 42% at 50% 48%, rgba(116, 31, 40, .17), transparent 75%),
+        radial-gradient(ellipse 70% 65% at 50% 115%, rgba(45, 48, 66, .28), transparent 72%),
+        #0b0d12;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: .28;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.13'/%3E%3C/svg%3E");
+    }
+
+    main {
+      position: relative;
+      display: grid;
+      place-items: center;
+      min-height: 100svh;
+      padding: 28px 18px;
+    }
+
+    .scene {
+      width: min(100%, 720px);
+      text-align: center;
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: #bcaeb0;
+      font-size: 10px;
+      font-weight: 650;
+      letter-spacing: .32em;
+      text-transform: uppercase;
+    }
+
+    .art {
+      display: block;
+      width: min(100%, 650px);
+      aspect-ratio: 1.34;
+      margin: auto;
+      padding: 0;
+      border: 0;
+      border-radius: 24px;
+      background: transparent;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+
+    .art:focus-visible {
+      outline: 1px solid rgba(255, 164, 166, .65);
+      outline-offset: 5px;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .caption {
+      margin: -3px 0 0;
+      color: #e5dfe0;
+      font-size: clamp(13px, 2.4vw, 15px);
+      font-weight: 450;
+      letter-spacing: .025em;
+    }
+
+    .hint {
+      margin: 10px 0 0;
+      color: #817d86;
+      font-size: 11px;
+      letter-spacing: .09em;
+    }
+
+    @media (max-height: 570px) {
+      .art { width: min(75vh, 650px); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .art { cursor: default; }
+      .hint { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="scene">
+      <p class="eyebrow">An icon in motion</p>
+      <button class="art" type="button" aria-label="Animated red fedora. Hover, tap, or press Enter to scatter and reform it.">
+        <canvas aria-hidden="true"></canvas>
+      </button>
+      <p class="caption">A little spark of possibility.</p>
+      <p class="hint">HOVER OR TAP TO REIMAGINE</p>
+    </div>
+  </main>
+
+  <script>
+    (() => {
+      const button = document.querySelector(".art");
+      const canvas = document.querySelector("canvas");
+      const ctx = canvas.getContext("2d", { alpha: true });
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+      const TAU = Math.PI * 2;
+      const segments = 52;
+      const faces = [];
+      const particles = [];
+      const orbiters = [];
+
+      let width = 650;
+      let height = 485;
+      let angle = -.32;
+      let lastTime = 0;
+      let phase = "idle";
+      let phaseStart = 0;
+      let orbitStart = 0;
+      let raf = 0;
+
+      const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+      const smooth = x => {
+        x = clamp(x);
+        return x * x * (3 - 2 * x);
+      };
+      const random = (a, b) => a + Math.random() * (b - a);
+
+      function point(radius, theta, y) {
+        return [Math.cos(theta) * radius[0], y, Math.sin(theta) * radius[1]];
+      }
+
+      function project(v, spin) {
+        const c = Math.cos(spin);
+        const s = Math.sin(spin);
+        const x = v[0] * c + v[2] * s;
+        const z = v[2] * c - v[0] * s;
+        const elevation = .31;
+        const raised = v[1] * Math.cos(elevation) - z * Math.sin(elevation);
+        const depth = v[1] * Math.sin(elevation) + z * Math.cos(elevation);
+        const perspective = 3.8 / (3.8 - depth);
+        const unit = Math.min(width / 4.22, height / 3.15);
+        return {
+          x: width * .5 + x * unit * perspective,
+          y: height * .49 - raised * unit * perspective,
+          depth
+        };
+      }
+
+      function addFace(vertices, kind, theta, spin) {
+        const projected = vertices.map(v => project(v, spin));
+        faces.push({
+          points: projected,
+          depth: projected.reduce((sum, p) => sum + p.depth, 0) / projected.length,
+          kind,
+          theta
+        });
+      }
+
+      function surface(spin) {
+        faces.length = 0;
+
+        for (let i = 0; i < segments; i++) {
+          const a = i * TAU / segments;
+          const b = (i + 1) * TAU / segments;
+          const mid = (a + b) / 2;
+
+          // A gently curled brim, including its dark lower edge.
+          const brim = (theta, t) => {
+            const curl = .095 * t * Math.cos(theta * 2 + .35);
+            const frontDip = -.075 * t * Math.sin(theta);
+            return point([.79 + .82 * t, .55 + .39 * t], theta,
+              -.43 + curl + frontDip);
+          };
+
+          for (let j = 0; j < 5; j++) {
+            const t0 = j / 5;
+            const t1 = (j + 1) / 5;
+            addFace([brim(a, t0), brim(b, t0), brim(b, t1), brim(a, t1)],
+              "brim", mid, spin);
+          }
+
+          const edgeA = brim(a, 1);
+          const edgeB = brim(b, 1);
+          addFace([
+            edgeA, edgeB,
+            [edgeB[0] * .997, edgeB[1] - .035, edgeB[2] * .997],
+            [edgeA[0] * .997, edgeA[1] - .035, edgeA[2] * .997]
+          ], "edge", mid, spin);
+
+          // The crown narrows toward its pinched top.
+          const crown = (theta, t, extra = 0) => {
+            const pinch = .028 * t * Math.cos(theta * 2 - .3);
+            return point(
+              [.785 - .12 * t + pinch + extra, .545 - .065 * t + extra * .7],
+              theta,
+              -.42 + 1.12 * t - .055 * t * Math.sin(theta)
+            );
+          };
+
+          for (let j = 0; j < 8; j++) {
+            const t0 = j / 8;
+            const t1 = (j + 1) / 8;
+            const isBand = j < 2;
+            addFace([
+              crown(a, t0, isBand ? .009 : 0),
+              crown(b, t0, isBand ? .009 : 0),
+              crown(b, t1, isBand ? .009 : 0),
+              crown(a, t1, isBand ? .009 : 0)
+            ], isBand ? "band" : "crown", mid, spin);
+          }
+
+          // Nested top rings give the crown its shallow central dent.
+          for (let j = 0; j < 4; j++) {
+            const r0 = j / 4;
+            const r1 = (j + 1) / 4;
+            const top = (theta, r) => {
+              const rim = .70 - .055 * Math.sin(theta);
+              const dent = .16 * (1 - r * r);
+              return point([.665 * r, .48 * r], theta, rim - dent);
+            };
+            addFace([
+              top(a, r0), top(b, r0), top(b, r1), top(a, r1)
+            ], "top", mid, spin);
+          }
+        }
+
+        faces.sort((a, b) => a.depth - b.depth);
+      }
+
+      function color(face, spin) {
+        const light = Math.cos(face.theta + spin - .68);
+        const side = .76 + .20 * light;
+        const front = Math.sin(face.theta + spin);
+        let r, g, b;
+
+        switch (face.kind) {
+          case "band":
+            r = 34 + 9 * light;
+            g = 23 + 5 * light;
+            b = 30 + 6 * light;
+            break;
+          case "edge":
+            r = 103 + 15 * light;
+            g = 22 + 3 * light;
+            b = 31 + 5 * light;
+            break;
+          case "brim":
+            r = 178 * side + 18;
+            g = 35 * side + 4;
+            b = 43 * side + 6;
+            break;
+          case "top":
+            r = 182 + 22 * light;
+            g = 43 + 8 * light;
+            b = 52 + 8 * light;
+            break;
+          default:
+            r = 186 * side + 14 - 7 * front;
+            g = 38 * side + 3;
+            b = 47 * side + 4;
+        }
+
+        return `rgb(${r | 0} ${g | 0} ${b | 0})`;
+      }
+
+      function drawHat(target, spin, opacity = 1) {
+        if (opacity <= 0) return;
+        surface(spin);
+        target.save();
+        target.globalAlpha = opacity;
+        target.lineJoin = "round";
+
+        for (const face of faces) {
+          const p = face.points;
+          target.beginPath();
+          target.moveTo(p[0].x, p[0].y);
+          for (let i = 1; i < p.length; i++) target.lineTo(p[i].x, p[i].y);
+          target.closePath();
+          target.fillStyle = color(face, spin);
+          target.fill();
+        }
+
+        target.restore();
+      }
+
+      function drawShadow(opacity) {
+        ctx.save();
+        ctx.globalAlpha = opacity;
+        ctx.filter = `blur(${Math.max(13, width * .032)}px)`;
+        ctx.fillStyle = "rgba(0, 0, 0, .72)";
+        ctx.beginPath();
+        ctx.ellipse(width * .5, height * .81, width * .265,
+          height * .037, 0, 0, TAU);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      function makeParticles() {
+        particles.length = 0;
+        const sample = document.createElement("canvas");
+        sample.width = Math.ceil(width);
+        sample.height = Math.ceil(height);
+        const off = sample.getContext("2d", { willReadFrequently: true });
+        drawHat(off, angle);
+        const pixels = off.getImageData(0, 0, sample.width, sample.height).data;
+
+        let attempts = 0;
+        while (particles.length < 2900 && attempts++ < 36000) {
+          const x = Math.floor(random(width * .1, width * .9));
+          const y = Math.floor(random(height * .13, height * .77));
+          const index = (y * sample.width + x) * 4;
+          if (pixels[index + 3] < 220) continue;
+
+          const dx = x - width * .5;
+          const dy = y - height * .47;
+          const distance = Math.hypot(dx, dy) || 1;
+          const reach = random(width * .16, width * .43);
+          const direction = Math.atan2(dy, dx) + random(-.7, .7);
+
+          particles.push({
+            x, y,
+            vx: Math.cos(direction) * reach,
+            vy: Math.sin(direction) * reach * .72 - random(12, 75),
+            phase: random(0, TAU),
+            size: random(.6, 1.65),
+            color: `rgb(${pixels[index]} ${pixels[index + 1]} ${pixels[index + 2]})`,
+            glow: particles.length % 29 === 0,
+            distance
+          });
+        }
+      }
+
+      function drawParticles(progress) {
+        const out = smooth(progress / .29);
+        const back = smooth((progress - .53) / .47);
+        const amount = out * (1 - back);
+        const visible = smooth(progress / .08) * (1 - smooth((progress - .84) / .16));
+
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+
+        for (const p of particles) {
+          const swirl = progress * 5.2 + p.phase * .16;
+          const c = Math.cos(swirl);
+          const s = Math.sin(swirl);
+          const x = p.x + (p.vx * c - p.vy * s) * amount
+            + Math.sin(progress * 13 + p.phase) * 9 * amount;
+          const y = p.y + (p.vx * s + p.vy * c) * amount
+            + Math.cos(progress * 11 + p.phase) * 8 * amount;
+
+          ctx.globalAlpha = visible * (p.glow ? .9 : .62);
+          ctx.fillStyle = p.color;
+          const size = p.size * (1 + .7 * amount);
+          ctx.fillRect(x, y, size, size);
+
+          if (p.glow) {
+            ctx.globalAlpha = visible * .13;
+            ctx.fillStyle = "#ff7565";
+            ctx.beginPath();
+            ctx.arc(x, y, size * 4.5, 0, TAU);
+            ctx.fill();
+          }
+        }
+
+        ctx.restore();
+      }
+
+      function drawOrbiters(time) {
+        if (!orbitStart) return;
+        const age = (time - orbitStart) / 1000;
+        const fade = smooth(age / 1.2);
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+
+        for (const p of orbiters) {
+          const t = age * p.speed + p.phase;
+          const x = width * .5 + Math.cos(t) * p.rx;
+          const y = height * .47 + Math.sin(t) * p.ry
+            + Math.sin(t * 2.1) * 8;
+          const trailX = width * .5 + Math.cos(t - .1) * p.rx;
+          const trailY = height * .47 + Math.sin(t - .1) * p.ry
+            + Math.sin((t - .1) * 2.1) * 8;
+
+          ctx.globalAlpha = fade * .12;
+          ctx.strokeStyle = "#ff645c";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(trailX, trailY);
+          ctx.lineTo(x, y);
+          ctx.stroke();
+
+          ctx.globalAlpha = fade * .45;
+          ctx.fillStyle = "#ff8c78";
+          ctx.beginPath();
+          ctx.arc(x, y, p.size, 0, TAU);
+          ctx.fill();
+        }
+
+        ctx.restore();
+      }
+
+      function render(time) {
+        if (!lastTime) lastTime = time;
+        const dt = Math.min(time - lastTime, 50);
+        lastTime = time;
+
+        ctx.clearRect(0, 0, width, height);
+
+        let hatOpacity = 1;
+        let shadowOpacity = .9;
+
+        if (phase === "idle") {
+          if (!reduceMotion.matches) angle += dt * .00048;
+        } else if (phase === "slowing") {
+          const t = clamp((time - phaseStart) / 480);
+          angle += dt * .00048 * (1 - smooth(t));
+          if (t >= 1) {
+            makeParticles();
+            phase = "dissolving";
+            phaseStart = time;
+          }
+        } else if (phase === "dissolving") {
+          const t = clamp((time - phaseStart) / 3600);
+          hatOpacity = 1 - smooth(t / .16) + smooth((t - .82) / .18);
+          hatOpacity = clamp(hatOpacity);
+          shadowOpacity = .9 * (.45 + .55 * hatOpacity);
+          if (t >= 1) {
+            phase = "idle";
+            orbitStart = time;
+            particles.length = 0;
+          }
+        }
+
+        drawShadow(shadowOpacity);
+        drawHat(ctx, angle, hatOpacity);
+
+        if (phase === "dissolving") {
+          drawParticles(clamp((time - phaseStart) / 3600));
+        }
+        drawOrbiters(time);
+
+        if (!reduceMotion.matches) raf = requestAnimationFrame(render);
+      }
+
+      function resize() {
+        const rect = canvas.getBoundingClientRect();
+        width = rect.width;
+        height = rect.height;
+        const scale = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.round(width * scale);
+        canvas.height = Math.round(height * scale);
+        ctx.setTransform(scale, 0, 0, scale, 0, 0);
+
+        orbiters.length = 0;
+        for (let i = 0; i < 16; i++) {
+          orbiters.push({
+            phase: i * TAU / 16 + random(-.2, .2),
+            speed: random(.24, .42),
+            rx: width * random(.29, .39),
+            ry: height * random(.13, .23),
+            size: random(.5, 1.25)
+          });
+        }
+
+        if (phase === "dissolving") makeParticles();
+        if (reduceMotion.matches) {
+          ctx.clearRect(0, 0, width, height);
+          drawShadow(.9);
+          drawHat(ctx, angle);
+        }
+      }
+
+      function activate() {
+        if (reduceMotion.matches || phase !== "idle") return;
+        phase = "slowing";
+        phaseStart = performance.now();
+      }
+
+      button.addEventListener("pointerenter", activate);
+      button.addEventListener("pointerdown", activate);
+      button.addEventListener("click", activate);
+      reduceMotion.addEventListener("change", () => {
+        cancelAnimationFrame(raf);
+        phase = "idle";
+        orbitStart = 0;
+        particles.length = 0;
+        lastTime = 0;
+        resize();
+        if (!reduceMotion.matches) raf = requestAnimationFrame(render);
+      });
+
+      new ResizeObserver(resize).observe(button);
+      resize();
+      if (!reduceMotion.matches) raf = requestAnimationFrame(render);
+    })();
+  </script>
+</body>
+</html>
