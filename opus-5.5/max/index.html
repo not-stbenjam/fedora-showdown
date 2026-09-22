@@ -1,0 +1,1474 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#060608">
+<title>Red Hat · Fedora</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #060608;
+    --ink: rgba(238, 234, 230, 0.9);
+    --muted: rgba(238, 234, 230, 0.42);
+    --red: #ee0000;
+    /* Updated from JS so the hit area and caption track the rendered hat. */
+    --hx: 50%;
+    --hy: 44%;
+    --hs: min(60vw, 46vh);
+    --cy: 74%;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+  }
+
+  body {
+    overflow: hidden;
+    color: var(--ink);
+    font-family: "Red Hat Display", "Red Hat Text", Inter, system-ui, -apple-system,
+      "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  .hero {
+    position: relative;
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 320px;
+    overflow: hidden;
+    isolation: isolate;
+    background:
+      radial-gradient(55% 50% at 50% 42%, rgba(110, 16, 20, 0.12), transparent 70%),
+      radial-gradient(120% 90% at 50% 38%, #141418 0%, #0a0a0d 50%, #050506 100%);
+    touch-action: manipulation;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  #scene {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    opacity: 0;
+    transition: opacity 1.6s cubic-bezier(.2, .6, .2, 1);
+  }
+  #scene.ready { opacity: 1; }
+
+  /* Static SVG hat, shown when WebGL (or JavaScript) is unavailable. */
+  .fallback {
+    position: absolute;
+    left: 50%;
+    top: 44%;
+    width: min(62vw, 44vh);
+    height: auto;
+    transform: translate(-50%, -50%);
+    filter: drop-shadow(0 28px 34px rgba(0, 0, 0, 0.65));
+    animation: float 6s ease-in-out infinite;
+  }
+  .gl .fallback { display: none; }
+
+  @keyframes float {
+    0%, 100% { transform: translate(-50%, -50%); }
+    50% { transform: translate(-50%, calc(-50% - 8px)); }
+  }
+
+  .hit {
+    position: absolute;
+    left: var(--hx);
+    top: var(--hy);
+    width: var(--hs);
+    height: var(--hs);
+    transform: translate(-50%, -50%);
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .hit:focus { outline: none; }
+  .hit:focus-visible {
+    outline: 1px solid rgba(255, 255, 255, 0.28);
+    outline-offset: 4px;
+  }
+
+  .caption {
+    position: absolute;
+    left: 50%;
+    top: var(--cy);
+    width: max-content;
+    max-width: 90vw;
+    transform: translateX(-50%);
+    text-align: center;
+    pointer-events: none;
+    opacity: 0;
+    animation: rise 1.6s cubic-bezier(.2, .6, .2, 1) 0.5s forwards;
+  }
+
+  @keyframes rise {
+    from { opacity: 0; transform: translate(-50%, 10px); }
+    to { opacity: 1; transform: translate(-50%, 0); }
+  }
+
+  .title {
+    margin: 0;
+    font-size: clamp(0.74rem, 0.62rem + 0.4vw, 0.95rem);
+    font-weight: 500;
+    letter-spacing: 0.44em;
+    /* Balance the trailing letter-spacing so the word stays optically centred. */
+    margin-right: -0.44em;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+
+  .rule {
+    display: block;
+    width: 28px;
+    height: 1px;
+    margin: 0.85em auto 0.8em;
+    background: linear-gradient(90deg, transparent, var(--red), transparent);
+    opacity: 0.85;
+  }
+
+  .hint {
+    margin: 0;
+    font-size: clamp(0.64rem, 0.58rem + 0.2vw, 0.74rem);
+    font-weight: 400;
+    letter-spacing: 0.2em;
+    margin-right: -0.2em;
+    text-transform: lowercase;
+    color: var(--muted);
+    transition: opacity 0.8s ease;
+  }
+  .busy .hint { opacity: 0.45; }
+
+  .hint .tap { display: none; }
+  @media (hover: none) {
+    .hint .hover { display: none; }
+    .hint .tap { display: inline; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    #scene { transition: opacity 0.6s linear; }
+    .fallback { animation: none; }
+    .caption { animation: fade 0.6s linear 0.2s forwards; }
+    @keyframes fade {
+      from { opacity: 0; transform: translateX(-50%); }
+      to { opacity: 1; transform: translateX(-50%); }
+    }
+  }
+</style>
+</head>
+<body>
+<main class="hero" id="hero">
+  <canvas id="scene" aria-hidden="true"></canvas>
+
+  <svg class="fallback" viewBox="0 0 240 150" aria-hidden="true">
+    <defs>
+      <linearGradient id="fbCrown" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#ff2a2a"/>
+        <stop offset="1" stop-color="#b00000"/>
+      </linearGradient>
+      <linearGradient id="fbBrim" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#f00000"/>
+        <stop offset="1" stop-color="#9c0000"/>
+      </linearGradient>
+    </defs>
+    <path fill="url(#fbBrim)" d="M14 98c-2-12 28-16 50-14l112 0c24-2 54 2 52 14-3 16-50 26-108 26S17 114 14 98z"/>
+    <path fill="url(#fbCrown)" d="M60 96c-4-30 4-58 26-62 14-3 22 8 34 8s22-12 36-8c22 5 28 32 24 62-18 10-102 10-120 0z"/>
+    <path fill="#151515" d="M61 84c24 9 94 9 118 0l1 12c-18 10-102 10-120 0z"/>
+  </svg>
+
+  <button class="hit" id="hit" type="button" aria-label="Dissolve the hat into embers"></button>
+
+  <div class="caption">
+    <h1 class="title">Red Hat</h1>
+    <span class="rule" aria-hidden="true"></span>
+    <p class="hint"><span class="hover">hover</span><span class="tap">tap</span> <span id="verb">to dissolve</span></p>
+  </div>
+</main>
+
+<script>
+(() => {
+'use strict';
+
+/* ------------------------------------------------------------------ *
+ *  Setup
+ * ------------------------------------------------------------------ */
+const hero = document.getElementById('hero');
+const canvas = document.getElementById('scene');
+const hitEl = document.getElementById('hit');
+const verbEl = document.getElementById('verb');
+
+const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+let reducedMotion = motionQuery.matches;
+
+const gl = canvas.getContext('webgl', {
+  antialias: true,
+  alpha: false,
+  depth: true,
+  premultipliedAlpha: false,
+  powerPreference: 'high-performance'
+}) || canvas.getContext('experimental-webgl');
+
+if (!gl) {
+  // The static SVG fallback stays visible; nothing else to do.
+  hitEl.hidden = true;
+  return;
+}
+document.documentElement.classList.add('gl');
+
+/* ------------------------------------------------------------------ *
+ *  Small math toolkit
+ * ------------------------------------------------------------------ */
+const TAU = Math.PI * 2;
+const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
+const lerp = (a, b, t) => a + (b - a) * t;
+const smoothstep = (a, b, x) => {
+  const t = clamp((x - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
+};
+const gauss = (x, w) => Math.exp(-(x * x) / (w * w));
+const angleDiff = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
+const damp = (current, target, rate, dt) => lerp(current, target, 1 - Math.exp(-rate * dt));
+
+// Seeded PRNG: the hat and its particle cloud are identical on every load.
+function mulberry32(seed) {
+  return () => {
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const rand = mulberry32(0x0fed0a);
+
+// Smooth, cheap 3D pseudo-noise in [-1, 1] used to organise the burn front.
+function softNoise(x, y, z) {
+  return (
+    Math.sin(1.7 * x + 0.3 + 1.3 * Math.sin(1.1 * z)) +
+    Math.sin(1.9 * z - 0.7 + 1.2 * Math.sin(1.3 * y)) +
+    Math.sin(2.3 * y + 1.1 + 1.4 * Math.sin(0.9 * x))
+  ) / 3;
+}
+
+// 3x3 rotations, row-major, for CPU-side transforms.
+function rotX(a) { const c = Math.cos(a), s = Math.sin(a); return [1, 0, 0, 0, c, -s, 0, s, c]; }
+function rotY(a) { const c = Math.cos(a), s = Math.sin(a); return [c, 0, s, 0, 1, 0, -s, 0, c]; }
+function rotZ(a) { const c = Math.cos(a), s = Math.sin(a); return [c, -s, 0, s, c, 0, 0, 0, 1]; }
+function mul3(a, b) {
+  const o = new Array(9);
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      o[r * 3 + c] = a[r * 3] * b[c] + a[r * 3 + 1] * b[3 + c] + a[r * 3 + 2] * b[6 + c];
+    }
+  }
+  return o;
+}
+
+// Column-major 4x4 helpers for the GPU.
+function perspective(out, fovy, aspect, near, far) {
+  const f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far);
+  out.fill(0);
+  out[0] = f / aspect;
+  out[5] = f;
+  out[10] = (far + near) * nf;
+  out[11] = -1;
+  out[14] = 2 * far * near * nf;
+  return out;
+}
+function lookAt(out, eye, target, up) {
+  let zx = eye[0] - target[0], zy = eye[1] - target[1], zz = eye[2] - target[2];
+  let l = Math.hypot(zx, zy, zz); zx /= l; zy /= l; zz /= l;
+  let xx = up[1] * zz - up[2] * zy, xy = up[2] * zx - up[0] * zz, xz = up[0] * zy - up[1] * zx;
+  l = Math.hypot(xx, xy, xz); xx /= l; xy /= l; xz /= l;
+  const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+  out[0] = xx; out[1] = yx; out[2] = zx; out[3] = 0;
+  out[4] = xy; out[5] = yy; out[6] = zy; out[7] = 0;
+  out[8] = xz; out[9] = yz; out[10] = zz; out[11] = 0;
+  out[12] = -(xx * eye[0] + xy * eye[1] + xz * eye[2]);
+  out[13] = -(yx * eye[0] + yy * eye[1] + yz * eye[2]);
+  out[14] = -(zx * eye[0] + zy * eye[1] + zz * eye[2]);
+  out[15] = 1;
+  return out;
+}
+function multiply(out, a, b) {
+  for (let c = 0; c < 4; c++) {
+    const b0 = b[c * 4], b1 = b[c * 4 + 1], b2 = b[c * 4 + 2], b3 = b[c * 4 + 3];
+    for (let r = 0; r < 4; r++) {
+      out[c * 4 + r] = a[r] * b0 + a[4 + r] * b1 + a[8 + r] * b2 + a[12 + r] * b3;
+    }
+  }
+  return out;
+}
+function project(m, x, y, z) {
+  const w = m[3] * x + m[7] * y + m[11] * z + m[15];
+  return [
+    (m[0] * x + m[4] * y + m[8] * z + m[12]) / w,
+    (m[1] * x + m[5] * y + m[9] * z + m[13]) / w
+  ];
+}
+
+/* ------------------------------------------------------------------ *
+ *  Scene constants
+ * ------------------------------------------------------------------ */
+const HAT = {
+  crownRx: 1.0,      // crown half-width (left/right)
+  crownRz: 1.16,     // crown half-length (front/back)
+  crownH: 1.2,       // crown height at the back
+  frontDrop: 0.1,    // crown is a touch lower at the front
+  taper: 0.13,
+  dent: 0.3,         // centre crease depth
+  dentW: 0.34,
+  pinch: 0.13,       // front pinches
+  bandTop: 0.27,
+  bandBulge: 0.018,
+  brimRx: 1.92,
+  brimRz: 2.16,
+  brimThick: 0.05,
+  lift: -0.45        // model origin sits this far below the visual centre
+};
+
+const FLOOR_Y = -1.38;
+const FOV = 30 * Math.PI / 180;
+const EDGE = 0.036;            // width of the glowing burn front (in key units)
+
+const smallScreen = Math.min(window.innerWidth, window.innerHeight) < 640;
+const lowPower = (navigator.hardwareConcurrency || 4) <= 4;
+const PARTICLE_COUNT = smallScreen || lowPower ? 8000 : 15000;
+const ORBITER_COUNT = 11;
+const TRAIL_SAMPLES = 110;
+
+const SPIN_FAST = 0.52;        // rad/s at rest
+const SPIN_SLOW = 0.12;        // rad/s while hovered / dissolving
+
+// Timeline of one dissolve cycle (seconds).
+const T_DISSOLVE = 1.6;
+const T_REFORM_START = 4.1;
+const T_REFORM = 1.7;
+const T_LAND_FADE = 0.4;
+const T_CYCLE = T_REFORM_START + T_REFORM + T_LAND_FADE;
+const T_CALM = 2.8;            // reduced-motion glow cycle
+
+/* ------------------------------------------------------------------ *
+ *  WebGL helpers
+ * ------------------------------------------------------------------ */
+function compile(type, src) {
+  const sh = gl.createShader(type);
+  gl.shaderSource(sh, src);
+  gl.compileShader(sh);
+  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+    throw new Error(gl.getShaderInfoLog(sh) || 'shader compile failed');
+  }
+  return sh;
+}
+
+function makeProgram(vsSrc, fsSrc, attribs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vsSrc));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fsSrc));
+  attribs.forEach((name, i) => gl.bindAttribLocation(p, i, name));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+    throw new Error(gl.getProgramInfoLog(p) || 'program link failed');
+  }
+  const u = {};
+  const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++) {
+    const info = gl.getActiveUniform(p, i);
+    u[info.name.replace(/\[0\]$/, '')] = gl.getUniformLocation(p, info.name);
+  }
+  return { p, u, count: attribs.length };
+}
+
+function makeBuffer(data, target = gl.ARRAY_BUFFER, usage = gl.STATIC_DRAW) {
+  const b = gl.createBuffer();
+  gl.bindBuffer(target, b);
+  gl.bufferData(target, data, usage);
+  return b;
+}
+
+let enabledAttribs = 0;
+function useProgram(prog) {
+  gl.useProgram(prog.p);
+  for (let i = prog.count; i < enabledAttribs; i++) gl.disableVertexAttribArray(i);
+  for (let i = enabledAttribs; i < prog.count; i++) gl.enableVertexAttribArray(i);
+  enabledAttribs = prog.count;
+}
+
+function bindAttrib(loc, buf, size, stride, offset) {
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.vertexAttribPointer(loc, size, gl.FLOAT, false, stride, offset);
+}
+
+/* ------------------------------------------------------------------ *
+ *  Shaders
+ * ------------------------------------------------------------------ */
+const FRAG_PRECISION = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+`;
+
+const BG_VS = `
+attribute vec2 aPos;
+void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
+`;
+
+const BG_FS = FRAG_PRECISION + `
+uniform vec2 uRes;
+uniform vec2 uCenter;
+uniform float uGlow;
+float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+void main() {
+  vec2 uv = gl_FragCoord.xy / uRes;
+  vec2 p = (gl_FragCoord.xy - uCenter) / uRes.y;
+  float r = length(p * vec2(0.9, 1.1));
+  vec3 col = mix(vec3(0.052, 0.053, 0.064), vec3(0.012, 0.012, 0.016), smoothstep(0.0, 0.95, r));
+  // A soft warm bloom behind the hat, a little brighter while the embers fly.
+  col += vec3(0.085, 0.014, 0.016) * exp(-r * r * 7.0) * (0.55 + 0.45 * uGlow);
+  // Faint cool spill from an imaginary light above.
+  col += vec3(0.010, 0.011, 0.015) * smoothstep(0.35, 1.0, uv.y);
+  float v = length((uv - 0.5) * vec2(uRes.x / uRes.y, 1.0));
+  col *= 1.0 - 0.45 * smoothstep(0.35, 1.25, v);
+  col += (hash(gl_FragCoord.xy) - 0.5) / 255.0;
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+const FLOOR_VS = `
+attribute vec2 aPos;
+uniform mat4 uViewProj;
+uniform float uFloorY;
+varying vec2 vXZ;
+void main() {
+  vXZ = aPos;
+  gl_Position = uViewProj * vec4(aPos.x, uFloorY, aPos.y, 1.0);
+}
+`;
+
+const FLOOR_FS = FRAG_PRECISION + `
+varying vec2 vXZ;
+uniform float uSpin;
+uniform float uShadow;
+uniform float uSoft;
+uniform float uEmber;
+uniform vec2 uShadowOff;
+float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+void main() {
+  float r = length(vXZ);
+  // Bring the floor point into the hat's frame so the oval shadow turns with it.
+  vec2 q = vXZ - uShadowOff;
+  float c = cos(uSpin), s = sin(uSpin);
+  q = vec2(c * q.x - s * q.y, s * q.x + c * q.y);
+  float e = length(q / vec2(1.86, 2.08));
+  float soft = 1.0 - smoothstep(0.05, 1.15 + uSoft, e);
+  float core = 1.0 - smoothstep(0.0, 0.72, e);
+  float shadow = clamp((0.5 * soft + 0.4 * core) * uShadow, 0.0, 0.9);
+
+  vec3 light = vec3(0.062, 0.060, 0.068) * exp(-r * r * 0.09);
+  light += vec3(0.05, 0.006, 0.006) * exp(-(e - 1.05) * (e - 1.05) * 9.0) * uShadow;
+  light += vec3(1.0, 0.34, 0.12) * 0.05 * exp(-r * r * 0.14) * uEmber;
+
+  float fade = 1.0 - smoothstep(2.2, 6.5, r);
+  float a = shadow * fade;
+  vec3 rgb = light * (1.0 - shadow) * fade + (hash(gl_FragCoord.xy) - 0.5) / 255.0;
+  gl_FragColor = vec4(max(rgb, 0.0), a);
+}
+`;
+
+const HAT_VS = `
+attribute vec3 aPos;
+attribute vec3 aNormal;
+attribute vec3 aInfo;
+uniform mat4 uModel;
+uniform mat4 uViewProj;
+uniform mat3 uNormalMat;
+varying vec3 vWorld;
+varying vec3 vNormal;
+varying vec3 vModel;
+varying vec3 vInfo;
+void main() {
+  vec4 w = uModel * vec4(aPos, 1.0);
+  vWorld = w.xyz;
+  vNormal = uNormalMat * aNormal;
+  vModel = aPos;
+  vInfo = aInfo;
+  gl_Position = uViewProj * w;
+}
+`;
+
+const HAT_FS = FRAG_PRECISION + `
+varying vec3 vWorld;
+varying vec3 vNormal;
+varying vec3 vModel;
+varying vec3 vInfo;           // x: burn key, y: part id, z: ambient occlusion
+uniform vec3 uCamPos;
+uniform vec3 uKeyDir;
+uniform vec3 uFillDir;
+uniform vec3 uRimDir;
+uniform vec3 uKeyDirModel;
+uniform float uCut;
+uniform float uHeat;
+uniform float uWarm;
+uniform float uBandTop;
+uniform float uEdge;
+
+float hash(vec3 p) {
+  p = fract(p * 0.3183099 + 0.1);
+  p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+float vnoise(vec3 x) {
+  vec3 i = floor(x);
+  vec3 f = fract(x);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(hash(i), hash(i + vec3(1.0, 0.0, 0.0)), f.x),
+                 mix(hash(i + vec3(0.0, 1.0, 0.0)), hash(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),
+             mix(mix(hash(i + vec3(0.0, 0.0, 1.0)), hash(i + vec3(1.0, 0.0, 1.0)), f.x),
+                 mix(hash(i + vec3(0.0, 1.0, 1.0)), hash(i + vec3(1.0, 1.0, 1.0)), f.x), f.y), f.z);
+}
+
+// Soft shadow of the crown (an elliptic cylinder) cast onto the brim, in model space.
+float crownShadow(vec3 p, vec3 L) {
+  vec2 rad = vec2(0.95, 1.1);
+  vec2 q = p.xz / rad;
+  vec2 d = L.xz / rad;
+  float dd = dot(d, d);
+  if (dd < 1e-4) return 1.0;
+  float s = -dot(q, d) / dd;
+  if (s <= 0.0) return 1.0;
+  float dist = length(q + s * d);
+  float entry = max(s - sqrt(max(0.0, 1.0 - dist * dist) / dd), 0.0);
+  float y = p.y + entry * L.y;
+  float soft = 0.05 + 0.16 * entry;
+  float inside = 1.0 - smoothstep(1.0 - soft, 1.0 + soft, dist);
+  float below = 1.0 - smoothstep(1.02 - soft, 1.1 + soft, y);
+  return 1.0 - 0.82 * inside * below;
+}
+
+void main() {
+  float over = vInfo.x + (vnoise(vModel * 8.0) - 0.5) * 0.07
+             + (vnoise(vModel * 26.0) - 0.5) * 0.03 - uCut;
+  if (over < 0.0) discard;
+
+  vec3 N = normalize(vNormal);
+  float inner = 0.0;
+  if (!gl_FrontFacing) { N = -N; inner = 1.0; }
+  vec3 V = normalize(uCamPos - vWorld);
+
+  float part = vInfo.y;
+  float ao = vInfo.z * (1.0 - 0.55 * inner);
+  float band = part < 0.5 ? 1.0 - smoothstep(uBandTop - 0.004, uBandTop + 0.004, vModel.y) : 0.0;
+  band *= 1.0 - inner;
+
+  vec3 felt = vec3(0.66, 0.004, 0.004);
+  vec3 albedo = mix(felt, vec3(0.016, 0.015, 0.017), band);
+
+  float shade = (part > 0.5 && part < 1.5) || part > 2.5 ? crownShadow(vModel, uKeyDirModel) : 1.0;
+  float nk = dot(N, uKeyDir);
+  float key = clamp((nk + 0.3) / 1.3, 0.0, 1.0);
+  key *= key * shade;
+  float fill = clamp((dot(N, uFillDir) + 0.5) / 1.5, 0.0, 1.0);
+  vec3 ambient = mix(vec3(0.032, 0.022, 0.024), vec3(0.07, 0.076, 0.095), 0.5 + 0.5 * N.y);
+
+  vec3 keyCol = vec3(1.0, 0.94, 0.87) * 2.1;
+  vec3 color = albedo * (keyCol * key + vec3(0.42, 0.5, 0.72) * 0.34 * fill + ambient);
+
+  float ndv = clamp(dot(N, V), 0.0, 1.0);
+  float fres = pow(1.0 - ndv, 3.0);
+  // Felt sheen: soft, slightly desaturated light that gathers at grazing angles.
+  color += mix(vec3(1.0, 0.34, 0.28), vec3(0.5, 0.5, 0.55), band) * fres * (0.04 + 0.16 * key);
+  // Back rim light to separate the silhouette from the dark.
+  float rim = fres * clamp(dot(N, uRimDir) + 0.3, 0.0, 1.0) * shade;
+  color += mix(vec3(1.0, 0.2, 0.15), vec3(0.45, 0.45, 0.5), band) * rim * 0.95;
+  // Broad felt highlight, tighter satin highlight on the band.
+  float nh = clamp(dot(N, normalize(uKeyDir + V)), 0.0, 1.0);
+  color += keyCol * shade * mix(0.045 * pow(nh, 14.0), 0.5 * pow(nh, 64.0), band);
+  color *= ao;
+
+  // The burn front: charred rim followed by a thin glowing seam.
+  float front = 1.0 - smoothstep(0.0, uEdge, over);
+  float charred = 1.0 - smoothstep(0.0, uEdge * 2.6, over);
+  color *= 1.0 - 0.6 * charred * uHeat;
+  vec3 ember = mix(vec3(0.9, 0.14, 0.03), vec3(1.0, 0.52, 0.2), front * front);
+  color += ember * front * front * 1.5 * uHeat;
+
+  // Reduced-motion variant: a gentle inner glow instead of a dissolve.
+  color += vec3(1.0, 0.28, 0.1) * uWarm * (0.12 + 0.5 * fres) * (1.0 - band * 0.6);
+
+  color = 1.0 - exp(-color * 1.25);
+  color = pow(color, vec3(1.0 / 2.2));
+  gl_FragColor = vec4(color, 1.0);
+}
+`;
+
+const SPARK_VS = `
+attribute vec3 aPos;
+attribute vec2 aState;        // x: alpha, y: temperature
+attribute vec3 aStatic;       // x: size (world), y: seed, z: kind (0 felt, 1 band, 2 trail)
+uniform mat4 uView;
+uniform mat4 uProj;
+uniform float uPointScale;
+uniform float uFocus;
+uniform float uTime;
+uniform float uGain;
+varying vec3 vColor;
+
+vec3 ember(float t, float kind) {
+  vec3 c = mix(vec3(0.8, 0.05, 0.03), vec3(1.0, 0.3, 0.07), smoothstep(0.0, 0.55, t));
+  c = mix(c, vec3(1.0, 0.76, 0.46), smoothstep(0.55, 1.0, t));
+  vec3 ash = mix(vec3(0.5, 0.3, 0.22), vec3(1.0, 0.82, 0.62), t) * 0.7;
+  vec3 trail = vec3(1.0, 0.5, 0.36);
+  return kind < 0.5 ? c : kind < 1.5 ? ash : trail;
+}
+
+void main() {
+  if (aState.x <= 0.002) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    gl_PointSize = 0.0;
+    vColor = vec3(0.0);
+    return;
+  }
+  vec4 vp = uView * vec4(aPos, 1.0);
+  gl_Position = uProj * vp;
+  float z = max(-vp.z, 0.1);
+  float size = aStatic.x;
+  // A touch of depth of field: out-of-focus sparks grow softer and dimmer.
+  float sz = size + abs(z - uFocus) * 0.022;
+  float px = sz * uPointScale / z;
+  float pxc = clamp(px, 1.5, 40.0);
+  gl_PointSize = pxc;
+  float energy = pow(size / sz, 1.2) * min(1.0, (px * px) / (pxc * pxc));
+  float flick = aStatic.z > 1.5 ? 1.0
+              : 0.78 + 0.22 * sin(uTime * (6.0 + aStatic.y * 9.0) + aStatic.y * 43.0);
+  vColor = ember(aState.y, aStatic.z) * aState.x * flick * energy * uGain;
+}
+`;
+
+const SPARK_FS = `
+precision mediump float;
+varying vec3 vColor;
+void main() {
+  vec2 d = gl_PointCoord - 0.5;
+  float r2 = dot(d, d) * 4.0;
+  if (r2 > 1.0) discard;
+  float glow = (exp(-r2 * 8.0) + 0.32 * exp(-r2 * 2.4)) * (1.0 - r2);
+  gl_FragColor = vec4(vColor * glow, 1.0);
+}
+`;
+
+/* ------------------------------------------------------------------ *
+ *  Procedural fedora
+ * ------------------------------------------------------------------ */
+const COLS = 200;              // segments around the hat
+const CROWN_ROWS = 84;
+const BRIM_ROWS = 30;
+const LIP_ROWS = 8;
+
+const mesh = { pos: [], nrm: [], info: [], idx: [] };
+
+function burnKey(base, p) {
+  return clamp(base + 0.09 * softNoise(p[0] * 1.3, p[1] * 1.3, p[2] * 1.3), 0, 1);
+}
+
+// Adds a (cols+1) x (rows+1) parametric grid. Normals come from area-weighted
+// face normals; coincident vertices (seam, pole) are welded so shading is smooth;
+// every triangle is wound counter-clockwise when seen from outside.
+function addGrid(rows, part, vertex) {
+  const base = mesh.pos.length / 3;
+  const count = (COLS + 1) * (rows + 1);
+  const P = new Float64Array(count * 3);
+  const N = new Float64Array(count * 3);
+  let hint = 0;
+  const hints = [];
+
+  for (let j = 0; j <= rows; j++) {
+    for (let i = 0; i <= COLS; i++) {
+      const v = vertex(i / COLS, j / rows);
+      const k = j * (COLS + 1) + i;
+      P[k * 3] = v.p[0]; P[k * 3 + 1] = v.p[1]; P[k * 3 + 2] = v.p[2];
+      mesh.info.push(v.key, part, v.ao);
+      hints.push(v.out);
+    }
+  }
+
+  const tris = [];
+  const face = (a, b, c) => {
+    const ax = P[a * 3], ay = P[a * 3 + 1], az = P[a * 3 + 2];
+    const ux = P[b * 3] - ax, uy = P[b * 3 + 1] - ay, uz = P[b * 3 + 2] - az;
+    const vx = P[c * 3] - ax, vy = P[c * 3 + 1] - ay, vz = P[c * 3 + 2] - az;
+    return [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx];
+  };
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < COLS; i++) {
+      const a = j * (COLS + 1) + i, b = a + 1, c = a + COLS + 1, d = c + 1;
+      for (const t of [[a, b, d], [a, d, c]]) {
+        const n = face(t[0], t[1], t[2]);
+        if (Math.hypot(n[0], n[1], n[2]) < 1e-10) continue;   // collapsed at the pole
+        for (const v of t) { N[v * 3] += n[0]; N[v * 3 + 1] += n[1]; N[v * 3 + 2] += n[2]; }
+        tris.push(t);
+      }
+    }
+  }
+
+  // Weld normals of vertices that share a position.
+  const groups = new Map();
+  for (let k = 0; k < count; k++) {
+    const key = Math.round(P[k * 3] * 1e4) + ',' + Math.round(P[k * 3 + 1] * 1e4) + ',' + Math.round(P[k * 3 + 2] * 1e4);
+    const g = groups.get(key);
+    if (g) g.push(k); else groups.set(key, [k]);
+  }
+  for (const g of groups.values()) {
+    if (g.length < 2) continue;
+    let x = 0, y = 0, z = 0;
+    for (const k of g) { x += N[k * 3]; y += N[k * 3 + 1]; z += N[k * 3 + 2]; }
+    for (const k of g) { N[k * 3] = x; N[k * 3 + 1] = y; N[k * 3 + 2] = z; }
+  }
+
+  for (let k = 0; k < count; k++) {
+    const l = Math.hypot(N[k * 3], N[k * 3 + 1], N[k * 3 + 2]) || 1;
+    N[k * 3] /= l; N[k * 3 + 1] /= l; N[k * 3 + 2] /= l;
+    const h = hints[k];
+    hint += N[k * 3] * h[0] + N[k * 3 + 1] * h[1] + N[k * 3 + 2] * h[2];
+  }
+  const sign = hint < 0 ? -1 : 1;
+
+  for (let k = 0; k < count; k++) {
+    mesh.pos.push(P[k * 3], P[k * 3 + 1], P[k * 3 + 2]);
+    mesh.nrm.push(N[k * 3] * sign, N[k * 3 + 1] * sign, N[k * 3 + 2] * sign);
+  }
+  for (const t of tris) {
+    const n = face(t[0], t[1], t[2]);
+    const s = (n[0] * (N[t[0] * 3] + N[t[1] * 3] + N[t[2] * 3]) +
+               n[1] * (N[t[0] * 3 + 1] + N[t[1] * 3 + 1] + N[t[2] * 3 + 1]) +
+               n[2] * (N[t[0] * 3 + 2] + N[t[1] * 3 + 2] + N[t[2] * 3 + 2])) * sign;
+    if (s >= 0) mesh.idx.push(base + t[0], base + t[1], base + t[2]);
+    else mesh.idx.push(base + t[0], base + t[2], base + t[1]);
+  }
+}
+
+// Crown profile: a superellipse from the side wall over the rounded edge to the
+// top centre, resampled by arc length so the vertices are evenly spread.
+function crownProfile(n) {
+  const raw = [[1, -0.04]];
+  const M = 800, e = 3.4;
+  for (let i = 0; i <= M; i++) {
+    const a = (i / M) * Math.PI / 2;
+    raw.push([Math.pow(Math.cos(a), 2 / e), Math.pow(Math.sin(a), 2 / e)]);
+  }
+  const L = [0];
+  for (let i = 1; i < raw.length; i++) {
+    L.push(L[i - 1] + Math.hypot((raw[i][0] - raw[i - 1][0]) * 1.08, (raw[i][1] - raw[i - 1][1]) * 1.2));
+  }
+  const total = L[L.length - 1];
+  const out = [];
+  let k = 1;
+  for (let j = 0; j <= n; j++) {
+    const s = (j / n) * total;
+    while (k < L.length - 1 && L[k] < s) k++;
+    const t = clamp((s - L[k - 1]) / ((L[k] - L[k - 1]) || 1), 0, 1);
+    out.push([lerp(raw[k - 1][0], raw[k][0], t), lerp(raw[k - 1][1], raw[k][1], t), j / n]);
+  }
+  return out;
+}
+const PROFILE = crownProfile(CROWN_ROWS);
+
+function crownVertex(fu, fv) {
+  const th = fu * TAU;
+  const [pr, py, arc] = PROFILE[Math.round(fv * CROWN_ROWS)];
+  const ct = Math.cos(th), st = Math.sin(th);
+  const h = HAT.crownH - HAT.frontDrop * st;
+  const pinch = gauss(angleDiff(th, Math.PI / 2 - 0.62), 0.33) + gauss(angleDiff(th, Math.PI / 2 + 0.62), 0.33);
+
+  let r = pr * (1 - HAT.taper * Math.max(py, 0));
+  r *= 1 - HAT.pinch * pinch * smoothstep(0.3, 0.8, py);
+
+  // Centre crease running front to back, fading out toward the edges of the top.
+  const X = r * ct, Z = r * st;
+  const crease = Math.exp(-(X * X) / (HAT.dentW * HAT.dentW)) *
+    (1 - smoothstep(0.5, 0.95, Math.abs(Z))) * smoothstep(0.55, 0.97, py);
+  let y = py * h - HAT.dent * crease - 0.06 * pinch * smoothstep(0.7, 1, py);
+
+  // The band sits proud of the felt by a hair.
+  r += HAT.bandBulge * (1 - smoothstep(HAT.bandTop - 0.012, HAT.bandTop + 0.004, y));
+
+  const p = [r * HAT.crownRx * ct, y, r * HAT.crownRz * st];
+  const ao = (1 - 0.4 * Math.exp(-Math.max(y, 0) / 0.14)) * (1 - 0.3 * crease);
+  return { p, key: burnKey(0.5 * (1 - arc), p), ao, out: [ct, 0.4 + py, st] };
+}
+
+function brimVertex(fu, t, bottom) {
+  const th = fu * TAU;
+  const ct = Math.cos(th), st = Math.sin(th);
+  const front = Math.max(0, st), back = Math.max(0, -st);
+  const rx = lerp(HAT.crownRx * 0.97, HAT.brimRx, t);
+  const rz = lerp(HAT.crownRz * 0.97, HAT.brimRz, t);
+  // Curled up at the sides, a little at the back, snapped down at the front.
+  let y = Math.pow(t, 2.1) * (0.28 * ct * ct + 0.16 * back * back - 0.12 * front * front);
+  if (bottom) y -= HAT.brimThick * (1 - 0.4 * t);
+  const p = [rx * ct, y, rz * st];
+  const ao = bottom ? 0.45 + 0.35 * t : 1 - 0.5 * Math.exp(-t / 0.09);
+  return { p, key: burnKey(0.5 + 0.5 * t, p), ao, out: [0, bottom ? -1 : 1, 0] };
+}
+
+// Rounded edge joining the upper and lower brim surfaces.
+function lipVertex(fu, fv) {
+  const top = brimVertex(fu, 1, false).p;
+  const bot = brimVertex(fu, 1, true).p;
+  const phi = fv * Math.PI;
+  const rad = (top[1] - bot[1]) / 2;
+  const ol = Math.hypot(top[0], top[2]);
+  const ox = top[0] / ol, oz = top[2] / ol;
+  const lift = Math.sin(phi) * rad * 1.1;
+  const p = [
+    top[0] + ox * lift,
+    (top[1] + bot[1]) / 2 + Math.cos(phi) * rad,
+    top[2] + oz * lift
+  ];
+  return { p, key: burnKey(1, top), ao: 1 - 0.35 * fv, out: [ox, 0, oz] };
+}
+
+addGrid(CROWN_ROWS, 0, crownVertex);
+addGrid(BRIM_ROWS, 1, (u, v) => brimVertex(u, v, false));
+addGrid(BRIM_ROWS, 2, (u, v) => brimVertex(u, v, true));
+addGrid(LIP_ROWS, 3, lipVertex);
+
+const hatPos = new Float32Array(mesh.pos);
+const hatNrm = new Float32Array(mesh.nrm);
+const hatInfo = new Float32Array(mesh.info);
+const hatIdx = new Uint16Array(mesh.idx);
+
+/* ------------------------------------------------------------------ *
+ *  Particles: sampled across the hat's surface, area-weighted
+ * ------------------------------------------------------------------ */
+const NP = PARTICLE_COUNT;
+const home = new Float32Array(NP * 3);    // rest position, model space
+const homeN = new Float32Array(NP * 3);   // surface normal, model space
+const pKey = new Float32Array(NP);        // burn key (when the front reaches it)
+const pos = new Float32Array(NP * 3);     // current position, world space
+const vel = new Float32Array(NP * 3);
+const p0 = new Float32Array(NP * 3);      // where the flight home began
+const v0 = new Float32Array(NP * 3);
+const tRel = new Float32Array(NP);        // release time in the cycle
+const tRet = new Float32Array(NP);        // start of the flight home
+const tArr = new Float32Array(NP);        // arrival (surface re-forms here)
+const spiral = new Float32Array(NP);      // extra swirl on the way home
+const phase = new Uint8Array(NP);         // 0 attached, 1 free, 2 homing, 3 landed, 4 orbiting
+const dyn = new Float32Array(NP * 5);     // GPU: x y z alpha temperature
+const stat = new Float32Array(NP * 3);    // GPU: size seed kind
+
+(function sampleSurface() {
+  const T = hatIdx.length / 3;
+  const cum = new Float64Array(T);
+  let total = 0;
+  for (let t = 0; t < T; t++) {
+    const a = hatIdx[t * 3] * 3, b = hatIdx[t * 3 + 1] * 3, c = hatIdx[t * 3 + 2] * 3;
+    const ux = hatPos[b] - hatPos[a], uy = hatPos[b + 1] - hatPos[a + 1], uz = hatPos[b + 2] - hatPos[a + 2];
+    const vx = hatPos[c] - hatPos[a], vy = hatPos[c + 1] - hatPos[a + 1], vz = hatPos[c + 2] - hatPos[a + 2];
+    const area = 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+    // The underside is rarely in view, so it sheds fewer sparks.
+    total += area * (hatInfo[hatIdx[t * 3] * 3 + 1] === 2 ? 0.35 : 1);
+    cum[t] = total;
+  }
+
+  const span = 1 + 2 * EDGE;
+  for (let i = 0; i < NP; i++) {
+    const r = rand() * total;
+    let lo = 0, hi = T - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (cum[mid] < r) lo = mid + 1; else hi = mid;
+    }
+    const ia = hatIdx[lo * 3], ib = hatIdx[lo * 3 + 1], ic = hatIdx[lo * 3 + 2];
+    const s = Math.sqrt(rand()), q = rand();
+    const wa = 1 - s, wb = s * (1 - q), wc = s * q;
+    for (let k = 0; k < 3; k++) {
+      home[i * 3 + k] = hatPos[ia * 3 + k] * wa + hatPos[ib * 3 + k] * wb + hatPos[ic * 3 + k] * wc;
+      homeN[i * 3 + k] = hatNrm[ia * 3 + k] * wa + hatNrm[ib * 3 + k] * wb + hatNrm[ic * 3 + k] * wc;
+    }
+    const nl = Math.hypot(homeN[i * 3], homeN[i * 3 + 1], homeN[i * 3 + 2]) || 1;
+    homeN[i * 3] /= nl; homeN[i * 3 + 1] /= nl; homeN[i * 3 + 2] /= nl;
+
+    const key = hatInfo[ia * 3] * wa + hatInfo[ib * 3] * wb + hatInfo[ic * 3] * wc;
+    const band = hatInfo[ia * 3 + 1] === 0 && home[i * 3 + 1] < HAT.bandTop;
+    pKey[i] = key;
+
+    // Release when the burn front passes; land exactly when the surface re-forms.
+    tRel[i] = T_DISSOLVE * (key + EDGE) / span;
+    tArr[i] = T_REFORM_START + T_REFORM * (1 + EDGE - key) / span;
+    tRet[i] = Math.max(tArr[i] - (1.15 + 0.8 * rand()), tRel[i] + 0.7);
+    spiral[i] = (0.6 + 0.9 * rand()) * (rand() < 0.85 ? 1 : -1);
+
+    stat[i * 3] = (0.03 + 0.034 * Math.pow(rand(), 2.4)) * (band ? 0.85 : 1);
+    stat[i * 3 + 1] = rand();
+    stat[i * 3 + 2] = band ? 1 : 0;
+  }
+})();
+
+/* A few sparks stay behind after the first dissolve and keep circling the hat. */
+const orbiters = [];
+for (let j = 0; j < ORBITER_COUNT; j++) {
+  let idx;
+  do { idx = (rand() * NP) | 0; } while (stat[idx * 3 + 2] !== 0 || orbiters.some((o) => o.idx === idx));
+  const a = 2.45 + rand() * 0.95;
+  orbiters.push({
+    idx,
+    a,
+    b: a * (0.8 + 0.14 * rand()),
+    incl: (rand() - 0.5) * 0.95,
+    node: rand() * TAU,
+    y: (rand() - 0.5) * 0.7,
+    speed: (0.3 + rand() * 0.3) * (j % 5 === 4 ? -1 : 1),
+    phase0: rand() * TAU,
+    trail: 0.75 + rand() * 0.55,     // trail length, radians of arc
+    size: 0.06 + rand() * 0.025,
+    seed: rand(),
+    joined: -1                       // time it settled into orbit (-1: not yet)
+  });
+}
+
+function orbitPoint(o, theta, out) {
+  const x = o.a * Math.cos(theta), z = o.b * Math.sin(theta);
+  const ci = Math.cos(o.incl), si = Math.sin(o.incl);
+  const cn = Math.cos(o.node), sn = Math.sin(o.node);
+  const y1 = -z * si, z1 = z * ci;                  // tilt the orbital plane
+  out[0] = x * cn + z1 * sn;                         // then turn it about the vertical
+  out[1] = y1 + o.y;
+  out[2] = -x * sn + z1 * cn;
+  return out;
+}
+
+/* ------------------------------------------------------------------ *
+ *  GPU resources
+ * ------------------------------------------------------------------ */
+let progBg, progFloor, progHat, progSpark;
+try {
+  progBg = makeProgram(BG_VS, BG_FS, ['aPos']);
+  progFloor = makeProgram(FLOOR_VS, FLOOR_FS, ['aPos']);
+  progHat = makeProgram(HAT_VS, HAT_FS, ['aPos', 'aNormal', 'aInfo']);
+  progSpark = makeProgram(SPARK_VS, SPARK_FS, ['aPos', 'aState', 'aStatic']);
+} catch (err) {
+  console.warn('WebGL setup failed, showing the static hat instead.', err);
+  document.documentElement.classList.remove('gl');
+  hitEl.hidden = true;
+  return;
+}
+
+const bufTri = makeBuffer(new Float32Array([-1, -1, 3, -1, -1, 3]));
+const bufFloor = makeBuffer(new Float32Array([-8, -8, 8, -8, -8, 8, 8, 8]));
+const bufHatPos = makeBuffer(hatPos);
+const bufHatNrm = makeBuffer(hatNrm);
+const bufHatInfo = makeBuffer(hatInfo);
+const bufHatIdx = makeBuffer(hatIdx, gl.ELEMENT_ARRAY_BUFFER);
+const bufDyn = makeBuffer(dyn, gl.ARRAY_BUFFER, gl.DYNAMIC_DRAW);
+const bufStat = makeBuffer(stat);
+const TRAIL_VERTS = ORBITER_COUNT * (TRAIL_SAMPLES + 1);
+const trailData = new Float32Array(TRAIL_VERTS * 8);
+const bufTrail = makeBuffer(trailData, gl.ARRAY_BUFFER, gl.DYNAMIC_DRAW);
+
+/* ------------------------------------------------------------------ *
+ *  Scene state, camera, layout
+ * ------------------------------------------------------------------ */
+const state = {
+  time: 0,
+  spin: -0.65,                // hat angle about its own axis
+  spinSpeed: SPIN_FAST,
+  hover: false,
+  cycle: -1,                  // seconds into a dissolve cycle, -1 when idle
+  calm: -1,                   // seconds into a reduced-motion glow, -1 when idle
+  cut: -1,
+  heat: 0,
+  warm: 0,
+  ember: 0,
+  shadow: 1,
+  bob: 0
+};
+
+const view = new Float32Array(16);
+const proj = new Float32Array(16);
+const viewProj = new Float32Array(16);
+const model = new Float32Array(16);
+const normalMat = new Float32Array(9);
+let R = [1, 0, 0, 0, 1, 0, 0, 0, 1];   // hat rotation, row-major
+let TY = HAT.lift;                      // hat vertical offset
+let camPos = [0, 0, 10];
+let cssW = 1, cssH = 1, dpr = 1, pointScale = 1, camDist = 10;
+const TARGET = [0, -0.12, 0];
+
+const norm = (v) => { const l = Math.hypot(v[0], v[1], v[2]); return [v[0] / l, v[1] / l, v[2] / l]; };
+const KEY_DIR = norm([-0.55, 0.85, 0.45]);
+const FILL_DIR = norm([0.9, 0.15, 0.35]);
+const RIM_DIR = norm([0.35, 0.45, -0.95]);
+
+function resize() {
+  cssW = Math.max(1, canvas.clientWidth);
+  cssH = Math.max(1, canvas.clientHeight);
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+
+  // Size the hat against whichever screen dimension is tighter.
+  const hatPx = Math.min(cssW * 0.6, cssH * 0.55);
+  const pxPerUnit = hatPx / 4.3;
+  camDist = (cssH / 2) / (Math.tan(FOV / 2) * pxPerUnit);
+  const elev = 0.3;
+  camPos = [0, TARGET[1] + Math.sin(elev) * camDist, Math.cos(elev) * camDist];
+  lookAt(view, camPos, TARGET, [0, 1, 0]);
+  perspective(proj, FOV, cssW / cssH, Math.max(0.1, camDist - 12), camDist + 12);
+  proj[9] = -0.1;                       // lens shift: lift the hat to make room for the caption
+  multiply(viewProj, proj, view);
+  pointScale = (canvas.height / 2) / Math.tan(FOV / 2);
+
+  const toCss = (p) => [(p[0] * 0.5 + 0.5) * cssW, (0.5 - p[1] * 0.5) * cssH];
+  const c = toCss(project(viewProj, 0, 0, 0));
+  const f = toCss(project(viewProj, 0, FLOOR_Y, 2.3));
+  hero.style.setProperty('--hx', c[0].toFixed(1) + 'px');
+  hero.style.setProperty('--hy', c[1].toFixed(1) + 'px');
+  hero.style.setProperty('--hs', (hatPx * 1.05).toFixed(1) + 'px');
+  hero.style.setProperty('--cy', Math.min(f[1] + 6, cssH - 86).toFixed(1) + 'px');
+}
+
+function updateModel(t) {
+  const still = reducedMotion;
+  state.bob = still ? 0 : 0.05 * Math.sin(t * 0.8);
+  const wobble = still ? 0 : 0.025 * Math.sin(t * 0.53 + 1.0);
+  R = mul3(mul3(rotX(0.1 + wobble), rotZ(-0.07)), rotY(state.spin));
+  TY = HAT.lift + state.bob;
+  model[0] = R[0]; model[1] = R[3]; model[2] = R[6]; model[3] = 0;
+  model[4] = R[1]; model[5] = R[4]; model[6] = R[7]; model[7] = 0;
+  model[8] = R[2]; model[9] = R[5]; model[10] = R[8]; model[11] = 0;
+  model[12] = 0; model[13] = TY; model[14] = 0; model[15] = 1;
+  normalMat[0] = R[0]; normalMat[1] = R[3]; normalMat[2] = R[6];
+  normalMat[3] = R[1]; normalMat[4] = R[4]; normalMat[5] = R[7];
+  normalMat[6] = R[2]; normalMat[7] = R[5]; normalMat[8] = R[8];
+}
+
+// World-space rest position of particle i under the current hat transform.
+function homeWorld(i, out) {
+  const x = home[i * 3], y = home[i * 3 + 1], z = home[i * 3 + 2];
+  out[0] = R[0] * x + R[1] * y + R[2] * z;
+  out[1] = R[3] * x + R[4] * y + R[5] * z + TY;
+  out[2] = R[6] * x + R[7] * y + R[8] * z;
+  return out;
+}
+
+/* ------------------------------------------------------------------ *
+ *  The dissolve: burn front -> embers -> swirl -> flow home
+ * ------------------------------------------------------------------ */
+const orbiterOf = new Map(orbiters.map((o) => [o.idx, o]));
+const tmp = [0, 0, 0];
+const tmpV = [0, 0, 0];
+const SPAN = 1 + 2 * EDGE;
+
+function trigger() {
+  if (state.cycle >= 0 || state.calm >= 0) return;
+  hero.classList.add('busy');
+  if (reducedMotion) {
+    state.calm = 0;
+    return;
+  }
+  state.cycle = 0;
+  phase.fill(0);
+}
+
+function finishCycle() {
+  state.cycle = -1;
+  state.cut = -1;
+  state.heat = 0;
+  state.ember = 0;
+  state.shadow = 1;
+  phase.fill(0);
+  dyn.fill(0);
+  hero.classList.remove('busy');
+}
+
+function release(i) {
+  const j = i * 3;
+  homeWorld(i, tmp);
+  const nx = homeN[j], ny = homeN[j + 1], nz = homeN[j + 2];
+  const wx = R[0] * nx + R[1] * ny + R[2] * nz;
+  const wy = R[3] * nx + R[4] * ny + R[5] * nz;
+  const wz = R[6] * nx + R[7] * ny + R[8] * nz;
+  const burst = 0.45 + 0.85 * Math.random();
+  pos[j] = tmp[0]; pos[j + 1] = tmp[1]; pos[j + 2] = tmp[2];
+  // Push off the surface, rise like an ember, and keep the spin's momentum.
+  vel[j] = wx * burst + state.spinSpeed * tmp[2] + (Math.random() - 0.5) * 0.3;
+  vel[j + 1] = wy * burst + 0.3 + 0.45 * Math.random();
+  vel[j + 2] = wz * burst - state.spinSpeed * tmp[0] + (Math.random() - 0.5) * 0.3;
+}
+
+function freeFlight(i, t, dt) {
+  const j = i * 3;
+  const x = pos[j], y = pos[j + 1], z = pos[j + 2];
+  const age = t - tRel[i];
+  const ramp = smoothstep(0, 1.3, age);
+
+  // A slowly evolving divergence-free (ABC) flow gives the smoky swirl...
+  const s = 0.8, w = t * 0.5;
+  let fx = Math.sin(s * z + w) + 0.8 * Math.cos(s * y - 0.7 * w);
+  let fy = 0.7 * Math.sin(s * x + 0.8 * w) + Math.cos(s * z - 0.6 * w);
+  let fz = 0.8 * Math.sin(s * y + 1.1 * w) + 0.7 * Math.cos(s * x + 0.5 * w);
+  const flow = 0.34 * ramp;
+  fx *= flow; fy *= flow; fz *= flow;
+
+  // ...a gentle vortex around the hat's axis carries everything around...
+  const rr = x * x + z * z;
+  const omega = (0.62 / (1 + 0.1 * rr)) * ramp;
+  fx += omega * z;
+  fz -= omega * x;
+
+  // ...embers rise at first, and a soft shell keeps the cloud on stage.
+  fy += 0.4 * Math.exp(-age / 1.4);
+  const r = Math.sqrt(rr + y * y) || 1;
+  const pull = 1.4 * Math.max(0, r - 2.6);
+  fx -= (x / r) * pull; fy -= (y / r) * pull; fz -= (z / r) * pull;
+
+  const k = 1 - Math.exp(-dt * 1.5);
+  vel[j] += (fx - vel[j]) * k;
+  vel[j + 1] += (fy - vel[j + 1]) * k;
+  vel[j + 2] += (fz - vel[j + 2]) * k;
+  pos[j] = x + vel[j] * dt;
+  pos[j + 1] = y + vel[j + 1] * dt;
+  pos[j + 2] = z + vel[j + 2] * dt;
+
+  const d = i * 5;
+  dyn[d] = pos[j]; dyn[d + 1] = pos[j + 1]; dyn[d + 2] = pos[j + 2];
+  dyn[d + 3] = smoothstep(0, 0.12, age);
+  dyn[d + 4] = 0.34 + 0.66 * Math.exp(-age / 0.8);
+}
+
+function beginHoming(i) {
+  const j = i * 3;
+  p0[j] = pos[j]; p0[j + 1] = pos[j + 1]; p0[j + 2] = pos[j + 2];
+  const sp = Math.hypot(vel[j], vel[j + 1], vel[j + 2]);
+  const c = sp > 2.2 ? 2.2 / sp : 1;
+  v0[j] = vel[j] * c; v0[j + 1] = vel[j + 1] * c; v0[j + 2] = vel[j + 2] * c;
+}
+
+// Cubic Hermite from the ember's current motion to a moving target, with a
+// swirl that peaks mid-flight and vanishes on arrival, so landings are exact.
+function homing(i, t) {
+  const j = i * 3, d = i * 5;
+  const F = tArr[i] - tRet[i];
+  const u = clamp((t - tRet[i]) / F, 0, 1);
+  const o = orbiterOf.get(i);
+  const toOrbit = o && o.joined < 0;
+  let tvx = 0, tvy = 0, tvz = 0;
+  if (toOrbit) {
+    const th = o.phase0 + o.speed * state.time;
+    orbitPoint(o, th, tmp);
+    orbitPoint(o, th + 0.01, tmpV);
+    tvx = (tmpV[0] - tmp[0]) * 100 * o.speed;
+    tvy = (tmpV[1] - tmp[1]) * 100 * o.speed;
+    tvz = (tmpV[2] - tmp[2]) * 100 * o.speed;
+  } else {
+    homeWorld(i, tmp);
+  }
+  const u2 = u * u, u3 = u2 * u;
+  const h00 = 2 * u3 - 3 * u2 + 1, h10 = u3 - 2 * u2 + u;
+  const h01 = -2 * u3 + 3 * u2, h11 = u3 - u2;
+  let x = h00 * p0[j] + h10 * F * v0[j] + h01 * tmp[0] + h11 * F * tvx;
+  const y = h00 * p0[j + 1] + h10 * F * v0[j + 1] + h01 * tmp[1] + h11 * F * tvy;
+  let z = h00 * p0[j + 2] + h10 * F * v0[j + 2] + h01 * tmp[2] + h11 * F * tvz;
+
+  const a = spiral[i] * 3.2 * u * (1 - u) * (1 - u);
+  const ca = Math.cos(a), sa = Math.sin(a);
+  const rx = x * ca + z * sa;
+  z = -x * sa + z * ca;
+  x = rx;
+
+  pos[j] = x; pos[j + 1] = y; pos[j + 2] = z;
+  dyn[d] = x; dyn[d + 1] = y; dyn[d + 2] = z;
+  dyn[d + 3] = 1;
+  dyn[d + 4] = 0.34 + 0.5 * u2;
+
+  if (u >= 1) {
+    if (toOrbit) {
+      o.joined = state.time;
+      phase[i] = 4;
+      dyn[d + 3] = 0;
+    } else {
+      phase[i] = 3;
+    }
+  }
+}
+
+// Landed embers sit just proud of the re-formed felt and fade as it cools.
+function landed(i, t) {
+  const j = i * 3, d = i * 5;
+  homeWorld(i, tmp);
+  const nx = homeN[j], ny = homeN[j + 1], nz = homeN[j + 2];
+  dyn[d] = tmp[0] + (R[0] * nx + R[1] * ny + R[2] * nz) * 0.012;
+  dyn[d + 1] = tmp[1] + (R[3] * nx + R[4] * ny + R[5] * nz) * 0.012;
+  dyn[d + 2] = tmp[2] + (R[6] * nx + R[7] * ny + R[8] * nz) * 0.012;
+  const f = clamp((t - tArr[i]) / T_LAND_FADE, 0, 1);
+  dyn[d + 3] = 1 - f * f * (3 - 2 * f);
+  dyn[d + 4] = 0.84 - 0.4 * f;
+}
+
+function updateCycle(dt) {
+  const t = (state.cycle += dt);
+  state.cut = t < T_REFORM_START
+    ? Math.min(-EDGE + SPAN * t / T_DISSOLVE, 1 + EDGE)
+    : Math.max(1 + EDGE - SPAN * (t - T_REFORM_START) / T_REFORM, -0.4);
+  state.heat = smoothstep(0, 0.25, t) * (1 - smoothstep(T_REFORM_START + T_REFORM, T_CYCLE, t));
+  state.shadow = 1 - smoothstep(0.35, 1.05, state.cut);
+  state.ember = smoothstep(0, 0.8, t) * (1 - smoothstep(T_REFORM_START, T_CYCLE, t));
+
+  for (let i = 0; i < NP; i++) {
+    let ph = phase[i];
+    if (ph === 0) {
+      if (t < tRel[i]) { dyn[i * 5 + 3] = 0; continue; }
+      release(i);
+      ph = phase[i] = 1;
+    }
+    if (ph === 1) {
+      if (t < tRet[i]) { freeFlight(i, t, dt); continue; }
+      beginHoming(i);
+      ph = phase[i] = 2;
+    }
+    if (ph === 2) { homing(i, t); continue; }
+    if (ph === 3) { landed(i, t); continue; }
+    dyn[i * 5 + 3] = 0;
+  }
+
+  if (t >= T_CYCLE) finishCycle();
+}
+
+// Reduced motion: nothing travels. The felt warms and the embers glow in place.
+function updateCalm(dt) {
+  const t = (state.calm += dt);
+  const e = Math.sin(Math.PI * clamp(t / T_CALM, 0, 1));
+  const env = e * e * (3 - 2 * e);
+  state.warm = env * 0.8;
+  state.ember = env * 0.6;
+  for (let i = 0; i < NP; i++) {
+    const s = stat[i * 3 + 1];
+    landed(i, -1e9);
+    dyn[i * 5 + 3] = env * (0.1 + 0.32 * s * s);
+    dyn[i * 5 + 4] = 0.45 + 0.2 * s;
+  }
+  if (t >= T_CALM) {
+    state.calm = -1;
+    state.warm = 0;
+    state.ember = 0;
+    dyn.fill(0);
+    hero.classList.remove('busy');
+  }
+}
+
+// Orbiting sparks, each drawing a faint arc of light behind it.
+function updateTrails() {
+  let v = 0;
+  if (reducedMotion) return 0;
+  for (const o of orbiters) {
+    if (o.joined < 0) continue;
+    const age = state.time - o.joined;
+    const theta = o.phase0 + o.speed * state.time;
+    const len = Math.min(o.trail, Math.abs(o.speed) * age);
+    const dir = Math.sign(o.speed);
+    const glow = (0.85 + 0.15 * Math.sin(state.time * 1.3 + o.seed * 10)) * (1 + 0.4 * state.ember);
+    for (let k = 0; k <= TRAIL_SAMPLES; k++) {
+      const f = k / TRAIL_SAMPLES;
+      orbitPoint(o, theta - dir * len * f, tmp);
+      const b = v * 8;
+      trailData[b] = tmp[0]; trailData[b + 1] = tmp[1]; trailData[b + 2] = tmp[2];
+      if (k === 0) {
+        trailData[b + 3] = glow;
+        trailData[b + 4] = 0.72;
+        trailData[b + 5] = o.size;
+        trailData[b + 6] = o.seed;
+        trailData[b + 7] = 0;
+      } else {
+        trailData[b + 3] = 0.18 * Math.pow(1 - f, 1.8) * glow * smoothstep(0, 0.6, age);
+        trailData[b + 4] = 0.5;
+        trailData[b + 5] = lerp(0.034, 0.014, f);
+        trailData[b + 6] = o.seed;
+        trailData[b + 7] = 2;
+      }
+      v++;
+    }
+  }
+  return v;
+}
+
+/* ------------------------------------------------------------------ *
+ *  Rendering
+ * ------------------------------------------------------------------ */
+const GAIN = clamp(0.85 * Math.sqrt(10000 / NP), 0.6, 1.1);
+
+function render() {
+  gl.clearColor(0.02, 0.02, 0.025, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  // Backdrop.
+  gl.disable(gl.DEPTH_TEST);
+  gl.depthMask(false);
+  gl.disable(gl.BLEND);
+  useProgram(progBg);
+  bindAttrib(0, bufTri, 2, 0, 0);
+  const c = project(viewProj, 0, 0, 0);
+  gl.uniform2f(progBg.u.uRes, canvas.width, canvas.height);
+  gl.uniform2f(progBg.u.uCenter, (c[0] * 0.5 + 0.5) * canvas.width, (c[1] * 0.5 + 0.5) * canvas.height);
+  gl.uniform1f(progBg.u.uGlow, state.ember);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  // Floor: a soft pool of light with the hat's contact shadow in it.
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  useProgram(progFloor);
+  bindAttrib(0, bufFloor, 2, 0, 0);
+  const height = TY - 0.1 - FLOOR_Y;
+  gl.uniformMatrix4fv(progFloor.u.uViewProj, false, viewProj);
+  gl.uniform1f(progFloor.u.uFloorY, FLOOR_Y);
+  gl.uniform1f(progFloor.u.uSpin, state.spin);
+  gl.uniform1f(progFloor.u.uShadow, state.shadow);
+  gl.uniform1f(progFloor.u.uSoft, 0.1 + 0.6 * (height - 0.8));
+  gl.uniform1f(progFloor.u.uEmber, state.ember);
+  gl.uniform2f(progFloor.u.uShadowOff,
+    -KEY_DIR[0] / KEY_DIR[1] * height * 0.5, -KEY_DIR[2] / KEY_DIR[1] * height * 0.5);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+  // The hat itself.
+  gl.disable(gl.BLEND);
+  gl.enable(gl.DEPTH_TEST);
+  gl.depthFunc(gl.LEQUAL);
+  gl.depthMask(true);
+  useProgram(progHat);
+  bindAttrib(0, bufHatPos, 3, 0, 0);
+  bindAttrib(1, bufHatNrm, 3, 0, 0);
+  bindAttrib(2, bufHatInfo, 3, 0, 0);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, bufHatIdx);
+  const u = progHat.u;
+  gl.uniformMatrix4fv(u.uModel, false, model);
+  gl.uniformMatrix4fv(u.uViewProj, false, viewProj);
+  gl.uniformMatrix3fv(u.uNormalMat, false, normalMat);
+  gl.uniform3fv(u.uCamPos, camPos);
+  gl.uniform3fv(u.uKeyDir, KEY_DIR);
+  gl.uniform3fv(u.uFillDir, FILL_DIR);
+  gl.uniform3fv(u.uRimDir, RIM_DIR);
+  // Key light in the hat's own frame (R is orthonormal, so its transpose inverts it).
+  gl.uniform3f(u.uKeyDirModel,
+    R[0] * KEY_DIR[0] + R[3] * KEY_DIR[1] + R[6] * KEY_DIR[2],
+    R[1] * KEY_DIR[0] + R[4] * KEY_DIR[1] + R[7] * KEY_DIR[2],
+    R[2] * KEY_DIR[0] + R[5] * KEY_DIR[1] + R[8] * KEY_DIR[2]);
+  gl.uniform1f(u.uCut, state.cut);
+  gl.uniform1f(u.uHeat, state.heat);
+  gl.uniform1f(u.uWarm, state.warm);
+  gl.uniform1f(u.uBandTop, HAT.bandTop);
+  gl.uniform1f(u.uEdge, EDGE);
+  gl.drawElements(gl.TRIANGLES, hatIdx.length, gl.UNSIGNED_SHORT, 0);
+
+  // Embers: additive, depth-tested against the hat but never writing depth.
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE);
+  gl.depthMask(false);
+  useProgram(progSpark);
+  const s = progSpark.u;
+  gl.uniformMatrix4fv(s.uView, false, view);
+  gl.uniformMatrix4fv(s.uProj, false, proj);
+  gl.uniform1f(s.uPointScale, pointScale);
+  gl.uniform1f(s.uFocus, camDist);
+  gl.uniform1f(s.uTime, reducedMotion ? 0 : state.time);
+  gl.uniform1f(s.uGain, GAIN);
+
+  if (state.cycle >= 0 || state.calm >= 0) {
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufDyn);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, dyn);
+    bindAttrib(0, bufDyn, 3, 20, 0);
+    bindAttrib(1, bufDyn, 2, 20, 12);
+    bindAttrib(2, bufStat, 3, 0, 0);
+    gl.drawArrays(gl.POINTS, 0, NP);
+  }
+
+  const trailCount = updateTrails();
+  if (trailCount > 0) {
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufTrail);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, trailData.subarray(0, trailCount * 8));
+    bindAttrib(0, bufTrail, 3, 32, 0);
+    bindAttrib(1, bufTrail, 2, 32, 12);
+    bindAttrib(2, bufTrail, 3, 32, 20);
+    gl.drawArrays(gl.POINTS, 0, trailCount);
+  }
+  gl.depthMask(true);
+}
+
+/* ------------------------------------------------------------------ *
+ *  Input, motion preference, main loop
+ * ------------------------------------------------------------------ */
+hitEl.addEventListener('pointerenter', (e) => {
+  if (e.pointerType !== 'mouse') return;
+  state.hover = true;
+  trigger();
+});
+hitEl.addEventListener('pointerleave', (e) => {
+  if (e.pointerType === 'mouse') state.hover = false;
+});
+// Taps and keyboard (Enter / Space) arrive as clicks.
+hitEl.addEventListener('click', trigger);
+// On touch screens, a tap anywhere on the stage works too.
+hero.addEventListener('pointerdown', (e) => {
+  if (e.pointerType !== 'mouse' && e.target !== hitEl) trigger();
+});
+
+function applyMotionPreference() {
+  reducedMotion = motionQuery.matches;
+  verbEl.textContent = reducedMotion ? 'to glow' : 'to dissolve';
+  hitEl.setAttribute('aria-label', reducedMotion ? 'Make the hat glow' : 'Dissolve the hat into embers');
+  if (reducedMotion && state.cycle >= 0) finishCycle();
+}
+if (motionQuery.addEventListener) motionQuery.addEventListener('change', applyMotionPreference);
+else if (motionQuery.addListener) motionQuery.addListener(applyMotionPreference);
+applyMotionPreference();
+if (reducedMotion) state.spinSpeed = 0;
+
+canvas.addEventListener('webglcontextlost', (e) => e.preventDefault());
+canvas.addEventListener('webglcontextrestored', () => window.location.reload());
+
+window.addEventListener('resize', resize);
+if (window.ResizeObserver) new ResizeObserver(resize).observe(canvas);
+resize();
+
+let last = performance.now();
+let first = true;
+function frame(now) {
+  const dt = clamp((now - last) / 1000, 0, 0.05);
+  last = now;
+  state.time += dt;
+
+  const target = reducedMotion ? 0 : state.hover || state.cycle >= 0 ? SPIN_SLOW : SPIN_FAST;
+  state.spinSpeed = damp(state.spinSpeed, target, 1.8, dt);
+  state.spin += state.spinSpeed * dt;
+  updateModel(state.time);
+
+  if (state.cycle >= 0) updateCycle(dt);
+  else if (state.calm >= 0) updateCalm(dt);
+
+  render();
+  if (first) {
+    first = false;
+    canvas.classList.add('ready');
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
