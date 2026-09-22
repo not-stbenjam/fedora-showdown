@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="en" class="no-gl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#08090b">
+<title>Red Hat · Embers</title>
+<style>
+  :root {
+    --ink: #eceae8;
+    --muted: rgba(236, 234, 232, 0.5);
+    --red: #ee0000;
+    --caption-top: 76%;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: radial-gradient(120% 90% at 50% 42%, #15171b 0%, #0a0b0d 55%, #050506 100%) fixed #07080a;
+    color: var(--ink);
+    font-family: "Red Hat Display", "Red Hat Text", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .hero { position: fixed; inset: 0; overflow: hidden; margin: 0; }
+  #scene {
+    position: absolute; inset: 0; width: 100%; height: 100%; display: block;
+    opacity: 0; transition: opacity 1.4s ease;
+  }
+  .ready #scene { opacity: 1; }
+  #hit {
+    position: absolute; left: 50%; top: 42%;
+    width: 44vmin; height: 44vmin; transform: translate(-50%, -50%);
+    margin: 0; padding: 0; border: 0; border-radius: 50%;
+    background: transparent; color: transparent; cursor: pointer;
+    touch-action: manipulation; outline: none;
+  }
+  #hit:focus-visible { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16), 0 0 0 7px rgba(238, 0, 0, 0.1); }
+  figcaption {
+    position: absolute; left: 50%; top: var(--caption-top);
+    transform: translate(-50%, 8px);
+    width: min(90vw, 34rem); text-align: center; pointer-events: none;
+    opacity: 0; transition: opacity 1.6s ease 0.5s, transform 1.6s cubic-bezier(.2, .7, .2, 1) 0.5s;
+  }
+  .ready figcaption, .no-gl figcaption { opacity: 1; transform: translate(-50%, 0); }
+  .title {
+    display: block; font-size: clamp(0.78rem, 0.7rem + 0.35vw, 0.98rem);
+    font-weight: 600; letter-spacing: 0.44em; padding-left: 0.44em; text-transform: uppercase;
+  }
+  .rule {
+    display: block; width: 32px; height: 1px; margin: 0.95rem auto 0.85rem;
+    background: linear-gradient(90deg, transparent, var(--red), transparent);
+  }
+  .hint {
+    display: block; font-size: clamp(0.7rem, 0.66rem + 0.2vw, 0.84rem);
+    color: var(--muted); letter-spacing: 0.08em;
+  }
+  .fallback {
+    display: none; position: absolute; left: 50%; top: 42%;
+    width: min(62vmin, 440px); transform: translate(-50%, -50%);
+    perspective: 900px;
+  }
+  .fallback svg { display: block; width: 100%; height: auto; filter: drop-shadow(0 18px 30px rgba(0, 0, 0, 0.6)); animation: sway 9s linear infinite; }
+  .no-gl .fallback { display: block; }
+  .no-gl #scene, .no-gl #hit { display: none; }
+  @keyframes sway { to { transform: rotateY(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    #scene, figcaption { transition: opacity 0.6s ease; }
+    figcaption { transform: translate(-50%, 0); }
+    .fallback svg { animation: none; }
+  }
+</style>
+</head>
+<body>
+<figure class="hero">
+  <canvas id="scene" role="img" aria-label="A red fedora, the Red Hat logo, turning slowly in soft studio light"></canvas>
+  <div class="fallback" aria-hidden="true">
+    <svg viewBox="0 0 200 124">
+      <ellipse cx="100" cy="112" rx="66" ry="6" fill="#000" opacity=".55"/>
+      <path d="M53 72 C50 46 58 26 70 20 C82 14 92 22 100 22 C108 22 118 14 130 20 C142 26 150 46 147 72 Z" fill="#e00"/>
+      <path d="M51 56 Q100 64 149 56 L148 72 Q100 80 52 72 Z" fill="#141414"/>
+      <path d="M8 58 Q14 92 100 92 Q186 92 192 58 Q176 78 100 78 Q24 78 8 58 Z" fill="#e00"/>
+    </svg>
+  </div>
+  <button id="hit" type="button" aria-label="Red Hat logo. Activate to scatter it into embers."></button>
+  <figcaption id="caption">
+    <span class="title">Red Hat</span>
+    <span class="rule" aria-hidden="true"></span>
+    <span class="hint" id="hint">Open by design</span>
+  </figcaption>
+</figure>
+<script>
+(() => {
+  'use strict';
+
+  const canvas = document.getElementById('scene');
+  const hit = document.getElementById('hit');
+  const hint = document.getElementById('hint');
+  const root = document.documentElement;
+  const motionQuery = matchMedia('(prefers-reduced-motion: reduce)');
+  const hoverQuery = matchMedia('(hover: hover)');
+  let reduced = motionQuery.matches;
+
+  // ---------- shape & timing ----------
+  const HAT = { rb: 1.0, rc: 0.52, rt: 0.45, h: 0.74, th: 0.036, zScale: 0.9, bandLo: 0.058, bandHi: 0.19 };
+  const T = { burn: 1.25, out: 1.7, back: 3.5, backSpread: 1.0, backDur: 2.0 };
+  const T_HOME = T.back + T.backSpread + T.backDur;
+  const T_TOTAL = T_HOME + 0.6;
+  const FLOOR_Y = -0.52;
+  const HAT_CY = 0.33;
+  const REST_SPIN = -0.38;
+  const SPIN_FAST = 0.5, SPIN_SLOW = 0.11;
+  const ORBIT_PER = 6, ORBIT_MAX = 18, TRAIL = 36;
+
+  const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+  // ---------- matrices (column-major) ----------
+  function perspective(fovy, aspect, near, far) {
+    const f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far);
+    return new Float32Array([f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) * nf, -1, 0, 0, 2 * far * near * nf, 0]);
+  }
+  function lookAt(e, t, up) {
+    let zx = e[0] - t[0], zy = e[1] - t[1], zz = e[2] - t[2];
+    let l = Math.hypot(zx, zy, zz); zx /= l; zy /= l; zz /= l;
+    let xx = up[1] * zz - up[2] * zy, xy = up[2] * zx - up[0] * zz, xz = up[0] * zy - up[1] * zx;
+    l = Math.hypot(xx, xy, xz); xx /= l; xy /= l; xz /= l;
+    const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+    return new Float32Array([xx, yx, zx, 0, xy, yy, zy, 0, xz, yz, zz, 0,
+      -(xx * e[0] + xy * e[1] + xz * e[2]), -(yx * e[0] + yy * e[1] + yz * e[2]), -(zx * e[0] + zy * e[1] + zz * e[2]), 1]);
+  }
+  function mul(a, b) {
+    const o = new Float32Array(16);
+    for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
+      o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+    }
+    return o;
+  }
+  // spin about Y (+x turns toward +z), then a gentle forward tilt, then lift
+  function modelMatrix(spin, tilt, lift) {
+    const c = Math.cos(spin), s = Math.sin(spin), ct = Math.cos(tilt), st = Math.sin(tilt);
+    return new Float32Array([c, -st * s, ct * s, 0, 0, ct, st, 0, -s, -st * c, ct * c, 0, 0, lift, 0, 1]);
+  }
+
+  // ---------- fedora geometry: a deformed surface of revolution ----------
+  // parts: 0 brim underside, 1 rolled rim, 2 brim top, 3 fillet, 4 crown wall, 5 shoulder, 6 crown top
+  function buildProfile() {
+    const { rb, rc, rt, h, th } = HAT;
+    const pts = [];
+    const push = (r, y, part) => pts.push([r, y, part]);
+    const er = th / 2, rEdge = rb - er, f = 0.05, s = 0.1;
+    for (let i = 0; i <= 14; i++) push(rc + (rEdge - rc) * i / 14, -th, 0);
+    for (let i = 1; i < 9; i++) { const a = -Math.PI / 2 + Math.PI * i / 9; push(rEdge + Math.cos(a) * er, -er + Math.sin(a) * er, 1); }
+    for (let i = 0; i <= 22; i++) push(rEdge + (rc + f - rEdge) * i / 22, 0, 2);
+    for (let i = 1; i < 6; i++) { const a = -Math.PI / 2 - Math.PI / 2 * i / 6; push(rc + f + Math.cos(a) * f, f + Math.sin(a) * f, 3); }
+    for (let i = 0; i <= 30; i++) { const t = i / 30; push(rc + (rt - rc) * t + 0.014 * Math.sin(Math.PI * t), f + (h - s - f) * t, 4); }
+    for (let i = 1; i < 9; i++) { const a = Math.PI / 2 * i / 9; push(rt - s + Math.cos(a) * s, h - s + Math.sin(a) * s, 5); }
+    const r0 = rt - s;
+    for (let i = 0; i <= 12; i++) { const r = r0 * (1 - i / 12); push(r, h + 0.025 * (1 - (r / r0) ** 2), 6); }
+    return pts;
+  }
+
+  function deform(r, y, part, ang) {
+    const { rb, rc, h } = HAT;
+    const ca = Math.cos(ang), sa = Math.sin(ang);
+    if (part === 4) r += 0.011 * smooth(HAT.bandLo - 0.012, HAT.bandLo, y) * (1 - smooth(HAT.bandHi, HAT.bandHi + 0.012, y));
+    let x = r * ca, z = r * sa, crease = 0;
+    if (part <= 2) {
+      // brim sweeps up at the sides and dips a touch front and back
+      const f = Math.max(0, (r - rc) / (rb - rc));
+      y += 0.13 * Math.pow(f, 2.6) * Math.pow(Math.abs(ca), 1.8) - 0.05 * f * f * sa * sa;
+    } else {
+      const w = smooth(h - 0.34, h + 0.02, y);
+      const front = Math.max(0, sa);
+      x *= 1 - 0.17 * w * front * front;                       // pinch at the front
+      crease = w * w * Math.exp(-(x * x) / (2 * 0.12 * 0.12)) * (1 - 0.3 * (z / HAT.rt) ** 2);
+      y -= 0.12 * crease;                                      // centre dent, front to back
+    }
+    return [x, y, z * HAT.zScale, crease];
+  }
+
+  function buildHat() {
+    const prof = buildProfile();
+    const NP = prof.length, NU = 160;
+    const pos = new Float32Array(NP * NU * 3), nrm = new Float32Array(NP * NU * 3), ao = new Float32Array(NP * NU);
+    for (let i = 0; i < NP; i++) {
+      const [r, y, part] = prof[i];
+      let occ = 1;
+      if (part === 0) occ = 0.85;
+      else if (part === 2) occ = 1 - 0.5 * Math.exp(-(((r - HAT.rc) / 0.13) ** 2));
+      else if (part === 3) occ = 0.56;
+      else if (part === 4) occ = 1 - 0.45 * Math.exp(-((y / 0.09) ** 2));
+      for (let j = 0; j < NU; j++) {
+        const p = deform(r, y, part, j / NU * Math.PI * 2), k = i * NU + j;
+        pos[k * 3] = p[0]; pos[k * 3 + 1] = p[1]; pos[k * 3 + 2] = p[2];
+        ao[k] = occ * (1 - 0.3 * p[3]);
+      }
+    }
+    const P = (i, j) => ((i * NU + ((j + NU) % NU)) * 3);
+    for (let i = 0; i < NP; i++) {
+      const i0 = Math.max(0, i - 1), i1 = Math.min(NP - 1, i + 1);
+      for (let j = 0; j < NU; j++) {
+        const a = P(i0, j), b = P(i1, j), c = P(i, j - 1), d = P(i, j + 1);
+        const sx = pos[b] - pos[a], sy = pos[b + 1] - pos[a + 1], sz = pos[b + 2] - pos[a + 2];
+        const tx = pos[d] - pos[c], ty = pos[d + 1] - pos[c + 1], tz = pos[d + 2] - pos[c + 2];
+        let nx = sy * tz - sz * ty, ny = sz * tx - sx * tz, nz = sx * ty - sy * tx;
+        let l = Math.hypot(nx, ny, nz);
+        if (l < 1e-9) { nx = 0; ny = 1; nz = 0; l = 1; }
+        const k = (i * NU + j) * 3;
+        nrm[k] = nx / l; nrm[k + 1] = ny / l; nrm[k + 2] = nz / l;
+      }
+    }
+    const idx = new Uint16Array((NP - 1) * NU * 6);
+    let n = 0;
+    for (let i = 0; i < NP - 1; i++) for (let j = 0; j < NU; j++) {
+      const a = i * NU + j, b = (i + 1) * NU + j, c = i * NU + (j + 1) % NU, d = (i + 1) * NU + (j + 1) % NU;
+      idx[n++] = a; idx[n++] = b; idx[n++] = c;
+      idx[n++] = b; idx[n++] = d; idx[n++] = c;
+    }
+    const inter = new Float32Array(NP * NU * 7);
+    for (let k = 0; k < NP * NU; k++) {
+      inter.set([pos[k * 3], pos[k * 3 + 1], pos[k * 3 + 2], nrm[k * 3], nrm[k * 3 + 1], nrm[k * 3 + 2], ao[k]], k * 7);
+    }
+    return { pos, nrm, idx, inter };
+  }
+
+  // ---------- embers: area-weighted samples of the very same surface ----------
+  function sampleSurface(geo, count) {
+    const { pos, nrm, idx } = geo;
+    const tris = idx.length / 3, cum = new Float64Array(tris);
+    let total = 0;
+    for (let t = 0; t < tris; t++) {
+      const a = idx[t * 3] * 3, b = idx[t * 3 + 1] * 3, c = idx[t * 3 + 2] * 3;
+      const ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2];
+      const vx = pos[c] - pos[a], vy = pos[c + 1] - pos[a + 1], vz = pos[c + 2] - pos[a + 2];
+      total += 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+      cum[t] = total;
+    }
+    const out = new Float32Array(count * 11);
+    for (let i = 0; i < count; i++) {
+      const target = Math.random() * total;
+      let lo = 0, hi = tris - 1;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (cum[mid] < target) lo = mid + 1; else hi = mid; }
+      let u = Math.random(), v = Math.random();
+      if (u + v > 1) { u = 1 - u; v = 1 - v; }
+      const w = 1 - u - v, a = idx[lo * 3] * 3, b = idx[lo * 3 + 1] * 3, c = idx[lo * 3 + 2] * 3, o = i * 11;
+      for (let k = 0; k < 3; k++) {
+        out[o + k] = pos[a + k] * w + pos[b + k] * u + pos[c + k] * v;
+        out[o + 3 + k] = nrm[a + k] * w + nrm[b + k] * u + nrm[c + k] * v;
+      }
+      for (let k = 6; k < 10; k++) out[o + k] = Math.random();
+      const y = out[o + 1], rr = Math.hypot(out[o], out[o + 2] / HAT.zScale);
+      out[o + 10] = y > HAT.bandLo && y < HAT.bandHi && rr < 0.56 ? 1 : 0;
+    }
+    return out;
+  }
+
+  // ---------- shaders ----------
+  const n4 = (x) => x.toFixed(4);
+  const PREC = `#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+`;
+  const COMMON = `
+const float T_BURN = ${n4(T.burn)};
+const float T_OUT = ${n4(T.out)};
+const float T_BACK = ${n4(T.back)};
+const float T_BACK_SPREAD = ${n4(T.backSpread)};
+const float T_BACK_DUR = ${n4(T.backDur)};
+float hash3(vec3 p) {
+  p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
+  p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+float vnoise(vec3 x) {
+  vec3 i = floor(x), f = fract(x);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(hash3(i), hash3(i + vec3(1, 0, 0)), f.x), mix(hash3(i + vec3(0, 1, 0)), hash3(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(hash3(i + vec3(0, 0, 1)), hash3(i + vec3(1, 0, 1)), f.x), mix(hash3(i + vec3(0, 1, 1)), hash3(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+// when each point of the hat lets go: top of the crown first, brim edge last, broken up by noise
+float delayAt(vec3 p) {
+  float sweep = 0.55 * clamp(1.0 - (p.y + 0.05) / 0.85, 0.0, 1.0) + 0.45 * clamp(length(p.xz), 0.0, 1.0);
+  float n = 0.65 * vnoise(p * 3.5 + 11.0) + 0.35 * vnoise(p * 8.0 - 4.0);
+  return clamp((sweep * 0.7 + n * 0.45 - 0.12) / 0.85, 0.0, 1.0);
+}
+`;
+
+  const MESH_VS = `
+attribute vec3 aPos;
+attribute vec3 aNormal;
+attribute float aAO;
+uniform mat4 uModel;
+uniform mat4 uViewProj;
+varying vec3 vObj;
+varying vec3 vWorld;
+varying vec3 vNormal;
+varying float vAO;
+void main() {
+  vec4 w = uModel * vec4(aPos, 1.0);
+  vObj = aPos;
+  vWorld = w.xyz;
+  vNormal = (uModel * vec4(aNormal, 0.0)).xyz;
+  vAO = aAO;
+  gl_Position = uViewProj * w;
+}`;
+
+  const MESH_FS = PREC + COMMON + `
+uniform vec3 uCam;
+uniform float uPhase;
+uniform float uGlow;
+varying vec3 vObj;
+varying vec3 vWorld;
+varying vec3 vNormal;
+varying float vAO;
+vec3 aces(vec3 x) { return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
+vec3 emberRamp(float x) { return mix(vec3(0.78, 0.09, 0.02), vec3(1.0, 0.74, 0.46), x * x); }
+void main() {
+  float edge = 0.0, charred = 0.0;
+  if (uPhase >= 0.0) {
+    float d = delayAt(vObj);
+    float tb = d * T_BURN;
+    float th = T_BACK + d * T_BACK_SPREAD + T_BACK_DUR;
+    if (uPhase > tb && uPhase < th) discard;
+    if (uPhase <= tb) {
+      float lead = tb - uPhase;
+      edge = 1.0 - smoothstep(0.0, 0.07, lead);
+      charred = 1.0 - smoothstep(0.0, 0.3, lead);
+    } else {
+      edge = 0.55 * (1.0 - smoothstep(0.0, 0.22, uPhase - th));
+      charred = edge;
+    }
+  }
+  vec3 N = normalize(vNormal);
+  if (!gl_FrontFacing) N = -N;
+  vec3 V = normalize(uCam - vWorld);
+  float rr = length(vec2(vObj.x, vObj.z / ${n4(HAT.zScale)}));
+  float band = smoothstep(${n4(HAT.bandLo - 0.003)}, ${n4(HAT.bandLo + 0.003)}, vObj.y)
+             * (1.0 - smoothstep(${n4(HAT.bandHi - 0.003)}, ${n4(HAT.bandHi + 0.003)}, vObj.y))
+             * (1.0 - smoothstep(0.552, 0.568, rr));
+  vec3 base = mix(vec3(0.84, 0.0, 0.004), vec3(0.016, 0.016, 0.018), band);
+
+  vec3 L1 = normalize(vec3(-0.55, 0.85, 0.7));   // warm key, upper left
+  vec3 L2 = normalize(vec3(0.95, 0.2, 0.25));    // cool fill, right
+  vec3 L3 = normalize(vec3(0.35, 0.45, -1.0));   // rim, behind
+  float d1 = max((dot(N, L1) + 0.35) / 1.35, 0.0);
+  float d2 = max(dot(N, L2), 0.0);
+  float fres = pow(1.0 - max(dot(N, V), 0.0), 3.0);
+  vec3 H = normalize(L1 + V);
+  float spec = pow(max(dot(N, H), 0.0), mix(20.0, 56.0, band)) * mix(0.1, 0.5, band) * step(0.0, dot(N, L1));
+  float env = smoothstep(0.15, 0.95, reflect(-V, N).y) * mix(0.04, 0.2, band);
+
+  vec3 col = base * (vec3(1.0, 0.95, 0.9) * 1.3 * d1 + vec3(0.55, 0.65, 0.95) * 0.22 * d2 + vec3(0.05, 0.05, 0.065));
+  col += vec3(1.0, 0.97, 0.94) * (spec + env);
+  col += (vec3(0.75, 0.82, 1.0) * 0.45 * max(dot(N, L3), 0.0) + base * 0.4) * fres;
+  col *= vAO;
+  if (!gl_FrontFacing) col = base * 0.1 * vAO + vec3(0.008, 0.004, 0.004);
+  col = mix(col, col * vec3(0.55, 0.35, 0.3), charred * 0.6);
+  col += (vec3(1.0, 0.42, 0.18) * fres * 0.4 + base * 0.1) * uGlow;
+  col = pow(aces(col), vec3(1.0 / 2.2));
+  col = mix(col, emberRamp(edge), edge * 0.8);
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+  const EMBER_VS = COMMON + `
+attribute vec3 aRest;
+attribute vec3 aNormal;
+attribute vec4 aSeed;
+attribute float aMat;
+uniform mat4 uModel;
+uniform mat4 uViewProj;
+uniform float uPhase;
+uniform float uTime;
+uniform float uPx;
+uniform float uDist;
+varying vec3 vColor;
+void main() {
+  float d = delayAt(aRest);
+  float tb = d * T_BURN;
+  float tr = T_BACK + d * T_BACK_SPREAD;
+  float th = tr + T_BACK_DUR;
+  float t0 = uPhase - tb;
+  if (t0 < 0.0 || uPhase >= th) {
+    gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+    gl_PointSize = 0.0;
+    vColor = vec3(0.0);
+    return;
+  }
+  // e: 0 on the surface, 1 fully adrift
+  float e = smoothstep(0.0, T_OUT, t0) * (1.0 - smoothstep(tr, th, uPhase));
+  vec2 radial = aRest.xz / max(length(aRest.xz), 0.05);
+  vec3 dir = normalize(vec3(radial.x, 0.0, radial.y) * 0.6 + aNormal * 0.45 + (aSeed.xyz * 2.0 - 1.0) * 0.5 + vec3(0.0, 0.22, 0.0));
+  float dist = 0.1 + 0.3 * aSeed.w * aSeed.w + 0.08 * aSeed.x;
+  vec3 p = aRest + dir * dist * e;
+  p.y += e * e * (0.04 + 0.16 * aSeed.y);
+  p += e * 0.08 * vec3(sin(uTime * 1.1 + aSeed.x * 37.0 + p.y * 2.3),
+                      sin(uTime * 0.9 + aSeed.y * 41.0 + p.z * 2.1),
+                      sin(uTime * 1.3 + aSeed.z * 29.0 + p.x * 1.9));
+  // one full turn of swirl over the flight, so every ember lands exactly where it left
+  float a = 6.2831853 * smoothstep(tb, th, uPhase);
+  float ca = cos(a), sa = sin(a);
+  p.xz = vec2(p.x * ca - p.z * sa, p.x * sa + p.z * ca);
+  // flatten the drift along the view axis so embers never balloon toward the lens
+  vec4 home = uModel * vec4(aRest, 1.0);
+  vec4 world = uModel * vec4(p, 1.0);
+  world.xyz = home.xyz + (world.xyz - home.xyz) * vec3(1.0, 1.0, 0.6);
+  vec4 clip = uViewProj * world;
+  gl_Position = clip;
+
+  float heat = clamp(e * 1.6, 0.0, 1.0);
+  float flick = 0.72 + 0.28 * sin(uTime * (4.0 + 7.0 * aSeed.x) + aSeed.y * 60.0);
+  vec3 hot = mix(vec3(0.95, 0.2, 0.04), vec3(1.0, 0.6, 0.26), aSeed.z * aSeed.z) * flick;
+  vec3 surf = mix(vec3(0.8, 0.04, 0.02), vec3(0.08, 0.04, 0.03), aMat);
+  vec3 col = mix(surf, hot, heat) + vec3(1.0, 0.66, 0.38) * exp(-t0 * 3.5) * 0.7;
+  float fadeHome = 1.0 - smoothstep(th - 0.3, th, uPhase);
+  float depth = clamp(1.25 - (clip.w - uDist) * 0.3, 0.55, 1.3);
+  vColor = col * fadeHome * depth * 0.5;
+  gl_PointSize = clamp(mix(0.022, 0.009 + 0.034 * aSeed.w * aSeed.w * aSeed.w, heat) * uPx / clip.w, 1.0, 32.0);
+}`;
+
+  const ORBIT_VS = `
+attribute vec3 aPos;
+attribute vec4 aCol;
+attribute float aSize;
+uniform mat4 uViewProj;
+uniform float uPx;
+varying vec3 vColor;
+void main() {
+  vec4 clip = uViewProj * vec4(aPos, 1.0);
+  gl_Position = clip;
+  gl_PointSize = clamp(aSize * uPx / clip.w, 1.0, 40.0);
+  vColor = aCol.rgb * aCol.a;
+}`;
+
+  const POINT_FS = PREC + `
+varying vec3 vColor;
+void main() {
+  vec2 c = gl_PointCoord * 2.0 - 1.0;
+  float r2 = dot(c, c);
+  if (r2 > 1.0) discard;
+  float a = (exp(-r2 * 10.0) * 0.9 + exp(-r2 * 3.5) * 0.12) * (1.0 - r2);
+  gl_FragColor = vec4(vColor * a, 1.0);
+}`;
+
+  const FLOOR_VS = `
+attribute vec2 aXZ;
+uniform mat4 uViewProj;
+uniform float uY;
+varying vec2 vXZ;
+void main() {
+  vXZ = aXZ;
+  gl_Position = uViewProj * vec4(aXZ.x, uY, aXZ.y, 1.0);
+}`;
+
+  const FLOOR_FS = PREC + `
+uniform float uSolid;
+uniform float uEmber;
+uniform float uLift;
+varying vec2 vXZ;
+void main() {
+  float r2 = dot(vXZ, vXZ);
+  float pool = 0.07 * exp(-r2 * 0.5);
+  float spread = 1.0 + uLift;
+  vec2 s = vXZ / (vec2(1.0, 0.9) * spread);
+  float s2 = dot(s, s);
+  float sh = (0.5 * exp(-s2 * 2.4) + 0.3 * exp(-s2 * 8.0)) / spread * uSolid;
+  vec3 light = vec3(0.8, 0.82, 0.88) * pool + vec3(0.95, 0.3, 0.08) * uEmber * 0.09 * exp(-r2 * 0.7);
+  gl_FragColor = vec4(light * (1.0 - sh), sh);
+}`;
+
+  const BG_VS = `
+attribute vec2 aPos;
+void main() { gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+  const BG_FS = PREC + `
+uniform vec2 uRes;
+uniform vec2 uCenter;
+uniform float uEmber;
+void main() {
+  vec2 p = gl_FragCoord.xy;
+  float d = length((p - uCenter) / min(uRes.x, uRes.y));
+  vec3 col = mix(vec3(0.078, 0.082, 0.094), vec3(0.018, 0.019, 0.023), smoothstep(0.0, 1.0, d));
+  col += vec3(0.1, 0.012, 0.016) * exp(-d * d * 7.0) * (0.5 + 0.6 * uEmber);
+  vec2 uv = p / uRes - 0.5;
+  uv.x *= uRes.x / uRes.y;
+  col *= mix(0.6, 1.0, smoothstep(1.1, 0.25, length(uv)));
+  float n = fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+  gl_FragColor = vec4(col + (n - 0.5) / 255.0, 1.0);
+}`;
+
+  // ---------- GL plumbing ----------
+  const hat = buildHat();
+  const modest = Math.min(innerWidth, innerHeight) < 600 || (navigator.hardwareConcurrency || 8) <= 4;
+  const EMBERS = modest ? 4200 : 7000;
+  const embers = sampleSurface(hat, EMBERS);
+  const orbitData = new Float32Array(ORBIT_MAX * TRAIL * 8);
+  let gl = null, progs = null, bufs = null, enabled = [];
+
+  function compile(type, src) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  }
+  function program(vs, fs, attrs) {
+    const p = gl.createProgram();
+    gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+    gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+    attrs.forEach((name, i) => gl.bindAttribLocation(p, i, name));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    const u = {}, a = {};
+    for (let i = 0, n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS); i < n; i++) {
+      const name = gl.getActiveUniform(p, i).name;
+      u[name] = gl.getUniformLocation(p, name);
+    }
+    attrs.forEach((name) => { a[name] = gl.getAttribLocation(p, name); });
+    return { p, u, a };
+  }
+  function buffer(data, target, usage) {
+    const b = gl.createBuffer();
+    gl.bindBuffer(target || gl.ARRAY_BUFFER, b);
+    gl.bufferData(target || gl.ARRAY_BUFFER, data, usage || gl.STATIC_DRAW);
+    return b;
+  }
+  function attribs(prog, buf, stride, specs) {
+    for (const i of enabled) gl.disableVertexAttribArray(i);
+    enabled = [];
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    for (const [name, size, off] of specs) {
+      const loc = prog.a[name];
+      if (loc < 0) continue;
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, stride * 4, off * 4);
+      enabled.push(loc);
+    }
+  }
+
+  function initGL() {
+    const opts = { antialias: true, alpha: false, depth: true, premultipliedAlpha: false, powerPreference: 'high-performance' };
+    gl = canvas.getContext('webgl', opts) || canvas.getContext('experimental-webgl', opts);
+    if (!gl) return false;
+    enabled = [];
+    progs = {
+      mesh: program(MESH_VS, MESH_FS, ['aPos', 'aNormal', 'aAO']),
+      ember: program(EMBER_VS, POINT_FS, ['aRest', 'aNormal', 'aSeed', 'aMat']),
+      orbit: program(ORBIT_VS, POINT_FS, ['aPos', 'aCol', 'aSize']),
+      floor: program(FLOOR_VS, FLOOR_FS, ['aXZ']),
+      bg: program(BG_VS, BG_FS, ['aPos']),
+    };
+    bufs = {
+      mesh: buffer(hat.inter),
+      index: buffer(hat.idx, gl.ELEMENT_ARRAY_BUFFER),
+      ember: buffer(embers),
+      orbit: buffer(orbitData, gl.ARRAY_BUFFER, gl.DYNAMIC_DRAW),
+      floor: buffer(new Float32Array([-4, -4, 4, -4, -4, 4, 4, 4])),
+      tri: buffer(new Float32Array([-1, -1, 3, -1, -1, 3])),
+    };
+    return true;
+  }
+
+  // ---------- camera & layout ----------
+  const caption = document.getElementById('caption');
+  const view = { w: 1, h: 1, viewProj: null, eye: [0, 0, 5], dist: 5, px: 1, center: [0, 0] };
+
+  function project(p) {
+    const m = view.viewProj;
+    const x = m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12];
+    const y = m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13];
+    const w = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
+    return [(x / w * 0.5 + 0.5) * view.w, (0.5 - y / w * 0.5) * view.h, w];
+  }
+
+  function resize() {
+    const w = innerWidth, h = innerHeight, dpr = Math.min(devicePixelRatio || 1, 2);
+    view.w = w; view.h = h;
+    canvas.width = Math.max(1, Math.round(w * dpr));
+    canvas.height = Math.max(1, Math.round(h * dpr));
+    const aspect = w / h, fov = 32 * Math.PI / 180, t = Math.tan(fov / 2);
+    // keep the brim (and the drifting embers) inside narrow portrait screens
+    const dist = Math.max(4.5, 1.55 / (t * aspect), h < 520 ? 5.3 : 0);
+    const target = [0, 0.13, 0], el = 0.2;
+    view.eye = [0, target[1] + dist * Math.sin(el), dist * Math.cos(el)];
+    view.dist = dist;
+    view.viewProj = mul(perspective(fov, aspect, 0.1, 60), lookAt(view.eye, target, [0, 1, 0]));
+    view.px = canvas.height / t / 2;
+
+    const c = project([0, HAT_CY, 0]);
+    const r = 1.08 * (h / t / 2) / c[2];
+    view.center = [c[0] * dpr, (h - c[1]) * dpr];
+    Object.assign(hit.style, { left: c[0] + 'px', top: c[1] + 'px', width: 2 * r + 'px', height: 2 * r + 'px' });
+    const f = project([0, FLOOR_Y, 0.95]);
+    const capH = caption.offsetHeight || 70;
+    root.style.setProperty('--caption-top', Math.min(f[1] + 6, h - capH - Math.max(20, h * 0.05)) + 'px');
+    if (gl) gl.viewport(0, 0, canvas.width, canvas.height);
+  }
+
+  // ---------- state ----------
+  const S = { time: 0, spin: REST_SPIN, vel: SPIN_FAST, phase: -1, spawned: false, hovered: false, glow: 0, glowTo: 0, glowUntil: 0, lift: 0 };
+  const orbiters = [];
+
+  function spawnOrbiters() {
+    const n = Math.min(ORBIT_PER, ORBIT_MAX - orbiters.length);
+    for (let i = 0; i < n; i++) {
+      orbiters.push({
+        r: 1.12 + Math.random() * 0.42, inc: (Math.random() * 2 - 1) * 0.55, node: Math.random() * Math.PI * 2,
+        w: 0.32 + Math.random() * 0.34, a0: Math.random() * Math.PI * 2, ecc: 0.82 + Math.random() * 0.18,
+        y: HAT_CY - 0.08 + Math.random() * 0.22, size: 0.02 + Math.random() * 0.014, hue: Math.random(),
+        born: S.time + i * 0.18, tw: Math.random() * 10,
+      });
+    }
+  }
+
+  function orbitPoint(o, t, out, k) {
+    const a = o.a0 + o.w * t;
+    const x = Math.cos(a) * o.r, z = Math.sin(a) * o.r * o.ecc;
+    const ci = Math.cos(o.inc), si = Math.sin(o.inc), cn = Math.cos(o.node), sn = Math.sin(o.node);
+    const z2 = z * ci;
+    out[k] = x * cn - z2 * sn;
+    out[k + 1] = o.y - z * si + S.lift;
+    out[k + 2] = x * sn + z2 * cn;
+  }
+
+  function updateOrbiters() {
+    let n = 0;
+    for (const o of orbiters) {
+      const life = smooth(o.born, o.born + 1.6, S.time);
+      if (life <= 0) continue;
+      const tw = 0.8 + 0.2 * Math.sin(S.time * 2.3 + o.tw);
+      for (let k = 0; k < TRAIL; k++) {
+        const f = k / TRAIL, off = n * 8;
+        orbitPoint(o, S.time - k * 0.02, orbitData, off);
+        orbitData[off + 3] = 1.0;
+        orbitData[off + 4] = (0.5 + 0.2 * o.hue) * (1 - 0.35 * f);
+        orbitData[off + 5] = (0.22 + 0.1 * o.hue) * (1 - 0.5 * f);
+        orbitData[off + 6] = life * (k === 0 ? 0.85 * tw : 0.15 * Math.pow(1 - f, 1.8));
+        orbitData[off + 7] = k === 0 ? o.size : o.size * (1.3 - 0.8 * f);
+        n++;
+      }
+    }
+    return n;
+  }
+
+  // ---------- drawing ----------
+  function draw() {
+    const ph = S.phase;
+    const ember = ph < 0 ? 0 : smooth(0.1, 1.6, ph) * (1 - smooth(T.back, T_HOME, ph));
+    const solid = ph < 0 ? 1 : 1 - smooth(0, T.burn + 0.4, ph) * (1 - smooth(T.back + 0.6, T_HOME, ph));
+    const model = modelMatrix(S.spin, 0.1, S.lift);
+    let p;
+
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.BLEND);
+    gl.depthMask(true);
+    gl.clearColor(0.02, 0.02, 0.024, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    p = progs.bg; gl.useProgram(p.p);
+    attribs(p, bufs.tri, 2, [['aPos', 2, 0]]);
+    gl.uniform2f(p.u.uRes, canvas.width, canvas.height);
+    gl.uniform2f(p.u.uCenter, view.center[0], view.center[1]);
+    gl.uniform1f(p.u.uEmber, ember);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    // soft pool of light and a contact shadow that thins as the hat floats up or burns away
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    p = progs.floor; gl.useProgram(p.p);
+    attribs(p, bufs.floor, 2, [['aXZ', 2, 0]]);
+    gl.uniformMatrix4fv(p.u.uViewProj, false, view.viewProj);
+    gl.uniform1f(p.u.uY, FLOOR_Y);
+    gl.uniform1f(p.u.uSolid, solid);
+    gl.uniform1f(p.u.uEmber, ember);
+    gl.uniform1f(p.u.uLift, S.lift * 2.5);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    gl.disable(gl.BLEND);
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
+    p = progs.mesh; gl.useProgram(p.p);
+    attribs(p, bufs.mesh, 7, [['aPos', 3, 0], ['aNormal', 3, 3], ['aAO', 1, 6]]);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, bufs.index);
+    gl.uniformMatrix4fv(p.u.uModel, false, model);
+    gl.uniformMatrix4fv(p.u.uViewProj, false, view.viewProj);
+    gl.uniform3fv(p.u.uCam, view.eye);
+    gl.uniform1f(p.u.uPhase, ph);
+    gl.uniform1f(p.u.uGlow, S.glow);
+    gl.drawElements(gl.TRIANGLES, hat.idx.length, gl.UNSIGNED_SHORT, 0);
+
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    gl.depthMask(false);
+    if (ph >= 0) {
+      p = progs.ember; gl.useProgram(p.p);
+      attribs(p, bufs.ember, 11, [['aRest', 3, 0], ['aNormal', 3, 3], ['aSeed', 4, 6], ['aMat', 1, 10]]);
+      gl.uniformMatrix4fv(p.u.uModel, false, model);
+      gl.uniformMatrix4fv(p.u.uViewProj, false, view.viewProj);
+      gl.uniform1f(p.u.uPhase, ph);
+      gl.uniform1f(p.u.uTime, S.time % 1000);
+      gl.uniform1f(p.u.uPx, view.px);
+      gl.uniform1f(p.u.uDist, view.dist);
+      gl.drawArrays(gl.POINTS, 0, EMBERS);
+    }
+    const n = reduced ? 0 : updateOrbiters();
+    if (n) {
+      p = progs.orbit; gl.useProgram(p.p);
+      gl.bindBuffer(gl.ARRAY_BUFFER, bufs.orbit);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, orbitData.subarray(0, n * 8));
+      attribs(p, bufs.orbit, 8, [['aPos', 3, 0], ['aCol', 4, 3], ['aSize', 1, 7]]);
+      gl.uniformMatrix4fv(p.u.uViewProj, false, view.viewProj);
+      gl.uniform1f(p.u.uPx, view.px);
+      gl.drawArrays(gl.POINTS, 0, n);
+    }
+    gl.depthMask(true);
+  }
+
+  // ---------- loop ----------
+  let last = 0, raf = 0, lost = false;
+  function request() { if (!raf && !lost && gl) raf = requestAnimationFrame(frame); }
+
+  function frame(now) {
+    raf = 0;
+    const dt = last ? Math.min(0.05, Math.max(0, (now - last) / 1000)) : 1 / 60;
+    last = now;
+    S.time += dt;
+    let again = true;
+    if (reduced) {
+      // no spin, no drift: just a gentle warmth that fades in and out
+      S.spin = REST_SPIN; S.lift = 0; S.phase = -1;
+      if (S.glowUntil && S.time > S.glowUntil) { S.glowUntil = 0; S.glowTo = S.hovered ? 1 : 0; }
+      S.glow += (S.glowTo - S.glow) * (1 - Math.exp(-dt * 5));
+      again = S.glowUntil > 0 || Math.abs(S.glowTo - S.glow) > 0.002;
+      if (!again) last = 0;
+    } else {
+      if (S.phase >= 0) {
+        S.phase += dt;
+        if (!S.spawned && S.phase > T.back - 0.8) { S.spawned = true; spawnOrbiters(); }
+        if (S.phase > T_TOTAL) S.phase = -1;
+      }
+      const target = S.hovered || S.phase >= 0 ? SPIN_SLOW : SPIN_FAST;
+      S.vel += (target - S.vel) * (1 - Math.exp(-dt * 1.8));
+      S.spin = (S.spin + S.vel * dt) % (Math.PI * 2);
+      S.lift = 0.035 * Math.sin(S.time * 0.85);
+      S.glow *= Math.exp(-dt * 5);
+    }
+    draw();
+    if (again) request();
+  }
+
+  // ---------- interaction ----------
+  function trigger() {
+    if (reduced) { S.glowTo = 1; S.glowUntil = S.time + 1.4; request(); return; }
+    if (S.phase < 0) { S.phase = 0; S.spawned = false; }
+  }
+  hit.addEventListener('pointerenter', (e) => {
+    if (e.pointerType !== 'mouse') return;
+    S.hovered = true;
+    if (reduced) { S.glowTo = 1; request(); } else trigger();
+  });
+  hit.addEventListener('pointerleave', (e) => {
+    if (e.pointerType !== 'mouse') return;
+    S.hovered = false;
+    if (reduced && !S.glowUntil) { S.glowTo = 0; request(); }
+  });
+  hit.addEventListener('click', trigger);
+
+  function updateHint() {
+    const canHover = hoverQuery.matches;
+    hint.textContent = reduced
+      ? (canHover ? 'Motion reduced · hover or tap for a warm glow' : 'Motion reduced · tap for a warm glow')
+      : (canHover ? 'Hover or tap to scatter it into embers' : 'Tap to scatter it into embers');
+  }
+  function onMotionChange() {
+    reduced = motionQuery.matches;
+    S.phase = -1; S.glow = 0; S.glowUntil = 0; S.glowTo = reduced && S.hovered ? 1 : 0;
+    if (reduced) { S.spin = REST_SPIN; S.lift = 0; }
+    updateHint();
+    request();
+  }
+  const listen = (q, fn) => (q.addEventListener ? q.addEventListener('change', fn) : q.addListener(fn));
+  listen(motionQuery, onMotionChange);
+  listen(hoverQuery, updateHint);
+  addEventListener('resize', () => { resize(); request(); });
+
+  canvas.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault();
+    lost = true;
+    if (raf) cancelAnimationFrame(raf);
+    raf = 0;
+  });
+  canvas.addEventListener('webglcontextrestored', () => {
+    lost = false;
+    try { initGL(); resize(); request(); } catch (err) { root.classList.add('no-gl'); }
+  });
+
+  // ---------- start ----------
+  try {
+    if (!initGL()) return;
+  } catch (err) {
+    console.warn('WebGL unavailable; showing the static logo instead.', err);
+    return;
+  }
+  root.classList.remove('no-gl');
+  updateHint();
+  resize();
+  request();
+  requestAnimationFrame(() => root.classList.add('ready'));
+})();
+</script>
+</body>
+</html>
