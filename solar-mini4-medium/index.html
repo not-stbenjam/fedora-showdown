@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fedora — Red Hat</title>
+<style>
+  :root {
+    --bg-0: #0a0a12;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg-0);
+    font-family: Georgia, "Times New Roman", serif;
+    cursor: default;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  .scene {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  canvas {
+    display: block;
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+  }
+
+  .caption {
+    position: absolute;
+    right: 6%;
+    bottom: 14vh;
+    font-size: clamp(0.8rem, 2.4vw, 1.3rem);
+    font-weight: 400;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.4);
+    text-align: right;
+    pointer-events: none;
+    white-space: nowrap;
+    transition: opacity 0.8s ease;
+    opacity: 1;
+  }
+
+  .caption .logo {
+    display: block;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .caption { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="scene">
+  <canvas id="hatCanvas"></canvas>
+  <div class="caption"><span class="logo">RED HAT</span></div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------------------------------------------------------------------
+  // Canvas
+  // ---------------------------------------------------------------------
+  const canvas = document.getElementById("hatCanvas");
+  const ctx = canvas.getContext("2d");
+  let W, H, dpr;
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + "px";
+    canvas.style.height = H + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  // ---------------------------------------------------------------------
+  // 3D math
+  // ---------------------------------------------------------------------
+  class Vec3 {
+    constructor(x, y, z) { this.x = x; this.y = y; this.z = z; }
+    clone() { return new Vec3(this.x, this.y, this.z); }
+    set(x, y, z) { this.x = x; this.y = y; this.z = z; return this; }
+    add(o) { this.x += o.x; this.y += o.y; this.z += o.z; return this; }
+    sub(o) { this.x -= o.x; this.y -= o.y; this.z -= o.z; return this; }
+    scale(s) { this.x *= s; this.y *= s; this.z *= s; return this; }
+    len() { return Math.sqrt(this.x*this.x + this.y*this.y + this.z*this.z); }
+    normalize() {
+      const l = this.len();
+      if (l > 1e-9) { this.x/=l; this.y/=l; this.z/=l; }
+      return this;
+    }
+    dot(o) { return this.x*o.x + this.y*o.y + this.z*o.z; }
+  }
+
+  const ROT = {
+    x: (p, a) => {
+      const c = Math.cos(a), s = Math.sin(a);
+      return new Vec3(p.x, p.y*c - p.z*s, p.y*s + p.z*c);
+    },
+    y: (p, a) => {
+      const c = Math.cos(a), s = Math.sin(a);
+      return new Vec3(p.x*c + p.z*s, p.y, -p.x*s + p.z*c);
+    },
+  };
+
+  function project(p, cam, rotY, rotX, tilt, w, h, fov) {
+    let q = ROT.y(p, rotY);
+    q = ROT.x(q, rotX);
+    q = ROT.x(q, tilt || 0);
+    const dx = q.x - cam.x, dy = q.y - cam.y, dz = q.z - cam.z;
+    const scale = fov / (fov + dz);
+    return { x: w/2 + dx*scale, y: h/2 + dy*scale, scale: scale, dz: dz };
+  }
+
+  // ---------------------------------------------------------------------
+  // Hat geometry
+  // ---------------------------------------------------------------------
+  const CAMERA = { x: 0, y: 0.7, z: -6.2 };
+  const FOV = 2.4;
+  const CROWN_R = 0.62;
+  const CROWN_H = 0.82;
+  const BRIM_R = 1.08;
+  const BRIM_D = 0.42;
+  const BRIM_DOWNH = 0.07;
+  const BAND_H = 0.1;
+
+  function sampleCrownSurface(n) {
+    const arr = [];
+    for (let i = 0; i < n; i++) {
+      const theta = Math.acos(2 * Math.random() - 1);
+      const phi = 2 * Math.PI * Math.random();
+      const r = Math.pow(Math.random(), 0.55) * CROWN_R;
+      const x = r * Math.sin(theta) * Math.cos(phi);
+      const y = (0.2 + 0.8 * Math.cos(theta)) * CROWN_H;
+      const z = r * Math.sin(theta) * Math.sin(phi);
+      arr.push({ home: new Vec3(x, y, z), type: "crown" });
+    }
+    return arr;
+  }
+
+  function sampleCrownInterior(n) {
+    const arr = [];
+    for (let i = 0; i < n; i++) {
+      const theta = Math.acos(2 * Math.random() - 1);
+      const phi = 2 * Math.PI * Math.random();
+      const r = Math.pow(Math.random(), 1/3) * CROWN_R * 0.55;
+      const x = r * Math.sin(theta) * Math.cos(phi);
+      const y = (0.2 + 0.8 * Math.cos(theta)) * CROWN_H * 0.45;
+      const z = r * Math.sin(theta) * Math.sin(phi);
+      arr.push({ home: new Vec3(x, y, z), type: "interior" });
+    }
+    return arr;
+  }
+
+  function sampleBrim(n) {
+    const arr = [];
+    for (let i = 0; i < n; i++) {
+      const angle = 2 * Math.PI * Math.random();
+      const r = Math.sqrt(Math.random()) * BRIM_R;
+      const x = r * Math.cos(angle);
+      const z = -BRIM_D * Math.sin(angle);
+      const y = -0.02 - 0.10 * (1 + Math.sin(angle)) / 2;
+      arr.push({ home: new Vec3(x, y, z), type: "brim" });
+    }
+    return arr;
+  }
+
+  function sampleBrimEdge(n) {
+    const arr = [];
+    for (let i = 0; i < n; i++) {
+      const angle = 2 * Math.PI * Math.random();
+      const r = Math.sqrt(Math.random()) * BRIM_R * 1.05;
+      const x = r * Math.cos(angle);
+      const z = -BRIM_D * Math.sin(angle) * 1.02;
+      const y = -0.02 - 0.10 * (1 + Math.sin(angle)) / 2;
+      arr.push({ home: new Vec3(x, y, z), type: "edge" });
+    }
+    return arr;
+  }
+
+  function sampleBand(n) {
+    const arr = [];
+    for (let i = 0; i < n; i++) {
+      const theta = Math.acos(2 * Math.random() - 1);
+      const phi = 2 * Math.PI * Math.random();
+      const r = CROWN_R * 0.94;
+      const x = r * Math.sin(theta) * Math.cos(phi);
+      const y = (0.2 + 0.8 * Math.cos(theta)) * CROWN_H - BAND_H;
+      const z = r * Math.sin(theta) * Math.sin(phi);
+      arr.push({ home: new Vec3(x, y, z), type: "band" });
+    }
+    return arr;
+  }
+
+  function sampleSeam(n) {
+    const arr = [];
+    for (let i = 0; i < n; i++) {
+      const t = Math.random();
+      const y = 0.2 + 0.8 * t;
+      const x = (Math.random() - 0.5) * CROWN_R * 0.4;
+      const z = -CROWN_R * 0.5;
+      arr.push({ home: new Vec3(x, y, z), type: "seam" });
+    }
+    return arr;
+  }
+
+  function generateParticles() {
+    const counts = { crown: 1800, interior: 350, brim: 800, edge: 260, band: 180, seam: 100 };
+    const parts = [];
+    for (const key in counts) {
+      const fn = window["sample" + key.charAt(0).toUpperCase() + key.slice(1)];
+      parts.push(...fn(counts[key]));
+    }
+    return parts;
+  }
+
+  // ---------------------------------------------------------------------
+  // State machine
+  // ---------------------------------------------------------------------
+  const state = {
+    phase: "idle",
+    rotY: 0.6,
+    rotX: 0,
+    idleT: 0,
+    t: 0,
+    speed: 1,
+  };
+
+  const PHASE_DUR = {
+    idle:        { end: Infinity },
+    dissolving:  { end: 0.5 },
+    drifting:    { end: 1.5 },
+    reforming:   { end: 1.8 },
+    reformed:    { end: 1.5 },
+  };
+
+  const transitions = {
+    idle: "dissolving",
+    dissolving: "drifting",
+    drifting: "reforming",
+    reforming: "reformed",
+    reformed: "idle",
+  };
+
+  // ---------------------------------------------------------------------
+  // Particles
+  // ---------------------------------------------------------------------
+  let particles = [];
+  let pdata = [];
+
+  function initParticleData() {
+    pdata = particles.map((p, i) => {
+      const isOrbit = (i / particles.length) < 0.88;
+      return {
+        home: p.home.clone(),
+        type: p.type,
+        isOrbit,
+        orbitPhase: Math.random() * Math.PI * 2,
+        orbitSpeed: 0.35 + Math.random() * 0.35,
+        offset: new Vec3(0, 0, 0),
+        spring: new Vec3(0, 0, 0),
+        glowAlpha: 0,
+        swirlPhase: Math.random() * Math.PI * 2,
+      };
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Trigger
+  // ---------------------------------------------------------------------
+  function trigger() {
+    for (const d of pdata) {
+      d.offset.set(0, 0, 0);
+      d.spring.set(0, 0, 0);
+      d.glowAlpha = 0;
+    }
+    state.phase = "dissolving";
+    state.t = 0;
+    state.speed = 0.15;
+  }
+
+  // ---------------------------------------------------------------------
+  // Update (handles rotation speed & tilt per phase)
+  // ---------------------------------------------------------------------
+  function update(dt) {
+    let rotSpeed, tilt;
+
+    if (state.phase === "idle") {
+      rotSpeed = 0.028;
+      tilt = Math.sin(state.idleT * 1.7) * 0.03;
+      state.idleT += dt * state.speed;
+    } else if (state.phase === "dissolving") {
+      const k = Math.min(1, state.t / 0.5);
+      rotSpeed = 0.028 * (1 - k * k);
+      tilt = Math.sin(state.idleT * 1.7) * 0.03 * (1 - k) + Math.sin(state.t * 10) * 0.006 * k;
+      state.t += dt;
+      if (state.t >= 0.5) {
+        state.phase = "drifting";
+        state.t = 0;
+        state.speed = 1;
+      }
+    } else if (state.phase === "drifting") {
+      rotSpeed = 0.004;
+      tilt = Math.sin(state.idleT * 1.7 + state.t * 0.4) * 0.02;
+      state.t += dt;
+      if (state.t >= 1.5) {
+        state.phase = "reforming";
+        state.t = 0;
+        state.speed = 1;
+      }
+    } else if (state.phase === "reforming") {
+      const k = Math.min(1, state.t / 1.8);
+      rotSpeed = 0.004 + 0.024 * k;
+      tilt = Math.sin(state.idleT * 1.7 + state.t * 0.3) * 0.03;
+      state.t += dt;
+      if (state.t >= 1.8) {
+        state.phase = "reformed";
+        state.t = 0;
+        state.speed = 1;
+      }
+    } else { // reformed
+      rotSpeed = 0.028;
+      tilt = Math.sin(state.idleT * 1.7) * 0.03;
+      state.t += dt;
+      if (state.t >= 1.5) {
+        state.phase = "idle";
+        state.t = 0;
+        state.speed = 1;
+      }
+    }
+
+    state.rotY += rotSpeed * dt;
+    state.rotX = tilt;
+  }
+
+  // ---------------------------------------------------------------------
+  // Rendering
+  // ---------------------------------------------------------------------
+  const glowCache = {};
+
+  function getGlowSprite(size) {
+    const key = size | 0;
+    if (glowCache[key]) return glowCache[key];
+    const c = document.createElement("canvas");
+    c.width = size; c.height = size;
+    const g = c.getContext("2d");
+    const grad = g.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+    grad.addColorStop(0, "rgba(255,230,195,1)");
+    grad.addColorStop(0.25, "rgba(255,190,120,0.75)");
+    grad.addColorStop(0.5, "rgba(255,130,60,0.35)");
+    grad.addColorStop(0.75, "rgba(255,70,20,0.10)");
+    grad.addColorStop(1, "rgba(255,30,10,0)");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, size, size);
+    glowCache[key] = c;
+    return c;
+  }
+
+  function render() {
+    // --- Background ---
+    ctx.clearRect(0, 0, W, H);
+    const bg = ctx.createRadialGradient(W/2, H/2 - 80, 0, W/2, H/2, Math.max(W, H) * 0.75);
+    bg.addColorStop(0, "#141420");
+    bg.addColorStop(0.55, "#0d0d16");
+    bg.addColorStop(1, "#08080f");
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    // Vignette
+    const vig = ctx.createRadialGradient(W/2, H/2, W*0.35, W/2, H/2, Math.max(W, H) * 0.75);
+    vig.addColorStop(0, "rgba(0,0,0,0)");
+    vig.addColorStop(1, "rgba(0,0,0,0.5)");
+    ctx.fillStyle = vig;
+    ctx.fillRect(0, 0, W, H);
+
+    // Background glow blob
+    const blob = ctx.createRadialGradient(W/2, H/2 - 70, 0, W/2, H/2 - 70, 280);
+    blob.addColorStop(0, "rgba(232,100,86,0.09)");
+    blob.addColorStop(0.4, "rgba(232,100,86,0.03)");
+    blob.addColorStop(1, "rgba(232,100,86,0)");
+    ctx.fillStyle = blob;
+    ctx.fillRect(W/2 - 280, H/2 - 340, 560, 560);
+
+    // --- Camera & rotation ---
+    const rotY = state.rotY;
+    const rotX = state.rotX;
+    const tilt = Math.sin(state.idleT * 1.7 + state.t * 0.5) * 0.03;
+
+    // --- Project all particles ---
+    const pts = [];
+    for (let i = 0; i < pdata.length; i++) {
+      const d = pdata[i];
+      const world = d.home.clone();
+      const q1 = ROT.y(world, rotY);
+      const q2 = ROT.x(q1, rotX);
+      const q3 = ROT.x(q2, tilt);
+      const pr = project(q3, CAMERA, 0, 0, 0, W, H, FOV);
+      const s = pr.scale;
+      pr.x += d.offset.x * s * 0.6;
+      pr.y += d.offset.y * s * 0.6;
+      pr.scale += d.offset.z * s * 0.02;
+      pr.depth = q3.z;
+      pts.push({ d, pr });
+    }
+
+    // Sort by depth (far to near) — painter's algorithm
+    pts.sort((a, b) => b.pr.depth - a.pr.depth);
+
+    // --- Draw particles ---
+    const glowSprite = getGlowSprite(48);
+    for (let i = 0; i < pts.length; i++) {
+      const { d, pr } = pts[i];
+      const s = pr.scale;
+
+      let alpha, coreSize, glowSize, glowAlpha;
+
+      if (state.phase === "idle") {
+        alpha = 1;
+        glowAlpha = 0.35;
+        coreSize = s * 0.012;
+        glowSize = s * 0.075;
+      } else if (state.phase === "dissolving") {
+        const k = Math.min(1, state.t / 0.5);
+        alpha = k;
+        glowAlpha = 0.3 + 0.55 * k;
+        coreSize = s * 0.012 * (1 + 1.2 * k);
+       glowSize = s * 0.075 * (1 + 2.8 * k);
+        pr.x += d.offset.x * s * 0.8 * k;
+        pr.y += d.offset.y * s * 0.8 * k;
+        pr.scale += d.offset.z * s * 0.02 * k;
+      } else if (state.phase === "drifting") {
+        const k = Math.min(1, state.t / 1.5);
+        const m = 0.6 + 0.4 * Math.sin(k * Math.PI);
+        alpha = 1;
+        glowAlpha = 0.65;
+        if (d.isOrbit) {
+          const orbitAngle = d.orbitPhase + state.t * (d.orbitSpeed + 1.5);
+          const cf = Math.cos(orbitAngle) * m;
+          const sf = Math.sin(orbitAngle) * m;
+          pr.x += cf * s * 1.6;
+          pr.y += sf * s * 1.6;
+          pr.scale += 0.01 * Math.sin(state.t * 2);
+          pr.x += Math.sin(state.t * 3.7) * 0.05 * s;
+          pr.y += Math.cos(state.t * 2.3) * 0.04 * s;
+        } else {
+          const angle = Math.atan2(d.home.y, d.home.z);
+          const dist = Math.sqrt(d.home.y * d.home.y + d.home.z * d.home.z) * 0.5;
+          const dirX = Math.cos(angle + Math.PI / 2);
+          const dirY = Math.sin(angle + Math.PI / 2);
+          pr.x += dirX * dist * k;
+          pr.y += dirY * dist * k;
+          pr.y -= 0.04 * k;
+          pr.scale += 0.02 * k;
+          const swirlAngle = state.t * 2.5;
+          const swirlRot = ROT.y(d.home, swirlAngle);
+          pr.x += (swirlRot.x - d.home.x) * s * 0.5;
+          pr.y += (swirlRot.y - d.home.y) * s * 0.5;
+          pr.x += Math.sin(d.swirlPhase + state.t * 2.3) * 0.04 * s;
+          pr.y += Math.cos(d.swirlPhase * 0.9 + state.t * 1.9) * 0.03 * s;
+        }
+      } else if (state.phase === "reforming") {
+        const k = Math.min(1, state.t / 1.8);
+        const spring = 0.5;
+        pr.x += (d.home.x * s - pr.x) * spring;
+        pr.y += (d.home.y * s - pr.y) * spring;
+        pr.scale += (1 + d.home.z * 0.02 - pr.scale) * spring;
+        pr.x += Math.sin(k * 6 + i) * 0.03 * s * (1 - k);
+        pr.y += Math.cos(k * 5 + i * 0.9) * 0.025 * s * (1 - k);
+        alpha = 1;
+        glowAlpha = 0.9 + 0.1 * (1 - k);
+        coreSize = s * 0.012 * (1 - 0.5 * (1 - k));
+        glowSize = s * 0.075 * (1 - 2.0 * (1 - k));
+      } else { // reformed
+        const k = Math.min(1, state.t / 1.5);
+        alpha = 1;
+        glowAlpha = 0.95;
+        if (d.isOrbit) {
+          const orbitAngle = d.orbitPhase + state.t * (d.orbitSpeed + 0.6);
+          const orbitRadius = 0.32 + 0.2 * (1 - k);
+          const cf = Math.cos(orbitAngle) * orbitRadius;
+          const sf = Math.sin(orbitAngle) * orbitRadius;
+          pr.x += cf * s * 1.6;
+          pr.y += sf * s * 1.6;
+          pr.scale += 0.008 * Math.sin(state.t * 2);
+        }
+      }
+
+      if (alpha <= 0.005 || s < 0.01) continue;
+
+      // --- Color by type ---
+      let baseColor;
+      switch (d.type) {
+        case "crown": baseColor = "rgba(255,208,178,0.95)"; break;
+        case "interior": baseColor = "rgba(255,188,158,0.85)"; break;
+        case "brim": baseColor = "rgba(255,208,178,0.9)"; break;
+        case "edge": baseColor = "rgba(255,228,203,0.95)"; break;
+        case "band": baseColor = "rgba(255,198,158,0.9)"; break;
+        case "seam": baseColor = "rgba(255,218,183,0.85)"; break;
+        default: baseColor = "rgba(255,208,178,0.95)"; break;
+      }
+
+      // --- Glow layer ---
+      if (glowAlpha > 0.01) {
+        const gs = glowSize * 0.5;
+        ctx.globalAlpha = glowAlpha * 0.6;
+        ctx.drawImage(glowSprite, pr.x - gs, pr.y - gs, gs * 2, gs * 2);
+      }
+
+      // --- Core ---
+      ctx.globalAlpha = alpha * 0.9;
+      ctx.fillStyle = baseColor;
+      ctx.beginPath();
+      ctx.arc(pr.x, pr.y, coreSize, 0, Math.PI * 2);
+      ctx.fill();
+
+      // --- Highlight ---
+      ctx.globalAlpha = alpha * 0.35;
+      ctx.fillStyle = "rgba(255,255,255,0.55)";
+      ctx.beginPath();
+      ctx.arc(pr.x - coreSize * 0.4, pr.y - coreSize * 0.4, coreSize * 0.35, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.globalAlpha = 1;
+    }
+
+    // --- Brim shadow ---
+    const shadowAlpha = state.phase === "idle" ? 0.10 :
+                        state.phase === "dissolving" ? 0.45 :
+                        state.phase === "drifting" ? 0.12 : 0.05;
+    if (shadowAlpha > 0.01) {
+      const sh = ctx.createRadialGradient(W/2 + 25, H/2 + 55, 10, W/2 + 25, H/2 + 55, 210);
+      sh.addColorStop(0, "rgba(0,0,0,0.35)");
+      sh.addColorStop(0.6, "rgba(0,0,0,0.08)");
+      sh.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = sh;
+      ctx.fillRect(W/2 - 200, H/2 + 10, 400, 190);
+    }
+
+    // --- Caption ---
+    const cap = document.querySelector(".caption");
+    if (cap) {
+      const hide = state.phase === "dissolving" || state.phase === "drifting" || state.phase === "reforming";
+      cap.style.opacity = hide ? "0" : "1";
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Boot
+  // ---------------------------------------------------------------------
+  particles = generateParticles();
+  initParticleData();
+
+  let lastTime = 0;
+
+  function loop(timestamp) {
+    const dt = Math.min((timestamp - lastTime) / 1000, 0.05);
+    lastTime = timestamp;
+
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (reducedMotion) {
+      state.phase = "idle";
+      state.rotY = 0.6 + 0.008 * state.idleT;
+      state.rotX = Math.sin(state.idleT * 1.7) * 0.03;
+      state.idleT += dt;
+    } else {
+      update(dt);
+    }
+
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  // Input: hover/tap triggers the dissolve animation
+  const sceneEl = document.querySelector(".scene");
+  sceneEl.addEventListener("mouseenter", trigger);
+  sceneEl.addEventListener("touchstart", function (e) {
+    e.preventDefault();
+    trigger();
+  }, { passive: false });
+  document.addEventListener("click", function (e) {
+    const target = e.target;
+    if (target.closest(".scene") || target === canvas) {
+      trigger();
+    }
+  });
+
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
