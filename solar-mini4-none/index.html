@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Fedora — 3D Pendant</title>
+<style>
+  :root {
+    --bg: #0b0a0c;
+    --surface: rgba(20, 18, 22, 0.72);
+    --surface-strong: rgba(30, 26, 32, 0.92);
+    --text: #f2efe9;
+    --muted: #9aa4b2;
+    --glow: rgba(255, 228, 176, 0.28);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { height: 100%; }
+
+  body {
+    font-family: "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+  }
+
+  .wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    padding: 24px;
+  }
+
+  .scene {
+    position: relative;
+    width: min(88vw, 640px);
+    height: min(88vh, 640px);
+    perspective: 1400px;
+    perspective-origin: center;
+  }
+
+  .stage {
+    position: absolute;
+    inset: 0;
+    transform-style: preserve-3d;
+    animation: floatStage 8s ease-in-out infinite;
+  }
+
+  @keyframes floatStage {
+    0%, 100% { transform: translateZ(0); }
+    50% { transform: translateZ(-18px); }
+  }
+
+  .hat {
+    position: relative;
+    transform-style: preserve-3d;
+    transform: rotateX(40deg) rotateZ(15deg);
+    animation: spin 10s linear infinite;
+    cursor: pointer;
+    will-change: transform;
+  }
+
+  @keyframes spin {
+    to { transform: rotateX(40deg) rotateZ(360deg) rotateY(0deg); }
+  }
+
+  .brim {
+    position: absolute;
+    bottom: 54%;
+    left: 50%;
+    width: 132%;
+    height: 18%;
+    border-radius: 50%;
+    background:
+      radial-gradient(circle at 50% 50%, rgba(255, 228, 176, 0.08), rgba(255, 228, 176, 0.018) 70%, transparent 100%);
+    transform: translateX(-50%) rotateX(90deg);
+    filter: blur(0.5px);
+    box-shadow:
+      0 0 24px rgba(255, 228, 176, 0.10),
+      inset 0 0 18px rgba(255, 228, 176, 0.035);
+  }
+
+  .crown {
+    position: absolute;
+    top: 30%;
+    left: 50%;
+    width: 100%;
+    aspect-ratio: 1;
+    transform: translateX(-50%) rotateX(90deg);
+    z-index: 2;
+  }
+
+  .band {
+    position: absolute;
+    top: 40%;
+    left: 50%;
+    width: 100%;
+    height: 16%;
+    transform: translateX(-50%) rotateX(90deg);
+    background: linear-gradient(90deg, transparent 30%, rgba(255, 220, 150, 0.08) 50%, transparent 70%);
+    border-radius: 4%;
+    border: 1px solid rgba(255, 228, 176, 0.06);
+    box-shadow: inset 0 0 16px rgba(255, 228, 176, 0.03);
+  }
+
+  .top {
+    position: absolute;
+    top: -3%;
+    left: 50%;
+    width: 100%;
+    aspect-ratio: 1;
+    transform: translateX(-50%) rotateX(90deg) translateZ(6%) skewY(8deg);
+    z-index: 3;
+    background:
+      radial-gradient(ellipse 118% 112% at 50% 40%, rgba(255, 228, 176, 0.10), rgba(255, 228, 176, 0.01) 70%, transparent 100%);
+    box-shadow:
+      0 0 40px rgba(255, 228, 176, 0.06),
+      inset 0 0 60px rgba(255, 228, 176, 0.02);
+  }
+
+  .pin {
+    position: absolute;
+    top: 8%;
+    left: 50%;
+    width: 14%;
+    aspect-ratio: 1;
+    transform: translateX(-50%) rotateX(90deg);
+    z-index: 3;
+    background: radial-gradient(circle at 50% 45%, #fff, rgba(255, 228, 176, 0.25));
+    box-shadow: 0 0 12px rgba(255, 228, 176, 0.15);
+  }
+
+  .brim-lines {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    pointer-events: none;
+  }
+
+  .brim-lines::before, .brim-lines::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 12%;
+    height: 2px;
+    background: linear-gradient(90deg, rgba(255, 228, 176, 0.12), rgba(255, 228, 176, 0.02));
+    transform: translate(-50%, -50%) rotateX(90deg);
+  }
+
+  .brim-lines::after { transform: translate(-50%, -50%) rotateX(90deg) rotate(90deg); }
+
+  .spine {
+    position: absolute;
+    left: 50%;
+    top: 6%;
+    width: 24%;
+    aspect-ratio: 1;
+    transform: translateX(-50%) rotateX(90deg);
+    border-radius: 70% 30% 40% 60% / 50% 40% 60% 50%;
+    background: linear-gradient(135deg, rgba(255, 228, 176, 0.055), rgba(255, 228, 176, 0.008));
+    transform-origin: center 46%;
+    box-shadow:
+      inset 0 0 22px rgba(255, 228, 176, 0.02),
+      0 0 14px rgba(255, 228, 176, 0.02);
+  }
+
+  .pompon {
+    position: absolute;
+    top: -6%;
+    left: 50%;
+    width: 26%;
+    aspect-ratio: 1;
+    transform: translateX(-50%) rotateX(90deg);
+    z-index: 4;
+  }
+
+  .pompon-core {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 72%;
+    aspect-ratio: 1;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: radial-gradient(circle at 40% 35%, rgba(255, 240, 200, 0.9), rgba(255, 210, 140, 0.35));
+    box-shadow:
+      0 0 22px rgba(255, 240, 200, 0.30),
+      0 0 60px rgba(255, 210, 140, 0.12);
+  }
+
+  .pompon-fringe {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    overflow: hidden;
+    background: radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.12), transparent 70%);
+    transform: translate(-50%, -50%);
+  }
+
+  .pompon-fringe::before, .pompon-fringe::after {
+    content: "";
+    position: absolute;
+    bottom: 22%;
+    left: 50%;
+    width: 100%;
+    height: 20%;
+    background: radial-gradient(circle at 50% 0%, rgba(255, 235, 185, 0.35), transparent 70%);
+    transform: translateX(-50%) rotateX(90deg);
+  }
+
+  .pompon-fringe::after { transform: translateX(-50%) rotateX(90deg) rotate(180deg); }
+
+  .cap {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 100%;
+    aspect-ratio: 1;
+    transform: translateX(-50%) rotateX(90deg) translateZ(7%) skewY(8deg);
+    z-index: 2;
+    background:
+      radial-gradient(ellipse 118% 112% at 50% 40%, rgba(255, 228, 176, 0.10), rgba(255, 228, 176, 0.01) 70%, transparent 100%);
+    box-shadow:
+      0 0 40px rgba(255, 228, 176, 0.06),
+      inset 0 0 60px rgba(255, 228, 176, 0.02);
+  }
+
+  .cap-front {
+    position: absolute;
+    top: 14%;
+    left: 50%;
+    width: 70%;
+    height: 60%;
+    transform: translateX(-50%) rotateX(90deg);
+    border-radius: 40% 60% 50% 50% / 60% 50% 50% 50%;
+    background:
+      linear-gradient(180deg, rgba(255, 228, 176, 0.08), rgba(255, 228, 176, 0.02));
+    box-shadow:
+      inset 0 0 18px rgba(255, 228, 176, 0.03),
+      0 0 12px rgba(255, 228, 176, 0.02);
+  }
+
+  .cap-strip {
+    position: absolute;
+    top: 34%;
+    left: 50%;
+    width: 44%;
+    height: 7%;
+    transform: translateX(-50%) rotateX(90deg);
+    background: linear-gradient(90deg, rgba(255, 220, 150, 0.10), rgba(255, 228, 176, 0.02));
+    border-radius: 4%;
+  }
+
+  .captial {
+    position: absolute;
+    top: 10%;
+    left: 50%;
+    width: 80%;
+    aspect-ratio: 1;
+    transform: translateX(-50%) rotateX(90deg);
+    z-index: 1;
+    background:
+      radial-gradient(circle at 45% 35%, rgba(255, 228, 176, 0.06), rgba(255, 228, 176, 0.01) 60%, transparent 100%);
+  }
+
+  .captial::after {
+    content: "";
+    position: absolute;
+    bottom: 4%;
+    left: 6%;
+    right: 6%;
+    height: 12%;
+    background: linear-gradient(90deg, rgba(255, 228, 176, 0.02), rgba(255, 228, 176, 0.005));
+    border-radius: 4%;
+  }
+
+  .particle-field {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+    transform-style: preserve-3d;
+  }
+
+  .particle {
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 40% 35%, #fffbe6, rgba(255, 200, 120, 0.65));
+    box-shadow: 0 0 8px rgba(255, 220, 150, 0.45);
+    will-change: transform, opacity;
+  }
+
+  .particle.orbiting {
+    background: radial-gradient(circle at 40% 35%, #fffbe6, rgba(255, 200, 120, 0.55));
+    box-shadow: 0 0 14px rgba(255, 220, 150, 0.55);
+  }
+
+  .caption {
+    margin-top: 40px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    font-weight: 500;
+    opacity: 0;
+    animation: captionIn 6s ease-out 2.6s forwards;
+    position: relative;
+  }
+
+  .caption::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-top: 1px solid rgba(255, 228, 176, 0.12);
+    border-bottom: 1px solid rgba(255, 228, 176, 0.05);
+    margin: 0 auto;
+    width: 32%;
+  }
+
+  .caption span { color: var(--text); opacity: 0.85; }
+
+  @keyframes captionIn {
+    0% { opacity: 0; transform: translateY(10px); }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (hover: hover) {
+    .hat { cursor: pointer; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .stage, .hat, .spine, .brim-lines, .pompon-core, .pompon-fringe,
+    .cap, .cap-front, .cap-strip, .captial, .floatStage {
+      animation: none !important;
+      transform: none !important;
+    }
+    .hat { transform: rotateX(40deg) rotateZ(15deg) !important; }
+    .particle { display: none; }
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="scene">
+      <div class="stage">
+        <div class="hat" id="hat">
+          <div class="brim"></div>
+          <div class="crown">
+            <div class="band"></div>
+            <div class="top"></div>
+            <div class="pin"></div>
+            <div class="spine"></div>
+          </div>
+          <div class="pompon">
+            <div class="pompon-core"></div>
+            <div class="pompon-fringe"></div>
+          </div>
+          <div class="cap">
+            <div class="cap-front"></div>
+            <div class="cap-strip"></div>
+            <div class="captial"></div>
+          </div>
+        </div>
+
+        <div class="particle-field" id="particleField"></div>
+
+        <div class="caption"><span>the fedora, &nbsp;reconsidered</span></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const hat = document.getElementById('hat');
+  const field = document.getElementById('particleField');
+  const root = document.documentElement;
+
+  const TOTAL = 4200;
+  const SPEED = 1.55;      // seconds per revolution (expanded drift)
+  const MAX_RISE = 230;    // px of vertical dispersal
+  const DRIFT_PERIOD = 7;  // seconds to flow back together
+
+  const particles = [];
+  const orbiting = [];
+  const half = TOTAL / 2;
+  const orphans = Math.max(60, Math.round(TOTAL * 0.12));
+
+  // Layout grid: normalize each particle's position to a rounded "cell" so the
+  // original hat's 3D silhouette is well-defined (a grid of cells reproduces a
+  // cylindrical / conical hat geometry when reassembled).
+  const cols = 48;
+  const rows = 40;
+  const cellW = 100 / cols;
+  const cellH = 100 / rows;
+  const layerCount = 12;
+
+  function rand(min, max) { return Math.random() * (max - min) + min; }
+
+  function createParticle(index) {
+    const col = index % cols;
+    const row = Math.floor(index / cols);
+    const depth = Math.floor(index / (cols * rows));
+    const t = index / TOTAL;
+
+    const x = col * cellW + rand(0, cellW);
+    const y = row * cellH + rand(0, cellH);
+
+    // Centered positions within the 88% viewport, with padding so particles
+    // never sit exactly on the edge of the stage.
+    const px = (x / 100 - 0.5) * 0.7 * 640;
+    const py = (y / 100 - 0.5) * 0.7 * 640;
+
+    // Radial distance from the hat's center axis; the cap slopes upward as
+    // we move outward, and the brim extends beyond the crown radius.
+    const ringRatio = x / 100;                       // 0..1
+    const capRadius = 0.30 + ringRatio * 0.22;       // 0.30..0.52
+    const capHeight = 0.28 - ringRatio * 0.16;       // 0.28..0.12
+    const z = (capRadius * 0.38 * (1 + t * 0.3)) - 0.22; // -0.22..~0.55
+
+    // A particle on the rim of the brim lifts slightly outward — this
+    // gives the deconstructed hat a more "blooming flower" silhouette.
+    const rimLift = Math.max(0, (1 - ringRatio)) * 0.14;
+
+    // Vertical offset: band around mid-cap, with slight forward (Y) tilt that
+    // mirrors the spinning hat.
+    const band = Math.sin((row / rows) * Math.PI) * 0.32;
+    const yOffset = (py - 0) * 0.5 + band * 140 + rand(-10, 10);
+
+    const size = 2.5 + rand(0, 4.5);
+    const opacity = 0.85 + rand(0, 0.15);
+
+    const el = document.createElement('div');
+    el.className = 'particle';
+    el.style.width = size + 'px';
+    el.style.height = size + 'px';
+    el.style.left = (px + 320) + 'px';
+    el.style.top = (py + 320) + 'px';
+    el.style.opacity = opacity;
+    el.style.transform = `translateZ(${(z + rimLift) * 6 + 'px'})`;
+    el.dataset.index = index;
+
+    field.appendChild(el);
+    particles.push(el);
+
+    return { el, px, py, size, z, yOffset, ringRatio, depth, t };
+  }
+
+  // Instantiate particles in rows, stopping early so we can reserve a core
+  // region (the "center of mass" of the hat) for tightly orbiting particles.
+  for (let i = 0; i < TOTAL; i++) {
+    if (i < half) createParticle(i);
+  }
+
+  // Tightly packed orbiting particles: concentrated near the crown axis.
+  const orbitRadius = 0.32; // fraction of scene
+  const orbitSpeed = 1.2;   // rad/s per particle, spread across a band
+
+  const orbitingCount = Math.min(24, Math.floor(TOTAL * 0.04));
+  for (let i = 0; i < orbitingCount; i++) {
+    const angle0 = rand(0, Math.PI * 2);
+    const orbiter = {
+      angle: angle0,
+      radius: orbitRadius + rand(0.02, 0.08),
+      speed: orbitSpeed + rand(-0.25, 0.25),
+      tilt: rand(-0.2, 0.2),
+      phase: rand(0, 1),
+      radiusOffset: rand(0.02, 0.06),
+    };
+
+    // Place them at a mid-cap height, slightly above the crown.
+    const orbitY = 0.28 * (1 + rand(0, 0.14));
+    const el = document.createElement('div');
+    el.className = 'particle orbiting';
+    const r = orbitRadius * 230;
+    const x = 320 + r * Math.cos(angle0);
+    const y = 320 + r * Math.sin(angle0);
+    el.style.width = '5px';
+    el.style.height = '5px';
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    el.style.opacity = 0.75;
+    el.style.transform = `translateZ(${Math.sin(angle0) * 40}px)`;
+    el.style.borderRadius = '50%';
+    el.style.background = 'radial-gradient(circle at 40% 35%, #fffbf0, rgba(255, 210, 140, 0.55))';
+    el.style.boxShadow = '0 0 16px rgba(255, 220, 150, 0.6)';
+    field.appendChild(el);
+    orbiting.push(el);
+  }
+
+  const isTouch = () => typeof TouchEvent !== 'undefined';
+  const isPointerDown = (e) => e.pointerType === 'pen' || e.pointerType === 'touch';
+  let isPaused = false;
+
+  const POMPON_RADIUS = 0.32;
+  const POMPON_SPEED = 1.6;
+  const DRAG = 0.985;
+  const ORBIT_DRAG = 0.995;
+
+  function startDissolve() {
+    if (isPaused) return;
+    isPaused = true;
+    hat.style.animationPlayState = 'paused';
+
+    // Lift the whole hat into a scattering cloud.
+    hat.style.transition = 'transform 0s linear';
+    const base = `rotateX(40deg) rotateZ(15deg)`;
+
+    const duration = TOTAL * 0.001;
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      const start = parseFloat(p.style.transform.replace(/[^0-9\-.]/g, '')) || 0;
+      const end = start + (rand(-MAX_RISE, MAX_RISE));
+      const delay = (i / TOTAL) * 0.4;
+      p.style.transition = `transform ${duration}s ease-out ${delay}s`;
+      p.style.transform = `translate3d(${rand(-80, 80)}px, ${rand(-80, 80)}px, ${end}px) scale(${0.3 + rand(0, 0.6)})`;
+      p.style.opacity = 0.2 + rand(0, 0.6);
+    }
+
+    // Rotate the orbiting particles slightly in sync.
+    for (const e of orbiting) {
+      const ang = parseFloat(e.style.transform.replace(/[^0-9\-.]/g, '')) || 0;
+      e.style.transition = `transform ${duration}s ease-out`;
+      e.style.transform = `rotateZ(${ang}deg)`;
+    }
+
+    // Dissolve indicator: fade out the caption to reduce visual noise.
+    const cap = document.querySelector('.caption');
+    cap.style.transition = 'opacity 0.2s';
+    cap.style.opacity = '0';
+  }
+
+  function continueDrift() {
+    if (particles.length === 0) return;
+    isPaused = false;
+    hat.style.animationPlayState = 'running';
+    hat.style.transition = 'none';
+
+    // Unfold: each particle rises back into its original 3D position.
+    const duration = DRIFT_PERIOD * 0.9;
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      const originZ = parseFloat(p.style.transform.match(/-?[\d.]+(?=\s*px\)/)?.[0]) || 0;
+
+      // Restore the original 3D layer so the hat's geometry resolves.
+      const destZ = originZ;
+      const delay = (i / particles.length) * 0.7;
+      p.style.transition = `transform ${duration}s ease-in-out ${delay}s, opacity ${duration * 0.8}s ease ${delay + duration * 0.2}s`;
+      p.style.transform = `translate3d(0, 0, ${destZ}px) scale(1)`;
+      p.style.opacity = '0.95';
+    }
+
+    // Re-orient orbiting particles to their home positions.
+    for (const e of orbiting) {
+      const ang = parseFloat(e.style.transform.replace(/[^0-9\-.]/g, '')) || 0;
+      e.style.transition = `transform ${DRIFT_PERIOD}s ease-in-out`;
+      e.style.transform = `rotateZ(${ang}deg)`;
+    }
+
+    // Fade in the caption as the hat reforms.
+    setTimeout(() => {
+      const cap = document.querySelector('.caption');
+      cap.style.transition = 'opacity 0.4s ease';
+      cap.style.opacity = '1';
+    }, DRIFT_PERIOD * 0.6);
+  }
+
+  function resetScene() {
+    // Clean up any leftover transitions.
+    for (const p of particles) p.style.transition = 'none';
+    for (const e of orbiting) e.style.transition = 'none';
+
+    // Fade out orphaned particles, then remove them to keep the field tidy.
+    let remaining = particles.length;
+    for (const p of particles) {
+      p.style.transition = 'opacity 0.2s';
+      p.style.opacity = '0';
+    }
+    setTimeout(() => {
+      for (const p of particles) {
+        field.removeChild(p);
+      }
+      particles.splice(0, particles.length);
+      for (const e of orbiting) { field.removeChild(e); }
+      orbiting.splice(0, orbiting.length);
+
+      // Recreate the full particle field.
+      for (let i = 0; i < TOTAL; i++) {
+        if (i < half) createParticle(i);
+      }
+      for (let i = 0; i < orbitingCount; i++) {
+        const angle0 = rand(0, Math.PI * 2);
+        const orbiter = {
+          angle: angle0,
+          radius: orbitRadius + rand(0.02, 0.08),
+          speed: orbitSpeed + rand(-0.25, 0.25),
+          tilt: rand(-0.2, 0.2),
+          phase: rand(0, 1),
+          radiusOffset: rand(0.02, 0.06),
+        };
+        const orbitY = 0.28 * (1 + rand(0, 0.14));
+        const el = document.createElement('div');
+        el.className = 'particle orbiting';
+        const r = orbitRadius * 230;
+        const x = 320 + r * Math.cos(angle0);
+        const y = 320 + r * Math.sin(angle0);
+        el.style.width = '5px';
+        el.style.height = '5px';
+        el.style.left = x + 'px';
+        el.style.top = y + 'px';
+        el.style.opacity = '0.75';
+        el.style.transform = `translateZ(${Math.sin(angle0) * 40}px)`;
+        el.style.borderRadius = '50%';
+        el.style.background = 'radial-gradient(circle at 40% 35%, #fffbf0, rgba(255, 210, 140, 0.55))';
+        el.style.boxShadow = '0 0 16px rgba(255, 220, 150, 0.6)';
+        field.appendChild(el);
+        orbiting.push(el);
+      }
+      isPaused = false;
+      hat.style.animationPlayState = 'running';
+    }, 220);
+  }
+
+  // Orbiting behavior: the cores of the hat keep circling after the main
+  // shape dissolves — a slow, hypnotic drift.
+  function animateOrbits(now) {
+    const dt = 16; // ~60fps nominal
+    for (const e of orbiting) {
+      // Apply slight rotation drift with easing toward the center.
+      e.style.transform = `rotateZ(${(parseFloat(e.style.transform.replace(/[^0-9\-.]/g, '')) || 0) + e.speed * (dt / 16)}deg)`;
+      // Glow drift
+      const glow = 0.4 + 0.4 * Math.sin(now * 0.002 + e.phase * 6.283);
+      e.style.boxShadow = `0 0 ${16 + glow * 8}px rgba(255, 220, 150, ${0.4 + glow * 0.2})`;
+      e.style.opacity = 0.55 + 0.25 * Math.sin(now * 0.0012 + e.phase);
+    }
+  }
+
+  const animFrame = (time) => {
+    if (isPaused === false && particles.length > 0) {
+      // Continue slow orbit glow for idle particles.
+      // (Orbital re-assembly is handled by resetScene after dissolve completes.)
+      animateOrbits(time);
+    }
+    requestAnimationFrame(animFrame);
+  };
+  requestAnimationFrame(animFrame);
+
+  function onTap() {
+    if (isPaused) return;
+    isPaused = true;
+    hat.style.animationPlayState = 'paused';
+    startDissolve();
+
+    setTimeout(() => {
+      continueDrift();
+    }, 320);
+  }
+
+  hat.addEventListener('click', onTap);
+  hat.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    onTap();
+  });
+  hat.addEventListener('pointerdown', (e) => {
+    // Only react to primary button or touch.
+    if (e.button !== 0) return;
+    if (isTouch()) e.preventDefault();
+  });
+  hat.addEventListener('pointercancel', () => { /* no-op */ });
+
+  // Keyboard accessibility: Enter / Space toggles the dissolve.
+  hat.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onTap();
+    }
+  });
+  hat.setAttribute('tabindex', '0');
+  hat.setAttribute('role', 'button');
+  hat.setAttribute('aria-label', 'Fedora: click to dissolve and reform');
+})();
+</script>
+</body>
+</html>
