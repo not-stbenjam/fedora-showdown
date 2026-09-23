@@ -1,0 +1,777 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Red Hat Fedora · 3D Remix</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%; overflow: hidden; background: #08070a;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    color: canvas; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+    user-select: none; touch-action: manipulation;
+  }
+  body { display: grid; place-items: center; padding: max(24px, env(safe-area-inset-top, 0)) max(24px, env(safe-area-inset-right, 0)) max(24px, env(safe-area-inset-bottom, 0)) max(24px, env(safe-area-inset-left, 0)); }
+  .stage {
+    position: relative; width: 100%; height: 100%; max-width: 960px; aspect-ratio: 3 / 4;
+    overflow: hidden; border-radius: 28px;
+    background: radial-gradient(120% 90% at 50% 0%, #171326 0%, #0d0a16 55%, #07050d 100%);
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.04) inset, 0 0 0 1px rgba(255, 255, 255, 0.03);
+    touch-action: none;
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+  .caption {
+    position: absolute; left: 0; right: 0; bottom: max(20px, 8vmin); margin: 0 auto; text-align: center;
+    pointer-events: none; opacity: 1; transition: opacity 1s ease;
+  }
+  .caption span {
+    display: inline-block; padding: 6px 18px; border-radius: 999px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.01) 60%, rgba(255, 255, 255, 0.05));
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35); white-space: nowrap;
+  }
+  .caption .label { font-size: clamp(11px, 1.6vw, 15px); font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255, 255, 255, 0.5); }
+  .caption .title { display: block; margin-top: 4px; font-size: clamp(18px, 2.6vw, 26px); font-weight: 600; color: rgba(255, 255, 255, 0.92); letter-spacing: 0.01em; }
+  @media (hover: hover) { .caption { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    .stage { display: grid; place-items: center; overflow: hidden; }
+    .stage canvas { animation: fade 1.6s ease-out forwards; opacity: 0; }
+    .caption { opacity: 1 !important; }
+    @keyframes fade { to { opacity: 1; } }
+  }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <canvas aria-hidden="true"></canvas>
+    <div class="caption" role="img" aria-label="Red Hat style fedora logo. Tap or hover to rotate.">
+      <span class="label">Red Hat / Fedora Remix</span>
+      <span class="title">Fedora</span>
+    </div>
+  </div>
+<script>
+    // Build a 3D model from triangles
+    const buildMesh = (radius, colors, kind, alpha) => {
+      const faces = [];
+      const meshColors = [];
+      const idx = [];
+      const n = 18;
+      const r = radius * 0.92;
+
+      for (let i = 0; i < n; i++) {
+        const a1 = (i / n) * Math.PI * 2;
+        const a2 = ((i + 1) / n) * Math.PI * 2;
+        const bw = 0.04 + Math.random() * 0.06;
+        const bas = a1 + rand(0, bw);
+        const aas = a2 - rand(0, bw);
+        const h = radius * 0.15 + Math.random() * 0.15;
+
+        const ax = r * Math.cos(bas), ay = h * 0.5, az = r * Math.sin(bas);
+        const bx = r * Math.cos(aas), by = h * 0.5, bz = r * Math.sin(aas);
+        const cx = r * Math.cos(aas), cy = -h * 0.5, cz = r * Math.sin(aas);
+        const dx = r * Math.cos(bas), dy = -h * 0.5, dz = r * Math.sin(bas);
+
+        faces.push([ax, ay, az], [bx, by, bz], [cx, cy, cz], [dx, dy, dz]);
+        idx.push(faces.length - 4, faces.length - 3, faces.length - 2);
+        idx.push(faces.length - 4, faces.length - 2, faces.length - 1);
+        meshColors.push(colors[Math.floor(Math.random() * colors.length)]);
+        meshColors.push(colors[Math.floor(Math.random() * colors.length)]);
+        meshColors.push(colors[Math.floor(Math.random() * colors.length)]);
+        meshColors.push(colors[Math.floor(Math.random() * colors.length)]);
+);
+
+      // Build index arrays
+      const indices = [];
+      const colors = [];
+      for (let i = 0; i < idx.length; i += 3) {
+        indices.push(idx[i], idx[i+1], idx[i+2]);
+        colors.push(meshColors[i], meshColors[i+1], meshColors[i+2]);
+      }
+      return { faces, indices, colors };
+    };
+
+    // Model class
+    class Model {
+      constructor(name, radius, colors, kind, alpha) {
+        this.name = name;
+        this.radius = radius;
+        this.alpha = alpha;
+        const m = buildMesh(radius, colors, kind, alpha);
+        this.faces = m.faces;
+        this.indices = m.indices;
+        this.colors = m.colors;
+      }
+      getVertex(i) {
+        const f = this.faces[this.indices[i]];
+        return { x: f[0], y: f[1], z: f[2] };
+      }
+      getNormal(i) {
+        const a = this.faces[this.indices[i]];
+        const b = this.faces[this.indices[i+1]];
+        const c = this.faces[this.indices[i+2]];
+        const ab = { x: b[0]-a[0], y: b[1]-a[1], z: b[2]-a[2] };
+        const ac = { x: c[0]-a[0], y: c[1]-a[1], z: c[2]-a[2] };
+        const nx = ab.y * ac.z - ab.z * ac.y;
+        const ny = ab.z * ac.x - ab.x * ac.z;
+        const nz = ab.x * ac.y - ab.y * ac.x;
+        const len = Math.sqrt(nx*nx + ny*ny + nz*nz);
+        if (len < 0.0001) return { x: 0, y: 0, z: 0 };
+        return { x: nx/len, y: ny/len, z: nz/len };
+      }
+    }
+
+    // Rebuild the models
+    const hatModel = new Model('hat', HAT_RADIUS, HAT_COLORS, 'hat', 0.85);
+    const brimModel = new Model('brim', BRIM_D, [dtypeBrim()], 'brim', 0.9);
+    const bandModel = new Model('band', BAND_W, [dtype('band')], 'band', 0.8);
+    const crownModel = new Model('crown', CROWS[0].r, [dtypeCrown()], 'crown', 0.75);
+    const crownModel2 = new Model('crown2', CROWS[1].r, [dtypeCrown2()], 'crown2', 0.65);
+
+    // Rebuild colors for hat
+    hatModel.colors = [];
+    for (let i = 0; i < hatModel.faces.length; i++) {
+      hatModel.colors.push(HAT_COLORS[Math.floor(Math.random() * HAT_COLORS.length)]);
+    }
+
+    // Animation state
+    let animTime = 0;
+    let spinSpeed = 0.75;
+    let rotationX = 0;
+    let rotationY = -Math.PI / 2;
+    let paused = false;
+    let exploded = false;
+    let dissolving = false;
+    let reassembling = false;
+    let done = false;
+    let shakeIntensity = 0;
+    let showParticles = false;
+    let particles = [];
+    let dust = [];
+    const MAX_DUST = 360;
+    let dustIndex = 0;
+    let particleCount = 4200;
+
+    // Color helpers
+    const hexToRgb = (hex) => {
+      const h = hex.replace('#', '');
+      return [parseInt(h.substr(0,2),16), parseInt(h.substr(2,2),16), parseInt(h.substr(4,2),16)];
+    };
+    const rgbToHex = (r, g, b) => '#' + [r,g,b].map(c => Math.round(c).toString(16).padStart(2,'0')).join('');
+    const lerpCol = (a, b, t) => {
+      const ra = hexToRgb(a), rb = hexToRgb(b);
+      return rgbToHex(
+        Math.round(ra[0] + (rb[0]-ra[0])*t),
+        Math.round(ra[1] + (rb[1]-ra[1])*t),
+        Math.round(ra[2] + (rb[2]-ra[2])*t)
+      );
+    };
+    const vecLerp = (a, b, t) => { return { x: a.x + (b.x-a.x)*t, y: a.y + (b.y-a.y)*t, z: a.z + (b.z-a.z)*t }; };
+    const vecSub = (a, b) => { return { x: a.x-b.x, y: a.y-b.y, z: a.z-b.z }; };
+    const vecAdd = (a, b) => { return { x: a.x+b.x, y: a.y+b.y, z: a.z+b.z }; };
+    const vecScale = (a, s) => { return { x: a.x*s, y: a.y*s, z: a.z*s }; };
+    const vecLen = (a) => Math.sqrt(a.x*a.x + a.y*a.y + a.z*a.z);
+    const vecNorm = (a) => { const l = vecLen(a); return l > 0.0001 ? vecScale(a, 1/l) : a; };
+    const vecDot = (a, b) => a.x*b.x + a.y*b.y + a.z*b.z;
+    const vecCross = (a, b) => { return { x: a.y*b.z - a.z*b.y, y: a.z*b.x - a.x*b.z, z: a.x*b.y - a.y*b.x }; };
+
+    // Types for different model parts
+    const dtype = (kind) => {
+      if (kind === 'brim') {
+        return [3, 4, 3, 4, 3, 4, 5, 4, 5, 4, 5, 4];
+      }
+      if (kind === 'crown') {
+        return [0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0];
+      }
+      if (kind === 'crown2') {
+        return [0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0];
+      }
+      return [];
+    };
+
+    // 3D transformations and projection
+    const v = (x, y, z) => ({ x, y, z });
+    const add = (a, b) => v(a.x + b.x, a.y + b.y, a.z + b.z);
+    const sub = (a, b) => v(a.x - b.x, a.y - b.y, a.z - b.z);
+    const mul = (a, s) => v(a.x * s, a.y * s, a.z * s);
+    const len = (a) => Math.hypot(a.x, a.y, a.z);
+    const norm = (a) => { const l = len(a); return l > 0.0001 ? mul(a, 1/l) : a; };
+    const dot = (a, b) => a.x*b.x + a.y*b.y + a.z*b.z;
+    const cross = (a, b) => v(a.y*b.z - a.z*b.y, a.z*b.x - a.x*b.z, a.x*b.y - a.y*b.x);
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const rand = (a, b) => Math.random() * (b - a) + a;
+    const deg2rad = Math.PI / 180;
+
+    // Project a 3D point to screen space
+    const project = (proj, view, rotZ, x, y, z, offset) => {
+      const vx = x + rotZ.x - offset.x;
+      const vy = y + rotZ.y - offset.y;
+      const vz = z + rotZ.z - offset.z;
+
+      // Apply view matrix
+      const vx2 = view[0]*vx + view[1]*vy + view[2]*vz + view[3];
+      const vy2 = view[4]*vx + view[5]*vy + view[6]*vz + view[7];
+      const vz2 = view[8]*vx + view[9]*vy + view[10]*vz + view[11];
+
+      // Apply projection
+      const wx = proj[0]*vx2 + proj[1]*vy2 + proj[2]*vz2 + proj[3];
+      const wy = proj[4]*vx2 + proj[5]*vy2 + proj[6]*vz2 + proj[7];
+      const wz = proj[8]*vx2 + proj[9]*vy2 + proj[10]*vz2 + proj[11];
+
+      const invW = 1 / wz;
+      return {
+        x: (wx * invW) * (W / 2) + (W / 2),
+        y: -(wy * invW) * (H / 2) + (H / 2),
+        z: vz2,
+      };
+    };
+
+    // Build view matrix
+    const buildViewMatrix = (eye, target, up) => {
+      const z = { x: eye.x - target.x, y: eye.y - target.y, z: eye.z - target.z };
+      const len = Math.sqrt(z.x*z.x + z.y*z.y + z.z*z.z);
+      if (len < 0.0001) return [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
+      z.x /= len; z.y /= len; z.z /= len;
+      const x = { x: up.y*z.z - up.z*z.y, y: up.z*z.x - up.x*z.z, z: up.x*z.y - up.y*z.x };
+      const xlen = Math.sqrt(x.x*x.x + x.y*x.y + x.z*x.z);
+      if (xlen < 0.0001) return [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
+      x.x /= xlen; x.y /= xlen; x.z /= xlen;
+      const y = { x: z.y*x.z - z.z*x.y, y: z.z*x.x - z.x*x.z, z: z.x*x.y - z.y*x.x };
+
+      const out = [
+        x.x, y.x, z.x, 0,
+        x.y, y.y, z.y, 0,
+        x.z, y.z, z.z, 0,
+        0,   0,   0,   1
+      ];
+      const tx = - (x.x*eye.x + x.y*eye.y + x.z*eye.z);
+      const ty = - (y.x*eye.x + y.y*eye.y + y.z*eye.z);
+      const tz = - (z.x*eye.x + z.y*eye.y + z.z*eye.z);
+      out[12] = tx; out[13] = ty; out[14] = tz;
+      return out;
+    };
+
+    // Perspective projection matrix
+    const FOV = 45 * Math.PI / 180;
+    const ASPECT = W / H;
+    const NEAR = 0.1;
+    const FAR = 100;
+
+    const makePerspective = () => {
+      const f = 1 / Math.tan(FOV / 2);
+      const nf = 1 / (NEAR - FAR);
+      return [
+        f / ASPECT, 0, 0, 0,
+        0, f, 0, 0,
+        0, 0, (FAR + NEAR) * nf, -1,
+        0, 0, (2 * FAR * NEAR) * nf, 0
+      ];
+    };
+
+    // Draw a 3D model with lighting
+    const draw3DModel = (model, eye, target, up) => {
+      const offset = { x: 0, y: 0, z: 0 };
+      const rot = { x: rotationX, y: rotationY, z: 0 };
+
+      const view = buildViewMatrix(eye, target, up);
+      const proj = makePerspective();
+
+      const len = model.indices.length;
+      for (let i = 0; i < len; i += 3) {
+        const v0 = model.getVertex(i);
+        const v1 = model.getVertex(i+1);
+        const v2 = model.getVertex(i+2);
+        const n = model.getNormal(i);
+
+        // Apply rotation
+        const rotX = {
+          x: v0.x,
+          y: v0.y * Math.cos(rot.x) - v0.z * Math.sin(rot.x),
+          z: v0.y * Math.sin(rot.x) + v0.z * Math.cos(rot.x)
+        };
+        const rotY = {
+          x: rotX.x * Math.cos(rot.y) + rotX.z * Math.sin(rot.y),
+          y: rotX.y,
+          z: -rotX.x * Math.sin(rot.y) + rotX.z * Math.cos(rot.y)
+        };
+        const rotZ = {
+          x: rotY.x * Math.cos(rot.z) - rotY.y * Math.sin(rot.z),
+          y: rotY.x * Math.sin(rot.z) + rotY.y * Math.cos(rot.z),
+          z: rotY.z,
+        };
+
+        const p0 = project(proj, view, rotZ, 0, 0, 0, offset);
+        const p1 = project(proj, view, rotZ, v1.x, v1.y, v1.z, offset);
+        const p2 = project(proj, view, rotZ, v2.x, v2.y, v2.z, offset);
+
+        // Backface culling
+        const dx = p1.x - p0.x;
+        const dy = p1.y - p0.y;
+        const ex = p2.x - p0.x;
+        const ey = p2.y - p0.y;
+        const cross2d = dx * ey - dy * ex;
+        if (cross2d <= 0) continue;
+
+        const col = model.colors[i] || model.colors[0];
+        const intensity = 0.6 + 0.4 * Math.max(0, dot(n, { x: 0, y: 0, z: 1 }));
+        const fill = lerpCol(col, col, intensity);
+
+        // Shadow depth
+        const avgDepth = (p0.z + p1.z + p2.z) / 3;
+        const screenZ = 1 / (1 - avgDepth * 0.5);
+
+        ctx.fillStyle = fill;
+        ctx.beginPath();
+        ctx.moveTo(p0.x, p0.y);
+        ctx.lineTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.closePath();
+        ctx.fill();
+
+        // Edges
+        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(p0.x, p0.y);
+        ctx.lineTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.closePath();
+        ctx.stroke();
+      }
+    };
+
+    // Create particle system for the dissolve effect
+    const createParticles = (count) => {
+      const cols = [
+        '#FBBF1C', '#F6AE2D', '#E07B1A', '#D95D0D', '#C94B0C',
+        '#E8A33D', '#F5B94B', '#FFB45A', '#FF8C42', '#FF6B28',
+        '#FFD6A5', '#FFB45A', '#FF8C42', '#FF4D1A', '#FFC94D',
+      ];
+      const pts = [];
+      for (let i = 0; i < count; i++) {
+        const hue = i / count;
+        const angle = Math.random() * Math.PI * 2;
+        const radius = 0.25 + Math.random() * 0.35;
+        const speed = 0.7 + Math.random() * 1.6;
+        const tension = 0.4 + Math.random() * 0.5;
+        const base = {
+          x: Math.cos(angle) * radius,
+          y: (Math.random() - 0.5) * 0.45,
+          z: Math.sin(angle) * radius
+        };
+        const vel = {
+          x: (Math.random() - 0.5) * 0.4,
+          y: (Math.random() - 0.5) * 0.4,
+          z: (Math.random() - 0.5) * 0.4
+        };
+        pts.push({
+          base: { ...base },
+          pos: { ...base },
+          vel: { ...vel },
+          size: 2.8 + Math.random() * 4.2,
+          speed: speed,
+          tension: tension,
+          lifetime: 0,
+          trail: Math.random() < 0.85,
+          brightness: (hue < 0.35 || hue > 0.62) ? 0.85 + Math.random() * 0.35 : 0.35 + Math.random() * 0.45,
+          idx: Math.floor(Math.random() * cols.length),
+          hue: hue,
+        });
+      }
+      return pts;
+    };
+
+    // Create dust particles for trailing effects
+    const createDust = () => {
+      const cols = [
+        '#FBBF1C', '#F6AE2D', '#E07B1A', '#D95D0D', '#C94B0C',
+        '#E8A33D', '#F5B94B', '#FFB45A', '#FF8C42', '#FF6B28',
+      ];
+      const hue = Math.random();
+      const angle = Math.random() * Math.PI * 2;
+      const radius = Math.random() * 0.07 + 0.02;
+      const speed = 0.01 + Math.random() * 0.035;
+      const alpha = 0.22 + Math.random() * 0.2;
+      const skew = 0.3 + Math.random() * 0.4;
+      const isBright = hue < 0.35 || hue > 0.62;
+      const brightness = isBright ? 0.55 + Math.random() * 0.35 : 0.25 + Math.random() * 0.3;
+      const offset = { x: (Math.random()-0.5)*0.35, y: (Math.random()-0.5)*0.35, z: (Math.random()-0.5)*0.35 };
+
+      return {
+        base: { x: Math.cos(angle)*radius, y: (Math.random()-0.5)*0.3, z: Math.sin(angle)*radius },
+        pos: { x: Math.cos(angle)*radius, y: (Math.random()-0.5)*0.3, z: Math.sin(angle)*radius },
+        vel: { x: (Math.random()-0.5)*0.12, y: (Math.random()-0.5)*0.12, z: (Math.random()-0.5)*0.12 },
+        size: 1.4 + Math.random() * 2.6,
+        speed: speed,
+        lifetime: 0,
+        alpha: alpha,
+        skew: skew,
+        brightness: brightness,
+        isBright: isBright,
+        offset: { ...offset },
+        idx: Math.floor(Math.random() * cols.length),
+      };
+    };
+
+    // Initialize particles and dust
+    particles = createParticles(particleCount);
+    for (let i = 0; i < MAX_DUST; i++) {
+      dust.push(createDust());
+    }
+
+    // Interaction state
+    let lastTouchX = 0, lastTouchY = 0;
+    let touchActive = false;
+    let tapCount = 0;
+    let tapTimer = 0;
+    const TAP_INTERVAL = 400;
+
+    const stage = document.querySelector('.stage');
+    const canvasEl = document.querySelector('canvas');
+
+    const onPointerDown = (e) => {
+      e.preventDefault();
+      touchActive = true;
+      const rect = canvasEl.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      lastTouchX = x;
+      lastTouchY = y;
+      tapCount++;
+      tapTimer = Date.now();
+      // Start interaction - slow down spin
+      paused = true;
+      spinSpeed = 0.15;
+      // Trigger explosion if not already done
+      if (!exploded) {
+        explode();
+      }
+    };
+
+    const onPointerUp = (e) => {
+      if (touchActive) {
+        touchActive = false;
+        // Reassemble after a delay
+        setTimeout(() => {
+          if (!exploded) return;
+          reassembling = true;
+          spinSpeed = 0.75;
+        }, 300);
+      }
+    };
+
+    // Trigger the explosion/particle effect
+    const explode = () => {
+      exploded = true;
+      dissolving = true;
+      showParticles = true;
+
+      const count = particleCount;
+      const cols = [
+        '#FBBF1C', '#F6AE2D', '#E07B1A', '#D95D0D', '#C94B0C',
+        '#E8A33D', '#F5B94B', '#FFB45A', '#FF8C42', '#FF6B28',
+        '#FFD6A5', '#FFB45A', '#FF8C42', '#FF4D1A', '#FFC94D',
+      ];
+
+      for (let i = 0; i < count; i++) {
+        const hue = i / count;
+        const angle = Math.random() * Math.PI * 2;
+        const radius = 0.25 + Math.random() * 0.35;
+        const speed = 0.7 + Math.random() * 1.6;
+        const tension = 0.4 + Math.random() * 0.5;
+        const base = {
+          x: Math.cos(angle) * radius,
+          y: (Math.random() - 0.5) * 0.45,
+          z: Math.sin(angle) * radius
+        };
+        const vel = {
+          x: (Math.random() - 0.5) * 0.4,
+          y: (Math.random() - 0.5) * 0.4,
+          z: (Math.random() - 0.5) * 0.4
+        };
+        particles[i] = {
+          base: { ...base },
+          pos: { ...base },
+          vel: { ...vel },
+          size: 2.8 + Math.random() * 4.2,
+          speed: speed,
+          tension: tension,
+          lifetime: 0,
+          trail: Math.random() < 0.85,
+          brightness: (hue < 0.35 || hue > 0.62) ? 0.85 + Math.random() * 0.35 : 0.35 + Math.random() * 0.45,
+          idx: Math.floor(Math.random() * cols.length),
+          hue: hue,
+        };
+      }
+
+      // Create orbiting dust particles
+      for (let i = 0; i < 100; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const radius = 0.4 + Math.random() * 0.2;
+        dust[i] = {
+          base: {
+            x: Math.cos(angle) * radius,
+            y: (Math.random() - 0.5) * 0.2 - 0.1,
+            z: Math.sin(angle) * radius
+          },
+          pos: {
+            x: Math.cos(angle) * radius,
+            y: (Math.random() - 0.5) * 0.2 - 0.1,
+            z: Math.sin(angle) * radius
+          },
+          vel: {
+            x: (Math.random() - 0.5) * 0.05,
+            y: (Math.random() - 0.5) * 0.05,
+            z: (Math.random() - 0.5) * 0.05
+          },
+          size: 2.0 + Math.random() * 3.0,
+          speed: 0.08 + Math.random() * 0.15,
+          lifetime: 0,
+          alpha: 0.3 + Math.random() * 0.3,
+          skew: 0.3 + Math.random() * 0.4,
+          brightness: 0.6 + Math.random() * 0.3,
+          isBright: Math.random() < 0.3,
+          idx: Math.floor(Math.random() * cols.length),
+        };
+      }
+    };
+
+    // Draw particles
+    const drawParticles = () => {
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        if (!p.alpha || p.alpha < 0.01) continue;
+
+        const alpha = p.alpha * p.brightness;
+        const size = p.size * glowPulse * (0.8 + 0.2 * p.hue);
+
+        ctx.beginPath();
+        ctx.arc(p.pos.x, p.pos.y, size, 0, Math.PI * 2);
+        ctx.fillStyle = lerpCol('#FFD6A5', palette[p.idx], p.hue);
+        ctx.globalAlpha = alpha * 0.8;
+        ctx.fill();
+
+        // Glow
+        ctx.globalAlpha = alpha * 0.2;
+        ctx.beginPath();
+        ctx.arc(p.pos.x, p.pos.y, size * 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.globalAlpha = 1;
+      }
+    };
+
+    // Draw dust/orbit particles
+    const drawDust = () => {
+      for (let i = 0; i < dust.length; i++) {
+        const d = dust[i];
+        if (!d) continue;
+        if (d.alpha < 0.01) continue;
+
+        const alpha = d.alpha * d.brightness;
+        const size = d.size * glowPulse;
+
+        // Trailing glow
+        ctx.globalAlpha = alpha * 0.15;
+        ctx.beginPath();
+        ctx.arc(d.pos.x, d.pos.y, size * 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Main particle
+        ctx.globalAlpha = alpha * 0.6;
+        ctx.beginPath();
+        ctx.arc(d.pos.x, d.pos.y, size, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Bright core
+        ctx.globalAlpha = alpha * 0.3;
+        ctx.beginPath();
+        ctx.arc(d.pos.x, d.pos.y, size * 0.4, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.globalAlpha = 1;
+      }
+    };
+
+    // Main rendering function
+    const renderScene = () => {
+      ctx.clearRect(0, 0, W, H);
+
+      // Background layers
+      ctx.fillStyle = '#08070a';
+      ctx.fillRect(-T, -T, T*2, T*2);
+
+      // Add subtle background gradient
+      const bgG = ctx.createRadialGradient(CX, CY, 0, CX, CY, T * 1.2);
+      bgG.addColorStop(0, 'rgba(23, 19, 38, 0.8)');
+      bgG.addColorStop(0.5, 'rgba(13, 10, 22, 0.6)');
+      bgG.addColorStop(1, 'rgba(7, 5, 13, 0.9)');
+      ctx.fillStyle = bgG;
+      ctx.fillRect(-T, -T, T*2, T*2);
+
+      // Apply camera shake
+      const shakeX = shakeIntensity * rand(-1, 1);
+      const shakeY = shakeIntensity * rand(-1, 1);
+      ctx.translate(shakeX, shakeY);
+
+      // Draw the 3D hat
+      draw3DModel(hatModel, { x: 0, y: 0.15, z: 1.8 }, { x: 0, y: 0.02, z: 0 }, { x: 0, y: 1, z: 0 });
+      draw3DModel(brimModel, { x: 0, y: 0.15, z: 1.8 }, { x: 0, y: 0.02, z: 0 }, { x: 0, y: 1, z: 0 });
+      draw3DModel(bandModel, { x: 0, y: 0.15, z: 1.8 }, { x: 0, y: 0.02, z: 0 }, { x: 0, y: 1, z: 0 });
+      draw3DModel(crownModel, { x: 0, y: 0.15, z: 1.8 }, { x: 0, y: 0.02, z: 0 }, { x: 0, y: 1, z: 0 });
+      draw3DModel(crownModel2, { x: 0, y: 0.15, z: 1.8 }, { x: 0, y: 0.02, z: 0 }, { x: 0, y: 1, z: 0 });
+
+      // Draw particles
+      drawParticles();
+
+      // Draw dust/orbit particles
+      drawDust();
+
+      // Restore transform
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    };
+
+    // Animation loop
+    const render = () => {
+      requestAnimationFrame(render);
+      const now = Date.now() / 1000;
+      animTime = now;
+
+      // Update camera shake
+      if (shakeIntensity > 0) {
+        shakeIntensity *= 0.92;
+        if (shakeIntensity < 0.01) shakeIntensity = 0;
+      }
+
+      // Update glow pulse
+      glowPulse = Math.sin(now * 2.5) * 0.08 + 0.1;
+
+      // Update particles
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        p.lifetime += 0.016;
+        if (p.lifetime > 3.0) {
+          // Reset particle - either to orbit or fade out
+          if (showParticles && dissolving) {
+            // Keep it alive during dissolve, then reset
+            p.lifetime = 0;
+            p.pos.x = p.base.x + (Math.random() - 0.5) * 0.1;
+            p.pos.y = p.base.y + (Math.random() - 0.5) * 0.1;
+            p.pos.z = p.base.z + (Math.random() - 0.5) * 0.1;
+          } else {
+            // Fade out
+            p.alpha = 0;
+          }
+          continue;
+        }
+        const life = clamp(p.lifetime / 3.0, 0, 1);
+        const drift = life * 1.2;
+        // Apply gravity and physics
+        const g = {
+          x: p.vel.x - 0.02 + Math.sin(p.hue * 10) * 0.01,
+          y: p.vel.y - 0.05,
+          z: p.vel.z - 0.02 + Math.cos(p.hue * 10) * 0.01
+        };
+        p.vel.x += g.x * 0.02;
+        p.vel.y += g.y * 0.02;
+        p.vel.z += g.z * 0.02;
+        // Apply tension toward base position
+        const diff = vecSub(p.pos, p.base);
+        const pull = 0.08 * p.tension;
+        p.vel.x += diff.x * pull;
+        p.vel.y += diff.y * pull;
+        p.vel.z += diff.z * pull;
+        // Move position
+        p.pos.x += p.vel.x * p.speed * 0.8;
+        p.pos.y += p.vel.y * p.speed * 0.8;
+        p.pos.z += p.vel.z * p.speed * 0.8;
+        // Trail effect
+        if (p.trail) {
+          p.lifetime = Math.min(p.lifetime, 0.5 + life * 0.5);
+        }
+        p.alpha = 1 - life * 0.5;
+      }
+
+      // Update dust particles - some orbit
+      for (let i = 0; i < dust.length; i++) {
+        const d = dust[i];
+        if (!d) continue;
+        d.lifetime += 0.016;
+        if (d.lifetime > 8.0) {
+          d.lifetime = 0;
+          d.pos.x = Math.random() * 0.5 - 0.25;
+          d.pos.y = Math.random() - 0.5;
+          d.pos.z = Math.random() * 0.5 - 0.25;
+        }
+        // Orbital motion around hat
+        const angle = d.lifetime * 0.5 + i * 0.1;
+        d.pos.x = Math.cos(angle) * (0.35 + 0.1 * Math.sin(d.lifetime * 0.3));
+        d.pos.z = Math.sin(angle) * (0.35 + 0.1 * Math.sin(d.lifetime * 0.3));
+        d.pos.y = -0.05 + 0.05 * Math.sin(d.lifetime * 0.7 + i);
+        // Add orbit velocity
+        const orbitSpeed = d.speed * 2;
+        d.vel.x = -Math.sin(angle) * orbitSpeed;
+        d.vel.z = Math.cos(angle) * orbitSpeed;
+        // Fade out
+        d.alpha = 0.3 + 0.5 * (1 - d.lifetime / 8.0);
+      }
+
+      // Update interaction - slow down rotation when touched
+      if (paused) {
+        spinSpeed *= 0.98;
+        if (spinSpeed < 0.1) spinSpeed = 0.1;
+      } else {
+        spinSpeed = 0.75;
+      }
+
+      // Update rotation
+      rotationY += spinSpeed * 0.012;
+      rotationX += 0.002;
+
+      // If exploded and reassembling, interpolate back
+      if (exploded && reassembling) {
+        const progress = 1 - (shakeIntensity / (1 + shakeIntensity));
+        if (progress > 0.95) {
+          reassembling = false;
+          exploded = false;
+          paused = false;
+          spinSpeed = 0.75;
+        }
+      }
+
+      // Render the scene
+      renderScene();
+    };
+
+    // Initialize the scene
+    (() => {
+      // Create pointer event listeners
+      canvasEl.addEventListener('pointerdown', onPointerDown);
+      canvasEl.addEventListener('pointerup', onPointerUp);
+      canvasEl.addEventListener('pointerleave', onPointerUp);
+      canvasEl.addEventListener('pointercancel', onPointerUp);
+
+      // Set initial canvas size
+      const resize = () => {
+        const dpr = Math.min(2, window.devicePixelRatio || 1);
+        const ratio = Math.min(
+          window.innerWidth / 1366,
+          window.innerHeight / 1821,
+          1
+        );
+        canvasEl.width = Math.max(1, Math.round(canvasEl.clientWidth * dpr * ratio));
+        canvasEl.height = Math.max(1, Math.round(canvasEl.clientHeight * dpr * ratio));
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+      };
+      window.addEventListener('resize', resize);
+      resize();
+
+      // Start animation
+      render();
+    })();
+  </script>
+</body>
+</html>
