@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Fedora</title>
+<style>
+  :root {
+    --bg: #0a0a0f;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: #f2f2f2;
+    font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    background:
+      radial-gradient(120% 80% at 50% 10%, #15151f 0%, #0a0a0f 55%, #050508 100%);
+  }
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(120% 90% at 50% 45%, rgba(90, 64, 32, 0.12), transparent 60%),
+      radial-gradient(90% 70% at 50% 100%, rgba(0, 0, 0, 0.6), transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image:
+      radial-gradient(1.4px 1.4px at 12% 20%, rgba(255,255,255,0.24), transparent),
+      radial-gradient(1.2px 1.2px at 88% 12%, rgba(255,255,255,0.18), transparent),
+      radial-gradient(1.2px 1.2px at 40% 78%, rgba(255,255,255,0.22), transparent),
+      radial-gradient(1px 1px at 70% 52%, rgba(255,255,255,0.16), transparent),
+      radial-gradient(1px 1px at 24% 42%, rgba(255,255,255,0.20), transparent),
+      radial-gradient(1px 1px at 94% 80%, rgba(255,255,255,0.14), transparent),
+      radial-gradient(1px 1px at 56% 93%, rgba(255,255,255,0.13), transparent),
+      radial-gradient(1px 1px at 16% 62%, rgba(255,255,255,0.15), transparent);
+    pointer-events: none;
+    z-index: 0;
+  }
+  .canvas-wrap {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  canvas#hat {
+    display: block;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .caption {
+    position: relative;
+    z-index: 2;
+    text-align: center;
+    pointer-events: none;
+    padding: 0 1.25rem;
+  }
+  .caption .tag {
+    font-size: 11px;
+    letter-spacing: 0.34em;
+    text-transform: uppercase;
+    color: rgba(242, 242, 242, 0.32);
+    margin-bottom: 0.4rem;
+    font-weight: 600;
+  }
+  .caption h1 {
+    font-size: clamp(1.25rem, 2.6vw, 1.9rem);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    margin: 0;
+    color: #f4f4f6;
+    text-shadow: 0 2px 14px rgba(0,0,0,0.55);
+  }
+  .caption p {
+    margin: 0.15rem 0 0;
+    font-size: 0.82rem;
+    color: rgba(242, 242, 242, 0.5);
+    letter-spacing: 0.04em;
+  }
+  @media (max-width: 520px) {
+    .caption { padding: 0 0.75rem; }
+    .caption h1 { font-size: 1.15rem; }
+    .caption p { font-size: 0.72rem; }
+    .caption .tag { letter-spacing: 0.22em; font-size: 10px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    body::before, body::after { transition: opacity 12s; }
+  }
+</style>
+</head>
+<body>
+  <main class="canvas-wrap">
+    <canvas id="hat" aria-label="A red hat, 3D spinning"></canvas>
+  </main>
+  <div class="caption">
+    <div class="tag">Four Hundred</div>
+    <h1>Fedora</h1>
+    <p>Hover or tap to dissolve into embers — then reform.</p>
+  </div>
+
+<script>
+"use strict";
+
+const canvas = document.getElementById("hat");
+const ctx = canvas.getContext("2d");
+let W = 0, H = 0;
+const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+// ---------------------------------------------------------------------------
+// 1. Geometry — a bare, wire-knit fedora
+//    Crown : upper half of an ellipsoid,  x^2/a^2 + y^2/b^2 + z^2/c^2 = 1,  y >= 0
+//    Brim  : annulus in the yz-plane at x = brimDepth,  z >= 0 is the "front"
+// ---------------------------------------------------------------------------
+const crownA = 1.00, crownB = 1.00, crownC = 0.72;
+const brimDepth = 0.62;
+const crownRimR = crownA;
+const brimInner = 0.94, brimOuter = 1.62;
+const Nu = 36, Nv = 20, Nm = 34;   // segments
+const EDGE_SAMPLES = 3;            // interior samples per edge (2 new particles each)
+
+// Crown vertices: { i, j, x, y, z }
+const crown = [];
+for (let i = 0; i <= Nu; i++) {
+  const u = (i / Nu) * Math.PI * 2;
+  for (let j = 0; j <= Nv; j++) {
+    const v = (j / Nv) * (Math.PI / 2);
+    crown.push({
+      i, j,
+      x: crownA * Math.cos(u) * Math.sin(v),
+      y: crownB * Math.sin(u) * Math.sin(v),
+      z: crownC * Math.cos(v),
+    });
+  }
+}
+// Brim vertices (annulus in yz-plane at x = brimDepth)
+const rim = [];
+for (let i = 0; i <= Nm; i++) {
+  const t = (i / Nm) * Math.PI * 2;
+  rim.push({ i, x: brimDepth, y: brimInner * Math.cos(t), z: brimInner * Math.sin(t) });
+}
+// Brim outer face (slightly offset +x, the brim's front lip)
+const rimOuter = [];
+for (let i = 0; i <= Nm; i++) {
+  const t = (i / Nm) * Math.PI * 2;
+  rimOuter.push({ i, x: brimDepth + 0.08, y: brimOuter * Math.cos(t), z: brimOuter * Math.sin(t) });
+}
+
+// ---------------------------------------------------------------------------
+// 2. Nodes + edges
+// ---------------------------------------------------------------------------
+const nodes = [];              // flat array of {x,y,z}
+const nodeIndex = new Map();   // geometry ref -> node index
+
+function addNode(ref) {
+  const existing = nodeIndex.get(ref);
+  if (existing !== undefined) return existing;
+  const idx = nodes.length;
+  nodeIndex.set(ref, idx);
+  nodes.push({ x: ref.x, y: ref.y, z: ref.z });
+  return idx;
+}
+
+// Full edges (pairs of node indices). Interior samples are generated after.
+const edges = [];
+const addEdge = (a, b) => {
+  edges.push({ a, b });
+};
+
+// Crown: meridians and rings
+for (let i = 0; i < Nu; i++) addEdge(crown[i * (Nv + 1)], crown[(i + 1) * (Nv + 1)]);
+for (let j = 1; j < Nv; j++) {
+  for (let i = 0; i < Nu; i++) addEdge(crown[i * (Nv + 1) + j], crown[i * (Nv + 1) + j + 1]);
+}
+// Crown top ring
+for (let i = 0; i < Nu; i++) addEdge(crown[i * (Nv + 1) + Nv], crown[(i + 1) * (Nv + 1) + Nv]);
+// Brim circles
+for (let i = 0; i < Nm; i++) {
+  addEdge(rim[i], rim[(i + 1) % Nm]);
+  addEdge(rimOuter[i], rimOuter[(i + 1) % Nm]);
+}
+// Spokes
+for (let i = 0; i < Nm; i++) {
+  const top = crown[i * (Nv + 1) + Nv];
+  addEdge(rim[i], top);
+  addEdge(rimOuter[i], top);
+}
+
+// Map every geometry reference to a node index now that all refs exist.
+const edges2 = edges.map((e) => ({ a: addNode(e.a), b: addNode(e.b) }));
+
+// ---------------------------------------------------------------------------
+// 3. Particles
+//    Each particle = one node (a vertex we want to glow) or one interior
+//    sample along an edge. target = node geometry (static), position is live.
+// ---------------------------------------------------------------------------
+const particles = [];
+const makeParticle = (pos, target, vx, vy, vz) => ({
+  x: pos.x, y: pos.y, z: pos.z,
+  tx: target.x, ty: target.y, tz: target.z,
+  vx, vy, vz,
+  phase: Math.random() * 6.283,
+  life: 0,
+  orbit: false,
+});
+
+// Vertex particles: crown, rim, rimOuter
+for (const v of crown) particles.push(makeParticle({ x: v.x, y: v.y, z: v.z }, { x: v.x, y: v.y, z: v.z }));
+for (const v of rim)   particles.push(makeParticle({ x: v.x, y: v.y, z: v.z }, { x: v.x, y: v.y, z: v.z }));
+for (const v of rimOuter) particles.push(makeParticle({ x: v.x, y: v.y, z: v.z }, { x: v.x, y: v.y, z: v.z }));
+
+// Interior samples along full edges
+for (const e of edges2) {
+  for (let s = 1; s < EDGE_SAMPLES; s++) {
+    const t = s / EDGE_SAMPLES;
+    particles.push(makeParticle(
+      { x: e.a.x + (e.b.x - e.a.x) * t, y: e.a.y + (e.b.y - e.a.y) * t, z: e.a.z + (e.b.z - e.a.z) * t },
+      { x: e.a.x + (e.b.x - e.a.x) * t, y: e.a.y + (e.b.y - e.a.y) * t, z: e.a.z + (e.b.z - e.a.z) * t },
+      0, 0, 0
+    ));
+  }
+}
+
+// Choose a few orbiting particles: the ones that end up in orbit.
+const orbiters = [];
+const order = particles.slice().sort(() => Math.random() - 0.5);
+const count = Math.min(13, order.length);
+for (let s = 0; s < count; s++) {
+  const p = order[s];
+  if (!p) continue;
+  const ang = Math.atan2(p.z, p.x);
+  const rad = Math.hypot(p.x, p.z) || 1.6;
+  orbiters.push({ p, ang, rad, speed: 0.20 + (s % 4) * 0.07, trail: [], alive: true });
+  p.orbit = true;
+}
+
+// ---------------------------------------------------------------------------
+// 4. Camera / projection
+// ---------------------------------------------------------------------------
+const eyeY = 0.22;
+const R = 2.65;
+const fov = 40 * Math.PI / 180;
+const f = 1 / Math.tan(fov / 2);
+
+let t = 0;       // rotation accumulator (radians)
+let spinSpeed = 1; // spin multiplier
+
+function project(p) {
+  const a = t * 0.28;
+  const ex = Math.sin(a) * R;
+  const ez = Math.cos(a) * R;
+  const dx = p.x - ex;
+  const dy = p.y - eyeY;
+  const dz = p.z - ez;
+  const len = Math.hypot(dx, dz) || 0.01;
+  const pull = 1 + 0.18 * dy;
+  const x = (dx * f) / len * (W / 2) * pull;
+  const y = (dy * f) / len * (H / 2) * pull;
+  return { x: W / 2 + x, y: H / 2 - y, scale: Math.min(1, 2.0 / (len * 1.2)) };
+}
+
+// ---------------------------------------------------------------------------
+// 5. Palette & lighting
+// ---------------------------------------------------------------------------
+const C = {
+  crownTop: [244, 201, 143],
+  crownMid: [233, 162, 82],
+  crownBase: [190, 92, 46],
+  brim: [126, 46, 18],
+  rim: [192, 104, 52],
+  ember: [255, 208, 140],
+  emberBright: [255, 235, 175],
+};
+
+function litColor(v, key) {
+  const ambient = 0.5;
+  const light = { x: 0.25, y: 0.85, z: 0.30 };
+  light.x /= Math.hypot(light.x, light.y, light.z);
+  light.y /= Math.hypot(light.x, light.y, light.z);
+  const nl = Math.hypot(v.x, v.z) || 0.01;
+  const dot = Math.max(0, (v.x / nl) * light.x + v.y * light.y + (v.z / nl) * light.z);
+  const sh = ambient + (1 - ambient) * dot;
+
+  if (key === "brim") {
+    const d = C.brim;
+    return [Math.round(d[0] * sh), Math.round(d[1] * sh), Math.round(d[2] * sh)];
+  }
+  if (key === "rim") {
+    const d = C.rim;
+    return [Math.round(d[0] * sh), Math.round(d[1] * sh), Math.round(d[2] * sh)];
+  }
+  // crown dome: blend top gold -> amber -> burnt orange by height
+  const top = C.crownTop, mid = C.crownMid, baseC = C.crownBase;
+  const h = Math.max(0, Math.min(1, v.y / (crownB * crownC * 0.92)));
+  const c1 = [Math.round(top[0] + (mid[0] - top[0]) * h), Math.round(top[1] + (mid[1] - top[1]) * h), Math.round(top[2] + (mid[2] - top[2]) * h)];
+  const c2 = [Math.round(mid[0] + (baseC[0] - mid[0]) * h), Math.round(mid[1] + (baseC[1] - mid[1]) * h), Math.round(mid[2] + (baseC[2] - mid[2]) * h)];
+  return [Math.round(c1[0] + (c2[0] - c1[0]) * h), Math.round(c1[1] + (c2[1] - c1[1]) * h), Math.round(c1[2] + (c2[2] - c1[2]) * h)];
+}
+
+// ---------------------------------------------------------------------------
+// 6. Build / scatter / return simulation
+// ---------------------------------------------------------------------------
+const state = {
+  status: "running",   // running | building
+  from: 0,             // 0 = scattering outward, 1 = returning to target
+  progress: 0,
+  building: false,
+  reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+};
+
+function clone3(v) { return { x: v.x, y: v.y, z: v.z }; }
+
+function startBuild() {
+  if (state.building) return;
+  if (state.reducedMotion) {
+    state.status = "running";
+    spinSpeed = 0;
+    setTimeout(() => { spinSpeed = 1; }, 800);
+    return;
+  }
+  state.building = true;
+  state.status = "building";
+  state.from = 0;
+  state.progress = 0;
+
+  // Burst outward + tangential drift for every particle.
+  for (const p of particles) {
+    const len = Math.hypot(p.x, p.z) || 0.001;
+    const tang = { x: -p.z / len, z: p.x / len };
+    p.vx = (Math.random() - 0.5) * 0.30 + tang.x * 0.70 * (0.5 + Math.random() * 0.5);
+    p.vy = (Math.random() - 0.5) * 0.30 + 0.60 + Math.random() * 0.25;
+    p.vz = (Math.random() - 0.5) * 0.30 + tang.z * 0.70 * (0.5 + Math.random() * 0.5);
+    const sp = Math.hypot(p.vx, p.vy, p.vz);
+    if (sp > 3.2) { p.vx /= sp; p.vy /= sp; p.vz /= sp; p.vx *= 3.2; p.vy *= 3.2; p.vz *= 3.2; }
+  }
+
+  // Orbiters get pure circular velocity.
+  for (const o of orbiters) {
+    o.ang += Math.PI * 2 * 0.12;
+    o.p.vx = -o.rad * Math.sin(o.ang) * o.speed;
+    o.p.vy = 0.30;
+    o.p.vz = o.rad * Math.cos(o.ang) * o.speed;
+  }
+}
+
+function updateBuild(dt) {
+  const p = Math.min(1, state.progress += 0.6 * dt);
+  const eased = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+
+  if (state.from === 0) {
+    // --- Scattering: fly outward, damped, gravity, tangential curl ---
+    for (const p of particles) {
+      p.vx *= 0.92;
+      p.vy *= 0.92;
+      p.vz *= 0.92;
+      p.vy -= 0.55 * dt;                       // gentle gravity
+      const dx = p.tx - p.x, dy = p.ty - p.y, dz = p.tz - p.z;
+      const dist = Math.hypot(dx, dy, dz) || 0.001;
+      const k = (0.12 * (1 - eased) + 0.005) * dist; // weakening spring
+      p.x += dx * (k / dist) * dt;
+      p.y += dy * (k / dist) * dt;
+      p.z += dz * (k / dist) * dt;
+      const len = Math.hypot(p.x, p.z) || 0.01;
+      const tang = { x: -p.z / len, z: p.x / len };
+      p.vx += tang.x * 0.22 * (1 - eased) * dt;
+      p.vz += tang.z * 0.22 * (1 - eased) * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.z += p.vz * dt;
+    }
+    if (p >= 0.5) state.from = 1;
+  } else {
+    // --- Return: smooth bezier curving back to each target (perfect reform) ---
+    const q = Math.min(1, (p - 0.5) / 0.5);
+    const easeOut = 1 - Math.pow(1 - q, 3);
+    const dir = 1 - eased;
+    for (const p of particles) {
+      const dx = p.tx - p.x, dy = p.ty - p.y, dz = p.tz - p.z;
+      const dist = Math.hypot(dx, dy, dz) || 0.001;
+      const nx = dx / dist, ny = dy / dist, nz = dz / dist;
+      // Control point pulled outward tangentially so the ember swirls in.
+      const cp = {
+        x: p.x + (-nz / (Math.hypot(nx, nz) || 0.01)) * dist * 0.30,
+        y: p.y + (0.05 + (p.ty - p.y) * 0.05) * dist * 0.40,
+        z: p.z + (nx / (Math.hypot(nx, nz) || 0.01)) * dist * 0.30,
+      };
+      const u = 1 - easeOut;
+      p.x = u * u * p.x + 2 * u * easeOut * cp.x + easeOut * easeOut * p.tx;
+      p.y = u * u * p.y + 2 * u * easeOut * cp.y + easeOut * easeOut * p.ty;
+      p.z = u * u * p.z + 2 * u * easeOut * cp.z + easeOut * easeOut * p.tz;
+      p.vx += nx * dir * dt * 0.6;
+      p.vz += (p.ty - p.y) * dir * dt * 0.12;
+    }
+    if (p >= 1) {
+      for (const p of particles) { p.x = p.tx; p.y = p.ty; p.z = p.tz; } // perfect snap
+      for (const o of orbiters) {
+        o.alive = true;
+        o.p.orbit = true;
+        o.rad = Math.hypot(o.p.x, o.p.z) || 1.6;
+        o.ang = Math.atan2(o.p.z, o.p.x);
+        o.p.vx = -o.rad * Math.sin(o.ang) * o.speed;
+        o.p.vz = o.rad * Math.cos(o.ang) * o.speed;
+      }
+      state.building = false;
+      state.status = "running";
+      spinSpeed = 1;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 7. Resize
+// ---------------------------------------------------------------------------
+function resize() {
+  const rect = canvas.getBoundingClientRect();
+  W = Math.max(1, Math.floor(rect.width));
+  H = Math.max(1, Math.floor(rect.height));
+  canvas.width = Math.floor(W * dpr);
+  canvas.height = Math.floor(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+// ---------------------------------------------------------------------------
+// 8. Rendering
+// ---------------------------------------------------------------------------
+function drawParticle(p, proj, alpha, glowColor) {
+  const sz = (p.sz || 1.3) * alpha;
+  const col = glowColor || [255, 208, 140];
+  const fade = 1;
+
+  // Soft halo.
+  ctx.beginPath();
+  ctx.arc(proj.x, proj.y, sz * 4.2, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(${col[0]},${col[1]},${col[2]},0.08)`;
+  ctx.fill();
+  // Core.
+  ctx.beginPath();
+  ctx.arc(proj.x, proj.y, sz * 0.7, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(${col[0]},${col[1]},${col[2]},${alpha * 0.95})`;
+  ctx.fill();
+  // Hot spot.
+  ctx.beginPath();
+  ctx.arc(proj.x, proj.y, sz * 0.26, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(255,255,255,${alpha * 0.9})`;
+  ctx.fill();
+}
+
+function render(dt) {
+  ctx.clearRect(0, 0, W, H);
+
+  // Background
+  const bg = ctx.createRadialGradient(W * 0.5, H * 0.42, 0, W * 0.5, H * 0.5, Math.max(W, H) * 0.85);
+  bg.addColorStop(0, "#1a1510");
+  bg.addColorStop(0.65, "#0c0a08");
+  bg.addColorStop(1, "#050406");
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // Ambient warm glow behind the hat
+  const gg = ctx.createRadialGradient(W * 0.5, H * 0.46, 0, W * 0.5, H * 0.5, Math.max(W, H) * 0.5);
+  gg.addColorStop(0, "rgba(94,58,26,0.16)");
+  gg.addColorStop(1, "rgba(94,58,26,0)");
+  ctx.fillStyle = gg;
+  ctx.fillRect(0, 0, W, H);
+
+  // Ground shadow
+  const sh = ctx.createRadialGradient(W * 0.5, H * 0.62, 0, W * 0.5, H * 0.62, 0.5 * Math.max(W, H));
+  sh.addColorStop(0, "rgba(24,16,10,0.55)");
+  sh.addColorStop(1, "rgba(24,16,10,0)");
+  ctx.fillStyle = sh;
+  ctx.fillRect(W * 0.5 - 0.25 * Math.max(W, H), H * 0.62 - 0.25 * Math.max(W, H), 0.5 * Math.max(W, H), 0.5 * Math.max(W, H));
+
+  // Scene additive glow (soft lighting)
+  ctx.globalCompositeOperation = "lighter";
+  const scene = ctx.createRadialGradient(W * 0.5, H * 0.40, 0, W * 0.5, H * 0.46, Math.max(W, H) * 0.45);
+  scene.addColorStop(0, "rgba(200,150,90,0.10)");
+  scene.addColorStop(0.6, "rgba(150,90,40,0.04)");
+  scene.addColorStop(1, "rgba(150,90,40,0)");
+  ctx.fillStyle = scene;
+  ctx.fillRect(0, 0, W, H);
+  ctx.globalCompositeOperation = "source-over";
+
+  // Sort particles back-to-front by depth
+  const sorted = [];
+  for (let i = 0; i < particles.length; i++) {
+    const p = particles[i];
+    const proj = project(p);
+    sorted.push({ p, proj, depth: Math.hypot(p.x, p.y, p.z) });
+  }
+  sorted.sort((a, b) => a.depth - b.depth);
+
+  for (const item of sorted) {
+    const p = item.p;
+    const proj = item.proj;
+    if (proj.x < 0 || proj.x > W || proj.y < 0 || proj.y > H) continue;
+    if (p.orbit) continue; // drawn separately with trails
+
+    const dist = Math.hypot(p.x - p.tx, p.y - p.ty, p.z - p.tz);
+    const isBrim = Math.abs(p.x - brimDepth) < 0.14;
+    const isRim = Math.abs(p.x - (brimDepth + 0.08)) < 0.14;
+    const key = isBrim ? 'brim' : (isRim ? 'rim' : 'crown');
+    const smoothed = litColor(p, key);
+
+    const alpha = key === 'crown' ? (0.55 + 0.35 * Math.min(1, p.y / 1.02)) : 0.9;
+    const scatterDim = 1 - Math.min(1, dist * 0.6);
+    drawParticle(p, proj, alpha * scatterDim, smoothed);
+  }
+
+  // Wireframe edge overlay (on top, crisp)
+  ctx.lineWidth = 1.2;
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "rgba(120,84,48,0.85)";
+  for (const e of edges2) {
+    const pa = project(e.a), pb = project(e.b);
+    const pxOk = pa.x > 0 && pa.x < W && pb.x > 0 && pb.x < W &&
+                 pa.y > 0 && pa.y < H && pb.y > 0 && pb.y < H;
+    if (!pxOk) continue;
+    ctx.beginPath();
+    ctx.moveTo(pa.x, pa.y);
+    ctx.lineTo(pb.x, pb.y);
+    ctx.stroke();
+  }
+
+  // Orbiters (trailing light) — only update position during normal run
+  for (let s = 0; s < orbiters.length; s++) {
+    const o = orbiters[s];
+    const isRunning = state.status === "running";
+    if (isRunning && o.alive) {
+      o.ang += o.speed * dt * 60;
+      o.p.x = o.rad * Math.cos(o.ang);
+      o.p.y = 0.16 + 0.035 * Math.sin(o.ang * 0.9 + o.life);
+      o.p.z = o.rad * Math.sin(o.ang);
+      o.p.vx = -o.rad * Math.sin(o.ang) * o.speed;
+      o.p.vz = o.rad * Math.cos(o.ang) * o.speed;
+    }
+    o.life += 0.02;
+
+    if (o.trail.length > 16) o.trail.shift();
+    o.trail.push({ x: o.p.x, y: o.p.y, z: o.p.z });
+
+    for (let k = o.trail.length - 1; k > 0; k--) {
+      const a = o.trail[k], b = o.trail[k - 1];
+      const pa = project(a), pb = project(b);
+      if (pa.x < 0 || pa.x > W || pa.y < 0 || pa.y > H) continue;
+      if (pb.x < 0 || pb.x > W || pb.y < 0 || pb.y > H) continue;
+      const alpha = (k / o.trail.length) * 0.55;
+      ctx.beginPath();
+      ctx.moveTo(pa.x, pa.y);
+      ctx.lineTo(pb.x, pb.y);
+      ctx.strokeStyle = `rgba(255,214,160,${alpha})`;
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+    }
+
+    const proj = project(o.p);
+    if (proj.x < 0 || proj.x > W || proj.y < 0 || proj.y > H) continue;
+    ctx.beginPath();
+    ctx.arc(proj.x, proj.y, 1.9, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,235,180,0.55)";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(proj.x, proj.y, 0.7, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,245,215,0.95)";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(proj.x, proj.y, 0.25, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,255,255,0.95)";
+    ctx.fill();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 9. Main loop
+// ---------------------------------------------------------------------------
+let prev = performance.now();
+
+function loop(now) {
+  const dt = Math.min(0.05, (now - prev) / 1000 || 0.016);
+  prev = now;
+
+  if (state.status === "building") {
+    updateBuild(dt);
+  } else {
+    spinSpeed = 1;
+    // Gentle camera wobble.
+    t += 0.006 * Math.sin(t * 0.1) * dt;
+  }
+
+  t += 0.30 * spinSpeed * dt;
+  render(dt);
+  requestAnimationFrame(loop);
+}
+
+// ---------------------------------------------------------------------------
+// 10. Input
+// ---------------------------------------------------------------------------
+let pointerDown = false;
+let pointerOver = false;
+
+canvas.addEventListener("pointerdown", () => {
+  if (state.building) return;
+  pointerDown = true;
+  pointerOver = true;
+  startBuild();
+});
+canvas.addEventListener("pointerover", () => { pointerOver = true; });
+canvas.addEventListener("pointerout", () => { pointerOver = false; });
+canvas.addEventListener("pointerup", () => { pointerDown = false; });
+canvas.addEventListener("pointercancel", () => { pointerDown = false; });
+
+window.addEventListener("resize", resize);
+
+resize();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
