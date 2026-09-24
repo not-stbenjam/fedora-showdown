@@ -1,0 +1,748 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0a0b10">
+<title>The Fedora · An Ember Study</title>
+<style>
+  html, body { height: 100%; }
+  * { margin: 0; box-sizing: border-box; }
+  body {
+    overflow: hidden;
+    background: radial-gradient(130% 100% at 50% 36%, #12141b 0%, #0a0b10 48%, #050507 100%);
+    color: #e6e1d8;
+    font-family: Georgia, 'Palatino Linotype', 'Times New Roman', serif;
+  }
+  #hero {
+    position: fixed; inset: 0;
+    outline: none;
+    touch-action: manipulation;
+  }
+  #scene { position: fixed; inset: 0; display: block; }
+  .caption {
+    position: fixed; left: 0; right: 0;
+    bottom: clamp(24px, 6vh, 64px);
+    text-align: center;
+    padding: 0 24px;
+    pointer-events: none;
+  }
+  .cap-title {
+    font-size: 13px;
+    letter-spacing: .55em;
+    text-indent: .55em;
+    text-transform: uppercase;
+    color: #c8563f;
+    margin: 0 0 10px;
+    font-weight: normal;
+  }
+  .cap-sub {
+    font-size: 14.5px;
+    font-style: italic;
+    color: #737986;
+    letter-spacing: .02em;
+    margin: 0;
+  }
+  @keyframes capIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .caption { animation: capIn 1.4s ease .3s both; }
+  @media (prefers-reduced-motion: reduce) { .caption { animation: none; } }
+  #hero:focus-visible::after {
+    content: ""; position: fixed; inset: 14px;
+    border: 1px solid rgba(255, 96, 64, .22);
+    border-radius: 18px;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<main id="hero" tabindex="0" role="img"
+      aria-label="A red fedora, Red Hat style, spinning slowly in a dark scene with soft lighting and a soft shadow beneath it. On hover or tap it dissolves into thousands of tiny glowing embers that drift apart, swirl around, then flow back together and reform the hat, with a few embers continuing to orbit it. Press Enter or Space to trigger the effect.">
+  <canvas id="scene" aria-hidden="true"></canvas>
+  <noscript><p class="cap-sub">A red fedora rests in the dark. (JavaScript is off, so it stays perfectly still.)</p></noscript>
+  <footer class="caption">
+    <p class="cap-title">The Fedora</p>
+    <p class="cap-sub" id="capSub">Hover it — the felt scatters into embers, then finds its way home.</p>
+  </footer>
+</main>
+
+<script>
+(function () {
+'use strict';
+
+/* ---------------------------------------------------------------- setup */
+const hero = document.getElementById('hero');
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+const capSub = document.getElementById('capSub');
+const mqReduce = matchMedia('(prefers-reduced-motion: reduce)');
+const mqCoarse = matchMedia('(pointer: coarse)');
+
+const isSmall = Math.min(innerWidth, innerHeight) < 640 || mqCoarse.matches;
+const AS = isSmall ? 52 : 72;   // angular segments
+const VS = isSmall ? 14 : 16;   // crown vertical rings
+const BS = isSmall ? 6 : 7;     // brim radial rings
+const NP = isSmall ? 2200 : 3600;
+const ORB_N = isSmall ? 22 : 32;
+
+let W = 0, H = 0, DPR = 1, S = 100, cx = 0, cy = 0;
+const F = 4.6;                 // camera distance (world units)
+const TILT = 0.18;             // fixed downward view tilt
+const CP = Math.cos(TILT), SP = Math.sin(TILT);
+
+function norm3(x, y, z) { const l = Math.hypot(x, y, z) || 1; return [x / l, y / l, z / l]; }
+const L1 = norm3(-0.42, 0.74, 0.53);  // key light: upper left, viewer side
+const L2 = norm3(0.87, -0.07, 0.49);  // soft fill: right, low
+
+function smooth01(x) { x = x < 0 ? 0 : x > 1 ? 1 : x; return x * x * (3 - 2 * x); }
+
+/* ---------------------------------------------------------------- geometry */
+function crownPoint(u, v) {
+  const R0 = 0.46, WALL = 0.72;
+  let r, y;
+  if (v <= WALL) {
+    const t = v / WALL;
+    r = R0 * (0.965 - 0.150 * t);
+    y = -0.075 + 0.47 * t;
+  } else {
+    const t = (v - WALL) / (1 - WALL);
+    const r0 = R0 * 0.815;
+    r = r0 * Math.pow(Math.cos(t * Math.PI / 2), 0.82);
+    y = 0.395 + 0.185 * Math.pow(Math.sin(t * Math.PI / 2), 0.95);
+  }
+  // lengthwise crease, deepening toward the top
+  const cd = 0.34 * smooth01((v - 0.45) / 0.55);
+  r *= 1 - cd * Math.pow(Math.abs(Math.cos(u)), 5);
+  return [Math.sin(u) * r, y, Math.cos(u) * r];
+}
+function brimPoint(u, s) {
+  const rIn = 0.40;
+  const rOut = 1.36 * (1 + 0.055 * Math.pow(Math.max(0, Math.cos(u)), 2));
+  const r = rIn + (rOut - rIn) * s;
+  const front = Math.pow(Math.max(0, Math.cos(u)), 3);
+  const back = Math.pow(Math.max(0, -Math.cos(u)), 2);
+  const y = -0.045 - 0.06 * s * s - 0.20 * front * Math.pow(s, 1.7) + 0.055 * back * s * s;
+  return [Math.sin(u) * r, y, Math.cos(u) * r];
+}
+
+const CROWN = [206, 27, 39],  CROWNB = [96, 12, 20];
+const BAND  = [44, 9, 15],    BANDB  = [28, 6, 10];
+const BEV   = [66, 13, 20],   BEVB   = [38, 8, 13];
+const BRIM  = [178, 23, 33],  BRIMB  = [84, 10, 17];
+const EDGE  = [146, 18, 27],  EDGEB  = [64, 9, 14];
+
+const vx = [], vy = [], vz = [];
+function addV(x, y, z) { vx.push(x); vy.push(y); vz.push(z); return vx.length - 1; }
+
+const quads = [];
+function addQuad(a, b, c, d, col, back, mode) {
+  const ax = vx[a], ay = vy[a], az = vz[a];
+  const e1x = vx[b] - ax, e1y = vy[b] - ay, e1z = vz[b] - az;
+  const e2x = vx[d] - ax, e2y = vy[d] - ay, e2z = vz[d] - az;
+  let nx = e1y * e2z - e1z * e2y,
+      ny = e1z * e2x - e1x * e2z,
+      nz = e1x * e2y - e1y * e2x;
+  const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
+  const gx = (vx[a] + vx[b] + vx[c] + vx[d]) * 0.25,
+        gy = (vy[a] + vy[b] + vy[c] + vy[d]) * 0.25,
+        gz = (vz[a] + vz[b] + vz[c] + vz[d]) * 0.25;
+  let px, py, pz;
+  if (mode === 'radial')   { const l = Math.hypot(gx, gz) || 1; px = gx / l; py = 0; pz = gz / l; }
+  else if (mode === 'upout')  { const l = Math.hypot(gx, gz) || 1; px = gx / l * 0.7; py = 0.7; pz = gz / l * 0.7; }
+  else if (mode === 'downout'){ const l = Math.hypot(gx, gz) || 1; px = gx / l * 0.8; py = -0.6; pz = gz / l * 0.8; }
+  else                     { px = 0; py = 1; pz = 0; } // 'up'
+  if (nx * px + ny * py + nz * pz < 0) { nx = -nx; ny = -ny; nz = -nz; }
+  quads.push({ a, b, c, d, nx, ny, nz, col, back, cy0: gy, cr0: Math.hypot(gx, gz) / 1.42 });
+}
+
+const TAU = Math.PI * 2;
+// crown
+const crownRings = [];
+for (let j = 0; j <= VS; j++) {
+  const v = (j / VS) * 0.94, row = [];
+  for (let i = 0; i < AS; i++) { const p = crownPoint(i / AS * TAU, v); row.push(addV(p[0], p[1], p[2])); }
+  crownRings.push(row);
+}
+for (let j = 0; j < VS; j++) for (let i = 0; i < AS; i++) {
+  const i2 = (i + 1) % AS;
+  addQuad(crownRings[j][i], crownRings[j][i2], crownRings[j + 1][i2], crownRings[j + 1][i], CROWN, CROWNB, 'radial');
+}
+const apex = addV(0, 0.585, 0);
+for (let i = 0; i < AS; i++) {
+  const i2 = (i + 1) % AS;
+  addQuad(crownRings[VS][i], crownRings[VS][i2], apex, apex, CROWN, CROWNB, 'up');
+}
+// band + bevels
+const bandLo = [], bandHi = [], bevT = [], bevB = [];
+for (let i = 0; i < AS; i++) {
+  const u = i / AS * TAU;
+  let p = crownPoint(u, 0.07);   bandLo.push(addV(p[0] * 1.05, p[1], p[2] * 1.05));
+  p = crownPoint(u, 0.225);      bandHi.push(addV(p[0] * 1.05, p[1], p[2] * 1.05));
+  p = crownPoint(u, 0.30);       bevT.push(addV(p[0], p[1], p[2]));
+  p = crownPoint(u, 0.02);       bevB.push(addV(p[0], p[1], p[2]));
+}
+for (let i = 0; i < AS; i++) {
+  const i2 = (i + 1) % AS;
+  addQuad(bandLo[i], bandLo[i2], bandHi[i2], bandHi[i], BAND, BANDB, 'radial');
+  addQuad(bandHi[i], bandHi[i2], bevT[i2], bevT[i], BEV, BEVB, 'upout');
+  addQuad(bevB[i], bevB[i2], bandLo[i2], bandLo[i], BEVB, BEVB, 'downout');
+}
+// brim + outer edge wall
+const brimRings = [];
+for (let k = 0; k <= BS; k++) {
+  const s = k / BS, row = [];
+  for (let i = 0; i < AS; i++) { const p = brimPoint(i / AS * TAU, s); row.push(addV(p[0], p[1], p[2])); }
+  brimRings.push(row);
+}
+for (let k = 0; k < BS; k++) for (let i = 0; i < AS; i++) {
+  const i2 = (i + 1) % AS;
+  addQuad(brimRings[k][i], brimRings[k][i2], brimRings[k + 1][i2], brimRings[k + 1][i], BRIM, BRIMB, 'up');
+}
+const edgeR = [];
+for (let i = 0; i < AS; i++) { const p = brimPoint(i / AS * TAU, 1); edgeR.push(addV(p[0], p[1] - 0.034, p[2])); }
+for (let i = 0; i < AS; i++) {
+  const i2 = (i + 1) % AS;
+  addQuad(brimRings[BS][i], brimRings[BS][i2], edgeR[i2], edgeR[i], EDGE, EDGEB, 'radial');
+}
+
+const VX = new Float32Array(vx), VY = new Float32Array(vy), VZ = new Float32Array(vz);
+const NV = VX.length, Q = quads.length;
+const PVZ = new Float32Array(NV), PSX = new Float32Array(NV), PSY = new Float32Array(NV);
+const dep = new Float32Array(Q);
+const order = new Array(Q); for (let i = 0; i < Q; i++) order[i] = i;
+function cmpDep(a, b) { return dep[a] - dep[b]; }
+
+/* area-weighted surface sampling (for ember rest positions) */
+const cum = new Float64Array(Q * 2);
+let totA = 0;
+for (let f = 0; f < Q; f++) {
+  const q = quads[f];
+  const ax = VX[q.a], ay = VY[q.a], az = VZ[q.a];
+  function triArea(ib, ic) {
+    const e1x = VX[ib] - ax, e1y = VY[ib] - ay, e1z = VZ[ib] - az;
+    const e2x = VX[ic] - ax, e2y = VY[ic] - ay, e2z = VZ[ic] - az;
+    return 0.5 * Math.hypot(e1y * e2z - e1z * e2y, e1z * e2x - e1x * e2z, e1x * e2y - e1y * e2x);
+  }
+  cum[2 * f] = (totA += triArea(q.b, q.c));
+  cum[2 * f + 1] = (totA += triArea(q.c, q.d));
+}
+function sampleSurface() {
+  const r = Math.random() * totA;
+  let lo = 0, hi = Q * 2 - 1;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (cum[m] < r) lo = m + 1; else hi = m; }
+  const ti = lo, q = quads[ti >> 1];
+  let ia, ib, ic;
+  if (ti & 1) { ia = q.a; ib = q.c; ic = q.d; } else { ia = q.a; ib = q.b; ic = q.c; }
+  let u = Math.random(), v = Math.random();
+  if (u + v > 1) { u = 1 - u; v = 1 - v; }
+  const ax = VX[ia], ay = VY[ia], az = VZ[ia];
+  return [
+    ax + (VX[ib] - ax) * u + (VX[ic] - ax) * v + q.nx * 0.004,
+    ay + (VY[ib] - ay) * u + (VY[ic] - ay) * v + q.ny * 0.004,
+    az + (VZ[ib] - az) * u + (VZ[ic] - az) * v + q.nz * 0.004
+  ];
+}
+
+/* ---------------------------------------------------------------- ember sprites */
+function makeSprite(hex) {
+  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const x = c.getContext('2d');
+  const rg = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  rg.addColorStop(0, 'rgba(255,250,238,0.95)');
+  rg.addColorStop(0.22, 'rgba(' + r + ',' + g + ',' + b + ',0.9)');
+  rg.addColorStop(0.55, 'rgba(' + ((r * 0.8) | 0) + ',' + ((g * 0.55) | 0) + ',' + ((b * 0.5) | 0) + ',0.30)');
+  rg.addColorStop(1, 'rgba(0,0,0,0)');
+  x.fillStyle = rg; x.fillRect(0, 0, 64, 64);
+  return c;
+}
+const SPR = ['#ff4622', '#ff6a2a', '#ff9a40', '#ffcf7a', '#ff2747', '#ffe6bd'].map(makeSprite);
+const SPRW = [0.30, 0.24, 0.17, 0.10, 0.13, 0.06];
+const cumW = []; let acc = 0;
+for (const w of SPRW) { acc += w; cumW.push(acc); }
+function pickSprite() {
+  const r = Math.random();
+  for (let i = 0; i < cumW.length; i++) if (r < cumW[i]) return i;
+  return 0;
+}
+
+/* ---------------------------------------------------------------- particles */
+const parts = [];
+for (let i = 0; i < NP; i++) {
+  const q = sampleSurface();
+  parts.push({
+    rx: q[0], ry: q[1], rz: q[2],
+    x: q[0], y: q[1], z: q[2], vx: 0, vy: 0, vz: 0,
+    w: 0.008 + Math.pow(Math.random(), 2.6) * 0.026,
+    c: pickSprite(),
+    seed: Math.random() * 100,
+    delay: 0.05 + Math.random() * 0.30 + Math.max(0, 0.5 - q[1]) * 0.08,
+    buoy: 0.2 + Math.random() * 0.9,
+    baseA: 0.5 + Math.random() * 0.45,
+    alpha: 0, launched: false, arrived: false, arrT: 0,
+    Rp: 1.05 + Math.random() * 1.1, yp: -0.35 + Math.random() * 0.95,
+    orb: false, orbA: 0, oR: 0, oSpd: 0, oA: 0, ou: [1, 0, 0], ov: [0, 0, 1],
+    oy: 0, oyA: 0, oyP: 0,
+    tr: [],
+    fl: 5 + Math.random() * 8, ph: Math.random() * 6.28
+  });
+}
+
+/* ---------------------------------------------------------------- state */
+const PHDUR = [0, 0.75, 1.15, 1.6, 2.2, 0.9]; // idle, dissolve, ember, swirl, reform, settle
+let phase = 0, phaseT = 0, cycleT = 0, cycleEnd = -10;
+let theta = 0.85, omega = 0.45, CT = Math.cos(theta), ST = Math.sin(theta);
+let bob = 0, hatAlpha = 1, pulse = 0, pointerIn = false, orbActive = false;
+let nowT = 0, reduced = mqReduce.matches, raf = 0, lastT = 0;
+
+/* ---------------------------------------------------------------- bloom buffers */
+const b1 = document.createElement('canvas'), b1x = b1.getContext('2d');
+const b2 = document.createElement('canvas'), b2x = b2.getContext('2d');
+
+/* ---------------------------------------------------------------- resize */
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = Math.max(2, Math.round(W * DPR));
+  canvas.height = Math.max(2, Math.round(H * DPR));
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  S = Math.min(W * 0.30, H * 0.26);
+  cx = W * 0.5; cy = H * 0.44;
+  b1.width = Math.max(2, (canvas.width / 6) | 0);  b1.height = Math.max(2, (canvas.height / 6) | 0);
+  b2.width = Math.max(2, (canvas.width / 15) | 0); b2.height = Math.max(2, (canvas.height / 15) | 0);
+  for (const p of parts) p.tr.length = 0;
+  if (reduced) drawStatic();
+}
+
+/* ---------------------------------------------------------------- cycle control */
+function startCycle() {
+  phase = 1; phaseT = 0; cycleT = 0; pulse = 0; orbActive = false;
+  for (const p of parts) {
+    p.tr.length = 0;
+    if (p.orb) {
+      // lingering orbiters rejoin the storm
+      const rh = Math.hypot(p.x, p.z) || 1e-4;
+      p.vx = -p.z / rh * 0.9; p.vz = p.x / rh * 0.9; p.vy = 0.15;
+      p.orb = false; p.launched = true; p.arrived = false; p.alpha = p.baseA * 0.8; p.delay = 0.05;
+    } else {
+      p.launched = false; p.arrived = false; p.alpha = 0; p.arrT = 0;
+    }
+  }
+}
+function tryTrigger() {
+  if (reduced || phase !== 0) return;
+  if (nowT - cycleEnd < 0.7) return;
+  startCycle();
+}
+function activateOrbiters() {
+  orbActive = false;
+  let n = 0;
+  for (const p of parts) {
+    if (n >= ORB_N) break;
+    if (!p.orb && p.w < 0.016 && Math.random() < 0.05) {
+      p.orb = true; p.orbA = 0; p.tr.length = 0;
+      const inc = 0.3 + Math.random() * 0.85, az = Math.random() * TAU;
+      const w = [Math.sin(inc) * Math.cos(az), Math.cos(inc), Math.sin(inc) * Math.sin(az)];
+      let ux = w[2], uz = -w[0];
+      const ul = Math.hypot(ux, uz) || 1; ux /= ul; uz /= ul;
+      p.ou = [ux, 0, uz];
+      p.ov = [w[1] * uz, w[2] * ux - w[0] * uz, -w[1] * ux];
+      p.oR = 1.05 + Math.random() * 0.55;
+      p.oSpd = (0.35 + Math.random() * 0.5) * (Math.random() < 0.5 ? -1 : 1);
+      p.oA = Math.random() * TAU;
+      p.oy = 0.05 + Math.random() * 0.28;
+      p.oyA = 0.08 + Math.random() * 0.18;
+      p.oyP = Math.random() * TAU;
+      n++; orbActive = true;
+    }
+  }
+}
+
+/* ---------------------------------------------------------------- update */
+function update(dt, t) {
+  if (phase > 0) {
+    phaseT += dt; cycleT += dt;
+    if (phaseT >= PHDUR[phase]) {
+      phase++; phaseT = 0;
+      if (phase === 5) { pulse = 1; activateOrbiters(); }
+      if (phase > 5) { phase = 0; cycleEnd = t; }
+    }
+  }
+  if (phase === 1) hatAlpha = 1 - smooth01((phaseT - 0.05) / 0.55);
+  else if (phase === 2 || phase === 3) hatAlpha = 0;
+  else if (phase === 4) hatAlpha = smooth01((phaseT - 0.95) / 1.1);
+  else hatAlpha = 1;
+
+  const slow = (phase >= 1 && phase <= 4) || pointerIn;
+  const wt = slow ? 0.055 : 0.45;
+  omega += (wt - omega) * (1 - Math.exp(-2.6 * dt));
+  theta += omega * dt;
+  CT = Math.cos(theta); ST = Math.sin(theta);
+  bob = Math.sin(t * 0.85) * 0.022;
+  if (pulse > 0) pulse = Math.max(0, pulse - dt * 1.5);
+
+  updateParticles(dt, t);
+}
+
+function updateParticles(dt, t) {
+  const active = phase >= 1 && phase <= 5;
+  if (!active && !orbActive) return;
+  const ct = CT, st = ST;
+  for (const p of parts) {
+    if (p.orb) {
+      p.oA += p.oSpd * dt;
+      const ca = Math.cos(p.oA), sa = Math.sin(p.oA);
+      p.x = (p.ou[0] * ca + p.ov[0] * sa) * p.oR;
+      p.z = (p.ou[2] * ca + p.ov[2] * sa) * p.oR;
+      p.y = p.oy + Math.sin(p.oA * 1.6 + p.oyP) * p.oyA + bob * 0.5;
+      if (p.orbA < 1) p.orbA = Math.min(1, p.orbA + dt * 1.6);
+      continue;
+    }
+    if (!active) continue;
+
+    if (!p.launched) {
+      if (cycleT < p.delay) continue;
+      // spawn exactly on the current surface of the hat
+      const wx = p.rx * ct + p.rz * st, wy = p.ry + bob, wz = p.rz * ct - p.rx * st;
+      p.x = wx; p.y = wy; p.z = wz;
+      const rh = Math.hypot(wx, wz) || 1e-4;
+      let dx = wx / rh, dy = wy * 0.5, dz = wz / rh;
+      const dl = Math.hypot(dx, dy, dz) || 1; dx /= dl; dy /= dl; dz /= dl;
+      const spd = 0.45 + Math.random() * 1.15, sgn = Math.random() < 0.5 ? -1 : 1;
+      p.vx = dx * spd - (wz / rh) * 0.55 * sgn;
+      p.vy = dy * spd + 0.12;
+      p.vz = dz * spd + (wx / rh) * 0.55 * sgn;
+      p.launched = true;
+    }
+
+    if (phase <= 3) {
+      // ember drift
+      const n1 = Math.sin(t * 1.35 + p.seed), n2 = Math.cos(t * 1.05 + p.seed * 1.31), n3 = Math.sin(t * 1.8 + p.seed * 0.71);
+      p.vx += n1 * 0.85 * dt;
+      p.vy += (p.buoy + n3 * 0.5) * dt;
+      p.vz += n2 * 0.85 * dt;
+      if (phase === 3) {
+        // vortex swirl
+        const varr = 0.55 + 0.75 * Math.abs(Math.sin(p.seed * 2.7));
+        const amp = 2.8 * Math.sin(Math.PI * Math.min(1, phaseT / PHDUR[3])) * varr;
+        const rh = Math.hypot(p.x, p.z) || 1e-4;
+        p.vx += (-p.z / rh) * amp * dt + (p.x / rh) * (p.Rp - rh) * 3.2 * dt;
+        p.vz += ( p.x / rh) * amp * dt + (p.z / rh) * (p.Rp - rh) * 3.2 * dt;
+        p.vy += (p.yp - p.y) * 2.3 * dt;
+        const dr = Math.exp(-1.0 * dt);
+        p.vx *= dr; p.vy *= dr; p.vz *= dr;
+      } else {
+        const dr = Math.exp(-1.35 * dt);
+        p.vx *= dr; p.vy *= dr; p.vz *= dr;
+      }
+      p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+    } else {
+      // reform: flow home to the (still slowly rotating) surface
+      const tx = p.rx * ct + p.rz * st, ty = p.ry + bob, tz = p.rz * ct - p.rx * st;
+      if (!p.arrived) {
+        const prog = Math.min(1, phaseT / PHDUR[4]);
+        const k = phase === 4 ? 3.2 + 6.5 * prog * prog : 10;
+        p.vx += (tx - p.x) * k * dt; p.vy += (ty - p.y) * k * dt; p.vz += (tz - p.z) * k * dt;
+        const sw = 1.6 * (1 - prog) * 0.6; // residual spiral on the way in
+        const rh = Math.hypot(p.x, p.z) || 1e-4;
+        p.vx += (-p.z / rh) * sw * dt; p.vz += (p.x / rh) * sw * dt;
+        const dr = Math.exp(-3.6 * dt);
+        p.vx *= dr; p.vy *= dr; p.vz *= dr;
+        p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+        const dx = tx - p.x, dy = ty - p.y, dz = tz - p.z;
+        if (phase === 5 || (phaseT > 0.3 && dx * dx + dy * dy + dz * dz < 0.0032)) {
+          p.arrived = true; p.arrT = cycleT;
+        }
+      } else {
+        const k2 = 1 - Math.exp(-16 * dt);
+        p.x += (tx - p.x) * k2; p.y += (ty - p.y) * k2; p.z += (tz - p.z) * k2;
+      }
+    }
+
+    // alpha
+    if (!p.arrived) {
+      p.alpha = p.baseA * smooth01((cycleT - p.delay) / 0.25);
+      if (phase === 5) p.alpha *= 1 - smooth01((phaseT - 0.15) / 0.5);
+    } else {
+      p.alpha = p.baseA * (1 - smooth01((cycleT - p.arrT) / 0.45));
+    }
+  }
+}
+
+/* ---------------------------------------------------------------- drawing */
+function stormEnv() {
+  if (phase === 1) return smooth01(phaseT / 0.5);
+  if (phase === 2 || phase === 3) return 1;
+  if (phase === 4) return 1 - smooth01((phaseT - 0.4) / 1.5);
+  if (phase === 5) return 0.3 * (1 - smooth01(phaseT / 0.6));
+  return orbActive ? 0.1 : 0;
+}
+
+function drawGlow(env) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const gx = cx, gy = cy - S * 0.12, R = S * 2.4;
+  const g = ctx.createRadialGradient(gx, gy, 0, gx, gy, R);
+  g.addColorStop(0, 'rgba(255,66,40,' + (0.05 + 0.09 * env).toFixed(3) + ')');
+  g.addColorStop(0.55, 'rgba(150,28,26,' + (0.03 + 0.05 * env).toFixed(3) + ')');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(gx - R, gy - R, R * 2, R * 2);
+  ctx.restore();
+}
+
+function drawShadow(env) {
+  const wy = -0.52 + bob;
+  const Yv = wy * CP, Zv = wy * SP;
+  const pe = F / (F - Zv);
+  const sy = cy - Yv * pe * S;
+  const rx = 1.55 * S, ry = 0.30 * rx;
+  const a = 0.5 * hatAlpha + 0.10 * env;
+  ctx.save();
+  ctx.translate(cx, sy);
+  ctx.scale(1, ry / rx);
+  // faint floor light-pool so the shadow reads on the dark ground
+  const pool = ctx.createRadialGradient(0, 0, 0, 0, 0, rx * 1.3);
+  pool.addColorStop(0, 'rgba(122,134,164,' + (0.06 + 0.03 * hatAlpha).toFixed(3) + ')');
+  pool.addColorStop(1, 'rgba(122,134,164,0)');
+  ctx.fillStyle = pool;
+  ctx.fillRect(-rx * 1.3, -rx * 1.3, rx * 2.6, rx * 2.6);
+  if (a > 0.01) {
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+    g.addColorStop(0, 'rgba(0,0,0,' + a.toFixed(3) + ')');
+    g.addColorStop(0.6, 'rgba(0,0,0,' + (a * 0.4).toFixed(3) + ')');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(-rx, -rx, rx * 2, rx * 2);
+  }
+  if (env > 0.02) {
+    ctx.globalCompositeOperation = 'lighter';
+    const wg = ctx.createRadialGradient(0, 0, 0, 0, 0, rx * 0.75);
+    wg.addColorStop(0, 'rgba(255,110,50,' + (0.12 * env).toFixed(3) + ')');
+    wg.addColorStop(1, 'rgba(255,110,50,0)');
+    ctx.fillStyle = wg;
+    ctx.fillRect(-rx * 0.75, -rx * 0.75, rx * 1.5, rx * 1.5);
+  }
+  ctx.restore();
+}
+
+function drawHat() {
+  const ct = CT, st = ST;
+  const Sb = S * (phase === 1 ? 1 + 0.07 * (1 - hatAlpha) : 1);
+  for (let i = 0; i < NV; i++) {
+    const x = VX[i], y = VY[i] + bob, z = VZ[i];
+    const rxv = x * ct + z * st, rzv = z * ct - x * st;
+    const Yv = y * CP - rzv * SP, Zv = y * SP + rzv * CP;
+    PVZ[i] = Zv;
+    const pe = F / (F - Zv);
+    PSX[i] = cx + rxv * pe * Sb;
+    PSY[i] = cy - Yv * pe * Sb;
+  }
+  for (let f = 0; f < Q; f++) {
+    const q = quads[f];
+    dep[f] = (PVZ[q.a] + PVZ[q.b] + PVZ[q.c] + PVZ[q.d]) * 0.25;
+  }
+  order.sort(cmpDep);
+
+  ctx.globalAlpha = hatAlpha;
+  for (let oi = 0; oi < Q; oi++) {
+    const q = quads[order[oi]];
+    const nx = q.nx, ny = q.ny, nz = q.nz;
+    const nrx = nx * ct + nz * st, nrz = nz * ct - nx * st;
+    const nY = ny * CP - nrz * SP, nZ = ny * SP + nrz * CP;
+    let mx = nrx, my = nY, mz = nZ, base = q.col;
+    if (nZ < 0) { mx = -mx; my = -my; mz = -mz; base = q.back; }
+    const dk = Math.max(0, mx * L1[0] + my * L1[1] + mz * L1[2]);
+    const df = Math.max(0, mx * L2[0] + my * L2[1] + mz * L2[2]);
+    const rimv = 1 - Math.min(1, Math.abs(nZ));
+    const rim = rimv * rimv * rimv;
+    let sh = 0.17 + 0.92 * dk + 0.22 * df;
+    sh *= 0.86 + 0.30 * smooth01((q.cy0 + 0.15) / 0.75);
+    sh *= 1.04 - 0.20 * q.cr0;
+    let r = base[0] * sh + 150 * rim,
+        g = base[1] * sh + 55 * rim,
+        b = base[2] * sh + 38 * rim;
+    if (r > 255) r = 255; if (g > 255) g = 255; if (b > 255) b = 255;
+
+    const i0 = q.a, i1 = q.b, i2 = q.c, i3 = q.d;
+    const x0 = PSX[i0], y0 = PSY[i0], x1 = PSX[i1], y1 = PSY[i1],
+          x2 = PSX[i2], y2 = PSY[i2], x3 = PSX[i3], y3 = PSY[i3];
+    const gx = (x0 + x1 + x2 + x3) * 0.25, gy = (y0 + y1 + y2 + y3) * 0.25;
+    // inflate slightly toward the centroid to hide antialiasing seams
+    let dx = x0 - gx, dy = y0 - gy, dl = Math.hypot(dx, dy);
+    const X0 = dl > 0.001 ? x0 + dx / dl * 0.8 : x0, Y0 = dl > 0.001 ? y0 + dy / dl * 0.8 : y0;
+    dx = x1 - gx; dy = y1 - gy; dl = Math.hypot(dx, dy);
+    const X1 = dl > 0.001 ? x1 + dx / dl * 0.8 : x1, Y1 = dl > 0.001 ? y1 + dy / dl * 0.8 : y1;
+    dx = x2 - gx; dy = y2 - gy; dl = Math.hypot(dx, dy);
+    const X2 = dl > 0.001 ? x2 + dx / dl * 0.8 : x2, Y2 = dl > 0.001 ? y2 + dy / dl * 0.8 : y2;
+    dx = x3 - gx; dy = y3 - gy; dl = Math.hypot(dx, dy);
+    const X3 = dl > 0.001 ? x3 + dx / dl * 0.8 : x3, Y3 = dl > 0.001 ? y3 + dy / dl * 0.8 : y3;
+
+    ctx.fillStyle = 'rgb(' + (r | 0) + ',' + (g | 0) + ',' + (b | 0) + ')';
+    ctx.beginPath();
+    ctx.moveTo(X0, Y0); ctx.lineTo(X1, Y1); ctx.lineTo(X2, Y2); ctx.lineTo(X3, Y3);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawStorm(t) {
+  if (phase < 1 || phase > 5) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const p of parts) {
+    if (p.orb || !p.launched) continue;
+    const a = p.alpha;
+    if (a <= 0.02) continue;
+    const Yv = p.y * CP - p.z * SP, Zv = p.y * SP + p.z * CP;
+    const pe = F / (F - Zv);
+    const sx = cx + p.x * pe * S, sy = cy - Yv * pe * S;
+    let s = Math.max(1.4, p.w * pe * S * 3.4);
+    if (phase === 3) s *= 1 + 0.18 * Math.sin(t * 3 + p.seed);
+    ctx.globalAlpha = Math.min(1, a * (0.72 + 0.28 * Math.sin(t * p.fl + p.ph)));
+    ctx.drawImage(SPR[p.c], sx - s * 0.5, sy - s * 0.5, s, s);
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
+function drawOrbiters(t, behind) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineCap = 'round';
+  for (const p of parts) {
+    if (!p.orb) continue;
+    const Yv = p.y * CP - p.z * SP, Zv = p.y * SP + p.z * CP;
+    if (behind ? Zv >= -0.45 : Zv < -0.45) continue;
+    const pe = F / (F - Zv);
+    const sx = cx + p.x * pe * S, sy = cy - Yv * pe * S;
+    const tr = p.tr;
+    tr.push(sx, sy);
+    if (tr.length > 30) tr.splice(0, 2);
+    const n = tr.length / 2;
+    for (let i = 1; i < n; i++) {
+      const f = i / n;
+      ctx.strokeStyle = 'rgba(255,150,82,' + (0.16 * f * p.orbA).toFixed(3) + ')';
+      ctx.lineWidth = 0.35 + 1.0 * f;
+      ctx.beginPath();
+      ctx.moveTo(tr[(i - 1) * 2], tr[(i - 1) * 2 + 1]);
+      ctx.lineTo(tr[i * 2], tr[i * 2 + 1]);
+      ctx.stroke();
+    }
+    const s = Math.max(1.2, p.w * pe * S * 3.0);
+    ctx.globalAlpha = Math.min(0.85, p.orbA * (0.55 + 0.3 * Math.sin(t * p.fl + p.ph)));
+    ctx.drawImage(SPR[p.c], sx - s * 0.5, sy - s * 0.5, s, s);
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
+function drawPulse() {
+  const a = 0.15 * pulse;
+  const R = S * (1.2 + 1.6 * (1 - pulse));
+  const g = ctx.createRadialGradient(cx, cy - S * 0.1, 0, cx, cy - S * 0.1, R);
+  g.addColorStop(0, 'rgba(255,190,150,0)');
+  g.addColorStop(0.72, 'rgba(255,150,95,' + a.toFixed(3) + ')');
+  g.addColorStop(1, 'rgba(255,120,80,0)');
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = g;
+  ctx.fillRect(cx - R, cy - S * 0.1 - R, R * 2, R * 2);
+  ctx.restore();
+}
+
+function applyBloom() {
+  b1x.clearRect(0, 0, b1.width, b1.height);
+  b1x.drawImage(canvas, 0, 0, b1.width, b1.height);
+  b2x.clearRect(0, 0, b2.width, b2.height);
+  b2x.drawImage(b1, 0, 0, b2.width, b2.height);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = 0.26;
+  ctx.drawImage(b1, 0, 0, W, H);
+  ctx.globalAlpha = 0.18;
+  ctx.drawImage(b2, 0, 0, W, H);
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
+function draw(t) {
+  ctx.clearRect(0, 0, W, H);
+  const env = stormEnv();
+  drawGlow(env);
+  drawShadow(env);
+  if (orbActive) drawOrbiters(t, true);
+  if (hatAlpha > 0.02) drawHat();
+  drawStorm(t);
+  if (orbActive) drawOrbiters(t, false);
+  if (pulse > 0) drawPulse();
+  applyBloom();
+}
+
+function drawStatic() {
+  theta = 0.85; CT = Math.cos(theta); ST = Math.sin(theta);
+  bob = 0.02; hatAlpha = 1; phase = 0; orbActive = false;
+  draw(0);
+}
+
+/* ---------------------------------------------------------------- loop */
+function loop(now) {
+  raf = requestAnimationFrame(loop);
+  const t = now / 1000;
+  let dt = t - lastT;
+  lastT = t;
+  if (dt > 0.05) dt = 0.05;
+  if (dt < 0) dt = 0;
+  nowT = t;
+  update(dt, t);
+  draw(t);
+}
+function startLoop() {
+  if (!raf) { lastT = performance.now() / 1000; raf = requestAnimationFrame(loop); }
+}
+function stopLoop() {
+  if (raf) { cancelAnimationFrame(raf); raf = 0; }
+}
+
+/* ---------------------------------------------------------------- caption */
+function setCaption() {
+  if (mqReduce.matches) capSub.textContent = 'A red fedora at rest in the dark — stillness, by your request.';
+  else if (mqCoarse.matches) capSub.textContent = 'Tap it — the felt scatters into embers, then finds its way home.';
+  else capSub.textContent = 'Hover it — the felt scatters into embers, then finds its way home.';
+}
+
+/* ---------------------------------------------------------------- events */
+window.addEventListener('resize', resize);
+hero.addEventListener('pointerenter', function () { pointerIn = true; tryTrigger(); });
+hero.addEventListener('pointerleave', function (e) {
+  pointerIn = false;
+  // leaving mid-flight lets the embers return early (mouse / pen only; taps play out fully)
+  if (!reduced && (e.pointerType === 'mouse' || e.pointerType === 'pen') && phase >= 1 && phase <= 3) {
+    phase = 4; phaseT = 0;
+  }
+});
+hero.addEventListener('pointerdown', function (e) { if (e.pointerType !== 'mouse') tryTrigger(); });
+hero.addEventListener('keydown', function (e) {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); tryTrigger(); }
+});
+
+function onMq(mq, fn) { if (mq.addEventListener) mq.addEventListener('change', fn); else mq.addListener(fn); }
+onMq(mqReduce, function (e) {
+  reduced = e.matches;
+  setCaption();
+  if (reduced) { stopLoop(); orbActive = false; phase = 0; hatAlpha = 1; drawStatic(); }
+  else { startLoop(); }
+});
+onMq(mqCoarse, setCaption);
+
+/* ---------------------------------------------------------------- go */
+setCaption();
+resize();
+if (reduced) drawStatic();
+else startLoop();
+
+})();
+</script>
+</body>
+</html>
