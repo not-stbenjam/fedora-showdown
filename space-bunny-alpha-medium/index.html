@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#080b12">
+<title>Open Source, Refined</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+  body {
+    background:
+      radial-gradient(ellipse 70% 55% at 50% 45%, rgba(36, 46, 67, .22), transparent 72%),
+      linear-gradient(145deg, #090c13 0%, #07090f 58%, #0b0e16 100%);
+    color: #eef1f7;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .scene {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-height: 100svh;
+    isolation: isolate;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+  }
+  .scene::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px) 50% 50% / 120px 120px,
+      linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px) 50% 50% / 120px 120px;
+    -webkit-mask-image: radial-gradient(circle at 50% 49%, #000, transparent 67%);
+    mask-image: radial-gradient(circle at 50% 49%, #000, transparent 67%);
+    opacity: .32;
+  }
+  .aura {
+    position: absolute;
+    left: 50%; top: 47%;
+    width: min(78vw, 860px); aspect-ratio: 1;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(120, 35, 42, .14), rgba(45, 65, 100, .055) 38%, transparent 69%);
+    filter: blur(10px);
+    pointer-events: none;
+  }
+  #hat {
+    position: absolute;
+    width: 100%; height: 100%;
+    display: block;
+    outline: none;
+    touch-action: manipulation;
+    cursor: default;
+  }
+  #hat:focus-visible { box-shadow: inset 0 0 0 2px rgba(225, 72, 82, .75); border-radius: 12px; }
+  .copy {
+    position: absolute;
+    z-index: 2;
+    left: 50%; bottom: clamp(30px, 7.5vh, 76px);
+    width: min(88vw, 560px);
+    transform: translateX(-50%);
+    text-align: center;
+    pointer-events: none;
+  }
+  .eyebrow {
+    margin: 0 0 12px;
+    color: #c9ceda;
+    font-size: 10px;
+    line-height: 1;
+    font-weight: 650;
+    letter-spacing: .24em;
+    text-transform: uppercase;
+  }
+  .eyebrow::before, .eyebrow::after {
+    content: ""; display: inline-block; vertical-align: middle;
+    width: 28px; height: 1px; margin: 0 13px;
+    background: linear-gradient(90deg, transparent, #687080);
+  }
+  .eyebrow::after { background: linear-gradient(90deg, #687080, transparent); }
+  h1 {
+    margin: 0;
+    font-size: clamp(20px, 2.2vw, 29px);
+    line-height: 1.2;
+    font-weight: 430;
+    letter-spacing: -.025em;
+    text-shadow: 0 3px 20px rgba(0,0,0,.7);
+  }
+  .hint {
+    margin: 11px 0 0;
+    color: #7f8796;
+    font-size: 11px;
+    line-height: 1.4;
+    letter-spacing: .07em;
+    transition: opacity .4s, color .4s;
+  }
+  .scene.active .hint { color: #b08a8e; }
+  .vignette {
+    position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 38%, rgba(2,4,8,.3) 78%, rgba(2,4,8,.7) 130%);
+  }
+  @media (max-width: 600px) { .aura { width: 130vw; } .eyebrow::before, .eyebrow::after { width: 18px; margin-inline: 9px; } }
+  @media (prefers-reduced-motion: reduce) { .aura { filter: none; } .hint { transition: none; } }
+</style>
+</head>
+<body>
+<main class="scene" id="scene">
+  <div class="aura" aria-hidden="true"></div>
+  <canvas id="hat" tabindex="0" role="button" aria-label="A three-dimensional fedora. Hover, tap, or press Enter to scatter it into embers and reform it."></canvas>
+  <div class="copy" aria-hidden="true">
+    <p class="eyebrow">Open source, refined</p>
+    <h1>Bold ideas. Built together.</h1>
+    <p class="hint" id="hint">Hover or tap to set it free</p>
+  </div>
+  <div class="vignette" aria-hidden="true"></div>
+</main>
+<script>
+(() => {
+  'use strict';
+  const canvas = document.getElementById('hat');
+  const scene = document.getElementById('scene');
+  const ctx = canvas.getContext('2d', { alpha: true });
+  const layer = document.createElement('canvas');
+  const lc = layer.getContext('2d', { alpha: true });
+  const trail = document.createElement('canvas');
+  const tc = trail.getContext('2d', { alpha: true });
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+  const lowPower = matchMedia('(max-width: 650px)').matches;
+  const COUNT = lowPower ? 1900 : 2800;
+  const TAU = Math.PI * 2;
+  const rand = (a,b) => a + Math.random() * (b-a);
+  const clamp = (v,a,b) => Math.max(a, Math.min(b,v));
+  const ease = t => t*t*(3-2*t);
+  const outQuint = t => 1-Math.pow(1-t,5);
+  const inQuint = t => Math.pow(t,5);
+
+  let W=0, H=0, dpr=1, cx=0, cy=0, scale=1, rotation=-.42, last=0, cycle=-1;
+  let orbitClock=0, pointerInside=false, prevX=0, prevY=0, hasPointer=false;
+  const points=[];
+
+  function normalFor(kind,t,u,ny=1,nx=Math.cos(u),nz=Math.sin(u)) {
+    let shade=.48 + .5*Math.max(0,nx*.46+ny*.78+nz*.2);
+    shade += rand(-.045,.045);
+    if (kind===1) shade = .38 + .2*(.5+.5*ny);
+    return clamp(shade,.22,1);
+  }
+  function add(kind,t,u) {
+    let x,y,z, shade;
+    if (kind===0) {
+      // Crown: subtly pinched, asymmetric fedora silhouette.
+      const crownR = 1.08*(1-.78*Math.pow(t,1.55));
+      const pinch = .13*Math.exp(-Math.pow((t-.66)/.24,2));
+      const crease = pinch*Math.pow(Math.max(0,Math.cos(u*2+.45)),4);
+      const fold = .025*Math.sin(u*5+t*8)*(1-t);
+      const r=Math.max(.025,crownR-crease+fold);
+      x=Math.cos(u)*r; z=Math.sin(u)*r; y=-.30+1.83*t;
+      const slope=-1.42*Math.pow(Math.max(.02,1-t),.55)/Math.max(r,.14);
+      shade=normalFor(0,t,u,slope,Math.cos(u)*.28,Math.sin(u)*.28);
+    } else if (kind===1) {
+      // Black satin hatband.
+      const r=1.01+Math.sin(u*4)*.009;
+      x=Math.cos(u)*r; z=Math.sin(u)*r; y=-.17+t*.31;
+      shade=normalFor(1,t,u,.04);
+    } else {
+      // Wide, gently curled brim.
+      const r=.84+1.28*Math.sqrt(t);
+      const curl=.16*Math.pow(t,4.2)+.018*Math.sin(u*3)*t;
+      x=Math.cos(u)*r; z=Math.sin(u)*r; y=-.42-curl+.035*Math.sin(u*2+1.4)*t;
+      shade=normalFor(2,t,u,.93,Math.cos(u)*.25,Math.sin(u)*.25);
+    }
+    const edge=kind===2 && t>.95;
+    points.push({x,y,z,shade,kind,edge,
+      px:rand(-1,1), py:rand(-1,1), pz:rand(-1,1),
+      phase:rand(0,TAU), speed:rand(.55,1.45), size:rand(.62,1.35),
+      hot:Math.random()<.035
+    });
+  }
+  // Balanced surface sampling, with an extra fine ring around the brim edge.
+  for(let i=0;i<COUNT*.73;i++){ const u=rand(0,TAU); const t=Math.pow(Math.random(),.72); add(0,t,u); }
+  for(let i=0;i<COUNT*.12;i++) add(1,Math.random(),rand(0,TAU));
+  for(let i=0;i<COUNT*.15;i++) add(2,Math.pow(Math.random(),.55),rand(0,TAU));
+
+  function resize() {
+    W=innerWidth; H=innerHeight; dpr=Math.min(devicePixelRatio||1,2);
+    for (const c of [canvas,layer,trail]) { c.width=Math.round(W*dpr); c.height=Math.round(H*dpr); }
+    canvas.style.width=W+'px'; canvas.style.height=H+'px';
+    cx=W*.5; cy=H*(H<650?.455:.475);
+    const room=Math.min(W*.39,H*.42);
+    scale=clamp(room,155,385);
+    ctx.setTransform(dpr,0,0,dpr,0,0); lc.setTransform(dpr,0,0,dpr,0,0); tc.setTransform(dpr,0,0,dpr,0,0);
+  }
+  addEventListener('resize',resize,{passive:true}); resize();
+
+  function smoothstep(a,b,x){ const t=clamp((x-a)/(b-a),0,1); return t*t*(3-2*t); }
+  function begin() {
+    if (reduced.matches || cycle>=0) return;
+    cycle=0; scene.classList.add('active');
+    document.getElementById('hint').textContent='A moment apart, then beautifully whole';
+  }
+  function cycleState(t) {
+    if (t<1.55) return {a:outQuint(t/1.55), swirl:t/1.55, spread:outQuint(t/1.55)};
+    if (t<2.75) return {a:1, swirl:1, spread:1};
+    const q=inQuint((t-2.75)/1.75);
+    return {a:1-q, swirl:1-q, spread:1-q};
+  }
+  function emberPosition(p,state,t) {
+    const a=state.a, swirl=state.swirl;
+    if(a<=.0001) return null;
+    // Deterministic turbulence turns the point cloud into slow, coherent embers.
+    const phi=p.phase+t*.46*p.speed;
+    const lift=clamp((p.y+.5)/2.2,0,1);
+    const radius=(.55+1.65*p.px*p.px)*Math.min(W,H)/560;
+    const tx=p.x*Math.cos(phi*.72)-p.z*Math.sin(phi*.72);
+    const tz=p.x*Math.sin(phi*.72)+p.z*Math.cos(phi*.72);
+    const x=tx+(.35+Math.abs(p.px))*radius*(.7+.3*Math.sin(phi));
+    const y=p.y+((p.py*.9+.28)*2.4*Math.sin(swirl*Math.PI)*(1-lift*.25))-swirl*.16*Math.sin(phi);
+    const z=tz+Math.cos(phi*1.31)*radius*.32;
+    return {x:cx+x*scale,y:cy+y*scale,z:z};
+  }
+  function colorFor(p,shade,alpha,hot=false) {
+    if(hot) return `rgba(255,${150+shade*45|0},105,${alpha})`;
+    if(p.kind===1) return `rgba(${12+shade*9|0},${15+shade*10|0},${21+shade*13|0},${alpha})`;
+    if(p.edge) return `rgba(${17+shade*10|0},${19+shade*10|0},${24+shade*12|0},${alpha})`;
+    // Near-black felt with a restrained burgundy reflected edge.
+    return `rgba(${18+shade*15|0},${17+shade*13|0},${20+shade*15|0},${alpha})`;
+  }
+  function renderPoint(p,sx,sy,z,alpha,size,hot,particleLayer) {
+    const c=particleLayer?lc:ctx;
+    c.globalAlpha=alpha;
+    c.fillStyle=colorFor(p,clamp((z+2.3)/4.6,.1,.95),1,hot);
+    const r=size*particleLayer?size:size*dpr;
+    c.fillRect(sx-r*.5,sy-r*.5,r,r);
+    if(hot && particleLayer){ c.globalAlpha=alpha*.18; c.fillRect(sx-2,sy-2,4,4); }
+  }
+
+  function draw(ts) {
+    const now=ts*.001, dt=last?Math.min(.033,now-last):.016; last=now;
+    ctx.clearRect(0,0,W,H); lc.clearRect(0,0,W,H);
+    tc.globalCompositeOperation='source-over';
+    tc.fillStyle='rgba(5,7,12,.22)'; tc.fillRect(0,0,W,H);
+    tc.globalCompositeOperation='source-over';
+    if (cycle>=0) cycle+=dt;
+    const t=cycle>=0?cycle:0;
+    const state=cycle>=0?cycleState(t):{a:0,swirl:0,spread:0};
+    if(cycle>=5.0){ cycle=-1; scene.classList.remove('active'); document.getElementById('hint').textContent='Hover or tap to set it free'; }
+    if(!reduced.matches) orbitClock+=dt;
+    const targetRot=reduced.matches?-.38:rotation+(pointerInside?.075:.19)*dt;
+    rotation=reduced.matches?-.38:targetRot;
+    orbitClock*=reduced.matches?0:1;
+    const order=points.map(p=>({p,z:0}));
+    const cos=Math.cos(state.a ? rotation+state.swirl*1.2 : rotation);
+    const sin=Math.sin(state.a ? rotation+state.swirl*1.2 : rotation);
+
+    for(const item of order){
+      const p=item.p;
+      let sx,sy,z,alpha=1,size=p.size*(1+state.a*.7),hot=p.hot&&state.a>.2;
+      if(state.a>0){
+        const e=emberPosition(p,state,t);
+        const er=Math.cos(state.swirl*1.2), es=Math.sin(state.swirl*1.2);
+        const x=e.x-cx, y=e.y-cy, z3=e.z;
+        sx=cx+(x*er-z3*es)*scale;
+        sy=cy+y*scale;
+        z=z3*er+x*es;
+        alpha=.56+.38*(.5+.5*Math.sin(p.phase+t*2*p.speed));
+        size*=.7+.45*(.5+.5*Math.sin(p.phase*.7));
+      }else{
+        const x=p.x*cos-p.z*sin, z0=p.x*sin+p.z*cos;
+        sx=cx+x*scale; sy=cy+p.y*scale; z=z0;
+        // Fine depth integration gives the dense point surface dimension.
+        alpha=.78+.2*clamp((z+2.2)/4.4,0,1);
+        size*=.86+.24*clamp((z+2.2)/4.4,0,1);
+      }
+      item.z=z; item.sx=sx; item.sy=sy; item.alpha=alpha; item.size=size; item.hot=hot;
+    }
+    order.sort((a,b)=>a.z-b.z);
+    for(const o of order) renderPoint(o.p,o.sx,o.sy,o.z,o.alpha,o.size,o.hot,true);
+
+    // Restrained bloom and a slowly dissipating ember trail.
+    ctx.save(); ctx.globalCompositeOperation='lighter';
+    ctx.globalAlpha=.23; ctx.filter='blur(7px)'; ctx.drawImage(layer,0,0,W,H);
+    ctx.restore();
+    ctx.drawImage(layer,0,0,W,H);
+    tc.drawImage(layer,0,0,W,H);
+    ctx.save(); ctx.globalCompositeOperation='lighter'; ctx.globalAlpha=.11;
+    ctx.filter='blur(2px)'; ctx.drawImage(trail,0,0,W,H); ctx.restore();
+
+    if(!reduced.matches){
+      const remain=40;
+      for(let i=0;i<remain;i++){
+        const pp=points[(Math.floor(orbitClock*7)*37+i*83)%points.length];
+        const ph=pp.phase+orbitClock*pp.speed;
+        const r=(1.05+(i%7)*.10)*scale;
+        const x=cx+Math.cos(ph)*r*.72;
+        const y=cy+Math.sin(ph)*r*.30-12*Math.sin(ph*.7);
+        const a=.12+.10*Math.sin(ph*1.8);
+        ctx.globalAlpha=Math.max(0,a); ctx.fillStyle=i%4===0?'#e36a59':'#a94549';
+        ctx.fillRect(x,y,i%3===0?1.7:1,1.7);
+      }
+      ctx.globalAlpha=1;
+    }
+    requestAnimationFrame(draw);
+  }
+
+  canvas.addEventListener('pointerenter',e=>{ pointerInside=true; hasPointer=true; prevX=e.clientX; prevY=e.clientY; begin(); });
+  canvas.addEventListener('pointermove',e=>{
+    if(e.pointerType==='mouse'&&!reduced.matches&&hasPointer){
+      rotation+=(e.clientX-prevX)*.004+(e.clientY-prevY)*.0015;
+      prevX=e.clientX; prevY=e.clientY;
+    }
+  },{passive:true});
+  canvas.addEventListener('pointerleave',()=>{pointerInside=false;hasPointer=false;});
+  canvas.addEventListener('pointerdown',begin,{passive:true});
+  canvas.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();begin();}});
+  reduced.addEventListener?.('change',()=>{ if(reduced.matches){cycle=-1;scene.classList.remove('active');document.getElementById('hint').textContent='Reduced motion · static view';} });
+  if(reduced.matches) document.getElementById('hint').textContent='Reduced motion · static view';
+  document.addEventListener('visibilitychange',()=>{if(document.hidden)last=0;});
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

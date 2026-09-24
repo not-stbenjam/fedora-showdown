@@ -1,0 +1,1538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#06070a">
+  <title>Big ideas, built together</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #f5efec;
+      --muted: #9b9697;
+      --red: #e34b3e;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      min-height: 100%;
+      margin: 0;
+    }
+
+    body {
+      overflow: hidden;
+      background: #06070a;
+      color: var(--ink);
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    .scene {
+      position: relative;
+      isolation: isolate;
+      min-height: 100vh;
+      min-height: 100svh;
+      overflow: hidden;
+      background:
+        radial-gradient(ellipse at 50% 43%, rgba(76, 18, 19, 0.25) 0%, rgba(16, 11, 14, 0.12) 29%, transparent 61%),
+        radial-gradient(ellipse at 50% 48%, #111015 0%, #08090d 43%, #040507 100%);
+    }
+
+    .scene::before {
+      position: absolute;
+      z-index: 0;
+      inset: -20%;
+      content: "";
+      pointer-events: none;
+      opacity: 0.13;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.16) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.16) 1px, transparent 1px);
+      background-size: 68px 68px;
+      transform: perspective(620px) rotateX(63deg) translateY(30%);
+      transform-origin: 50% 100%;
+      mask-image: radial-gradient(ellipse 58% 48% at 50% 55%, #000 0%, transparent 76%);
+      -webkit-mask-image: radial-gradient(ellipse 58% 48% at 50% 55%, #000 0%, transparent 76%);
+    }
+
+    .scene::after {
+      position: absolute;
+      z-index: 1;
+      inset: 0;
+      content: "";
+      pointer-events: none;
+      box-shadow: inset 0 0 16vw 3vw rgba(0, 0, 0, 0.62);
+    }
+
+    .experience {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      width: 100%;
+      min-height: 100vh;
+      min-height: 100svh;
+      margin: 0;
+      padding: clamp(18px, 3svh, 36px);
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      border-radius: 0;
+      outline: 0;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+
+    .hat-wrap {
+      --spread: 1;
+      position: relative;
+      isolation: isolate;
+      width: min(92vw, 70svh, 720px);
+      aspect-ratio: 1.25 / 1;
+      transform: translateY(-1.2svh);
+      border-radius: 28px;
+    }
+
+    .experience:focus-visible .hat-wrap {
+      outline: 1px solid rgba(255, 184, 169, 0.55);
+      outline-offset: 9px;
+    }
+
+    .aura {
+      position: absolute;
+      z-index: -2;
+      top: 42%;
+      left: 50%;
+      width: 76%;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(210, 57, 44, 0.105) 0%, rgba(141, 34, 34, 0.045) 37%, transparent 70%);
+      filter: blur(8px);
+      transform: translate(-50%, -50%);
+      transition: opacity 700ms ease, transform 1.4s cubic-bezier(0.2, 0.7, 0.2, 1);
+    }
+
+    .is-active .aura {
+      opacity: 1.35;
+      transform: translate(-50%, -50%) scale(1.12);
+    }
+
+    .ground-shadow {
+      position: absolute;
+      z-index: -1;
+      top: 80%;
+      left: 50%;
+      width: 48%;
+      height: 8%;
+      border-radius: 50%;
+      pointer-events: none;
+      background: radial-gradient(ellipse, rgba(0, 0, 0, 0.86) 0%, rgba(0, 0, 0, 0.48) 39%, transparent 74%);
+      filter: blur(10px);
+      opacity: 0.9;
+      transform: translate(-50%, -50%) scaleX(var(--spread));
+      transition: opacity 400ms ease;
+    }
+
+    canvas,
+    .still {
+      position: absolute;
+      z-index: 1;
+      inset: 0;
+      display: block;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    canvas {
+      opacity: 0;
+      transition: opacity 450ms ease;
+    }
+
+    .still {
+      z-index: 0;
+      overflow: visible;
+      opacity: 1;
+      transition: opacity 450ms ease;
+    }
+
+    .webgl-ready canvas {
+      opacity: 1;
+    }
+
+    .webgl-ready .still {
+      opacity: 0;
+    }
+
+    .caption {
+      position: relative;
+      z-index: 2;
+      display: block;
+      margin-top: clamp(7px, 1.6svh, 18px);
+      color: #e8e2df;
+      font-size: clamp(14px, 1.5vw, 17px);
+      font-weight: 450;
+      line-height: 1.4;
+      letter-spacing: 0.025em;
+      text-align: center;
+      text-shadow: 0 2px 18px rgba(0, 0, 0, 0.8);
+      transition: color 500ms ease, text-shadow 500ms ease;
+    }
+
+    .is-active .caption {
+      color: #fffaf7;
+      text-shadow: 0 0 22px rgba(239, 93, 74, 0.24);
+    }
+
+    .hint {
+      position: relative;
+      z-index: 2;
+      display: block;
+      min-height: 1em;
+      margin-top: 9px;
+      color: #716d70;
+      font-size: 9px;
+      font-weight: 600;
+      line-height: 1.4;
+      letter-spacing: 0.24em;
+      text-align: center;
+      text-transform: uppercase;
+      transition: color 400ms ease, opacity 400ms ease, letter-spacing 500ms ease;
+    }
+
+    .is-active .hint {
+      color: #a99896;
+      opacity: 0.25;
+      letter-spacing: 0.3em;
+    }
+
+    .sr-only {
+      position: absolute !important;
+      width: 1px !important;
+      height: 1px !important;
+      padding: 0 !important;
+      margin: -1px !important;
+      overflow: hidden !important;
+      clip: rect(0, 0, 0, 0) !important;
+      white-space: nowrap !important;
+      border: 0 !important;
+    }
+
+    @media (max-width: 520px) {
+      .experience {
+        padding-inline: 12px;
+      }
+
+      .hat-wrap {
+        width: min(94vw, 66svh, 520px);
+        transform: translateY(-0.5svh);
+      }
+
+      .hint {
+        max-width: 90vw;
+        font-size: 8px;
+        letter-spacing: 0.2em;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.001ms !important;
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="scene" aria-labelledby="page-title">
+    <h1 id="page-title" class="sr-only">Big ideas, built together</h1>
+
+    <button
+      class="experience"
+      id="experience"
+      type="button"
+      aria-label="Interactive red fedora. Hover, tap, or activate to scatter it into glowing embers and reform it."
+      aria-describedby="hint"
+    >
+      <span class="hat-wrap" id="hat-wrap">
+        <span class="aura" aria-hidden="true"></span>
+        <span class="ground-shadow" id="ground-shadow" aria-hidden="true"></span>
+
+        <svg class="still" id="still" viewBox="0 0 800 640" aria-hidden="true" focusable="false">
+          <defs>
+            <linearGradient id="brimRed" x1="0" y1="0" x2="0.8" y2="1">
+              <stop offset="0" stop-color="#f15a48"/>
+              <stop offset="0.48" stop-color="#d94336"/>
+              <stop offset="1" stop-color="#8d211f"/>
+            </linearGradient>
+            <linearGradient id="crownRed" x1="0.08" y1="0" x2="0.9" y2="0.95">
+              <stop offset="0" stop-color="#f26450"/>
+              <stop offset="0.35" stop-color="#df493b"/>
+              <stop offset="0.74" stop-color="#bd302d"/>
+              <stop offset="1" stop-color="#7e1c20"/>
+            </linearGradient>
+            <linearGradient id="bandRed" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#812025"/>
+              <stop offset="0.45" stop-color="#5b1119"/>
+              <stop offset="1" stop-color="#350b12"/>
+            </linearGradient>
+            <linearGradient id="underRed" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#a42a28"/>
+              <stop offset="1" stop-color="#4b0d15"/>
+            </linearGradient>
+            <radialGradient id="hatGlow">
+              <stop offset="0" stop-color="#f35b49" stop-opacity="0.24"/>
+              <stop offset="1" stop-color="#f35b49" stop-opacity="0"/>
+            </radialGradient>
+            <filter id="softLift" x="-30%" y="-30%" width="160%" height="180%">
+              <feDropShadow dx="0" dy="20" stdDeviation="19" flood-color="#000" flood-opacity="0.62"/>
+            </filter>
+          </defs>
+
+          <ellipse cx="400" cy="505" rx="264" ry="33" fill="url(#hatGlow)"/>
+          <ellipse cx="400" cy="500" rx="222" ry="18" fill="#000" opacity="0.46"/>
+
+          <g filter="url(#softLift)">
+            <path
+              d="M91 443 C139 411 213 386 290 377 C371 367 456 370 521 382 C609 398 682 424 708 447 C730 466 680 485 622 495 C515 513 279 513 168 494 C112 485 72 465 91 443Z"
+              fill="url(#underRed)"
+            />
+            <path
+              d="M92 438 C143 404 220 380 292 371 C374 361 452 364 520 376 C601 391 674 416 707 440 C726 453 688 468 628 476 C516 492 281 491 169 474 C113 466 72 453 92 438Z"
+              fill="url(#brimRed)"
+            />
+            <path
+              d="M286 383 C295 330 307 245 326 187 C339 150 367 124 401 128 C436 122 465 149 479 188 C499 250 511 331 520 383 C449 402 352 402 286 383Z"
+              fill="url(#crownRed)"
+            />
+            <path
+              d="M295 316 C353 328 451 328 505 314 L518 373 C449 390 352 390 288 374Z"
+              fill="url(#bandRed)"
+            />
+            <path
+              d="M454 325 C465 323 478 328 481 339 C484 350 477 365 466 370 C454 372 447 360 447 347 C447 338 449 330 454 325Z"
+              fill="#451017"
+              opacity="0.88"
+            />
+            <path
+              d="M337 188 C350 156 374 139 400 143 C423 138 449 154 462 186 C428 171 373 171 337 188Z"
+              fill="#ff7a61"
+              opacity="0.18"
+            />
+            <path
+              d="M400 137 C387 159 389 177 402 192 C416 177 418 157 400 137Z"
+              fill="#70171d"
+              opacity="0.2"
+            />
+            <path
+              d="M113 442 C213 403 312 394 401 397 C502 394 607 408 687 443"
+              fill="none"
+              stroke="#ff8a70"
+              stroke-width="3"
+              stroke-linecap="round"
+              opacity="0.16"
+            />
+          </g>
+        </svg>
+
+        <canvas id="hat" aria-hidden="true"></canvas>
+      </span>
+
+      <span class="caption">Big ideas, built together.</span>
+      <span class="hint" id="hint">Hover or tap to release</span>
+    </button>
+
+    <div class="sr-only" id="status" aria-live="polite" aria-atomic="true"></div>
+  </main>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const root = document.documentElement;
+      const experience = document.getElementById("experience");
+      const hint = document.getElementById("hint");
+      const status = document.getElementById("status");
+      const canvas = document.getElementById("hat");
+      const shadow = document.getElementById("ground-shadow");
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+      let reduced = reducedMotion.matches;
+      let renderer = null;
+
+      const setCopy = () => {
+        if (reduced) {
+          hint.textContent = "Still edition · Reduced motion";
+          experience.setAttribute(
+            "aria-label",
+            "A red fedora illustration. Animation is disabled to respect your reduced motion preference."
+          );
+        } else {
+          hint.textContent = "Hover or tap to release";
+          experience.setAttribute(
+            "aria-label",
+            "Interactive red fedora. Hover, tap, or activate to scatter it into glowing embers and reform it."
+          );
+        }
+      };
+
+      const boot = () => {
+        if (reduced || renderer) return;
+
+        try {
+          renderer = createHatRenderer(canvas, shadow, experience, status);
+          root.classList.add("webgl-ready");
+        } catch (error) {
+          renderer = null;
+          root.classList.remove("webgl-ready");
+          hint.textContent = "Static edition";
+          experience.setAttribute("aria-label", "A stylized red fedora illustration.");
+          console.warn("The interactive renderer is unavailable.", error);
+        }
+      };
+
+      const halt = () => {
+        if (!renderer) return;
+        renderer.destroy();
+        renderer = null;
+        root.classList.remove("webgl-ready");
+        shadow.style.removeProperty("--spread");
+        shadow.style.removeProperty("opacity");
+        experience.classList.remove("is-active");
+      };
+
+      experience.addEventListener("click", () => {
+        if (reduced) {
+          status.textContent = "The hat remains still because reduced motion is enabled.";
+          return;
+        }
+
+        if (renderer && renderer.trigger()) {
+          status.textContent = "The hat is dispersing into glowing embers.";
+        }
+      });
+
+      experience.addEventListener("pointerenter", event => {
+        if (
+          !reduced &&
+          renderer &&
+          (event.pointerType === "mouse" || event.pointerType === "pen")
+        ) {
+          if (renderer.trigger()) {
+            status.textContent = "The hat is dispersing into glowing embers.";
+          }
+        }
+      });
+
+      const onMotionPreferenceChange = event => {
+        reduced = event.matches;
+        if (reduced) halt();
+        setCopy();
+        if (!reduced) boot();
+      };
+
+      if (reducedMotion.addEventListener) {
+        reducedMotion.addEventListener("change", onMotionPreferenceChange);
+      } else {
+        reducedMotion.addListener(onMotionPreferenceChange);
+      }
+
+      setCopy();
+      boot();
+
+      function createHatRenderer(canvas, shadow, experience, status) {
+        const gl =
+          canvas.getContext("webgl", {
+            alpha: true,
+            antialias: true,
+            depth: true,
+            premultipliedAlpha: true,
+            powerPreference: "high-performance"
+          }) ||
+          canvas.getContext("experimental-webgl", {
+            alpha: true,
+            antialias: true,
+            depth: true,
+            premultipliedAlpha: true
+          });
+
+        if (!gl) throw new Error("WebGL is not supported.");
+
+        const meshVertexShader = `
+          precision highp float;
+
+          attribute vec3 aPosition;
+          attribute vec3 aNormal;
+          attribute vec3 aColor;
+
+          uniform float uYaw;
+          uniform float uPitch;
+          uniform float uAspect;
+
+          varying vec3 vLocal;
+          varying vec3 vNormal;
+          varying vec3 vView;
+          varying vec3 vColor;
+
+          vec3 rotateY(vec3 p, float angle) {
+            float c = cos(angle);
+            float s = sin(angle);
+            return vec3(c * p.x + s * p.z, p.y, -s * p.x + c * p.z);
+          }
+
+          vec3 rotateX(vec3 p, float angle) {
+            float c = cos(angle);
+            float s = sin(angle);
+            return vec3(p.x, c * p.y - s * p.z, s * p.y + c * p.z);
+          }
+
+          void main() {
+            vec3 p = aPosition - vec3(0.0, 0.62, 0.0);
+            vec3 n = aNormal;
+
+            p = rotateY(p, uYaw);
+            p = rotateX(p, uPitch);
+            n = rotateY(n, uYaw);
+            n = rotateX(n, uPitch);
+
+            float perspective = 6.0 / max(4.5, 6.0 - p.z);
+
+            gl_Position = vec4(
+              p.x * 0.68 * perspective / uAspect,
+              p.y * 1.12 * perspective,
+              -0.18 + p.z * 0.025,
+              1.0
+            );
+
+            vLocal = aPosition;
+            vNormal = n;
+            vView = vec3(-p.x, -p.y, 6.0 - p.z);
+            vColor = aColor;
+          }
+        `;
+
+        const meshFragmentShader = `
+          precision highp float;
+
+          uniform float uDissolve;
+          uniform float uTime;
+
+          varying vec3 vLocal;
+          varying vec3 vNormal;
+          varying vec3 vView;
+          varying vec3 vColor;
+
+          float hash31(vec3 p) {
+            p = fract(p * 0.1031);
+            p += dot(p, p.yzx + 33.33);
+            return fract((p.x + p.y) * p.z);
+          }
+
+          void main() {
+            vec3 n = normalize(vNormal);
+            if (!gl_FrontFacing) n = -n;
+
+            vec3 view = normalize(vView);
+            vec3 keyDirection = normalize(vec3(-0.52, 0.86, 1.0));
+            vec3 fillDirection = normalize(vec3(0.82, 0.30, 0.55));
+
+            float key = max(dot(n, keyDirection), 0.0);
+            float fill = max(dot(n, fillDirection), 0.0);
+            float hemisphere = 0.5 + 0.5 * n.y;
+            vec3 halfDirection = normalize(keyDirection + view);
+
+            float specular = pow(max(dot(n, halfDirection), 0.0), 58.0);
+            float rim = pow(1.0 - max(dot(n, view), 0.0), 3.0);
+
+            vec3 color = vColor * (0.31 + key * 0.76 + fill * 0.16 + hemisphere * 0.08);
+            color += vec3(1.0, 0.72, 0.52) * specular * 0.29;
+            color += vec3(1.0, 0.15, 0.08) * rim * 0.14;
+
+            float grain = hash31(floor(vLocal * 34.0));
+            float threshold = uDissolve * 1.04 - 0.01;
+
+            if (uDissolve > 0.0001 && grain < threshold) discard;
+
+            float edge = 1.0 - smoothstep(0.0, 0.055, abs(grain - threshold));
+            edge *= smoothstep(0.001, 0.08, uDissolve);
+            float flicker = 0.82 + 0.18 * sin(uTime * 8.0 + grain * 41.0);
+            color = mix(color, vec3(1.0, 0.53, 0.25), edge * 0.68 * flicker);
+
+            gl_FragColor = vec4(min(color, vec3(1.0)), 1.0);
+          }
+        `;
+
+        const particleVertexShader = `
+          precision highp float;
+
+          attribute vec3 aPosition;
+          attribute vec3 aColor;
+          attribute vec4 aSeed;
+
+          uniform float uYaw;
+          uniform float uPitch;
+          uniform float uAspect;
+          uniform float uProgress;
+          uniform float uDpr;
+
+          varying vec3 vColor;
+          varying float vAlpha;
+
+          vec3 rotateY(vec3 p, float angle) {
+            float c = cos(angle);
+            float s = sin(angle);
+            return vec3(c * p.x + s * p.z, p.y, -s * p.x + c * p.z);
+          }
+
+          vec3 rotateX(vec3 p, float angle) {
+            float c = cos(angle);
+            float s = sin(angle);
+            return vec3(p.x, c * p.y - s * p.z, s * p.y + c * p.z);
+          }
+
+          void main() {
+            vec3 rest = aPosition - vec3(0.0, 0.62, 0.0);
+            rest = rotateY(rest, uYaw);
+            rest = rotateX(rest, uPitch);
+
+            float t = uProgress;
+            float release = smoothstep(aSeed.x * 0.10, 0.24 + aSeed.x * 0.11, t);
+            float returnHome = 1.0 - smoothstep(0.68 + aSeed.y * 0.10, 0.995, t);
+            float scatter = release * returnHome;
+
+            vec3 radial = normalize(rest + vec3(0.001, 0.018, 0.002));
+            vec3 tangent = normalize(cross(vec3(0.0, 1.0, 0.0), radial) + vec3(0.0001));
+            vec3 bitangent = normalize(cross(radial, tangent));
+
+            vec3 direction = normalize(
+              radial +
+              tangent * (aSeed.y - 0.5) * 1.5 +
+              bitangent * (aSeed.z - 0.5) * 0.9
+            );
+
+            float reach = 0.48 + 1.62 * pow(aSeed.w, 0.66);
+            float phase = aSeed.x * 6.2831853;
+
+            vec3 p = rest;
+            p += direction * reach * scatter;
+            p += tangent * sin(phase + t * 8.2) * (0.20 + 0.34 * aSeed.z) * scatter;
+            p += bitangent * cos(phase * 1.7 + t * 6.4) * (0.12 + 0.24 * aSeed.y) * scatter;
+            p.y += sin(phase * 2.1 + t * 9.0) * 0.38 * scatter;
+            p.z += 0.025 * scatter;
+
+            float perspective = 6.0 / max(4.5, 6.0 - p.z);
+
+            gl_Position = vec4(
+              p.x * 0.68 * perspective / uAspect,
+              p.y * 1.12 * perspective,
+              -0.18 + p.z * 0.025,
+              1.0
+            );
+
+            gl_PointSize = (1.0 + 1.8 * aSeed.z) * uDpr * (1.0 + 0.18 * scatter);
+            vColor = mix(aColor, vec3(1.0, 0.53, 0.24), 0.28 + 0.28 * aSeed.w);
+            vAlpha = mix(0.018, 0.50, smoothstep(0.015, 0.34, scatter));
+          }
+        `;
+
+        const particleFragmentShader = `
+          precision highp float;
+
+          varying vec3 vColor;
+          varying float vAlpha;
+
+          void main() {
+            vec2 point = gl_PointCoord * 2.0 - 1.0;
+            float radiusSquared = dot(point, point);
+            if (radiusSquared > 1.0) discard;
+
+            float halo = exp(-radiusSquared * 5.5);
+            float core = exp(-radiusSquared * 22.0);
+            float alpha = (halo * 0.42 + core * 0.58) * vAlpha;
+
+            gl_FragColor = vec4(vColor * (0.80 + core * 0.80), alpha);
+          }
+        `;
+
+        const orbitVertexShader = `
+          precision highp float;
+
+          attribute vec4 aSeed;
+          attribute float aFade;
+          attribute float aHead;
+
+          uniform float uAspect;
+          uniform float uTime;
+          uniform float uDpr;
+          uniform float uOrbitLevel;
+          uniform float uHeadPass;
+
+          varying vec3 vColor;
+          varying float vAlpha;
+          varying float vHead;
+
+          vec3 orbitPosition(float time) {
+            float angle =
+              aSeed.w * 6.2831853 +
+              time * (0.16 + 0.14 * aSeed.x) +
+              0.12 * sin(time * 0.31 + aSeed.z * 6.2831853);
+
+            float radius = 0.78 + 0.67 * aSeed.x;
+            vec3 p = vec3(
+              cos(angle) * radius,
+              0.10 + sin(angle * 1.7 + aSeed.y * 6.2831853) * 0.22,
+              sin(angle) * radius * 0.48
+            );
+
+            p.y += sin(time * 0.50 + aSeed.y * 8.0) * 0.075;
+            p.x += 0.07 * sin(time * 0.37 + aSeed.z * 7.0);
+
+            float c = cos(0.30);
+            float s = sin(0.30);
+            return vec3(p.x, c * p.y - s * p.z, s * p.y + c * p.z);
+          }
+
+          void main() {
+            float tail = (1.0 - aFade) * 0.72;
+            vec3 p = orbitPosition(uTime - tail);
+            float perspective = 6.0 / max(4.5, 6.0 - p.z);
+
+            gl_Position = vec4(
+              p.x * 0.68 * perspective / uAspect,
+              p.y * 1.12 * perspective,
+              -0.14 + p.z * 0.02,
+              1.0
+            );
+
+            gl_PointSize = (1.4 + 2.0 * aSeed.z) * uDpr * (1.0 + 0.25 * uOrbitLevel);
+            vColor = mix(vec3(0.96, 0.29, 0.16), vec3(1.0, 0.67, 0.33), aSeed.y * 0.55);
+            vAlpha = aFade * uOrbitLevel * mix(0.16, 1.0, uHeadPass);
+            vHead = aHead;
+          }
+        `;
+
+        const orbitFragmentShader = `
+          precision highp float;
+
+          varying vec3 vColor;
+          varying float vAlpha;
+          varying float vHead;
+
+          void main() {
+            if (vHead < 0.5) {
+              gl_FragColor = vec4(vColor, vAlpha);
+              return;
+            }
+
+            vec2 point = gl_PointCoord * 2.0 - 1.0;
+            float radiusSquared = dot(point, point);
+            if (radiusSquared > 1.0) discard;
+
+            float glow = exp(-radiusSquared * 5.5) + 0.22 * exp(-radiusSquared * 1.6);
+            gl_FragColor = vec4(vColor * (0.82 + 0.58 * (1.0 - radiusSquared)), glow * vAlpha);
+          }
+        `;
+
+        const createProgram = (vertexSource, fragmentSource, attributeLocations, uniformNames) => {
+          const compile = (type, source) => {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+              const message = gl.getShaderInfoLog(shader);
+              gl.deleteShader(shader);
+              throw new Error(message || "Shader compilation failed.");
+            }
+
+            return shader;
+          };
+
+          const vertex = compile(gl.VERTEX_SHADER, vertexSource);
+          const fragment = compile(gl.FRAGMENT_SHADER, fragmentSource);
+          const program = gl.createProgram();
+
+          gl.attachShader(program, vertex);
+          gl.attachShader(program, fragment);
+
+          Object.keys(attributeLocations).forEach(name => {
+            gl.bindAttribLocation(program, attributeLocations[name], name);
+          });
+
+          gl.linkProgram(program);
+          gl.deleteShader(vertex);
+          gl.deleteShader(fragment);
+
+          if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            const message = gl.getProgramInfoLog(program);
+            gl.deleteProgram(program);
+            throw new Error(message || "Shader linking failed.");
+          }
+
+          const attributes = {};
+          const uniforms = {};
+
+          Object.keys(attributeLocations).forEach(name => {
+            attributes[name] = gl.getAttribLocation(program, name);
+          });
+
+          uniformNames.forEach(name => {
+            uniforms[name] = gl.getUniformLocation(program, name);
+          });
+
+          return { program, attributes, uniforms };
+        };
+
+        const meshProgram = createProgram(
+          meshVertexShader,
+          meshFragmentShader,
+          { aPosition: 0, aNormal: 1, aColor: 2 },
+          ["uYaw", "uPitch", "uAspect", "uDissolve", "uTime"]
+        );
+
+        const particleProgram = createProgram(
+          particleVertexShader,
+          particleFragmentShader,
+          { aPosition: 0, aColor: 1, aSeed: 2 },
+          ["uYaw", "uPitch", "uAspect", "uProgress", "uDpr"]
+        );
+
+        const orbitProgram = createProgram(
+          orbitVertexShader,
+          orbitFragmentShader,
+          { aSeed: 0, aFade: 1, aHead: 2 },
+          ["uAspect", "uTime", "uDpr", "uOrbitLevel", "uHeadPass"]
+        );
+
+        const geometry = buildHatGeometry();
+        const particleCount = window.innerWidth < 700 ? 12000 : 18000;
+        const particles = buildParticles(geometry, particleCount);
+        const orbit = buildOrbitBuffer(24, 8);
+
+        const createBuffer = data => {
+          const buffer = gl.createBuffer();
+          gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+          gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+          return buffer;
+        };
+
+        const meshBuffer = createBuffer(geometry.data);
+        const particlePositionBuffer = createBuffer(particles.positions);
+        const particleColorBuffer = createBuffer(particles.colors);
+        const particleSeedBuffer = createBuffer(particles.seeds);
+        const orbitBuffer = createBuffer(orbit.data);
+
+        let active = false;
+        let elapsed = 0;
+        let visualTime = 0;
+        let rotation = -0.45;
+        let spinVelocity = 0.26;
+        let afterglow = 0;
+        let aspect = 1;
+        let pixelRatio = 1;
+        let lastTime = performance.now();
+        let raf = 0;
+        let destroyed = false;
+
+        const duration = 4.8;
+        const baseSpeed = 0.26;
+        const pitch = 0.085;
+
+        const resize = () => {
+          const rect = canvas.getBoundingClientRect();
+          if (!rect.width || !rect.height) return;
+
+          const ratio = Math.min(
+            window.devicePixelRatio || 1,
+            2,
+            2400 / Math.max(rect.width, rect.height)
+          );
+
+          const width = Math.max(1, Math.round(rect.width * ratio));
+          const height = Math.max(1, Math.round(rect.height * ratio));
+
+          if (canvas.width !== width || canvas.height !== height) {
+            canvas.width = width;
+            canvas.height = height;
+          }
+
+          gl.viewport(0, 0, width, height);
+          aspect = width / height;
+          pixelRatio = width / rect.width;
+        };
+
+        const bindMesh = () => {
+          gl.bindBuffer(gl.ARRAY_BUFFER, meshBuffer);
+          gl.enableVertexAttribArray(meshProgram.attributes.aPosition);
+          gl.vertexAttribPointer(meshProgram.attributes.aPosition, 3, gl.FLOAT, false, 36, 0);
+          gl.enableVertexAttribArray(meshProgram.attributes.aNormal);
+          gl.vertexAttribPointer(meshProgram.attributes.aNormal, 3, gl.FLOAT, false, 36, 12);
+          gl.enableVertexAttribArray(meshProgram.attributes.aColor);
+          gl.vertexAttribPointer(meshProgram.attributes.aColor, 3, gl.FLOAT, false, 36, 24);
+        };
+
+        const bindParticles = () => {
+          gl.bindBuffer(gl.ARRAY_BUFFER, particlePositionBuffer);
+          gl.enableVertexAttribArray(particleProgram.attributes.aPosition);
+          gl.vertexAttribPointer(particleProgram.attributes.aPosition, 3, gl.FLOAT, false, 0, 0);
+
+          gl.bindBuffer(gl.ARRAY_BUFFER, particleColorBuffer);
+          gl.enableVertexAttribArray(particleProgram.attributes.aColor);
+          gl.vertexAttribPointer(particleProgram.attributes.aColor, 3, gl.FLOAT, false, 0, 0);
+
+          gl.bindBuffer(gl.ARRAY_BUFFER, particleSeedBuffer);
+          gl.enableVertexAttribArray(particleProgram.attributes.aSeed);
+          gl.vertexAttribPointer(particleProgram.attributes.aSeed, 4, gl.FLOAT, false, 0, 0);
+        };
+
+        const bindOrbit = () => {
+          gl.bindBuffer(gl.ARRAY_BUFFER, orbitBuffer);
+          gl.enableVertexAttribArray(orbitProgram.attributes.aSeed);
+          gl.vertexAttribPointer(orbitProgram.attributes.aSeed, 4, gl.FLOAT, false, 24, 0);
+          gl.enableVertexAttribArray(orbitProgram.attributes.aFade);
+          gl.vertexAttribPointer(orbitProgram.attributes.aFade, 1, gl.FLOAT, false, 24, 16);
+          gl.enableVertexAttribArray(orbitProgram.attributes.aHead);
+          gl.vertexAttribPointer(orbitProgram.attributes.aHead, 1, gl.FLOAT, false, 24, 20);
+        };
+
+        const frame = now => {
+          if (destroyed) return;
+          raf = window.requestAnimationFrame(frame);
+
+          const dt = Math.min(Math.max((now - lastTime) / 1000, 0), 0.05);
+          lastTime = now;
+          visualTime += dt;
+
+          let progress = 0;
+          let dissolve = 0;
+
+          if (active) {
+            elapsed += dt;
+            progress = Math.min(elapsed / duration, 1);
+
+            if (progress < 0.24) {
+              dissolve = smoothstep(0, 0.24, progress);
+            } else if (progress > 0.72) {
+              dissolve = 1 - smoothstep(0.72, 1, progress);
+            } else {
+              dissolve = 1;
+            }
+
+            const shadowPulse = Math.sin(progress * Math.PI);
+            shadow.style.setProperty("--spread", (1 + shadowPulse * 0.24).toFixed(3));
+            shadow.style.opacity = (0.90 - shadowPulse * 0.17).toFixed(3);
+
+            if (progress >= 1) {
+              active = false;
+              elapsed = 0;
+              progress = 0;
+              dissolve = 0;
+              afterglow = 0.9;
+              experience.classList.remove("is-active");
+              shadow.style.removeProperty("--spread");
+              shadow.style.removeProperty("opacity");
+              status.textContent = "The hat has reformed.";
+            }
+          } else {
+            afterglow *= Math.exp(-dt * 0.68);
+          }
+
+          const wantedSpeed = active ? 0 : baseSpeed;
+          spinVelocity += (wantedSpeed - spinVelocity) * (1 - Math.exp(-dt * (active ? 3.2 : 1.05)));
+          rotation += spinVelocity * dt;
+
+          const yaw = rotation;
+          const orbitLevel = active ? 1 : 0.16 + afterglow * 0.36;
+
+          gl.clearColor(0, 0, 0, 0);
+          gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+          gl.enable(gl.DEPTH_TEST);
+          gl.depthFunc(gl.LEQUAL);
+          gl.disable(gl.CULL_FACE);
+          gl.disable(gl.BLEND);
+          gl.depthMask(true);
+
+          gl.useProgram(meshProgram.program);
+          gl.uniform1f(meshProgram.uniforms.uYaw, yaw);
+          gl.uniform1f(meshProgram.uniforms.uPitch, pitch);
+          gl.uniform1f(meshProgram.uniforms.uAspect, aspect);
+          gl.uniform1f(meshProgram.uniforms.uDissolve, dissolve);
+          gl.uniform1f(meshProgram.uniforms.uTime, visualTime);
+          bindMesh();
+          gl.drawArrays(gl.TRIANGLES, 0, geometry.count);
+
+          gl.enable(gl.BLEND);
+          gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+          gl.depthMask(false);
+
+          gl.useProgram(particleProgram.program);
+          gl.uniform1f(particleProgram.uniforms.uYaw, yaw);
+          gl.uniform1f(particleProgram.uniforms.uPitch, pitch);
+          gl.uniform1f(particleProgram.uniforms.uAspect, aspect);
+          gl.uniform1f(particleProgram.uniforms.uProgress, progress);
+          gl.uniform1f(particleProgram.uniforms.uDpr, pixelRatio);
+          bindParticles();
+          gl.drawArrays(gl.POINTS, 0, particleCount);
+
+          gl.useProgram(orbitProgram.program);
+          gl.uniform1f(orbitProgram.uniforms.uAspect, aspect);
+          gl.uniform1f(orbitProgram.uniforms.uTime, visualTime);
+          gl.uniform1f(orbitProgram.uniforms.uDpr, pixelRatio);
+          gl.uniform1f(orbitProgram.uniforms.uOrbitLevel, orbitLevel);
+          bindOrbit();
+
+          gl.uniform1f(orbitProgram.uniforms.uHeadPass, 0);
+          gl.drawArrays(gl.LINES, 0, orbit.trailVertexCount);
+
+          gl.uniform1f(orbitProgram.uniforms.uHeadPass, 1);
+          gl.drawArrays(gl.POINTS, orbit.trailVertexCount, orbit.headCount);
+
+          gl.depthMask(true);
+          gl.disable(gl.BLEND);
+        };
+
+        const onResize = () => resize();
+        const onVisibilityChange = () => {
+          lastTime = performance.now();
+        };
+
+        window.addEventListener("resize", onResize, { passive: true });
+        document.addEventListener("visibilitychange", onVisibilityChange);
+
+        resize();
+        frame(performance.now());
+
+        return {
+          trigger() {
+            if (active || destroyed) return false;
+            active = true;
+            elapsed = 0;
+            afterglow = 0.12;
+            experience.classList.add("is-active");
+            return true;
+          },
+
+          destroy() {
+            destroyed = true;
+            window.cancelAnimationFrame(raf);
+            window.removeEventListener("resize", onResize);
+            document.removeEventListener("visibilitychange", onVisibilityChange);
+            gl.deleteBuffer(meshBuffer);
+            gl.deleteBuffer(particlePositionBuffer);
+            gl.deleteBuffer(particleColorBuffer);
+            gl.deleteBuffer(particleSeedBuffer);
+            gl.deleteBuffer(orbitBuffer);
+            gl.deleteProgram(meshProgram.program);
+            gl.deleteProgram(particleProgram.program);
+            gl.deleteProgram(orbitProgram.program);
+          }
+        };
+      }
+
+      function smoothstep(min, max, value) {
+        const x = Math.min(Math.max((value - min) / (max - min), 0), 1);
+        return x * x * (3 - 2 * x);
+      }
+
+      function clamp(value, min = 0, max = 1) {
+        return Math.min(Math.max(value, min), max);
+      }
+
+      function mixColor(a, b, t) {
+        return [
+          a[0] + (b[0] - a[0]) * t,
+          a[1] + (b[1] - a[1]) * t,
+          a[2] + (b[2] - a[2]) * t
+        ];
+      }
+
+      function scaleColor(color, scale) {
+        return [
+          clamp(color[0] * scale),
+          clamp(color[1] * scale),
+          clamp(color[2] * scale)
+        ];
+      }
+
+      function angleDistance(a, b) {
+        return Math.atan2(Math.sin(a - b), Math.cos(a - b));
+      }
+
+      function buildHatGeometry() {
+        const positions = [];
+        const normals = [];
+        const colors = [];
+        const TAU = Math.PI * 2;
+
+        const crownDeep = [0.67, 0.075, 0.075];
+        const crownRed = [0.88, 0.19, 0.145];
+        const crownTop = [0.92, 0.225, 0.17];
+        const brimRed = [0.80, 0.14, 0.115];
+        const brimUnder = [0.37, 0.035, 0.05];
+        const bandDark = [0.20, 0.012, 0.025];
+        const bandRed = [0.40, 0.035, 0.045];
+
+        const addTriangle = (a, b, c, color, outward) => {
+          const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+          const ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+          let normal = [
+            ab[1] * ac[2] - ab[2] * ac[1],
+            ab[2] * ac[0] - ab[0] * ac[2],
+            ab[0] * ac[1] - ab[1] * ac[0]
+          ];
+
+          let second = b;
+          let third = c;
+          const length = Math.hypot(normal[0], normal[1], normal[2]) || 1;
+          normal = normal.map(value => value / length);
+
+          const alignment =
+            normal[0] * outward[0] +
+            normal[1] * outward[1] +
+            normal[2] * outward[2];
+
+          if (alignment < 0) {
+            second = c;
+            third = b;
+            normal = [-normal[0], -normal[1], -normal[2]];
+          }
+
+          [a, second, third].forEach(point => {
+            positions.push(point[0], point[1], point[2]);
+            normals.push(normal[0], normal[1], normal[2]);
+            colors.push(color[0], color[1], color[2]);
+          });
+        };
+
+        const addSurface = (
+          grid,
+          rows,
+          columns,
+          wrap,
+          colorAt,
+          hintAt
+        ) => {
+          const finalColumn = wrap ? columns : columns - 1;
+
+          for (let row = 0; row < rows - 1; row++) {
+            for (let column = 0; column < finalColumn; column++) {
+              const next = (column + 1) % columns;
+              const a = grid[row][column];
+              const b = grid[row][next];
+              const c = grid[row + 1][next];
+              const d = grid[row + 1][column];
+
+              addTriangle(a, b, c, colorAt(a, row, column), hintAt(a, row, column));
+              addTriangle(a, c, d, colorAt(a, row + 1, column), hintAt(d, row + 1, column));
+            }
+          }
+        };
+
+        const radialHint = (point, inward = false) => {
+          const length = Math.hypot(point[0], point[2]) || 1;
+          const sign = inward ? -1 : 1;
+          return [point[0] / length * sign, 0.08, point[2] / length * sign];
+        };
+
+        const crownTopAt = angle => {
+          const front = Math.pow(Math.max(0, Math.cos(angle)), 8);
+          const back = Math.pow(Math.max(0, -Math.cos(angle)), 7);
+          return 1.28 - 0.08 * front - 0.025 * back + 0.012 * Math.cos(angle * 2);
+        };
+
+        const crownRadiusAt = (angle, t) => {
+          const front = Math.pow(Math.max(0, Math.cos(angle)), 6);
+          const back = Math.pow(Math.max(0, -Math.cos(angle)), 6);
+          let radius = 0.79 - 0.29 * smoothstep(0, 1, t);
+          radius += 0.025 * Math.sin(Math.PI * t) * Math.cos(angle * 2);
+          radius -= 0.10 * front * Math.pow(t, 2.4);
+          radius -= 0.05 * back * Math.pow(t, 3);
+          return radius;
+        };
+
+        const crownPoint = (angle, t) => {
+          const radius = crownRadiusAt(angle, t);
+          const y = 0.25 + (crownTopAt(angle) - 0.25) * t
+            + 0.012 * Math.sin(Math.PI * t) * Math.sin(angle);
+          return [Math.cos(angle) * radius, y, Math.sin(angle) * radius];
+        };
+
+        const brimSurface = (angle, t, top) => {
+          const front = Math.pow(Math.max(0, Math.cos(angle)), 5);
+          const back = Math.pow(Math.max(0, -Math.cos(angle)), 6);
+          const inner = 0.69 + 0.012 * Math.cos(angle * 2);
+          const outer = 1.48 + 0.11 * front - 0.03 * back + 0.025 * Math.cos(angle * 2 + 0.3);
+          const radius = inner + (outer - inner) * t;
+          const lift = 0.052 * Math.exp(-Math.pow((radius - 0.83) / 0.22, 2)) * (1 - t);
+          const drop = 0.145 * Math.pow(t, 1.75);
+          const frontLift = 0.05 * front * t;
+          const sweep = 0.018 * Math.sin(angle - 0.35) * Math.pow(t, 1.5);
+          const y = 0.24 + lift - drop + frontLift + sweep;
+
+          if (top) return [Math.cos(angle) * radius, y, Math.sin(angle) * radius];
+
+          const thickness = 0.052 - 0.021 * t;
+          return [Math.cos(angle) * radius, y - thickness, Math.sin(angle) * radius];
+        };
+
+        const angularSegments = 128;
+        const brimRings = 22;
+        const topBrim = [];
+        const bottomBrim = [];
+
+        for (let ring = 0; ring <= brimRings; ring++) {
+          const t = ring / brimRings;
+          const topRing = [];
+          const bottomRing = [];
+
+          for (let segment = 0; segment < angularSegments; segment++) {
+            const angle = segment / angularSegments * TAU;
+            topRing.push(brimSurface(angle, t, true));
+            bottomRing.push(brimSurface(angle, t, false));
+          }
+
+          topBrim.push(topRing);
+          bottomBrim.push(bottomRing);
+        }
+
+        addSurface(
+          topBrim,
+          brimRings + 1,
+          angularSegments,
+          true,
+          point => {
+            const shade = 0.94 + 0.055 * Math.atan2(point[2], point[0]);
+            return scaleColor(brimRed, shade);
+          },
+          () => [0, 1, 0]
+        );
+
+        addSurface(
+          bottomBrim,
+          brimRings + 1,
+          angularSegments,
+          true,
+          () => brimUnder,
+          () => [0, -1, 0]
+        );
+
+        const outerEdge = [];
+        const innerEdge = [];
+
+        for (let segment = 0; segment < angularSegments; segment++) {
+          const angle = segment / angularSegments * TAU;
+          outerEdge.push([
+            topBrim[brimRings][segment],
+            bottomBrim[brimRings][segment]
+          ]);
+          innerEdge.push([
+            topBrim[0][segment],
+            bottomBrim[0][segment]
+          ]);
+        }
+
+        addSurface(outerEdge, 2, angularSegments, true, () => scaleColor(brimUnder, 0.9), point => radialHint(point));
+        addSurface(innerEdge, 2, angularSegments, true, () => scaleColor(crownDeep, 0.9), point => radialHint(point, true));
+
+        const crownRings = 34;
+        const crown = [];
+
+        for (let ring = 0; ring <= crownRings; ring++) {
+          const t = ring / crownRings;
+          const row = [];
+
+          for (let segment = 0; segment < angularSegments; segment++) {
+            row.push(crownPoint(segment / angularSegments * TAU, t));
+          }
+
+          crown.push(row);
+        }
+
+        addSurface(
+          crown,
+          crownRings + 1,
+          angularSegments,
+          true,
+          point => {
+            const t = clamp((point[1] - 0.25) / 1.02);
+            const angle = Math.atan2(point[2], point[0]);
+            const color = mixColor(crownDeep, crownRed, 0.40 + t * 0.52);
+            return scaleColor(color, 0.98 + 0.035 * Math.sin(angle - 0.5) * (1 - t));
+          },
+          point => radialHint(point)
+        );
+
+        const bandRows = 4;
+        const band = [];
+
+        for (let row = 0; row <= bandRows; row++) {
+          const vertical = row / bandRows;
+          const y = 0.48 + 0.19 * vertical;
+          const bandRing = [];
+
+          for (let segment = 0; segment < angularSegments; segment++) {
+            const angle = segment / angularSegments * TAU;
+            const t = (y - 0.25) / (crownTopAt(angle) - 0.25);
+            const radius = crownRadiusAt(angle, t) + 0.024;
+            bandRing.push([Math.cos(angle) * radius, y, Math.sin(angle) * radius]);
+          }
+
+          band.push(bandRing);
+        }
+
+        addSurface(
+          band,
+          bandRows + 1,
+          angularSegments,
+          true,
+          point => {
+            const vertical = clamp((point[1] - 0.48) / 0.19);
+            return scaleColor(mixColor(bandDark, bandRed, vertical), 1 + 0.03 * Math.sin(vertical * Math.PI));
+          },
+          point => radialHint(point)
+        );
+
+        const capPoint = (angle, radial) => {
+          const edgeRadius = crownRadiusAt(angle, 1);
+          const radius = edgeRadius * radial;
+          const frontDistance = angleDistance(angle, 0);
+          const backDistance = angleDistance(angle, Math.PI);
+          const frontDent = 0.115 * Math.exp(-(frontDistance * frontDistance) / 0.12) * Math.sin(Math.PI * radial);
+          const backDent = 0.05 * Math.exp(-(backDistance * backDistance) / 0.50) * Math.sin(Math.PI * radial);
+          const ripple = 0.018 * Math.sin(angle * 2) * radial * (1 - radial);
+          const y = crownTopAt(angle) - 0.18 * radial * radial - frontDent - backDent - ripple;
+
+          return [Math.cos(angle) * radius, y, Math.sin(angle) * radius];
+        };
+
+        const center = [0, 1.105, 0];
+        let previous = Array(angularSegments).fill(center);
+        const capRings = 20;
+
+        for (let ring = 1; ring <= capRings; ring++) {
+          const radial = ring / capRings;
+          const current = [];
+
+          for (let segment = 0; segment < angularSegments; segment++) {
+            current.push(capPoint(segment / angularSegments * TAU, radial));
+          }
+
+          for (let segment = 0; segment < angularSegments; segment++) {
+            const next = (segment + 1) % angularSegments;
+            const a = previous[segment];
+            const b = current[segment];
+            const c = current[next];
+            const d = previous[next];
+            const color = scaleColor(
+              mixColor(crownRed, crownTop, radial * 0.22),
+              0.98 + 0.025 * Math.sin(segment / angularSegments * TAU * 2)
+            );
+
+            addTriangle(a, b, c, color, [0, 1, 0]);
+            addTriangle(a, c, d, color, [0, 1, 0]);
+          }
+
+          previous = current;
+        }
+
+        const foldRows = 8;
+        const foldColumns = 8;
+        const fold = [];
+
+        for (let row = 0; row <= foldRows; row++) {
+          const vertical = row / foldRows;
+          const y = 0.49 + 0.15 * vertical;
+          const foldRow = [];
+
+          for (let column = 0; column <= foldColumns; column++) {
+            const horizontal = column / foldColumns;
+            const width = 0.19 + 0.14 * Math.sin(vertical * Math.PI);
+            const angle = 0.30 + (horizontal - 0.5) * width;
+            const t = (y - 0.25) / (crownTopAt(angle) - 0.25);
+            const bulge = 0.025
+              + 0.030 * Math.sin(horizontal * Math.PI)
+              * Math.sin(vertical * Math.PI);
+            const radius = crownRadiusAt(angle, t) + 0.045 + bulge;
+
+            foldRow.push([
+              Math.cos(angle) * radius,
+              y + 0.003 * Math.sin(horizontal * Math.PI),
+              Math.sin(angle) * radius
+            ]);
+          }
+
+          fold.push(foldRow);
+        }
+
+        addSurface(
+          fold,
+          foldRows + 1,
+          foldColumns + 1,
+          false,
+          point => scaleColor([0.19, 0.009, 0.022], 0.88 + point[1] * 0.08),
+          point => radialHint(point)
+        );
+
+        const vertexCount = positions.length / 3;
+        const data = new Float32Array(positions.length * 3);
+        let cursor = 0;
+
+        for (let index = 0; index < positions.length; index++) {
+          data[cursor++] = positions[index];
+          data[cursor++] = normals[index];
+          data[cursor++] = colors[index];
+        }
+
+        return {
+          data,
+          count: vertexCount,
+          positions: new Float32Array(positions),
+          colors: new Float32Array(colors)
+        };
+      }
+
+      function buildParticles(geometry, count) {
+        const triangleCount = geometry.count / 3;
+        const cumulativeArea = new Float64Array(triangleCount);
+        let totalArea = 0;
+
+        for (let triangle = 0; triangle < triangleCount; triangle++) {
+          const offset = triangle * 9;
+          const ax = geometry.positions[offset];
+          const ay = geometry.positions[offset + 1];
+          const az = geometry.positions[offset + 2];
+          const bx = geometry.positions[offset + 3];
+          const by = geometry.positions[offset + 4];
+          const bz = geometry.positions[offset + 5];
+          const cx = geometry.positions[offset + 6];
+          const cy = geometry.positions[offset + 7];
+          const cz = geometry.positions[offset + 8];
+
+          const abx = bx - ax;
+          const aby = by - ay;
+          const abz = bz - az;
+          const acx = cx - ax;
+          const acy = cy - ay;
+          const acz = cz - az;
+
+          const crossX = aby * acz - abz * acy;
+          const crossY = abz * acx - abx * acz;
+          const crossZ = abx * acy - aby * acx;
+          totalArea += Math.hypot(crossX, crossY, crossZ) * 0.5;
+          cumulativeArea[triangle] = totalArea;
+        }
+
+        const positions = new Float32Array(count * 3);
+        const colors = new Float32Array(count * 3);
+        const seeds = new Float32Array(count * 4);
+
+        for (let particle = 0; particle < count; particle++) {
+          const target = Math.random() * totalArea;
+          let low = 0;
+          let high = triangleCount - 1;
+
+          while (low < high) {
+            const middle = (low + high) >> 1;
+            if (cumulativeArea[middle] < target) low = middle + 1;
+            else high = middle;
+          }
+
+          const offset = low * 9;
+          let baryA = Math.random();
+          let baryB = Math.random();
+
+          if (baryA + baryB > 1) {
+            baryA = 1 - baryA;
+            baryB = 1 - baryB;
+          }
+
+          const baryC = 1 - baryA - baryB;
+          const positionOffset = particle * 3;
+          const colorOffset = particle * 3;
+          const seedOffset = particle * 4;
+
+          for (let axis = 0; axis < 3; axis++) {
+            positions[positionOffset + axis] =
+              geometry.positions[offset + axis] * baryC +
+              geometry.positions[offset + 3 + axis] * baryA +
+              geometry.positions[offset + 6 + axis] * baryB;
+
+            colors[colorOffset + axis] =
+              geometry.colors[offset + axis] * baryC +
+              geometry.colors[offset + 3 + axis] * baryA +
+              geometry.colors[offset + 6 + axis] * baryB;
+          }
+
+          seeds[seedOffset] = Math.random();
+          seeds[seedOffset + 1] = Math.random();
+          seeds[seedOffset + 2] = Math.random();
+          seeds[seedOffset + 3] = Math.random();
+        }
+
+        return { positions, colors, seeds };
+      }
+
+      function buildOrbitBuffer(count, trailSegments) {
+        const trailVertexCount = count * trailSegments * 2;
+        const data = new Float32Array((trailVertexCount + count) * 6);
+        const seeds = new Float32Array(count * 4);
+        let cursor = 0;
+
+        for (let orbit = 0; orbit < count; orbit++) {
+          const seed = [
+            Math.random(),
+            Math.random(),
+            Math.random(),
+            Math.random()
+          ];
+          seeds.set(seed, orbit * 4);
+
+          for (let segment = 0; segment < trailSegments; segment++) {
+            const fades = [1 - segment / trailSegments, 1 - (segment + 1) / trailSegments];
+
+            fades.forEach(fade => {
+              data[cursor++] = seed[0];
+              data[cursor++] = seed[1];
+              data[cursor++] = seed[2];
+              data[cursor++] = seed[3];
+              data[cursor++] = fade;
+              data[cursor++] = 0;
+            });
+          }
+        }
+
+        for (let orbit = 0; orbit < count; orbit++) {
+          const offset = orbit * 4;
+          data[cursor++] = seeds[offset];
+          data[cursor++] = seeds[offset + 1];
+          data[cursor++] = seeds[offset + 2];
+          data[cursor++] = seeds[offset + 3];
+          data[cursor++] = 1;
+          data[cursor++] = 1;
+        }
+
+        return {
+          data,
+          trailVertexCount,
+          headCount: count
+        };
+      }
+    })();
+  </script>
+</body>
+</html>
