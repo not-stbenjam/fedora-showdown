@@ -1,0 +1,695 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#08090d">
+  <title>Ember Form — Interactive Fedora</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #f5eee6;
+      --muted: #9c9895;
+      --red: #ee493c;
+      --deep: #08090d;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { min-height: 100%; }
+
+    body {
+      margin: 0;
+      overflow-x: hidden;
+      background: var(--deep);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .scene {
+      position: relative;
+      isolation: isolate;
+      display: grid;
+      min-height: 100svh;
+      place-items: center;
+      overflow: hidden;
+      padding: 32px 24px 28px;
+      background:
+        radial-gradient(ellipse 52% 42% at 50% 50%, rgba(104, 26, 28, .17) 0%, rgba(27, 19, 22, .08) 43%, transparent 76%),
+        radial-gradient(ellipse 80% 65% at 50% 50%, #111217 0%, #090a0f 65%, #07080b 100%);
+    }
+
+    .scene::before {
+      position: absolute;
+      z-index: -1;
+      inset: 0;
+      pointer-events: none;
+      content: "";
+      opacity: .22;
+      background-image:
+        linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px);
+      background-size: 72px 72px;
+      mask-image: radial-gradient(ellipse at center, #000 0%, transparent 72%);
+    }
+
+    .scene::after {
+      position: absolute;
+      z-index: 5;
+      inset: 0;
+      pointer-events: none;
+      content: "";
+      background: radial-gradient(ellipse at center, transparent 36%, rgba(0,0,0,.28) 100%);
+    }
+
+    .hero {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      width: min(100%, 920px);
+      min-height: min(780px, 92svh);
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 0 0 15px;
+      color: #b8aaa1;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .26em;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before,
+    .eyebrow::after {
+      width: 28px;
+      height: 1px;
+      content: "";
+      background: linear-gradient(90deg, transparent, rgba(224, 85, 66, .72));
+    }
+
+    .eyebrow::after { transform: scaleX(-1); }
+
+    h1 {
+      max-width: 690px;
+      margin: 0;
+      color: #f1e9e1;
+      font-size: clamp(31px, 5.2vw, 67px);
+      font-weight: 300;
+      letter-spacing: -.055em;
+      line-height: .98;
+    }
+
+    h1 em {
+      color: #ed6250;
+      font-style: normal;
+    }
+
+    .intro {
+      max-width: 390px;
+      margin: 17px auto 0;
+      color: #898583;
+      font-size: 12px;
+      font-weight: 400;
+      letter-spacing: .02em;
+      line-height: 1.6;
+    }
+
+    .hat-zone {
+      position: relative;
+      display: grid;
+      width: min(100%, 620px);
+      height: clamp(255px, 38vw, 420px);
+      margin: 7px auto -3px;
+      place-items: center;
+      perspective: 1000px;
+      isolation: isolate;
+      cursor: crosshair;
+      outline: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .hat-zone::before {
+      position: absolute;
+      z-index: -1;
+      width: 66%;
+      height: 30%;
+      border-radius: 50%;
+      content: "";
+      background: rgba(193, 39, 37, .13);
+      filter: blur(48px);
+      opacity: .7;
+      transform: translateY(32px) scaleX(1.05);
+    }
+
+    .hat-shadow {
+      position: absolute;
+      z-index: -1;
+      bottom: 18%;
+      left: 50%;
+      width: 48%;
+      height: 9%;
+      border-radius: 50%;
+      background: rgba(0, 0, 0, .72);
+      filter: blur(15px);
+      transform: translateX(-50%) rotate(-2deg);
+      transition: opacity .5s ease;
+    }
+
+    .hat-model {
+      position: relative;
+      display: grid;
+      width: 100%;
+      height: 100%;
+      place-items: center;
+      transform: rotateX(-7deg) rotateY(0deg);
+      transform-style: preserve-3d;
+      will-change: transform;
+    }
+
+    .hat-model svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+      filter: drop-shadow(0 22px 19px rgba(0, 0, 0, .42)) drop-shadow(0 3px 2px rgba(0, 0, 0, .35));
+      transition: opacity .48s cubic-bezier(.22,.61,.36,1);
+    }
+
+    .hat-model.is-particles { opacity: 0; }
+
+    .hat-focus-ring {
+      position: absolute;
+      z-index: 3;
+      width: min(71%, 440px);
+      height: min(67%, 282px);
+      border: 1px solid rgba(238, 73, 60, .18);
+      border-radius: 48%;
+      opacity: 0;
+      pointer-events: none;
+      transform: rotate(-3deg) scale(.92);
+      transition: opacity .6s ease, transform .8s cubic-bezier(.2,.8,.2,1);
+    }
+
+    .hat-zone:hover .hat-focus-ring,
+    .hat-zone:focus-visible .hat-focus-ring {
+      opacity: 1;
+      transform: rotate(-3deg) scale(1);
+    }
+
+    #particles {
+      position: fixed;
+      z-index: 1;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .caption-row {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      color: #aaa19b;
+      font-size: 10px;
+      letter-spacing: .18em;
+      line-height: 1.4;
+      text-transform: uppercase;
+    }
+
+    .caption-row::before,
+    .caption-row::after {
+      width: 18px;
+      height: 1px;
+      content: "";
+      background: rgba(214, 125, 94, .45);
+    }
+
+    .caption { white-space: nowrap; }
+
+    .hint {
+      color: #625f61;
+      font-size: 9px;
+      letter-spacing: .12em;
+      text-transform: lowercase;
+    }
+
+    .hint::before { content: "· "; color: #ba4a3b; }
+
+    .corner-mark {
+      position: absolute;
+      z-index: 2;
+      bottom: 26px;
+      left: 32px;
+      color: #4b4a4d;
+      font-size: 9px;
+      letter-spacing: .2em;
+      text-transform: uppercase;
+    }
+
+    .corner-mark.right {
+      right: 32px;
+      left: auto;
+      text-align: right;
+    }
+
+    @media (max-height: 700px) and (min-width: 561px) {
+      .hero { min-height: 92svh; }
+      .hat-zone { height: clamp(220px, 33vh, 350px); margin-top: 0; }
+      .intro { margin-top: 11px; }
+    }
+
+    @media (max-width: 560px) {
+      .scene { padding-inline: 18px; }
+      .hero { min-height: 100svh; }
+      h1 { font-size: clamp(30px, 9vw, 48px); }
+      .intro { max-width: 300px; font-size: 11px; }
+      .hat-zone { height: clamp(235px, 67vw, 340px); margin-top: 4px; }
+      .hat-shadow { bottom: 14%; }
+      .caption-row { flex-direction: column; gap: 9px; font-size: 9px; }
+      .caption-row::before, .caption-row::after { display: none; }
+      .corner-mark { bottom: 17px; left: 18px; }
+      .corner-mark.right { right: 18px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        scroll-behavior: auto !important;
+        transition-duration: .01ms !important;
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="scene">
+    <canvas id="particles" aria-hidden="true"></canvas>
+
+    <section class="hero" aria-labelledby="title">
+      <p class="eyebrow">An icon in motion</p>
+      <h1 id="title">Built to move.<br><em>Made to return.</em></h1>
+      <p class="intro">A small study in heat, depth, and the space between form and feeling.</p>
+
+      <div class="hat-zone" id="hatZone" tabindex="0" role="button" aria-label="Interactive fedora. Hover or tap to scatter and reform it.">
+        <div class="hat-focus-ring" aria-hidden="true"></div>
+        <div class="hat-shadow" id="hatShadow" aria-hidden="true"></div>
+        <div class="hat-model" id="hatModel">
+          <svg viewBox="0 0 480 340" role="img" aria-label="A red fedora logo" focusable="false">
+            <defs>
+              <linearGradient id="crown" x1="0" y1="0" x2=".9" y2="1">
+                <stop offset="0" stop-color="#ff7054"/>
+                <stop offset=".2" stop-color="#e9483c"/>
+                <stop offset=".62" stop-color="#bb2730"/>
+                <stop offset="1" stop-color="#761923"/>
+              </linearGradient>
+              <linearGradient id="crownLight" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#ff8b63" stop-opacity=".68"/>
+                <stop offset=".52" stop-color="#f15845" stop-opacity=".12"/>
+                <stop offset="1" stop-color="#7f1824" stop-opacity="0"/>
+              </linearGradient>
+              <linearGradient id="band" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0" stop-color="#721a25"/>
+                <stop offset=".25" stop-color="#bd2930"/>
+                <stop offset=".56" stop-color="#f15a45"/>
+                <stop offset="1" stop-color="#851b28"/>
+              </linearGradient>
+              <linearGradient id="brim" x1="0" y1="0" x2=".85" y2="1">
+                <stop offset="0" stop-color="#f15b46"/>
+                <stop offset=".25" stop-color="#bf2930"/>
+                <stop offset=".62" stop-color="#771a26"/>
+                <stop offset="1" stop-color="#3b1420"/>
+              </linearGradient>
+              <linearGradient id="brimEdge" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0" stop-color="#ff7958" stop-opacity=".45"/>
+                <stop offset=".45" stop-color="#f2644d" stop-opacity=".06"/>
+                <stop offset="1" stop-color="#5f1522" stop-opacity=".38"/>
+              </linearGradient>
+            </defs>
+
+            <path d="M114 211 135 122c8-31 34-52 76-59 48-8 96 2 121 25 15 14 23 35 30 67l14 57Z" fill="url(#crown)"/>
+            <path d="M140 124c12-32 43-49 91-50 40-1 72 9 91 28-28-13-52-15-78-8-31 9-67 19-104 30Z" fill="url(#crownLight)"/>
+            <path d="M117 170c43 13 69 14 113 13 52-1 93-5 132-15l10 37c-53 17-105 19-161 15-39-2-70-7-95-13Z" fill="url(#band)"/>
+            <path d="M120 174c51 12 78 13 121 12 45-1 82-5 117-14" fill="none" stroke="#ff7356" stroke-opacity=".34" stroke-width="4"/>
+            <path d="M60 207c24-11 47-13 72-10 43 6 70 9 109 8 53-1 92-6 126-13 28-6 50-1 62 12 12 13 1 28-20 40-29 17-70 27-116 33-72 10-143 3-190-16-29-12-51-28-51-39 0-5 3-10 8-15Z" fill="url(#brim)"/>
+            <path d="M57 220c28-11 58-9 87-4 40 8 73 11 111 8 60-5 100-16 145-25 17-4 31-1 39 8 8 9-5 20-27 30-42 18-98 26-158 25-69-1-128-10-165-27-18-8-28-15-32-22Z" fill="url(#brimEdge)" opacity=".7"/>
+            <path d="M38 232c28 17 69 29 121 33 83 6 155-3 207-26" fill="none" stroke="#40131e" stroke-opacity=".7" stroke-width="7"/>
+            <path d="M91 207c28 4 53 5 77 4" fill="none" stroke="#ff8b64" stroke-opacity=".22" stroke-width="5" stroke-linecap="round"/>
+          </svg>
+        </div>
+      </div>
+
+      <div class="caption-row">
+        <span class="caption">Form follows feeling</span>
+        <span class="hint">hover / tap to scatter</span>
+      </div>
+    </section>
+
+    <div class="corner-mark">Field study <span style="color:#a53a34">/</span> 07</div>
+    <div class="corner-mark right">Heat · light · return</div>
+  </main>
+
+  <script>
+    (() => {
+      const zone = document.getElementById('hatZone');
+      const model = document.getElementById('hatModel');
+      const shadow = document.getElementById('hatShadow');
+      const canvas = document.getElementById('particles');
+      const ctx = canvas.getContext('2d', { alpha: true });
+      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const isSmall = window.matchMedia('(max-width: 560px)');
+      const count = isSmall.matches ? 1700 : 2450;
+      const source = { x: 0, y: 0 };
+      const particles = [];
+      const colors = [
+        [255, 103, 73],
+        [244, 69, 55],
+        [255, 161, 101],
+        [202, 43, 49],
+        [255, 211, 157]
+      ];
+
+      let width = 0;
+      let height = 0;
+      let stage = null;
+      let rotation = 0;
+      let lastTime = 0;
+      let cycleTime = -1;
+      let active = false;
+      let pointerIn = false;
+      let interacted = false;
+      let speed = 1;
+      let targetSpeed = 1;
+      let randomSeed = 739391;
+
+      function random() {
+        randomSeed = (randomSeed * 1664525 + 1013904223) >>> 0;
+        return randomSeed / 4294967296;
+      }
+
+      function clamp(value, min = 0, max = 1) {
+        return Math.max(min, Math.min(max, value));
+      }
+
+      function smooth(value) {
+        const t = clamp(value);
+        return t * t * (3 - 2 * t);
+      }
+
+      function easeOut(value) {
+        const t = clamp(value);
+        return 1 - Math.pow(1 - t, 3);
+      }
+
+      function easeInOut(value) {
+        const t = clamp(value);
+        return t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      }
+
+      function inCrown(x, y) {
+        if (y < 64 || y > 218 || x < 112 || x > 371) return false;
+        const top = 69 + Math.pow(Math.abs(x - 240) / 150, 1.8) * 48;
+        const lower = 215;
+        if (y < top) return false;
+        const left = 116 + (y - 70) * .23;
+        const right = 366 - (y - 70) * .03;
+        return x >= left && x <= right && y <= lower;
+      }
+
+      function inBrim(x, y) {
+        if (y < 199 || y > 296) return false;
+        const normalized = (y - 245) / 47;
+        if (Math.abs(normalized) > 1) return false;
+        const width = 212 * Math.sqrt(1 - normalized * normalized);
+        return Math.abs(x - 240) < width;
+      }
+
+      function inBand(x, y) {
+        return y >= 167 && y <= 210 && x >= 116 && x <= 367;
+      }
+
+      function inHat(x, y) {
+        return inCrown(x, y) || inBrim(x, y) || inBand(x, y);
+      }
+
+      function sourcePoint() {
+        let x;
+        let y;
+        do {
+          x = 28 + random() * 424;
+          y = 57 + random() * 243;
+        } while (!inHat(x, y));
+        return { x, y };
+      }
+
+      function resize() {
+        width = window.innerWidth;
+        height = window.innerHeight;
+        canvas.width = Math.round(width * dpr);
+        canvas.height = Math.round(height * dpr);
+        canvas.style.width = width + 'px';
+        canvas.style.height = height + 'px';
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        stage = zone.getBoundingClientRect();
+        if (stage) {
+          source.x = stage.left + stage.width / 2;
+          source.y = stage.top + stage.height / 2;
+        }
+      }
+
+      function buildParticles() {
+        particles.length = 0;
+        for (let i = 0; i < count; i++) {
+          const point = sourcePoint();
+          particles.push({
+            sx: point.x,
+            sy: point.y,
+            angle: random() * Math.PI * 2,
+            radius: 48 + random() * 175,
+            orbit: 0.7 + random() * 1.6,
+            phase: random() * Math.PI * 2,
+            size: .55 + random() * 1.65,
+            alpha: .36 + random() * .56,
+            delay: random() * .28,
+            x: 0,
+            y: 0,
+            px: 0,
+            py: 0
+          });
+        }
+      }
+
+      function mapPoint(p) {
+        if (!stage) return;
+        const scaleX = stage.width / 480;
+        const scaleY = stage.height / 340;
+        p.x = source.x + (p.sx - 240) * scaleX;
+        p.y = source.y + (p.sy - 170) * scaleY;
+        p.px = p.x;
+        p.py = p.y;
+      }
+
+      function swirlPosition(p, time, out) {
+        const scaleX = stage.width / 480;
+        const scaleY = stage.height / 340;
+        const u = Math.max(0, time - 1);
+        const angle = p.angle + u * p.orbit * .82 + Math.sin(u * 1.4 + p.phase) * .2;
+        const pulse = 1 + Math.sin(u * 1.2 + p.phase) * .11;
+        const radius = p.radius * pulse;
+        return {
+          x: source.x + Math.cos(angle) * radius * scaleX,
+          y: source.y + Math.sin(angle) * radius * scaleY * .72
+        };
+      }
+
+      function particlePosition(p, time) {
+        const homeX = source.x + (p.sx - 240) * stage.width / 480;
+        const homeY = source.y + (p.sy - 170) * stage.height / 340;
+        const delayedTime = Math.max(0, time - p.delay);
+        if (time < 1) {
+          const amount = easeOut(delayedTime / (1 - p.delay));
+          const swirl = swirlPosition(p, 1);
+          return {
+            x: homeX + (swirl.x - homeX) * amount,
+            y: homeY + (swirl.y - homeY) * amount
+          };
+        }
+        if (time < 3.8) {
+          return swirlPosition(p, time);
+        }
+        const start = swirlPosition(p, 3.8);
+        const amount = easeInOut((time - 3.8) / 1.9);
+        return {
+          x: start.x + (homeX - start.x) * amount,
+          y: start.y + (homeY - start.y) * amount
+        };
+      }
+
+      function drawDot(x, y, p, alpha) {
+        if (alpha <= 0) return;
+        const c = colors[p._color];
+        ctx.fillStyle = `rgba(${c[0]},${c[1]},${c[2]},${alpha})`;
+        ctx.beginPath();
+        ctx.arc(x, y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      function drawIdle(now) {
+        if (!stage) return;
+        const time = reducedMotion.matches ? 0 : now * .00028;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        for (let i = 0; i < 42 && i < particles.length; i++) {
+          const p = particles[i];
+          const angle = p.angle + time * p.orbit;
+          const radius = p.radius * .67;
+          const x = source.x + Math.cos(angle) * radius * stage.width / 480;
+          const y = source.y + Math.sin(angle) * radius * stage.height / 340 * .72;
+          const alpha = (.08 + (Math.sin(time * 1.3 + p.phase) + 1) * .025) * (interacted ? 1 : .48);
+          ctx.strokeStyle = `rgba(242,91,67,${alpha * .38})`;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(x - Math.sin(angle) * 8, y + Math.cos(angle) * 6);
+          ctx.lineTo(x, y);
+          ctx.stroke();
+          drawDot(x, y, p, alpha);
+        }
+        ctx.restore();
+      }
+
+      function drawCycle(time) {
+        if (!stage) return;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        for (let i = 0; i < particles.length; i++) {
+          const p = particles[i];
+          const point = particlePosition(p, time);
+          const fadeIn = smooth((time - p.delay) / .46);
+          const fadeOut = 1 - smooth((time - 5.35) / 1.05);
+          const alpha = p.alpha * fadeIn * fadeOut;
+          const vx = point.x - p.px;
+          const vy = point.y - p.py;
+          if (alpha > .025 && (Math.abs(vx) > .01 || Math.abs(vy) > .01)) {
+            ctx.strokeStyle = `rgba(239,74,54,${alpha * .11})`;
+            ctx.lineWidth = p.size * 1.15;
+            ctx.beginPath();
+            ctx.moveTo(point.x - vx * 1.8, point.y - vy * 1.8);
+            ctx.lineTo(point.x, point.y);
+            ctx.stroke();
+          }
+          drawDot(point.x, point.y, p, alpha);
+          p.px = point.x;
+          p.py = point.y;
+        }
+        ctx.restore();
+      }
+
+      function startCycle() {
+        if (reducedMotion.matches || active) return;
+        active = true;
+        cycleTime = 0;
+        interacted = true;
+        targetSpeed = .16;
+        model.classList.add('is-particles');
+        shadow.style.opacity = '.34';
+        for (let i = 0; i < particles.length; i++) {
+          particles[i]._color = Math.floor(random() * colors.length);
+          mapPoint(particles[i]);
+        }
+      }
+
+      function finishCycle() {
+        active = false;
+        cycleTime = -1;
+        model.classList.remove('is-particles');
+        shadow.style.opacity = '';
+        targetSpeed = pointerIn ? .16 : 1;
+      }
+
+      function render(now) {
+        const dt = Math.min(50, now - (lastTime || now));
+        lastTime = now;
+        speed += (targetSpeed - speed) * Math.min(1, dt * .004);
+
+        if (!reducedMotion.matches) {
+          rotation = (rotation + dt * .001 * (25.5 * speed)) % 360;
+          model.style.transform = `rotateX(-7deg) rotateY(${rotation.toFixed(3)}deg) rotateZ(${Math.sin(rotation * .012) * .7}deg)`;
+        } else {
+          model.style.transform = 'rotateX(-7deg) rotateY(0deg)';
+        }
+
+        ctx.clearRect(0, 0, width, height);
+        if (active && cycleTime >= 0) {
+          cycleTime += dt * .001;
+          if (cycleTime >= 6.45) finishCycle();
+          else drawCycle(cycleTime);
+        } else {
+          drawIdle(now);
+        }
+        requestAnimationFrame(render);
+      }
+
+      function onPointerEnter(event) {
+        if (event.pointerType === 'mouse' || event.pointerType === 'pen') {
+          pointerIn = true;
+          targetSpeed = active ? .16 : .16;
+          startCycle();
+        }
+      }
+
+      function onPointerLeave() {
+        pointerIn = false;
+        if (!active) targetSpeed = 1;
+      }
+
+      zone.addEventListener('pointerenter', onPointerEnter, { passive: true });
+      zone.addEventListener('pointerleave', onPointerLeave, { passive: true });
+      zone.addEventListener('pointerdown', () => {
+        pointerIn = true;
+        targetSpeed = .16;
+        startCycle();
+      }, { passive: true });
+      zone.addEventListener('focus', () => {
+        pointerIn = true;
+        targetSpeed = .16;
+        startCycle();
+      });
+      zone.addEventListener('blur', onPointerLeave);
+      zone.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          startCycle();
+        }
+      });
+
+      reducedMotion.addEventListener?.('change', () => {
+        if (reducedMotion.matches) finishCycle();
+      });
+      window.addEventListener('resize', () => {
+        resize();
+        for (const p of particles) mapPoint(p);
+      }, { passive: true });
+      window.addEventListener('scroll', resize, { passive: true });
+
+      resize();
+      buildParticles();
+      for (const p of particles) {
+        p._color = Math.floor(random() * colors.length);
+        mapPoint(p);
+      }
+      requestAnimationFrame(render);
+    })();
+  </script>
+</body>
+</html>
