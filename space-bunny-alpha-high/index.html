@@ -1,0 +1,662 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#080a0c">
+  <title>Ember / A kinetic fedora study</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #080a0c;
+      --paper: #eee9e3;
+      --muted: #8d8985;
+      --line: rgba(238, 233, 227, .14);
+      --ember: #d4524d;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { height: 100%; }
+
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: var(--ink);
+      color: var(--paper);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .scene {
+      position: relative;
+      min-height: 100svh;
+      isolation: isolate;
+      overflow: hidden;
+      background:
+        radial-gradient(ellipse at 50% 44%, rgba(111, 24, 30, .18) 0%, rgba(52, 13, 19, .08) 27%, transparent 57%),
+        radial-gradient(ellipse at 50% 100%, rgba(255,255,255,.025), transparent 40%),
+        #080a0c;
+    }
+
+    .scene::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.012) 1px, transparent 1px);
+      background-size: 100% 100%, 100% 100%;
+      opacity: .24;
+      mask-image: linear-gradient(to bottom, transparent, black 24%, black 78%, transparent);
+    }
+
+    .scene::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: 5;
+      pointer-events: none;
+      opacity: .035;
+      background-image: radial-gradient(rgba(255,255,255,.7) .55px, transparent .65px);
+      background-size: 4px 4px;
+      mix-blend-mode: soft-light;
+    }
+
+    .topbar {
+      position: absolute;
+      z-index: 3;
+      top: max(26px, env(safe-area-inset-top));
+      left: clamp(22px, 5vw, 72px);
+      right: clamp(22px, 5vw, 72px);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .2em;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: #c7c0ba;
+    }
+
+    .brand-mark {
+      position: relative;
+      width: 22px;
+      height: 22px;
+      border: 1px solid rgba(212, 82, 77, .75);
+      border-radius: 50%;
+    }
+
+    .brand-mark::before,
+    .brand-mark::after {
+      content: "";
+      position: absolute;
+      left: 5px;
+      right: 5px;
+      height: 1px;
+      background: var(--ember);
+      transform: rotate(-31deg);
+    }
+
+    .brand-mark::before { top: 8px; }
+    .brand-mark::after { top: 12px; opacity: .55; }
+
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+
+    .status-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--ember);
+      box-shadow: 0 0 12px rgba(212, 82, 77, .9);
+    }
+
+    .center-note {
+      position: absolute;
+      z-index: 2;
+      left: 50%;
+      bottom: clamp(27px, 6.5vh, 68px);
+      width: min(90vw, 520px);
+      transform: translateX(-50%);
+      text-align: center;
+      pointer-events: none;
+    }
+
+    .eyebrow {
+      margin: 0 0 12px;
+      color: #9e514f;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: .27em;
+      text-transform: uppercase;
+    }
+
+    .caption {
+      margin: 0;
+      color: #d7d0ca;
+      font-size: clamp(13px, 1.35vw, 16px);
+      font-weight: 430;
+      letter-spacing: .015em;
+    }
+
+    .hint {
+      margin: 11px 0 0;
+      color: #696664;
+      font-size: 10px;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .hint span {
+      color: #a16b66;
+    }
+
+    #object {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      display: block;
+      width: 100%;
+      height: 100%;
+      cursor: pointer;
+      outline: none;
+      touch-action: manipulation;
+    }
+
+    #object:focus-visible {
+      outline: 1px solid rgba(212, 82, 77, .65);
+      outline-offset: -10px;
+    }
+
+    .fallback {
+      display: none;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: var(--muted);
+      font-size: 13px;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    @media (max-width: 560px) {
+      .topbar {
+        top: max(20px, env(safe-area-inset-top));
+        font-size: 8px;
+        letter-spacing: .16em;
+      }
+      .status { gap: 7px; }
+      .center-note { bottom: max(25px, env(safe-area-inset-bottom)); }
+      .hint { font-size: 9px; letter-spacing: .1em; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        scroll-behavior: auto !important;
+        animation-duration: .001ms !important;
+        transition-duration: .001ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="scene">
+    <header class="topbar" aria-label="Artwork details">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>Ember / Object 01</span></div>
+      <div class="status"><span class="status-dot" aria-hidden="true"></span><span>Interactive study</span></div>
+    </header>
+
+    <canvas id="object" tabindex="0" role="img" aria-label="A softly lit red fedora. Hover, tap, or press Enter to scatter it into glowing embers and reform it."></canvas>
+    <div class="fallback">Your browser does not support canvas.</div>
+
+    <div class="center-note">
+      <p class="eyebrow">A study in form &amp; motion</p>
+      <p class="caption">The quiet shape of an idea.</p>
+      <p class="hint">Hover or tap to <span>scatter</span></p>
+    </div>
+  </main>
+
+  <script>
+  (() => {
+    'use strict';
+
+    const canvas = document.getElementById('object');
+    const ctx = canvas.getContext('2d', { alpha: true });
+    if (!ctx) {
+      document.querySelector('.fallback').style.display = 'block';
+      return;
+    }
+
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let w = 0, h = 0, dpr = 1;
+    let cx = 0, cy = 0, scale = 1;
+    let last = 0;
+    let spin = 0.38;
+    let cycleStart = -Infinity;
+    let cycleActive = false;
+    let orbitStart = Infinity;
+    let pointerInside = false;
+    let lastTrigger = -Infinity;
+
+    const TAU = Math.PI * 2;
+    const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+    const smooth = (a, b, v) => {
+      const t = clamp((v - a) / (b - a));
+      return t * t * (3 - 2 * t);
+    };
+    const lerp = (a, b, t) => a + (b - a) * t;
+
+    // A small deterministic generator keeps the particle field stable between visits.
+    let seed = 81723;
+    function random() {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed / 4294967296;
+    }
+    const rand = (a, b) => a + (b - a) * random();
+
+    const ringSpecs = [
+      { y: 0, r: 91 },
+      { y: 24, r: 94 },
+      { y: 55, r: 90 },
+      { y: 88, r: 79 },
+      { y: 116, r: 63 },
+      { y: 139, r: 43 },
+      { y: 151, r: 23 }
+    ];
+
+    function ringPoint(spec, angle, lift = 0) {
+      // Slight front dip and a pinched crown keep the silhouette recognizably fedora-like.
+      const front = Math.sin(angle);
+      const pinch = Math.pow(Math.abs(Math.sin(angle)), 2) * 4;
+      return [
+        Math.cos(angle) * spec.r,
+        spec.y + lift - pinch * (spec.y / 151),
+        Math.sin(angle) * spec.r * .72
+      ];
+    }
+
+    function outerBrim(angle) {
+      const dip = Math.sin(angle) * 4.5;
+      return [Math.cos(angle) * 165, 2 + dip, Math.sin(angle) * 119];
+    }
+
+    function innerBrim(angle) {
+      const dip = Math.sin(angle) * 2.8;
+      return [Math.cos(angle) * 89, -1 + dip, Math.sin(angle) * .72 * 89];
+    }
+
+    function bandPoint(angle, y, radius) {
+      return [Math.cos(angle) * radius, y - Math.pow(Math.abs(Math.sin(angle)), 2) * 2, Math.sin(angle) * radius * .72];
+    }
+
+    function makeSource() {
+      const kind = random();
+      if (kind < .58) {
+        const band = Math.floor(rand(0, ringSpecs.length - 1));
+        const next = Math.min(band + 1, ringSpecs.length - 1);
+        const mix = random();
+        const a = rand(0, TAU);
+        const p = ringPoint(ringSpecs[band], a);
+        const q = ringPoint(ringSpecs[next], a);
+        return [lerp(p[0], q[0], mix), lerp(p[1], q[1], mix), lerp(p[2], q[2], mix)];
+      }
+      if (kind < .88) {
+        const a = rand(0, TAU);
+        const inner = innerBrim(a), outer = outerBrim(a);
+        const mix = rand(.05, 1);
+        return [lerp(inner[0], outer[0], mix), lerp(inner[1], outer[1], mix) - Math.sin(mix * Math.PI) * 2, lerp(inner[2], outer[2], mix)];
+      }
+      const a = rand(0, TAU);
+      const y = rand(20, 40);
+      const p = bandPoint(a, y, 96.5);
+      return p;
+    }
+
+    const particles = Array.from({ length: 2400 }, () => {
+      const source = makeSource();
+      const n = Math.hypot(source[0], source[1] * .35, source[2]) || 1;
+      const dir = [source[0] / n * .55 + rand(-.75, .75), rand(.08, .95), source[2] / n * .55 + rand(-.75, .75)];
+      const norm = Math.hypot(dir[0], dir[1], dir[2]) || 1;
+      dir[0] /= norm; dir[1] /= norm; dir[2] /= norm;
+      return {
+        source,
+        dir,
+        seed: rand(0, TAU),
+        size: rand(.55, 1.75),
+        spread: rand(34, 112),
+        lift: rand(18, 105),
+        speed: rand(.72, 1.22),
+        bright: random()
+      };
+    });
+
+    const orbiters = particles.slice(0, 14).map((p, i) => ({
+      source: p.source,
+      seed: i * 2.39996,
+      radius: 125 + (i % 4) * 18,
+      y: -25 + (i % 5) * 22,
+      size: .8 + (i % 3) * .35
+    }));
+
+    function resize() {
+      const rect = canvas.getBoundingClientRect();
+      w = Math.max(1, rect.width);
+      h = Math.max(1, rect.height);
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      cx = w * .5;
+      cy = h * .475;
+      // Keep the object generous on phones, but never let it crowd the edges.
+      scale = clamp(Math.min(w * .64, h * .76, 430) / 330, .66, 1.3);
+      if (reduced.matches && last) render(performance.now());
+    }
+
+    function rotatePoint(p, angle) {
+      const co = Math.cos(angle), si = Math.sin(angle);
+      return [p[0] * co + p[2] * si, p[1], -p[0] * si + p[2] * co];
+    }
+
+    function project(p) {
+      const rz = p[2];
+      return {
+        x: cx + p[0] * scale,
+        y: cy - (p[1] * .96 - rz * .28) * scale,
+        depth: rz + p[1] * .12
+      };
+    }
+
+    function rgba(r, g, b, a = 1) { return `rgba(${r},${g},${b},${a})`; }
+
+    function faceColor(type, y, angle, brightness = 1) {
+      const light = .5 + .5 * Math.cos(angle + .72) * .54;
+      const vertical = clamp((y + 10) / 170);
+      if (type === 'band') {
+        return `rgb(${Math.round(22 + light * 12)},${Math.round(15 + light * 7)},${Math.round(18 + light * 8)})`;
+      }
+      if (type === 'brim') {
+        const edge = clamp(vertical * .15);
+        const r = 57 + light * 58 + edge * 25;
+        const g = 10 + light * 18;
+        const b = 17 + light * 20;
+        return `rgb(${Math.round(r * brightness)},${Math.round(g * brightness)},${Math.round(b * brightness)})`;
+      }
+      const r = 89 + light * 78 + (1 - vertical) * 15;
+      const g = 14 + light * 22;
+      const b = 25 + light * 25;
+      return `rgb(${Math.round(r * brightness)},${Math.round(g * brightness)},${Math.round(b * brightness)})`;
+    }
+
+    function makeFaces(angle) {
+      const faces = [];
+      const segments = 56;
+      const pushQuad = (a, b, c, d, type, y, sourceAngle) => {
+        const points = [a, b, c, d].map(p => project(rotatePoint(p, angle)));
+        const depth = points.reduce((sum, p) => sum + p.depth, 0) / 4;
+        faces.push({ points, color: faceColor(type, y, sourceAngle), depth });
+      };
+
+      for (let i = 0; i < segments; i++) {
+        const a = i / segments * TAU;
+        const b = (i + 1) / segments * TAU;
+        for (let r = 0; r < ringSpecs.length - 1; r++) {
+          const p1 = ringPoint(ringSpecs[r], a);
+          const p2 = ringPoint(ringSpecs[r], b);
+          const p3 = ringPoint(ringSpecs[r + 1], b);
+          const p4 = ringPoint(ringSpecs[r + 1], a);
+          pushQuad(p1, p2, p3, p4, 'crown', (ringSpecs[r].y + ringSpecs[r + 1].y) * .5, (a + b) * .5);
+        }
+        const inner1 = innerBrim(a), inner2 = innerBrim(b);
+        const outer1 = outerBrim(a), outer2 = outerBrim(b);
+        pushQuad(inner1, inner2, outer2, outer1, 'brim', 0, (a + b) * .5);
+        // Dark felt band, slightly proud of the crown.
+        const bandA1 = bandPoint(a, 20, 96.5), bandA2 = bandPoint(b, 20, 96.5);
+        const bandB1 = bandPoint(a, 39, 97), bandB2 = bandPoint(b, 39, 97);
+        pushQuad(bandA1, bandA2, bandB2, bandB1, 'band', 30, (a + b) * .5);
+      }
+
+      const top = ringSpecs[ringSpecs.length - 1];
+      const topPoints = [];
+      for (let i = 0; i < segments; i++) {
+        topPoints.push(project(rotatePoint(ringPoint(top, i / segments * TAU), angle)));
+      }
+      faces.push({
+        points: topPoints,
+        color: 'rgb(154,34,42)',
+        depth: topPoints.reduce((s, p) => s + p.depth, 0) / topPoints.length - .5
+      });
+      return faces;
+    }
+
+    function drawShadow() {
+      ctx.save();
+      ctx.translate(cx, cy + 74 * scale);
+      ctx.scale(1, .19);
+      const shadow = ctx.createRadialGradient(0, 0, 4, 0, 0, 190 * scale);
+      shadow.addColorStop(0, 'rgba(0,0,0,.52)');
+      shadow.addColorStop(.45, 'rgba(91,20,24,.16)');
+      shadow.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = shadow;
+      ctx.beginPath();
+      ctx.arc(0, 0, 190 * scale, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawHat(angle, opacity) {
+      if (opacity <= 0) return;
+      const faces = makeFaces(angle);
+      faces.sort((a, b) => a.depth - b.depth);
+      ctx.save();
+      ctx.globalAlpha = opacity;
+      for (const face of faces) {
+        ctx.beginPath();
+        ctx.moveTo(face.points[0].x, face.points[0].y);
+        for (let i = 1; i < face.points.length; i++) ctx.lineTo(face.points[i].x, face.points[i].y);
+        ctx.closePath();
+        ctx.fillStyle = face.color;
+        ctx.fill();
+        ctx.strokeStyle = face.color;
+        ctx.lineWidth = .65;
+        ctx.stroke();
+      }
+      // A restrained highlight on the upper left crown.
+      const glow = ctx.createRadialGradient(cx - 42 * scale, cy - 64 * scale, 2, cx - 42 * scale, cy - 64 * scale, 94 * scale);
+      glow.addColorStop(0, 'rgba(255,137,111,.12)');
+      glow.addColorStop(1, 'rgba(255,100,80,0)');
+      ctx.globalCompositeOperation = 'screen';
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.ellipse(cx - 28 * scale, cy - 29 * scale, 72 * scale, 89 * scale, -.12, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawBuckle(angle, opacity) {
+      if (opacity <= 0) return;
+      const co = Math.cos(angle), si = Math.sin(angle);
+      const points = [
+        [-15, 21, 72], [15, 21, 72], [15, 38, 72], [-15, 38, 72]
+      ].map(p => project(rotatePoint(p, angle)));
+      ctx.save();
+      ctx.globalAlpha = opacity * .9;
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      points.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+      ctx.closePath();
+      ctx.fillStyle = '#8f3c39';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,153,130,.24)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function particlePosition(p, t, angle) {
+      const spread = smooth(0, .17, t) * (1 - smooth(.56, 1, t));
+      const s = rotatePoint(p.source, angle);
+      if (spread <= 0) return s;
+      const orbit = (t - .12) * 8.2 * p.speed + p.seed;
+      const co = Math.cos(orbit), si = Math.sin(orbit);
+      const x = s[0] * co - s[2] * si;
+      const z = s[0] * si + s[2] * co;
+      const swirl = Math.sin(t * 15 + p.seed * 2) * 16 * spread;
+      const lift = Math.sin(t * 10 + p.seed) * 15 * spread;
+      return [
+        x + p.dir[0] * p.spread * spread + swirl,
+        s[1] + p.lift * spread + lift,
+        z + p.dir[2] * p.spread * spread
+      ];
+    }
+
+    function drawParticles(t, angle) {
+      const alpha = smooth(.035, .18, t) * (1 - smooth(.82, .985, t));
+      if (alpha <= 0) return;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (const p of particles) {
+        const pos = particlePosition(p, t, angle);
+        const pt = project(pos);
+        const bright = p.bright > .88 ? 1 : .62;
+        const size = p.size * (p.bright > .93 ? 1.5 : 1);
+        ctx.globalAlpha = alpha * (.25 + bright * .5);
+        ctx.fillStyle = p.bright > .78 ? '#ff9a78' : '#d85b52';
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, size, 0, TAU);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    function drawOrbiters(now) {
+      if (reduced.matches) return;
+      const t = (now - orbitStart) * .001;
+      if (t < 0 || !Number.isFinite(orbitStart)) return;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (const p of orbiters) {
+        const base = t * .34 + p.seed;
+        const points = [];
+        for (let j = 7; j >= 0; j--) {
+          const a = base - j * .065;
+          const wobble = Math.sin(a * 1.8 + p.seed) * 6;
+          const point = project([
+            Math.cos(a) * p.radius + wobble,
+            p.y + Math.sin(a * 2 + p.seed) * 13,
+            Math.sin(a) * p.radius * .72
+          ]);
+          points.push(point);
+        }
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        points.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+        ctx.strokeStyle = 'rgba(229,91,73,.13)';
+        ctx.lineWidth = 1.25;
+        ctx.stroke();
+        const head = points[0];
+        ctx.globalAlpha = .72;
+        ctx.fillStyle = '#f28b6d';
+        ctx.beginPath();
+        ctx.arc(head.x, head.y, p.size, 0, TAU);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+      ctx.restore();
+    }
+
+    function render(now) {
+      const time = reduced.matches ? 0 : now;
+      if (!reduced.matches && last) {
+        const dt = Math.min(48, now - last);
+        spin += dt * .00017 * (cycleActive ? .16 : 1);
+      }
+      last = now;
+      ctx.clearRect(0, 0, w, h);
+      drawShadow();
+
+      let t = -1, hatAlpha = 1;
+      if (cycleActive) {
+        t = (now - cycleStart) / 4700;
+        hatAlpha = t < .2 ? 1 - smooth(.055, .2, t) : t < .78 ? 0 : smooth(.78, .985, t);
+        if (t >= 1) {
+          cycleActive = false;
+          orbitStart = now;
+          t = -1;
+          hatAlpha = 1;
+        }
+      }
+
+      if (t >= 0) {
+        drawParticles(t, spin);
+        drawHat(spin, hatAlpha);
+        drawBuckle(spin, hatAlpha);
+      } else {
+        drawHat(spin, 1);
+        drawBuckle(spin, 1);
+        drawOrbiters(now);
+      }
+      if (reduced.matches) drawOrbiters(0);
+
+      if (!reduced.matches) requestAnimationFrame(render);
+    }
+
+    function trigger() {
+      if (reduced.matches) return;
+      const now = performance.now();
+      if (cycleActive && now - lastTrigger < 4200) return;
+      lastTrigger = now;
+      cycleStart = now;
+      cycleActive = true;
+    }
+
+    canvas.addEventListener('pointerenter', event => {
+      pointerInside = true;
+      if (event.pointerType !== 'touch') trigger();
+    });
+    canvas.addEventListener('pointerleave', () => { pointerInside = false; });
+    canvas.addEventListener('pointerdown', event => {
+      if (event.pointerType === 'touch' || event.pointerType === 'pen') trigger();
+    });
+    canvas.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        trigger();
+      }
+    });
+
+    const onMotionChange = () => {
+      if (reduced.matches) {
+        cycleActive = false;
+        orbitStart = 0;
+        last = 0;
+        render(performance.now());
+      } else {
+        last = 0;
+        requestAnimationFrame(render);
+      }
+    };
+    if (reduced.addEventListener) reduced.addEventListener('change', onMotionChange);
+    else reduced.addListener(onMotionChange);
+    window.addEventListener('resize', resize, { passive: true });
+    resize();
+    render(performance.now());
+  })();
+  </script>
+</body>
+</html>
