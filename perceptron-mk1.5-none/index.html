@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Red Hat Fedora</title>
+  <style>
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(ellipse at top, #2b2b3a 0%, #14141c 60%);
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      color: #f5f5f7;
+      overflow: hidden;
+      user-select: none;
+      touch-action: manipulation;
+    }
+
+    .scene {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      perspective: 1200px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .hat-container {
+      position: relative;
+      transform-style: preserve-3d;
+      animation: spinHat 12s linear infinite;
+      cursor: pointer;
+    }
+
+    @keyframes spinHat {
+      from { transform: rotateY(0deg); }
+      to   { transform: rotateY(360deg); }
+    }
+
+    /* Fedora hat shape */
+    .hat {
+      position: relative;
+      width: 220px;
+      height: 220px;
+      transform-style: preserve-3d;
+    }
+
+    .brim {
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      width: 220px;
+      height: 40px;
+      background: linear-gradient(to right, #e91e63, #ff5252);
+      border-radius: 50%;
+      transform: translateX(-50%) rotateX(90deg) translateY(-20px);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6), inset 0 -4px 10px rgba(0,0,0,0.3);
+    }
+
+    .crown {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      width: 140px;
+      height: 120px;
+      background: linear-gradient(to bottom, #e91e63, #ad1457);
+      border-radius: 20px 20px 0 0;
+      transform: translateX(-50%);
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5), inset 0 -6px 12px rgba(0,0,0,0.3);
+    }
+
+    .band {
+      position: absolute;
+      bottom: 100px;
+      left: 50%;
+      width: 140px;
+      height: 20px;
+      background: #1a1a1a;
+      border-radius: 10px;
+      transform: translateX(-50%);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+    }
+
+    .shadow {
+      position: absolute;
+      bottom: -60px;
+      left: 50%;
+      width: 200px;
+      height: 30px;
+      background: radial-gradient(ellipse at center, rgba(0,0,0,0.45) 0%, transparent 70%);
+      transform: translateX(-50%);
+      filter: blur(10px);
+    }
+
+    .caption {
+      position: absolute;
+      bottom: 40px;
+      text-align: center;
+      font-size: 1rem;
+      letter-spacing: 0.05em;
+      opacity: 0.8;
+      text-shadow: 0 2px 6px rgba(0,0,0,0.6);
+    }
+
+    /* Particle canvas overlay */
+    #particles {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .hat-container {
+        animation: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="scene">
+    <div class="hat-container" id="hatContainer">
+      <div class="hat">
+        <div class="brim"></div>
+        <div class="crown"></div>
+        <div class="band"></div>
+      </div>
+      <div class="shadow"></div>
+    </div>
+    <p class="caption">Fedora — Red Hat Style</p>
+  </div>
+  <canvas id="particles"></canvas>
+
+  <script>
+    (() => {
+      const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (prefersReducedMotion) return; // skip particle effects entirely
+
+      const container = document.getElementById('hatContainer');
+      const canvas = document.getElementById('particles');
+      const ctx = canvas.getContext('2d');
+
+      let particles = [];
+      let isHovering = false;
+      let animId;
+
+      function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
+      window.addEventListener('resize', resize);
+      resize();
+
+      class Particle {
+        constructor(x, y) {
+          this.x = x;
+          this.y = y;
+          this.vx = (Math.random() - 0.5) * 2;
+          this.vy = (Math.random() - 0.5) * 2;
+          this.life = Math.random() * 120 + 60;
+          this.maxLife = this.life;
+          this.size = Math.random() * 2 + 1;
+          this.color = `hsl(${340 + Math.random()*20}, 100%, ${60+Math.random()*20}%`;
+        }
+        update() {
+          this.x += this.vx;
+          this.y += this.vy;
+          this.life--;
+          this.vx *= 0.99;
+          this.vy *= 0.99;
+        }
+        draw() {
+          const alpha = this.life / this.maxLife;
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = this.color;
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.size, 0, Math.PI*2);
+          ctx.fill();
+        }
+      }
+
+      function spawnParticles(count) {
+        const rect = container.getBoundingClientRect();
+        for (let i = 0; i < count; i++) {
+          const x = rect.left + Math.random() * rect.width;
+          const y = rect.top + Math.random() * rect.height;
+          particles.push(new Particle(x, y));
+        }
+      }
+
+      function animate() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        particles.forEach(p => p.update());
+        particles = particles.filter(p => p.life > 0);
+        particles.forEach(p => p.draw());
+        animId = requestAnimationFrame(animate);
+      }
+
+      function startDissolve() {
+        spawnParticles(300);
+        container.style.animationPlayState = 'paused';
+        container.style.opacity = '0';
+        setTimeout(() => {
+          container.style.transition = 'opacity 1.5s ease-in-out';
+          container.style.opacity = '1';
+          container.style.animationPlayState = 'running';
+        }, 2500);
+      }
+
+      container.addEventListener('mouseenter', () => {
+        if (!isHovering) {
+          isHovering = true;
+          startDissolve();
+        }
+      });
+      container.addEventListener('mouseleave', () => {
+        isHovering = false;
+      });
+      container.addEventListener('touchstart', () => {
+        if (!isHovering) {
+          isHovering = true;
+          startDissolve();
+        }
+      });
+
+      animate();
+    })();
+  </script>
+</body>
+</html>
