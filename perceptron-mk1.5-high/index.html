@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Red Hat Fedora</title>
+<style>
+  :root {
+    --bg:#0f0f12;
+    --glow:#ff4d4d;
+    --hat-color:#c00;
+    --hat-dark:#900;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:radial-gradient(circle at 50% 30%,#1a1a20 0%,var(--bg) 70%);
+    font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#eee;
+    overflow:hidden;
+  }
+  .scene{perspective:800px;width:300px;height:300px;position:relative}
+  .hat{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) translateZ(0);width:200px;height:200px;animation:spin 8s linear infinite;will-change:transform}
+  .brim{position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:200px;height:50px;background:var(--hat-color);border-radius:50%/100%;box-shadow:0 0 20px rgba(255,77,77,.4)}
+  .crown{position:absolute;top:0;left:50%;transform:translateX(-50%);width:120px;height:150px;background:var(--hat-dark);border-radius:10px 10px 0 0;box-shadow:0 0 15px rgba(255,77,77,.3)}
+  .caption{margin-top:2rem;font-size:.9rem;opacity:.7;text-align:center}
+  @keyframes spin{from{transform:translate(-50%,-50%) rotateY(0deg);}to{transform:translate(-50%,-50%) rotateY(360deg);}}
+  @media (prefers-reduced-motion:reduce){.hat{animation:none;}}
+  canvas{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10}
+</style>
+</head>
+<body>
+<div class="scene">
+  <div class="hat" id="hat">
+    <div class="brim"></div>
+    <div class="crown"></div>
+  </div>
+</div>
+<p class="caption">Hover or tap to dissolve &amp; reform</p>
+<canvas id="c"></canvas>
+<script>
+(() => {
+  const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (prefersReduced) return;
+
+  const hat = document.getElementById('hat');
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  let w, h, dpr;
+  function resize(){
+    dpr = window.devicePixelRatio || 1;
+    w = canvas.width = window.innerWidth * dpr;
+    h = canvas.height = window.innerHeight * dpr;
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+  }
+  resize(); window.addEventListener('resize', resize);
+
+  const PARTICLE_COUNT = 200;
+  const particles = [];
+  let hovered = false;
+  let animId;
+  let lastTime = 0;
+  const ease = t => t*t*(3 - 2*t);
+  const lerp = (a,b,t)=>a+(b-a)*t;
+
+  // Initialize particles at hat center
+  function initParticles(){
+    const rect = hat.getBoundingClientRect();
+    const cx = rect.left + rect.width/2;
+    const cy = rect.top + rect.height/2;
+    for(let i=0;i<PARTICLE_COUNT;i++){
+      const angle = Math.random()*Math.PI*2;
+      const r = Math.random()*30+10;
+      particles.push({
+        x: cx + Math.cos(angle)*r,
+        y: cy + Math.sin(angle)*r,
+        vx:0, vy:0,
+        ox: cx, oy: cy,
+        phase: Math.random()*Math.PI*2,
+        size: Math.random()*2+1,
+        active:true,
+        returning:false,
+        timer:0
+      });
+    }
+  }
+  initParticles();
+
+  function drawParticle(p){
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+    ctx.fillStyle = `rgba(255,77,77,${p.active?0.8:0.2})`;
+    ctx.fill();
+  }
+
+  function animate(time){
+    if(!lastTime) lastTime = time;
+    const dt = (time - lastTime)/1000; // seconds
+    lastTime = time;
+    ctx.clearRect(0,0,w,h);
+    const cx = w/2, cy = h/2;
+    particles.forEach(p=>{
+      if(hovered && !p.returning){
+        // Move outward
+        const speed = 120; // px/s
+        const dir = Math.atan2(p.y-cy, p.x-cx);
+        p.vx = Math.cos(dir)*speed;
+        p.vy = Math.sin(dir)*speed;
+        p.x += p.vx*dt;
+        p.y += p.vy*dt;
+        // Swirl
+        p.phase += dt*2;
+        p.x += Math.sin(p.phase)*20*dt;
+        p.y -= Math.cos(p.phase)*20*dt;
+        // After 1.5s start returning
+        p.timer += dt;
+        if(p.timer > 1.5){
+          p.returning = true;
+          p.timer = 0;
+        }
+      } else if(p.returning){
+        // Ease back to origin
+        const progress = Math.min(p.timer/1.2,1);
+        const e = ease(progress);
+        p.x = lerp(p.x, p.ox, e);
+        p.y = lerp(p.y, p.oy, e);
+        p.vx *= 0.95; p.vy *= 0.95;
+        if(progress>=1){
+          p.x = p.ox; p.y = p.oy;
+          p.active = false; // hide after return
+        }
+      } else {
+        // idle orbiting particles (keep a few)
+        if(p.active){
+          const orbitSpeed = 0.5; // rad/s
+          const radius = 30;
+          const angle = p.phase + time*0.001*orbitSpeed;
+          p.x = cx + Math.cos(angle)*radius;
+          p.y = cy + Math.sin(angle)*radius;
+          p.phase += dt*orbitSpeed;
+        }
+      }
+      drawParticle(p);
+    });
+    animId = requestAnimationFrame(animate);
+  }
+  animId = requestAnimationFrame(animate);
+
+  function startHover(){
+    hovered = true;
+    hat.style.animationPlayState = 'paused';
+    particles.forEach(p=>{p.active=true; p.returning=false; p.timer=0;});
+  }
+  function endHover(){
+    hovered = false;
+    hat.style.animationPlayState = 'running';
+    // Reset particles to idle orbit
+    particles.forEach(p=>{p.active=true; p.returning=false; p.timer=0;});
+  }
+  hat.addEventListener('mouseenter', startHover);
+  hat.addEventListener('mouseleave', endHover);
+  hat.addEventListener('touchstart', startHover, {passive:true});
+  hat.addEventListener('touchend', endHover, {passive:true});
+})();
+</script>
+</body>
+</html>
