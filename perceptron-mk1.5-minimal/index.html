@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Fedora Hero</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;font-family:'Segoe UI',system-ui,sans-serif;color:#fff;background:#0a0a0f;}
+  body{display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;}
+  .hero{position:relative;width:100vw;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+  .hat-wrap{perspective:1200px;transform-style:preserve-3d;}
+  .hat{width:220px;height:220px;transform-style:preserve-3d;animation:spin 12s linear infinite;}
+  @keyframes spin{from{transform:rotateY(0deg);}to{transform:rotateY(360deg);}}
+  .hat svg{width:100%;height:100%;filter:drop-shadow(0 0 20px rgba(255,70,70,.6));}
+  .caption{margin-top:2rem;font-size:1.1rem;letter-spacing:.05em;text-align:center;opacity:.9;}
+  #particles{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10;}
+  @media(prefers-reduced-motion:reduce){
+    .hat{animation:none;}
+    #particles{display:none;}
+  }
+</style>
+</head>
+<body>
+<div class="hero">
+  <div class="hat-wrap">
+    <div class="hat" id="hat">
+      <!-- Simple Red Hat Fedora style vector -->
+      <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <radialGradient id="grad" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#ff4b4b"/>
+            <stop offset="100%" stop-color="#c00"/>
+          </radialGradient>
+        </defs>
+        <path d="M100 30 C130 30,150 50,150 80 L150 120 C150 140,130 160,100 160 C70 160,50 140,50 120 L50 80 C50 50,70 30,100 30Z" fill="url(#grad)" stroke="#fff" stroke-width="2"/>
+        <ellipse cx="100" cy="120" rx="45" ry="10" fill="#fff" opacity=".2"/>
+        <rect x="45" y="120" width="110" height="12" rx="6" fill="#fff" opacity=".3"/>
+      </svg>
+    </div>
+  </div>
+  <p class="caption">Fedora — Spin & Dissolve</p>
+</div>
+<canvas id="particles"></canvas>
+
+<script>
+(() => {
+  const canvas = document.getElementById('particles');
+  const ctx = canvas.getContext('2d');
+  let w, h, particles = [];
+  const PARTICLE_COUNT = 300;
+  const HAT_CENTER = {x: window.innerWidth/2, y: window.innerHeight/2};
+  let isHovering = false;
+  let spinSpeed = 1; // multiplier
+  let lastTime = 0;
+  let animId;
+
+  function resize(){
+    w = canvas.width = window.innerWidth;
+    h = canvas.height = window.innerHeight;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // Generate initial particle positions on hat surface (simple ellipse)
+  function initParticles(){
+    particles = [];
+    for(let i=0;i<PARTICLE_COUNT;i++){
+      const angle = Math.random()*Math.PI*2;
+      const radiusX = 45 + Math.random()*10;
+      const radiusY = 10 + Math.random()*5;
+      const x = HAT_CENTER.x + Math.cos(angle)*radiusX;
+      const y = HAT_CENTER.y + Math.sin(angle)*radiusY;
+      particles.push({
+        x, y,
+        vx:0, vy:0,
+        size: 1+Math.random()*2,
+        life: 1,
+        hue: Math.random()*30+0, // red range
+        trail: []
+      });
+    }
+  }
+  initParticles();
+
+  function drawHat(){
+    // Re‑draw hat using same SVG as static element (just for reference)
+    // Not needed for particles, but we keep hat visible via DOM.
+  }
+
+  function update(dt){
+    if(!isHovering){
+      spinSpeed = Math.min(spinSpeed+0.02,1);
+    } else {
+      spinSpeed = Math.max(spinSpeed-0.02,0);
+    }
+    // Update particles
+    particles.forEach(p=>{
+      if(isHovering && spinSpeed===0){
+        // Dissolve phase: push outward with swirl
+        const dx = p.x - HAT_CENTER.x;
+        const dy = p.y - HAT_CENTER.y;
+        const dist = Math.sqrt(dx*dx+dy*dy)||1;
+        const force = 0.5 + Math.random()*0.5;
+        p.vx += (dx/dist)*force*dt*60;
+        p.vy += (dy/dist)*force*dt*60;
+        // Add swirl component
+        const perpX = -dy/dist;
+        const perpY = dx/dist;
+        p.vx += perpX*force*dt*30;
+        p.vy += perpY*force*dt*30;
+      } else {
+        // Return phase: attract back gently
+        const dx = HAT_CENTER.x - p.x;
+        const dy = HAT_CENTER.y - p.y;
+        const dist = Math.sqrt(dx*dx+dy*dy)||1;
+        const pull = 0.02*dt*60;
+        p.vx += dx/dist*pull;
+        p.vy += dy/dist*pull;
+      }
+      // Damping
+      p.vx *= 0.98;
+      p.vy *= 0.98;
+      p.x += p.vx*dt*60;
+      p.y += p.vy*dt*60;
+      // Trail
+      p.trail.push({x:p.x,y:p.y});
+      if(p.trail.length>5) p.trail.shift();
+    });
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,w,h);
+    particles.forEach(p=>{
+      // Draw trail
+      ctx.beginPath();
+      ctx.strokeStyle=`hsla(${p.hue},100%,60%,0.3)`;
+      ctx.lineWidth=p.size*0.5;
+      ctx.moveTo(p.trail[0].x,p.trail[0].y);
+      for(const t of p.trail) ctx.lineTo(t.x,t.y);
+      ctx.stroke();
+      // Main dot
+      ctx.fillStyle=`hsla(${p.hue},100%,70%,${p.life})`;
+      ctx.beginPath();
+      ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
+      ctx.fill();
+    });
+  }
+
+  function loop(time){
+    const dt = (time-lastTime)/1000||0;
+    lastTime = time;
+    update(dt);
+    draw();
+    animId = requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  // Interaction
+  const hatEl = document.getElementById('hat');
+  hatEl.addEventListener('mouseenter',()=>{isHovering=true;});
+  hatEl.addEventListener('mouseleave',()=>{isHovering=false;});
+  hatEl.addEventListener('touchstart',()=>{isHovering=true;},{passive:true});
+  hatEl.addEventListener('touchend',()=>{isHovering=false;},{passive:true});
+})();
+</script>
+</body>
+</html>

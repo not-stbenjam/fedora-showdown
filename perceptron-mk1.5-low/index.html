@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Fedora Hero</title>
+<style>
+  :root {
+    --bg:#0a0a0c;
+    --glow:#ff4500;
+    --text:#e0e0e0;
+  }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  body{
+    min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:radial-gradient(circle at 50% 30%,#1a1a20 0%,var(--bg) 70%);
+    font-family:'Segoe UI',system-ui,sans-serif;color:var(--text);overflow:hidden;
+  }
+  .scene{
+    perspective:1200px;width:300px;height:300px;position:relative;
+  }
+  .hat-wrap{
+    width:100%;height:100%;transform-style:preserve-3d;animation:spin 12s linear infinite;
+  }
+  @keyframes spin{from{transform:rotateY(0deg);}to{transform:rotateY(360deg);}}
+  .hat{
+    position:absolute;top:50%;left:50%;width:200px;height:200px;
+    transform:translate(-50%,-50%) rotateX(-10deg);
+  }
+  .hat svg{width:100%;height:100%;filter:drop-shadow(0 0 12px rgba(255,69,0,.4));}
+  .caption{margin-top:2rem;font-size:1.1rem;letter-spacing:.05em;text-align:center;}
+  /* reduced motion */
+  @media (prefers-reduced-motion: reduce){
+    .hat-wrap{animation:none;}
+  }
+  /* particles container */
+  #particles{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:-1;}
+</style>
+</head>
+<body>
+<div class="scene">
+  <div class="hat-wrap">
+    <div class="hat">
+      <!-- Inline SVG of a stylized Fedora hat -->
+      <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#ff4500"/>
+            <stop offset="100%" stop-color="#ff6b35"/>
+          </linearGradient>
+        </defs>
+        <path d="M100 30 C130 30,150 50,150 80 L150 120 C150 140,130 160,100 160 C70 160,50 140,50 120 L50 80 C50 50,70 30,100 30Z" fill="url(#grad)" stroke="#fff" stroke-width="2"/>
+        <ellipse cx="100" cy="120" rx="45" ry="10" fill="#fff" opacity=".2"/>
+      </svg>
+    </div>
+  </div>
+</div>
+<p class="caption">Hover or tap to interact</p>
+<canvas id="particles"></canvas>
+
+<script>
+(() => {
+  const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (prefersReduced) return; // nothing to do
+
+  const canvas = document.getElementById('particles');
+  const ctx = canvas.getContext('2d');
+  let w, h;
+  function resize(){
+    w = canvas.width = window.innerWidth;
+    h = canvas.height = window.innerHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  const hatWrap = document.querySelector('.hat-wrap');
+  const hat = document.querySelector('.hat');
+  let active = false;
+  let particles = [];
+  const PARTICLE_COUNT = 300;
+  const colors = ['#ff4500','#ff6b35','#ff8c42'];
+
+  function createParticle(){
+    const angle = Math.random()*Math.PI*2;
+    const radius = 80 + Math.random()*40;
+    const speed = 0.5 + Math.random()*1.5;
+    const size = 1 + Math.random()*2;
+    const color = colors[Math.floor(Math.random()*colors.length)];
+    return {
+      x: w/2, y: h/2,
+      vx: Math.cos(angle)*speed,
+      vy: Math.sin(angle)*speed,
+      size, color,
+      life: 1,
+      phase: 'out' // out -> hold -> in
+    };
+  }
+
+  function initParticles(){
+    particles = [];
+    for(let i=0;i<PARTICLE_COUNT;i++) particles.push(createParticle());
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,w,h);
+    particles.forEach(p=>{
+      ctx.globalAlpha = p.life * 0.8;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  function update(){
+    if(!active){
+      // idle orbiting particles
+      particles.forEach(p=>{
+        const angle = Math.atan2(p.vy, p.vx) + 0.002;
+        const r = Math.sqrt(p.vx*p.vx + p.vy*p.vy);
+        p.vx = Math.cos(angle)*r;
+        p.vy = Math.sin(angle)*r;
+        p.x += p.vx;
+        p.y += p.vy;
+        // keep within bounds
+        if(p.x<0||p.x>w) p.vx*=-1;
+        if(p.y<0||p.y>h) p.vy*=-1;
+      });
+    } else {
+      particles.forEach(p=>{
+        if(p.phase==='out'){
+          p.x += p.vx;
+          p.y += p.vy;
+          p.life -= 0.005;
+          if(p.life<=0){
+            p.life=0;
+            p.phase='hold';
+          }
+        } else if(p.phase==='hold'){
+          // stay near edge
+          p.life = Math.min(p.life+0.01,1);
+        } else {
+          // move back toward center
+          const dx = w/2 - p.x;
+          const dy = h/2 - p.y;
+          const dist = Math.sqrt(dx*dx+dy*dy)||1;
+          const step = 0.02;
+          p.x += (dx/dist)*step*100;
+          p.y += (dy/dist)*step*100;
+          p.life = Math.max(p.life-0.01,0);
+          if(p.life===0){
+            p.phase='in';
+            p.life=1;
+          }
+        }
+      });
+    }
+    draw();
+    requestAnimationFrame(update);
+  }
+
+  function startInteraction(){
+    if(active) return;
+    active=true;
+    // slow spin
+    hatWrap.style.animationPlayState='paused';
+    // reset positions
+    particles.forEach(p=>{
+      const angle = Math.random()*Math.PI*2;
+      const radius = 80+Math.random()*40;
+      p.x = w/2 + Math.cos(angle)*radius;
+      p.y = h/2 + Math.sin(angle)*radius;
+      p.vx = Math.cos(angle)*(0.5+Math.random());
+      p.vy = Math.sin(angle)*(0.5+Math.random());
+      p.life=1;
+      p.phase='out';
+    });
+    setTimeout(()=>{
+      // after some time, bring back
+      particles.forEach(p=>{
+        p.phase='in';
+        p.life=1;
+      });
+      setTimeout(()=>{
+        active=false;
+        hatWrap.style.animationPlayState='running';
+        // hide particles after they reform
+        particles.forEach(p=>p.life=0);
+      },1200);
+    },1800);
+  }
+
+  hatWrap.addEventListener('mouseenter', startInteraction);
+  hatWrap.addEventListener('touchstart', startInteraction, {passive:true});
+  // also allow click anywhere on scene
+  document.querySelector('.scene').addEventListener('click', startInteraction);
+
+  initParticles();
+  update();
+})();
+</script>
+</body>
+</html>
