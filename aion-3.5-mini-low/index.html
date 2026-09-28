@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shade &amp; Ember — a fedora of light</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    overflow: hidden;
+    background:
+      radial-gradient(120% 95% at 50% 32%, #1b1014 0%, #0d0709 52%, #050304 100%);
+    color: #e9dcd6;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  /* soft vignette for depth */
+  body::after {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    background: radial-gradient(130% 110% at 50% 42%, transparent 55%, rgba(0,0,0,.55) 100%);
+  }
+  canvas#scene {
+    position: fixed; inset: 0;
+    width: 100%; height: 100%;
+    display: block;
+  }
+  .caption {
+    position: fixed; left: 0; right: 0;
+    bottom: clamp(20px, 6.5vh, 64px);
+    text-align: center;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+    animation: rise 1.6s .35s cubic-bezier(.2,.7,.2,1) both;
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: none; }
+  }
+  .caption h1 {
+    margin: 0 0 .6em;
+    font-family: "Didot", "Bodoni MT", "Playfair Display", Georgia, "Times New Roman", serif;
+    font-weight: 500;
+    font-size: clamp(15px, 2.1vw, 21px);
+    letter-spacing: .42em;
+    text-indent: .42em;
+    text-transform: uppercase;
+    color: #f0e4de;
+  }
+  .caption h1 span { color: #e0455a; }
+  .caption p {
+    margin: 0;
+    font-size: clamp(11px, 1.35vw, 13.5px);
+    font-weight: 300;
+    letter-spacing: .08em;
+    color: rgba(233, 215, 208, .5);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .caption { animation: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="scene" aria-label="A red fedora rendered as glowing particles"></canvas>
+<div class="caption">
+  <h1>Shade <span>&amp;</span> Ember</h1>
+  <p>A fedora spun from three thousand points of light.<span id="hint"></span></p>
+</div>
+
+<script>
+(() => {
+"use strict";
+
+const cv  = document.getElementById('scene');
+const ctx = cv.getContext('2d');
+const reducedMQ = matchMedia('(prefers-reduced-motion: reduce)');
+let reduced = reducedMQ.matches;
+
+const TAU = Math.PI * 2;
+const F   = 3.6;              // perspective distance
+const Lx = -0.42, Ly = 0.72, Lz = 0.55;   // view-space light direction (pre-normalized)
+
+/* ---------------- deterministic rng ---------------- */
+function mulberry32(a){
+  return function(){
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const rng = mulberry32(20240607);
+
+/* ---------------- hat point cloud ----------------
+   tags: 0 = red felt, 1 = dark band, 2 = sparkle            */
+const BRIM = 1250, CROWN = 900, TOP = 550, BAND = 400;
+const N = BRIM + CROWN + TOP + BAND;
+const hx = new Float32Array(N), hy = new Float32Array(N), hz = new Float32Array(N);
+const nx = new Float32Array(N), ny = new Float32Array(N), nz = new Float32Array(N);
+const r1 = new Float32Array(N), r2 = new Float32Array(N), r3 = new Float32Array(N),
+      r4 = new Float32Array(N), r5 = new Float32Array(N);
+const sz  = new Float32Array(N);
+const tag = new Uint8Array(N);
+
+let i = 0;
+function put(x, y, z, ax, ay, az, t){
+  hx[i] = x; hy[i] = y; hz[i] = z;
+  nx[i] = ax; ny[i] = ay; nz[i] = az;
+  r1[i] = rng(); r2[i] = rng(); r3[i] = rng(); r4[i] = rng(); r5[i] = rng();
+  sz[i] = 0.8 + 0.5 * rng();
+  tag[i] = t;
+  i++;
+}
+
+/* brim — flat disc with a wave in the rim and an asymmetric upturned curl */
+for (let k = 0; k < BRIM; k++){
+  const th = rng() * TAU, u = rng();
+  const R = 1.0 + 0.05 * Math.sin(2 * th + 0.9);          // wavy edge radius
+  const r = R * Math.sqrt(0.25 + 0.75 * u);               // area-uniform annulus
+  const e = Math.min(1, Math.max(0, (r - 0.52) / (R - 0.52)));
+  const lift = Math.pow(0.5 + 0.5 * Math.sin(th + 2.3), 1.5);
+  const y = -0.05 + e * e * (0.05 + 0.34 * lift) + (rng() - 0.5) * 0.012;
+  const x = r * Math.cos(th), z = r * Math.sin(th);
+  const sy = Math.min(1.3, 2 * e * (0.05 + 0.34 * lift) / (R - 0.52));
+  const nl = Math.sqrt(sy*sy + 1);
+  put(x, y, z, -sy * Math.cos(th) / nl, 1 / nl, -sy * Math.sin(th) / nl, 0);
+}
+/* crown — slightly tapered cylinder */
+for (let k = 0; k < CROWN; k++){
+  const th = rng() * TAU, u = rng();
+  const rad = 0.50 - 0.085 * u;
+  const x = rad * Math.cos(th), z = rad * Math.sin(th);
+  const y = 0.02 + u * 0.42 + (rng() - 0.5) * 0.008;
+  const nl = Math.sqrt(1 + 0.0144);
+  put(x, y, z, Math.cos(th) / nl, 0.12 / nl, Math.sin(th) / nl, 0);
+}
+/* crown top — low dome with a front-to-back crease (the pinch) */
+for (let k = 0; k < TOP; k++){
+  const u = rng(), th = rng() * TAU;
+  const r = 0.43 * Math.sqrt(u);
+  const x = r * Math.cos(th), z = r * Math.sin(th);
+  let y = 0.44 + 0.15 * (1 - Math.pow(r / 0.43, 1.6));
+  y -= 0.085 * Math.exp(-(z * z) / 0.01) * (1 - 0.5 * (r / 0.43) * (r / 0.43));
+  y += (rng() - 0.5) * 0.008;
+  put(x, y, z, 0, 1, 0, 0);
+}
+/* hat band — dark ring at the crown base */
+for (let k = 0; k < BAND; k++){
+  const th = rng() * TAU, u = rng();
+  const r = 0.515 + 0.012 * u;
+  const x = r * Math.cos(th), z = r * Math.sin(th);
+  const y = 0.03 + u * 0.13;
+  put(x, y, z, Math.cos(th), 0.08, Math.sin(th), 1);
+}
+/* sprinkle a few hot sparkles into the felt */
+for (let k = 0; k < N; k++) if (tag[k] === 0 && rng() < 0.022) tag[k] = 2;
+
+/* ---------------- glow sprites ---------------- */
+function makeGlow(r, g, b, core){
+  const s = document.createElement('canvas'); s.width = s.height = 64;
+  const c = s.getContext('2d');
+  const g0 = c.createRadialGradient(32, 32, 0, 32, 32, 32);
+  const mr = Math.round(r + (255 - r) * 0.55),
+        mg = Math.round(g + (255 - g) * 0.55),
+        mb = Math.round(b + (255 - b) * 0.55);
+  g0.addColorStop(0,    `rgba(${mr},${mg},${mb},${core})`);
+  g0.addColorStop(0.25, `rgba(${r},${g},${b},${core * 0.45})`);
+  g0.addColorStop(0.6,  `rgba(${r},${g},${b},${core * 0.12})`);
+  g0.addColorStop(1,    `rgba(${r},${g},${b},0)`);
+  c.fillStyle = g0; c.fillRect(0, 0, 64, 64);
+  return s;
+}
+const PAL = [[255, 44, 64], [168, 30, 44], [255, 224, 208], [255, 134, 46]]; // red, band, spark, ember
+const SPR = [], ESPR = [];
+for (let t = 0; t < 3; t++){
+  SPR[t] = [];
+  for (let l = 0; l < 6; l++){
+    const f = 0.38 + 0.62 * l / 5;
+    SPR[t].push(makeGlow(PAL[t][0] * f | 0, PAL[t][1] * f | 0, PAL[t][2] * f | 0, 0.85));
+  }
+}
+for (let l = 0; l < 6; l++){
+  const f = 0.38 + 0.62 * l / 5;
+  ESPR.push(makeGlow(PAL[3][0] * f | 0, PAL[3][1] * f | 0, PAL[3][2] * f | 0, 0.85));
+}
+const FLOOR = makeGlow(255, 70, 55, 0.5);
+const DSPR  = makeGlow(215, 190, 180, 0.7);
+
+/* ---------------- background dust ---------------- */
+const dust = [];
+for (let k = 0; k < 70; k++){
+  const front = Math.random() < 0.3;
+  dust.push({
+    x: (Math.random() * 2 - 1) * 4.5,
+    y: (Math.random() * 2 - 1) * 2.6 + 0.3,
+    z: front ? -0.4 - Math.random() * 0.6 : 1.2 + Math.random() * 2.8,
+    ph: Math.random() * TAU,
+    sp: 0.12 + Math.random() * 0.25,
+    sz: 0.7 + Math.random() * 1.3,
+    al: 0.05 + Math.random() * 0.09
+  });
+}
+
+/* ---------------- state ---------------- */
+const ST = { diss: 2.1, hold: 0.85, gath2: 1.8, gath: 1.9 };
+let state = reduced ? 'idle' : 'gather';
+let stT = 0, ang = 0.6, omega = 0.55, omegaT = 0.55;
+let embering = false;
+let tilt = -0.42, tiltT = -0.42, pan = 0, panT = 0, bob = 0;
+let ob = null, obSkip = null;
+const armedAt = performance.now() + 1200;
+
+const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
+const easeOut   = t => 1 - (1 - t) * (1 - t) * (1 - t);
+const easeInOut = t => t * t * (3 - 2 * t);
+
+function trigger(){
+  if (reduced || state !== 'idle' || performance.now() < armedAt) return;
+  state = 'dissolve'; stT = 0;
+  embering = true;
+  omegaT = 0.10;
+}
+
+function spawnOrbiters(){
+  ob = []; obSkip = new Set();
+  for (let k = 0; k < 16; k++){
+    let idx;
+    do { idx = (Math.random() * N) | 0; } while (tag[idx] === 1);
+    obSkip.add(idx);
+    ob.push({
+      idx,
+      age: 0,
+      dur: 7 + Math.random() * 4,
+      a: 1.15 + Math.random() * 0.85,
+      yaw: Math.random() * TAU,
+      incl: (Math.random() - 0.5) * 1.1,
+      ph: Math.random() * TAU,
+      sp: (0.55 + Math.random() * 0.8) * (Math.random() < 0.4 ? -1 : 1),
+      cy0: 0.18 + Math.random() * 0.25,
+      trail: [],
+      tc: 0
+    });
+  }
+}
+
+/* ---------------- sizing ---------------- */
+let W = 0, H = 0, S = 0, cx = 0, cy = 0;
+function resize(){
+  const dpr = Math.min(2, devicePixelRatio || 1);
+  W = innerWidth; H = innerHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  S = Math.min(W, H) * 0.205;
+  cx = W / 2; cy = H * 0.44;
+  if (reduced) render(0, 0);
+}
+addEventListener('resize', resize);
+
+/* ---------------- render ---------------- */
+function render(t, dt){
+
+  /* update orbiters */
+  if (ob){
+    for (const o of ob) o.age += dt;
+    if (state === 'orbit' && ob.every(o => o.age >= o.dur)){
+      state = 'idle'; embering = false; omegaT = 0.55; ob = null; obSkip = null;
+    }
+  }
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.globalCompositeOperation = 'lighter';
+
+  const ca = Math.cos(ang), sa = Math.sin(ang);
+  const ct = Math.cos(tilt), st_ = Math.sin(tilt);
+  const wobA = reduced ? 0 : 1;
+
+  /* warm under-glow (grounds the hat, breathes with the bob) */
+  {
+    const fy = -0.95 + bob * 0.6;
+    const Y2 = fy * ct, Z2 = fy * st_;
+    const pr = F / (F + Z2);
+    const r = S * 2.3 * pr * (1 - bob * 1.5);
+    ctx.globalAlpha = Math.max(0.05, 0.16 - bob * 1.6);
+    ctx.drawImage(FLOOR, cx + pan - r, cy - Y2 * S * pr - r, r * 2, r * 2);
+  }
+
+  /* drifting dust motes */
+  for (const d of dust){
+    const dx = d.x + Math.sin(t * d.sp + d.ph) * 0.25 * wobA;
+    const dy = d.y + Math.cos(t * d.sp * 0.8 + d.ph) * 0.18 * wobA;
+    const Y2 = dy * ct - d.z * st_, Z2 = dy * st_ + d.z * ct;
+    const pr = F / (F + Z2);
+    const ds = d.sz * S * 0.012 * pr * 3;
+    ctx.globalAlpha = d.al * (0.65 + 0.35 * Math.sin(t * 0.6 + d.ph));
+    ctx.drawImage(DSPR, cx + pan + dx * S * pr - ds / 2, cy - Y2 * S * pr - ds / 2, ds, ds);
+  }
+
+  /* orbiter trails (faint ember light) */
+  if (ob){
+    for (const o of ob){
+      if (o.age >= o.dur) continue;
+      const k = o.age < 0.9 ? easeInOut(o.age / 0.9)
+              : o.age > o.dur - 1.4 ? easeInOut((o.dur - o.age) / 1.4) : 1;
+      if (k <= 0.01) continue;
+      const n = o.trail.length / 3;
+      for (let j = 0; j < n; j++){
+        const wx = o.trail[j * 3], wy = o.trail[j * 3 + 1], wz = o.trail[j * 3 + 2];
+        const Y2 = wy * ct - wz * st_, Z2 = wy * st_ + wz * ct;
+        const pr = F / (F + Z2);
+        const ds = S * 0.016 * pr * 2.6;
+        ctx.globalAlpha = (1 - j / 16) * 0.22 * k;
+        ctx.drawImage(ESPR[3], cx + pan + wx * S * pr - ds / 2, cy - Y2 * S * pr - ds / 2, ds, ds);
+      }
+    }
+  }
+
+  /* the hat — every particle through the same pipeline */
+  for (let k = 0; k < N; k++){
+
+    if (obSkip && obSkip.has(k)) continue;
+
+    /* scatter amount q (0 = home, 1 = full ember) */
+    let q = 0;
+    if (state === 'dissolve'){
+      q = easeOut(clamp01(stT / ST.diss * 1.35 - 0.35 * r4[k]));
+    } else if (state === 'hold'){
+      q = 1;
+    } else if (state === 'gather' || state === 'gather2'){
+      const g = 1 - stT / (state === 'gather' ? ST.gath : ST.gath2);
+      q = easeInOut(clamp01(g * 1.4 - 0.4 * r4[k]));
+    }
+
+    let x = hx[k], y = hy[k], z = hz[k];
+    if (q > 0.001){
+      const R1 = r1[k], R2 = r2[k], R3 = r3[k], R4 = r4[k], R5 = r5[k];
+      const sw = (0.7 + 1.7 * R5) * (R3 < 0.5 ? -1 : 1) * q;   // per-particle swirl
+      const cs = Math.cos(sw), sn = Math.sin(sw);
+      const rx = x * cs - z * sn, rz = x * sn + z * cs;
+      const az = R1 * TAU, ch = 0.55 + 0.85 * R3;
+      const up = 0.55 + 1.25 * R2;
+      const dist = (0.55 + 1.9 * R4) * q;
+      const wobble = Math.sin(t * (1.5 + 2.2 * R5) + R1 * TAU) * 0.08 * q;
+      x = rx + Math.cos(az) * ch * dist + wobble;
+      z = rz + Math.sin(az) * ch * dist + wobble * 0.7;
+      y += (up * 0.9 + 0.35) * dist + Math.sin(t * 0.9 + R2 * TAU) * 0.06 * q;
+    }
+
+    /* spin, bob, tilt, project */
+    const X = x * ca + z * sa, Z0 = z * ca - x * sa, Y = y + bob;
+    const Y2 = Y * ct - Z0 * st_, Z2 = Y * st_ + Z0 * ct;
+    const pr = F / (F + Z2);
+    if (pr < 0.15) continue;
+    const px = cx + pan + X * S * pr;
+    const py = cy - Y2 * S * pr;
+
+    /* shade: rotate the normal with the hat, lambert + rim */
+    const nX = nx[k] * ca + nz[k] * sa, nZ0 = nz[k] * ca - nx[k] * sa;
+    const nY2 = ny[k] * ct - nZ0 * st_, nZ2 = ny[k] * st_ + nZ0 * ct;
+    let rim = 1 - Math.min(1, Math.abs(nZ2)); rim = rim * rim * rim * 0.55;
+    let li = 0.16 + 0.8 * Math.max(0, nX * Lx + nY2 * Ly + nZ2 * Lz) + rim;
+    let lvl = (li * 5.5) | 0; if (lvl > 5) lvl = 5;
+
+    /* draw */
+    const core = sz[k] * S * 0.017 * pr;
+    const ds = core * 3.4;
+    let al = (tag[k] === 1 ? 0.5 : 0.85) * (0.45 + 0.55 * Math.min(1, pr));
+    let spr = SPR[tag[k]][lvl];
+    if (embering && q > 0.02){
+      al *= 0.7 + 0.3 * Math.sin(t * 11 + r1[k] * 40);
+      if (q > 0.2 + 0.5 * r5[k] && tag[k] !== 2) spr = ESPR[lvl];
+    }
+    ctx.globalAlpha = al;
+    ctx.drawImage(spr, px - ds / 2, py - ds / 2, ds, ds);
+  }
+
+  /* orbiters — heads */
+  if (ob){
+    for (const o of ob){
+      if (o.age >= o.dur) continue;
+      const k = o.age < 0.9 ? easeInOut(o.age / 0.9)
+              : o.age > o.dur - 1.4 ? easeInOut((o.dur - o.age) / 1.4) : 1;
+
+      /* home position in world space (for the blend in/out) */
+      const hX = hx[o.idx] * ca + hz[o.idx] * sa,
+            hZ0 = hz[o.idx] * ca - hx[o.idx] * sa,
+            hY = hy[o.idx] + bob;
+
+      /* orbit */
+      const aO = o.ph + o.sp * o.age;
+      let ox = o.a * Math.cos(aO), oz = o.a * 0.72 * Math.sin(aO),
+          oy = 0.12 * Math.sin(aO * 2 + o.ph);
+      const cyw = Math.cos(o.yaw), syw = Math.sin(o.yaw);
+      const ox2 = ox * cyw + oz * syw, oz2 = -ox * syw + oz * cyw;
+      const ci = Math.cos(o.incl), si = Math.sin(o.incl);
+      const oy2 = oy * ci - oz2 * si, oz3 = oy * si + oz2 * ci;
+      const wX = ox2, wY = o.cy0 + bob + oy2, wZ = oz3;
+
+      const fx = hX + (wX - hX) * k,
+            fy2 = hY + (wY - hY) * k,
+            fz = hZ0 + (wZ - hZ0) * k;
+
+      /* trail */
+      if (k > 0.55 && !reduced){
+        if (o.tc++ % 3 === 0){
+          o.trail.unshift(fx, fy2, fz);
+          if (o.trail.length > 48) o.trail.length = 48;
+        }
+      }
+
+      const Y3 = fy2 * ct - fz * st_, Z3 = fy2 * st_ + fz * ct;
+      const pr = F / (F + Z3);
+      const ds = sz[o.idx] * S * 0.017 * pr * 1.6 * 3.4;
+      ctx.globalAlpha = 0.95 * k;
+      ctx.drawImage(ESPR[5], cx + pan + fx * S * pr - ds / 2, cy - Y3 * S * pr - ds / 2, ds, ds);
+    }
+  }
+
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+}
+
+/* ---------------- main loop ---------------- */
+let last = performance.now();
+function frame(now){
+  if (reduced) return;
+  requestAnimationFrame(frame);
+  let dt = (now - last) / 1000; last = now;
+  if (dt > 0.05) dt = 0.05;
+  const t = now / 1000;
+  stT += dt;
+
+  if (state === 'gather'  && stT >= ST.gath)  { state = 'idle'; }
+  else if (state === 'dissolve' && stT >= ST.diss){ state = 'hold'; stT = 0; }
+  else if (state === 'hold'     && stT >= ST.hold ){ state = 'gather2'; stT = 0; }
+  else if (state === 'gather2'  && stT >= ST.gath2){ spawnOrbiters(); state = 'orbit'; stT = 0; }
+
+  omega += (omegaT - omega) * Math.min(1, dt * 2.2);
+  ang += omega * dt;
+  bob = Math.sin(t * 0.8) * 0.035;
+  tilt += (tiltT - tilt) * Math.min(1, dt * 3);
+  pan  += (panT - pan)  * Math.min(1, dt * 3);
+
+  render(t, dt);
+}
+
+/* ---------------- input ---------------- */
+addEventListener('pointermove', e => {
+  if (reduced) return;
+  const mx = e.clientX / W * 2 - 1, my = e.clientY / H * 2 - 1;
+  tiltT = -0.42 + my * 0.07;
+  panT = mx * 0.09 * S;
+});
+cv.addEventListener('pointerenter', trigger);
+cv.addEventListener('pointerdown', trigger);
+
+/* ---------------- reduced motion ---------------- */
+function applyReduced(){
+  const hint = document.getElementById('hint');
+  hint.textContent = reduced
+    ? ' Resting still — reduced motion respected.'
+    : ' Hover or tap — it scatters, swirls, and returns.';
+}
+applyReduced();
+
+reducedMQ.addEventListener?.('change', e => {
+  reduced = e.matches;
+  applyReduced();
+  if (reduced){
+    state = 'idle'; embering = false; omegaT = 0.55; ob = null; obSkip = null;
+    render(0, 0);
+  } else {
+    last = performance.now();
+    requestAnimationFrame(frame);
+  }
+});
+
+resize();
+if (!reduced) requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
