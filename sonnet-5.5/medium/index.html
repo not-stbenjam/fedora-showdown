@@ -1,0 +1,570 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Fedora</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    height:100vh;height:100dvh;
+    display:flex;flex-direction:column;overflow:hidden;
+    background:radial-gradient(120% 90% at 50% 38%,#1a1924 0%,#0c0b12 48%,#050508 100%);
+    color:#ece8f2;
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    -webkit-tap-highlight-color:transparent;
+  }
+  body::after{
+    content:"";position:fixed;inset:0;pointer-events:none;z-index:3;opacity:.07;mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  }
+  body::before{
+    content:"";position:fixed;inset:0;pointer-events:none;z-index:2;
+    background:radial-gradient(ellipse at 50% 45%,transparent 55%,rgba(0,0,0,.55) 100%);
+  }
+  #c{position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}
+  #stage{
+    position:relative;z-index:1;flex:1 1 auto;min-height:0;cursor:pointer;
+    touch-action:manipulation;outline:none;-webkit-user-select:none;user-select:none;
+  }
+  #stage:focus-visible{outline:1px solid rgba(255,255,255,.22);outline-offset:-10px;border-radius:28px}
+  .caption{
+    position:relative;z-index:1;flex:0 0 auto;text-align:center;pointer-events:none;
+    padding:6px 20px max(28px,calc(env(safe-area-inset-bottom) + 18px));
+    animation:rise 1.4s .3s both cubic-bezier(.2,.7,.2,1);
+  }
+  .caption h1{
+    margin:0;font-weight:500;font-size:clamp(.78rem,.7rem + .3vw,.95rem);
+    letter-spacing:.42em;text-transform:uppercase;padding-left:.42em;color:rgba(240,236,246,.88);
+  }
+  .caption p{margin:.7em 0 0;font-size:clamp(.72rem,.68rem + .15vw,.82rem);letter-spacing:.06em;color:rgba(214,208,226,.46)}
+  .h-rm,.h-tap{display:none}
+  @media (hover:none){.h-hover{display:none}.h-tap{display:inline}}
+  @media (prefers-reduced-motion:reduce){
+    .h-hover,.h-tap{display:none}.h-rm{display:inline}
+    .caption{animation:none}
+  }
+  @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+</style>
+</head>
+<body>
+<canvas id="c" aria-hidden="true"></canvas>
+<main id="stage" tabindex="0" role="button" aria-label="A slowly spinning fedora. Activate to dissolve it into glowing particles that then reform."></main>
+<footer class="caption">
+  <h1>Fedora</h1>
+  <p>An open hat for an open world &middot;
+    <span class="h-hover">hover to dissolve</span><span class="h-tap">tap to dissolve</span><span class="h-rm">hover or tap for a soft glow</span>
+  </p>
+</footer>
+
+<script>
+(() => {
+'use strict';
+
+const TAU = Math.PI * 2;
+const D = 7.5;                       // camera distance
+const clamp = (x, a, b) => x < a ? a : x > b ? b : x;
+const ss = x => { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); };
+let seed = 20240607;
+const rnd = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const stage = document.getElementById('stage');
+const off = document.createElement('canvas');
+const og = off.getContext('2d');
+const rmq = window.matchMedia('(prefers-reduced-motion: reduce)');
+let reducedMode = rmq.matches;
+
+/* ------------------------------------------------------------------ geometry */
+const NS = 96, AX = 1.0, AZ = 1.1, YC = 0.3;
+const R_IN = 0.60, R_OUT = 1.52, CROWN_R = 0.60, TOP_Y = 0.74, DENT = 0.15;
+const quads = [];
+const sub = (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+function addQuad(a, b, c, d, type, ref, ao, wt) {
+  let n = cross(sub(c, a), sub(d, b));
+  const l = Math.hypot(n[0], n[1], n[2]);
+  if (l < 1e-9) return;
+  n = [n[0]/l, n[1]/l, n[2]/l];
+  if (n[0]*ref[0] + n[1]*ref[1] + n[2]*ref[2] < 0) n = [-n[0], -n[1], -n[2]];
+  quads.push({ v: [a, b, c, d], n, type, ao, w: l * 0.5 * wt });
+}
+const crownRadius = v => CROWN_R * (1 - 0.15 * Math.pow(v, 1.3));
+const topY = x => TOP_Y - DENT * Math.exp(-(x / 0.18) * (x / 0.18));
+
+const BU = [0, .07, .18, .32, .46, .6, .72, .83, .92, 1];
+function brimPt(th, u, top) {
+  const r = R_IN + (R_OUT - R_IN) * u;
+  const y = 0.13 * Math.cos(2 * th) * Math.pow(u, 1.7) - 0.03 * u + (top ? 0.018 : -0.018);
+  return [r * AX * Math.cos(th), y - YC, r * AZ * Math.sin(th)];
+}
+const ROWS = [
+  { v: 0, b: 0 }, { v: .07, b: 0 }, { v: .075, b: .02 }, { v: .335, b: .02 }, { v: .34, b: 0 },
+  { v: .45, b: 0 }, { v: .58, b: 0 }, { v: .7, b: 0 }, { v: .8, b: 0 }, { v: .9, b: 0 }, { v: 1, b: 0 }
+];
+function crownPt(th, row) {
+  const rr = crownRadius(row.v) + row.b;
+  const yTop = topY(crownRadius(1) * AX * Math.cos(th));
+  const y = 0.01 + row.v * (yTop - 0.01);
+  return [rr * AX * Math.cos(th), y - YC, rr * AZ * Math.sin(th)];
+}
+const CP = [1, .86, .72, .58, .45, .33, .22, .12, 0];
+function capPt(th, rho) {
+  const rt = crownRadius(1);
+  const x = rt * AX * rho * Math.cos(th);
+  return [x, topY(x) - YC, rt * AZ * rho * Math.sin(th)];
+}
+
+for (let j = 0; j < NS; j++) {
+  const t0 = j / NS * TAU, t1 = (j + 1) / NS * TAU, tm = (t0 + t1) / 2;
+  const radial = [Math.cos(tm) * AX, 0, Math.sin(tm) * AZ];
+  for (let i = 0; i < BU.length - 1; i++) {
+    const ao = 0.55 + 0.45 * ss(((BU[i] + BU[i+1]) / 2) / 0.22);
+    addQuad(brimPt(t0, BU[i], 1), brimPt(t1, BU[i], 1), brimPt(t1, BU[i+1], 1), brimPt(t0, BU[i+1], 1), 0, [0, 1, 0], ao, 1);
+    addQuad(brimPt(t0, BU[i], 0), brimPt(t1, BU[i], 0), brimPt(t1, BU[i+1], 0), brimPt(t0, BU[i+1], 0), 0, [0, -1, 0], 1, 0.2);
+  }
+  addQuad(brimPt(t0, 1, 1), brimPt(t1, 1, 1), brimPt(t1, 1, 0), brimPt(t0, 1, 0), 0, radial, 1, 0.5);
+  for (let s = 0; s < ROWS.length - 1; s++) {
+    const vm = (ROWS[s].v + ROWS[s+1].v) / 2;
+    addQuad(crownPt(t0, ROWS[s]), crownPt(t1, ROWS[s]), crownPt(t1, ROWS[s+1]), crownPt(t0, ROWS[s+1]),
+      (s >= 1 && s <= 3) ? 1 : 0, radial, 0.62 + 0.38 * ss(vm / 0.3), 1);
+  }
+  for (let i = 0; i < CP.length - 1; i++) {
+    const xm = crownRadius(1) * AX * (CP[i] + CP[i+1]) / 2 * Math.cos(tm);
+    addQuad(capPt(t0, CP[i]), capPt(t1, CP[i]), capPt(t1, CP[i+1]), capPt(t0, CP[i+1]), 0, [0, 1, 0],
+      1 - 0.3 * Math.exp(-(xm / 0.2) * (xm / 0.2)), 1);
+  }
+}
+const nQ = quads.length;
+const qv = new Float32Array(nQ * 12), qn = new Float32Array(nQ * 3), qc = new Float32Array(nQ * 3);
+const qt = new Uint8Array(nQ), qa = new Float32Array(nQ);
+const cum = new Float64Array(nQ);
+let totalW = 0;
+quads.forEach((q, i) => {
+  let cx_ = 0, cy_ = 0, cz_ = 0;
+  q.v.forEach((p, k) => { qv[i*12 + k*3] = p[0]; qv[i*12 + k*3 + 1] = p[1]; qv[i*12 + k*3 + 2] = p[2]; cx_ += p[0]; cy_ += p[1]; cz_ += p[2]; });
+  qc[i*3] = cx_ / 4; qc[i*3+1] = cy_ / 4; qc[i*3+2] = cz_ / 4;
+  qn[i*3] = q.n[0]; qn[i*3+1] = q.n[1]; qn[i*3+2] = q.n[2];
+  qt[i] = q.type; qa[i] = q.ao;
+  totalW += q.w; cum[i] = totalW;
+});
+
+/* ------------------------------------------------------------------ particles */
+const small = Math.min(innerWidth, innerHeight) < 520;
+const N = small ? 3800 : 6500;
+const NO = small ? 56 : 84;
+const DD = 2.2, RD = 2.0, T_TOTAL = 7.2, T_SWITCH = 3.7;
+const hx = new Float32Array(N), hy = new Float32Array(N), hz = new Float32Array(N);
+const sx = new Float32Array(N), sy = new Float32Array(N), sz = new Float32Array(N);
+const pd0 = new Float32Array(N), pr0 = new Float32Array(N), pk = new Int8Array(N);
+const pph = new Float32Array(N), pwa = new Float32Array(N), psz = new Float32Array(N), ptb = new Float32Array(N);
+const isOrb = new Uint8Array(N);
+const oR = new Float32Array(N), oW = new Float32Array(N), oA = new Float32Array(N), oCi = new Float32Array(N),
+      oSi = new Float32Array(N), oCy = new Float32Array(N), oSy = new Float32Array(N), oYo = new Float32Array(N);
+const orbList = new Int32Array(NO);
+
+(function initParticles() {
+  for (let i = 0; i < N; i++) {
+    const r = rnd() * totalW;
+    let lo = 0, hi = nQ - 1;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (cum[m] < r) lo = m + 1; else hi = m; }
+    const o = lo * 12, u = rnd(), w = rnd();
+    const a = (1-u)*(1-w), b = u*(1-w), c = u*w, d = (1-u)*w;
+    hx[i] = a*qv[o] + b*qv[o+3] + c*qv[o+6] + d*qv[o+9];
+    hy[i] = a*qv[o+1] + b*qv[o+4] + c*qv[o+7] + d*qv[o+10];
+    hz[i] = a*qv[o+2] + b*qv[o+5] + c*qv[o+8] + d*qv[o+11];
+
+    const th = rnd() * TAU, cp = rnd() * 2 - 1, sp = Math.sqrt(1 - cp * cp);
+    const rr = 0.9 + 1.5 * Math.pow(rnd(), 0.8);
+    sx[i] = sp * Math.cos(th) * rr * 1.25 + hx[i] * 0.3;
+    sy[i] = cp * rr * 0.8 + 0.25 + rnd() * 0.5 + hy[i] * 0.3;
+    sz[i] = sp * Math.sin(th) * rr * 1.2 + hz[i] * 0.3;
+
+    const yn = clamp((hy[i] + 0.35) / 0.9, 0, 1);
+    pd0[i] = 0.55 * (1 - yn) + rnd() * 0.35;
+    pr0[i] = 4.4 + 0.45 * yn + rnd() * 0.35;
+    const kr = rnd();
+    pk[i] = kr < 0.13 ? -1 : kr < 0.6 ? 1 : 2;
+    pph[i] = rnd() * TAU;
+    pwa[i] = 0.04 + 0.12 * rnd();
+    psz[i] = rnd();
+    ptb[i] = rnd();
+  }
+  for (let oi = 0; oi < NO; oi++) {
+    let i; do { i = (rnd() * N) | 0; } while (isOrb[i]);
+    isOrb[i] = 1; orbList[oi] = i;
+    oR[i] = 1.85 + 0.95 * rnd();
+    oW[i] = (0.3 + 0.55 * rnd()) * (rnd() < 0.78 ? 1 : -1);
+    oA[i] = rnd() * TAU;
+    const inc = (rnd() - 0.5) * 1.15, yaw = rnd() * TAU;
+    oCi[i] = Math.cos(inc); oSi[i] = Math.sin(inc); oCy[i] = Math.cos(yaw); oSy[i] = Math.sin(yaw);
+    oYo[i] = (rnd() - 0.5) * 0.5;
+    pd0[i] = Math.min(pd0[i], 0.9); pr0[i] = Math.max(pr0[i], 4.4);
+  }
+})();
+
+const sX = new Float32Array(N), sY = new Float32Array(N), sD = new Float32Array(N),
+      sA = new Float32Array(N), sZ = new Float32Array(N), eArr = new Float32Array(N);
+const sT = new Uint8Array(N), ids = new Int32Array(N);
+let idc = 0;
+
+const TR_L = 26, TR_STEP = 1 / 60;
+const hist = new Float32Array(NO * TR_L * 2), hl = new Uint8Array(NO);
+let hp = 0, trAcc = 0;
+
+const TEMPS = [[255,240,214],[255,205,140],[255,150,70],[250,96,40],[214,44,28],[150,20,26]];
+function makeSprite(c) {
+  const s = document.createElement('canvas'); s.width = s.height = 48;
+  const g = s.getContext('2d');
+  const gr = g.createRadialGradient(24, 24, 0, 24, 24, 24);
+  gr.addColorStop(0, `rgba(${c[0]},${c[1]},${c[2]},1)`);
+  gr.addColorStop(.16, `rgba(${c[0]},${c[1]},${c[2]},.72)`);
+  gr.addColorStop(.42, `rgba(${c[0]},${c[1]},${c[2]},.16)`);
+  gr.addColorStop(1, `rgba(${c[0]},${c[1]},${c[2]},0)`);
+  g.fillStyle = gr; g.fillRect(0, 0, 48, 48);
+  return s;
+}
+const sprites = TEMPS.map(makeSprite);
+const moteSprite = (() => {
+  const s = document.createElement('canvas'); s.width = s.height = 64;
+  const g = s.getContext('2d');
+  const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(255,214,200,1)'); gr.addColorStop(.5, 'rgba(255,190,180,.35)'); gr.addColorStop(1, 'rgba(255,180,170,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+  return s;
+})();
+const motes = Array.from({ length: 46 }, () => {
+  const d = rnd();
+  return { x: rnd(), y: rnd(), d, v: 0.004 + 0.012 * (1 - d) * rnd() + 0.003, p: rnd() * TAU, r: 5 + 60 * d * d * d + 8 * d };
+});
+
+/* ------------------------------------------------------------------ state */
+let W = 0, H = 0, DPR = 1, cx = 0, cy = 0, S = 200, spread = 1, sc = 1;
+let tg = 0, mt = 0, ang = 0.55, spinF = 1, evT = 0;
+let active = false, hover = false, orbitSeen = false;
+let glow = 0, glowTarget = 0, glowTimer = 0;
+let bobY = 0, pitch = 0.36;
+let m00=1,m01=0,m02=0,m10=0,m11=1,m12=0,m20=0,m21=0,m22=1;
+let _sx = 0, _sy = 0, _sz = 0, _sk = 1, _ox = 0, _oy = 0, _oz = 0;
+const SPIN = 0.62;
+
+const LN = Math.hypot(-0.5, 0.62, 0.6);
+const LX = -0.5 / LN, LY = 0.62 / LN, LZ = 0.6 / LN;
+const HN = Math.hypot(LX, LY, LZ + 1);
+const HX = LX / HN, HY = LY / HN, HZ = (LZ + 1) / HN;
+
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = document.documentElement.clientWidth || innerWidth;
+  H = document.documentElement.clientHeight || innerHeight;
+  canvas.width = off.width = Math.round(W * DPR);
+  canvas.height = off.height = Math.round(H * DPR);
+  const r = stage.getBoundingClientRect();
+  S = Math.max(40, Math.min(r.width * 0.235, r.height * 0.33));
+  cx = r.left + r.width / 2;
+  cy = r.top + r.height / 2 - 0.3 * S;
+  spread = clamp(W * 0.47 / (3.1 * S), 0.5, 1);
+  sc = clamp(S / 230, 0.7, 1.35);
+}
+
+function buildMatrix(a, p, r) {
+  const ca = Math.cos(a), sa = Math.sin(a), cp = Math.cos(p), sp = Math.sin(p), cr = Math.cos(r), sr = Math.sin(r);
+  const r00 = ca, r01 = 0, r02 = sa;
+  const r10 = sp * sa, r11 = cp, r12 = -sp * ca;
+  m20 = -cp * sa; m21 = sp; m22 = cp * ca;
+  m00 = cr * r00 - sr * r10; m01 = cr * r01 - sr * r11; m02 = cr * r02 - sr * r12;
+  m10 = sr * r00 + cr * r10; m11 = sr * r01 + cr * r11; m12 = sr * r02 + cr * r12;
+}
+function tp(x, y, z) {
+  const X = m00*x + m01*y + m02*z, Y = m10*x + m11*y + m12*z + bobY, Z = m20*x + m21*y + m22*z;
+  const k = D / (D - Z);
+  _sx = cx + X * S * k; _sy = cy - Y * S * k; _sz = Z; _sk = k;
+}
+function orbit(i) {
+  const a = oA[i] + oW[i] * tg;
+  const x = oR[i] * Math.cos(a), z0 = oR[i] * 0.85 * Math.sin(a);
+  const y = -z0 * oSi[i], z = z0 * oCi[i];
+  _ox = x * oCy[i] + z * oSy[i];
+  _oy = oYo[i] + y;
+  _oz = -x * oSy[i] + z * oCy[i];
+}
+
+/* ------------------------------------------------------------------ particle update */
+function evalParticle(i, t, act) {
+  let bx, by, bz, orbB = false;
+  if (isOrb[i] && (orbitSeen || (act && t >= T_SWITCH))) { orbit(i); bx = _ox; by = _oy; bz = _oz; orbB = true; }
+  else { bx = hx[i]; by = hy[i]; bz = hz[i]; }
+  let qx = bx, qy = by, qz = bz, e = 0;
+  if (act) {
+    const d0 = pd0[i], r0 = pr0[i];
+    const a = clamp((t - d0) / DD, 0, 1), b = clamp((t - r0) / RD, 0, 1);
+    const ea = 1 - Math.pow(1 - a, 2.2);
+    const eb = b < 0.5 ? 4*b*b*b : 1 - Math.pow(-2*b + 2, 3) / 2;
+    e = ea * (1 - eb);
+    if (e > 0) {
+      qx = bx + (sx[i] * spread - bx) * e;
+      qy = by + (sy[i] - by) * e;
+      qz = bz + (sz[i] * spread - bz) * e;
+      const P = ss((t - d0) / (r0 + RD - d0));
+      const phi = TAU * pk[i] * P, cs = Math.cos(phi), sn = Math.sin(phi);
+      const rx = qx * cs + qz * sn, rz = -qx * sn + qz * cs;
+      const ph = pph[i], wa = pwa[i] * e;
+      qx = rx + wa * Math.sin(tg * 1.3 + ph);
+      qy += wa * 0.7 * Math.sin(tg * 1.7 + ph * 2.1);
+      qz = rz + wa * Math.sin(tg * 1.1 + ph * 3.3);
+    }
+  }
+  eArr[i] = e;
+  const a0 = orbB ? 1 : Math.min(1, e * 3.5);
+  if (a0 <= 0.004) { sA[i] = 0; return; }
+  tp(qx, qy, qz);
+  const fl = 0.78 + 0.22 * Math.sin(tg * (2.5 + pph[i] * 0.6) + pph[i] * 9);
+  const ps = psz[i];
+  let d = (3.2 + 6 * ps * ps) * sc * _sk;
+  if (isOrb[i]) d *= 1.35;
+  sX[i] = _sx; sY[i] = _sy; sZ[i] = _sz; sD[i] = d;
+  sA[i] = a0 * fl * (isOrb[i] ? 0.85 : 0.55);
+  sT[i] = isOrb[i] ? Math.min(2, (ptb[i] * 3) | 0) : Math.min(5, (e * 3.2 + ptb[i] * 2.2) | 0);
+  ids[idc++] = i;
+}
+function updateParticles() {
+  idc = 0;
+  if (reducedMode) return;
+  if (active) { for (let i = 0; i < N; i++) evalParticle(i, evT, true); }
+  else if (orbitSeen) { for (let oi = 0; oi < NO; oi++) evalParticle(orbList[oi], 0, false); }
+}
+function pushTrails(dt) {
+  trAcc += dt;
+  if (trAcc < TR_STEP) return;
+  trAcc = Math.min(trAcc - TR_STEP, TR_STEP);
+  hp = (hp + 1) % TR_L;
+  for (let oi = 0; oi < NO; oi++) {
+    const i = orbList[oi];
+    const inOrb = !reducedMode && (orbitSeen || (active && evT >= T_SWITCH));
+    if (inOrb && eArr[i] < 0.001 && sA[i] > 0) {
+      const o = (oi * TR_L + hp) * 2;
+      hist[o] = sX[i]; hist[o + 1] = sY[i];
+      if (hl[oi] < TR_L) hl[oi]++;
+    } else hl[oi] = 0;
+  }
+}
+function drawParticles(front) {
+  ctx.globalCompositeOperation = 'lighter';
+  for (let k = 0; k < idc; k++) {
+    const i = ids[k];
+    if ((sZ[i] >= 0) !== front) continue;
+    const d = sD[i];
+    ctx.globalAlpha = sA[i];
+    ctx.drawImage(sprites[sT[i]], sX[i] - d / 2, sY[i] - d / 2, d, d);
+  }
+  ctx.globalAlpha = 1;
+  if (idc && (orbitSeen || (active && evT >= T_SWITCH))) {
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const alphas = [0.42, 0.21, 0.08], widths = [1.3, 1.0, 0.7];
+    for (let oi = 0; oi < NO; oi++) {
+      const n = hl[oi], i = orbList[oi];
+      if (n < 3 || (sZ[i] >= 0) !== front) continue;
+      const fade = Math.min(1, n / 12);
+      for (let s = 0; s < 3; s++) {
+        const k0 = s * 8, k1 = Math.min(n - 1, k0 + 8);
+        if (k1 <= k0) break;
+        ctx.beginPath();
+        for (let k = k0; k <= k1; k++) {
+          const o = (oi * TR_L + ((hp - k + TR_L) % TR_L)) * 2;
+          if (k === k0) ctx.moveTo(hist[o], hist[o + 1]); else ctx.lineTo(hist[o], hist[o + 1]);
+        }
+        ctx.strokeStyle = `rgba(255,${165 - s * 25},${105 - s * 20},${alphas[s] * fade})`;
+        ctx.lineWidth = widths[s] * sc;
+        ctx.stroke();
+      }
+    }
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+/* ------------------------------------------------------------------ mesh */
+const rn = new Float32Array(nQ * 3), dp = new Float32Array(nQ), vis = new Uint32Array(nQ);
+const c8 = v => v < 0 ? 0 : v > 255 ? 255 : v | 0;
+function drawMesh(g) {
+  let vc = 0;
+  for (let q = 0; q < nQ; q++) {
+    const q3 = q * 3;
+    const nx = qn[q3], ny = qn[q3+1], nz = qn[q3+2];
+    const rx = m00*nx + m01*ny + m02*nz, ry = m10*nx + m11*ny + m12*nz, rz = m20*nx + m21*ny + m22*nz;
+    const px = qc[q3], py = qc[q3+1], pz = qc[q3+2];
+    const X = m00*px + m01*py + m02*pz, Y = m10*px + m11*py + m12*pz + bobY, Z = m20*px + m21*py + m22*pz;
+    if (-rx * X - ry * Y + rz * (D - Z) <= 0.02) continue;
+    rn[q3] = rx; rn[q3+1] = ry; rn[q3+2] = rz; dp[q] = Z; vis[vc++] = q;
+  }
+  const list = vis.subarray(0, vc);
+  list.sort((a, b) => dp[a] - dp[b]);
+  g.lineWidth = 0.7; g.lineJoin = 'round';
+  for (let k = 0; k < vc; k++) {
+    const q = list[k], q3 = q * 3;
+    const rx = rn[q3], ry = rn[q3+1], rz = rn[q3+2];
+    const nl = rx*LX + ry*LY + rz*LZ, diff = nl > 0 ? nl : 0;
+    const nh = rx*HX + ry*HY + rz*HZ;
+    const black = qt[q] === 1;
+    const spec = nh > 0 ? Math.pow(nh, black ? 70 : 30) : 0;
+    const rim = Math.pow(1 - (rz > 0 ? rz : 0), 3);
+    const lum = (0.13 + 0.95 * diff) * qa[q];
+    let r, gg, b;
+    if (!black) {
+      if (lum < 0.6) { const f = lum / 0.6; r = 46 + 186 * f; gg = 4 * f; b = 8 - 2 * f; }
+      else { const f = Math.min(1, (lum - 0.6) / 0.4); r = 232 + 23 * f; gg = 4 + 70 * f; b = 6 + 50 * f; }
+      r += spec * 120 + rim * 14; gg += spec * 100 + rim * 22; b += spec * 95 + rim * 40;
+    } else {
+      r = 12 + lum * 34; gg = 12 + lum * 34; b = 16 + lum * 46;
+      r += spec * 105 + rim * 12; gg += spec * 105 + rim * 20; b += spec * 112 + rim * 36;
+    }
+    const style = `rgb(${c8(r)},${c8(gg)},${c8(b)})`;
+    g.fillStyle = style; g.strokeStyle = style;
+    const o = q * 12;
+    g.beginPath();
+    tp(qv[o], qv[o+1], qv[o+2]); g.moveTo(_sx, _sy);
+    tp(qv[o+3], qv[o+4], qv[o+5]); g.lineTo(_sx, _sy);
+    tp(qv[o+6], qv[o+7], qv[o+8]); g.lineTo(_sx, _sy);
+    tp(qv[o+9], qv[o+10], qv[o+11]); g.lineTo(_sx, _sy);
+    g.closePath(); g.fill(); g.stroke();
+  }
+}
+
+/* ------------------------------------------------------------------ backdrop */
+function ell(x, y, rx, ry, stops) {
+  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+  for (const [o, c] of stops) g.addColorStop(o, c);
+  ctx.save(); ctx.translate(x, y); ctx.scale(rx, ry); ctx.fillStyle = g; ctx.fillRect(-1, -1, 2, 2); ctx.restore();
+}
+function drawBackdrop(meshA, glowAmt) {
+  const ga = 0.10 + 0.20 * glowAmt;
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, S * 3.6);
+  g.addColorStop(0, `rgba(238,30,30,${ga})`);
+  g.addColorStop(0.35, `rgba(160,20,40,${ga * 0.35})`);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  const g2 = ctx.createRadialGradient(cx - 2 * S, cy - 1.6 * S, 0, cx - 2 * S, cy - 1.6 * S, S * 3);
+  g2.addColorStop(0, 'rgba(90,110,190,.07)'); g2.addColorStop(1, 'rgba(90,110,190,0)');
+  ctx.fillStyle = g2; ctx.fillRect(0, 0, W, H);
+
+  ctx.globalCompositeOperation = 'lighter';
+  for (const m of motes) {
+    const x = m.x * W + Math.sin(mt * 0.2 + m.p) * 16 * m.d;
+    let y = (m.y - mt * m.v) % 1; if (y < 0) y += 1;
+    const a = (0.03 + 0.13 * m.d) * (0.6 + 0.4 * Math.sin(mt * 0.7 + m.p)) * (m.r > 30 ? 0.5 : 1);
+    ctx.globalAlpha = a;
+    const r = m.r * sc;
+    ctx.drawImage(moteSprite, x - r, y * H - r, r * 2, r * 2);
+  }
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+
+  const sp = Math.sin(pitch), cp = Math.cos(pitch);
+  const fy = cy + 1.25 * cp * S, sh = 1 - bobY * 3;
+  ell(cx, fy, 2.9 * S, 2.9 * S * sp, [[0, `rgba(238,40,30,${0.16 + 0.12 * glowAmt})`], [0.5, `rgba(200,30,40,${0.05 + 0.04 * glowAmt})`], [1, 'rgba(0,0,0,0)']]);
+  const sa = 0.3 + 0.7 * meshA;
+  ell(cx + 0.28 * S, fy + 0.02 * S, 1.75 * S * sh, 1.75 * S * sh * sp,
+    [[0, `rgba(0,0,0,${0.66 * sa})`], [0.45, `rgba(0,0,0,${0.42 * sa})`], [1, 'rgba(0,0,0,0)']]);
+}
+
+/* ------------------------------------------------------------------ frame */
+let last = 0, raf = 0;
+function render(dt) {
+  const rm = reducedMode;
+  tg += dt; if (!rm) mt += dt;
+  let more = false;
+  if (rm) {
+    ang = 0.55; spinF = 0; bobY = 0; pitch = 0.36;
+    glow += (glowTarget - glow) * (1 - Math.exp(-dt * 3));
+    if (Math.abs(glow - glowTarget) < 0.002) glow = glowTarget; else more = true;
+    buildMatrix(ang, pitch, 0);
+  } else {
+    const target = (active || hover) ? 0.16 : 1;
+    spinF += (target - spinF) * (1 - Math.exp(-dt * 2.4));
+    ang += SPIN * spinF * dt;
+    if (active) {
+      evT += dt;
+      if (evT >= T_TOTAL) { active = false; orbitSeen = true; evT = 0; hl.fill(0); }
+    }
+    pitch = 0.36 + 0.03 * Math.sin(tg * 0.45);
+    bobY = 0.045 * Math.sin(tg * 0.85);
+    buildMatrix(ang, pitch, 0.035 * Math.sin(tg * 0.55));
+    more = true;
+  }
+  const t = evT;
+  let meshA = 1;
+  if (active) meshA = t < T_SWITCH ? 1 - ss((t - 0.1) / 0.95) : ss((t - 5.4) / 1.5);
+  const glowAmt = rm ? glow : (1 - meshA) * 0.85;
+
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  drawBackdrop(meshA, glowAmt);
+  updateParticles();
+  if (!rm) pushTrails(dt);
+  drawParticles(false);
+
+  if (meshA > 0.003) {
+    if (meshA >= 0.995) { drawMesh(ctx); }
+    else {
+      const bx = Math.max(0, Math.floor(cx - 2.3 * S)), by = Math.max(0, Math.floor(cy - 1.3 * S));
+      const bw = Math.min(W, Math.ceil(cx + 2.3 * S)) - bx, bh = Math.min(H, Math.ceil(cy + 1.4 * S)) - by;
+      if (bw > 0 && bh > 0) {
+        og.setTransform(DPR, 0, 0, DPR, 0, 0);
+        og.clearRect(bx, by, bw, bh);
+        drawMesh(og);
+        ctx.globalAlpha = meshA;
+        ctx.drawImage(off, bx * DPR, by * DPR, bw * DPR, bh * DPR, bx, by, bw, bh);
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+  drawParticles(true);
+  return more;
+}
+function tick(now) {
+  raf = 0;
+  const dt = Math.min(0.05, Math.max(0, (now - last) / 1000)); last = now;
+  if (render(dt)) raf = requestAnimationFrame(tick);
+}
+function kick() {
+  if (raf) return;
+  last = performance.now();
+  raf = requestAnimationFrame(tick);
+}
+
+/* ------------------------------------------------------------------ interaction */
+function trigger() {
+  if (reducedMode) {
+    glowTarget = 1; clearTimeout(glowTimer);
+    glowTimer = setTimeout(() => { glowTarget = 0; kick(); }, 1600);
+    kick(); return;
+  }
+  if (active) return;
+  active = true; evT = 0; hl.fill(0); kick();
+}
+stage.addEventListener('pointerenter', e => { if (e.pointerType !== 'touch') { hover = true; trigger(); } });
+stage.addEventListener('pointerleave', () => { hover = false; });
+stage.addEventListener('pointercancel', () => { hover = false; });
+stage.addEventListener('pointerdown', e => { if (e.pointerType !== 'touch') hover = true; trigger(); });
+stage.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); trigger(); }
+});
+
+const onMotionChange = () => {
+  reducedMode = rmq.matches;
+  active = false; evT = 0; glow = glowTarget = 0; hl.fill(0);
+  kick();
+};
+if (rmq.addEventListener) rmq.addEventListener('change', onMotionChange); else if (rmq.addListener) rmq.addListener(onMotionChange);
+
+const relayout = () => { resize(); kick(); };
+if (window.ResizeObserver) new ResizeObserver(relayout).observe(stage);
+window.addEventListener('resize', relayout);
+resize();
+kick();
+})();
+</script>
+</body>
+</html>
