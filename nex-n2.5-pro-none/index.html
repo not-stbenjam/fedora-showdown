@@ -1,0 +1,793 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#090b0f">
+  <title>Ember Fedora</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --red: #ee0000;
+      --red-hot: #ff3535;
+      --red-deep: #750000;
+      --ink: #090b0f;
+      --caption: rgba(245, 247, 251, 0.58);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      min-height: 100%;
+      margin: 0;
+    }
+
+    body {
+      min-height: 100vh;
+      min-height: 100svh;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 50% 42%, rgba(82, 8, 10, 0.26) 0, rgba(17, 11, 15, 0.22) 25%, transparent 58%),
+        radial-gradient(circle at 50% 115%, rgba(38, 5, 7, 0.2), transparent 48%),
+        linear-gradient(145deg, #111319 0%, var(--ink) 48%, #050609 100%);
+      color: #f5f7fb;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .stage {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      isolation: isolate;
+      perspective: 1000px;
+      overflow: hidden;
+    }
+
+    .stage::before,
+    .stage::after {
+      position: absolute;
+      border-radius: 50%;
+      content: "";
+      pointer-events: none;
+    }
+
+    .stage::before {
+      width: min(92vmin, 850px);
+      height: min(92vmin, 850px);
+      border: 1px solid rgba(255, 255, 255, 0.025);
+      box-shadow:
+        0 0 0 18vmin rgba(255, 255, 255, 0.006),
+        0 0 0 38vmin rgba(255, 255, 255, 0.004);
+    }
+
+    .stage::after {
+      width: 1px;
+      height: 1px;
+      inset: 42% 43% auto auto;
+      background: rgba(255, 255, 255, 0.45);
+      box-shadow:
+        -18vmin -9vmin 0 rgba(255, 255, 255, 0.16),
+        15vmin -13vmin 0 rgba(255, 255, 255, 0.12),
+        21vmin 8vmin 0 rgba(255, 255, 255, 0.1),
+        -24vmin 11vmin 0 rgba(255, 255, 255, 0.1);
+    }
+
+    .hero {
+      position: relative;
+      z-index: 2;
+      width: min(86vw, 760px);
+      aspect-ratio: 1;
+      display: grid;
+      place-items: center;
+      align-content: center;
+      transform: translateY(-2vh);
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .hero::after {
+      position: absolute;
+      left: 50%;
+      bottom: 17.5%;
+      width: 52%;
+      height: 13%;
+      border-radius: 50%;
+      background:
+        radial-gradient(ellipse, rgba(0, 0, 0, 0.76) 0%, rgba(0, 0, 0, 0.36) 42%, transparent 72%);
+      filter: blur(12px);
+      content: "";
+      pointer-events: none;
+      transform: translateX(-50%);
+    }
+
+    .hat-wrap {
+      position: relative;
+      width: 72%;
+      aspect-ratio: 1.08;
+      transform-style: preserve-3d;
+      transform: translateY(1%);
+    }
+
+    .hat {
+      position: absolute;
+      inset: 0;
+      transform-style: preserve-3d;
+      animation: hat-spin 8s linear infinite;
+      will-change: transform;
+    }
+
+    .hat-surface {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      backface-visibility: hidden;
+      transform-style: preserve-3d;
+      filter: drop-shadow(0 18px 22px rgba(0, 0, 0, 0.5));
+    }
+
+    .hat-surface::before {
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background:
+        radial-gradient(circle at 50% 40%, rgba(255, 255, 255, 0.12), transparent 25%),
+        radial-gradient(circle at 50% 50%, #b80000 0 18%, #8f0000 32%, #520000 58%, #230000 75%, #100000 100%);
+      content: "";
+      box-shadow:
+        inset 0 0 34px rgba(255, 70, 70, 0.22),
+        inset 0 -25px 40px rgba(0, 0, 0, 0.55),
+        0 0 40px rgba(238, 0, 0, 0.08);
+    }
+
+    .hat-surface::after {
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background:
+        linear-gradient(115deg, rgba(255, 255, 255, 0.2), transparent 24% 70%, rgba(255, 255, 255, 0.04)),
+        repeating-linear-gradient(102deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 4px);
+      mix-blend-mode: screen;
+      content: "";
+      pointer-events: none;
+    }
+
+    .crown {
+      position: absolute;
+      left: 18%;
+      top: 10%;
+      width: 64%;
+      height: 54%;
+      border-radius: 50% 50% 46% 46% / 68% 68% 36% 36%;
+      background:
+        radial-gradient(ellipse at 50% 24%, #d40000 0 10%, #a60000 28%, #650000 64%, #2d0000 100%);
+      box-shadow:
+        inset 15px 12px 24px rgba(255, 105, 105, 0.16),
+        inset -18px -18px 30px rgba(0, 0, 0, 0.56),
+        0 0 25px rgba(238, 0, 0, 0.1);
+      transform: translateZ(18px);
+    }
+
+    .crown::before {
+      position: absolute;
+      left: 14%;
+      top: 13%;
+      width: 72%;
+      height: 55%;
+      border-radius: 50% 50% 45% 45% / 72% 72% 36% 36%;
+      background:
+        radial-gradient(ellipse at 46% 30%, rgba(255, 255, 255, 0.24), transparent 24%),
+        linear-gradient(130deg, rgba(255, 255, 255, 0.08), transparent 45%);
+      content: "";
+      opacity: 0.72;
+    }
+
+    .band {
+      position: absolute;
+      left: 14%;
+      top: 52%;
+      width: 72%;
+      height: 15%;
+      border-radius: 50%;
+      background:
+        linear-gradient(180deg, #171317 0%, #09080a 50%, #1b1519 100%);
+      box-shadow:
+        inset 0 1px 1px rgba(255, 255, 255, 0.08),
+        inset 0 -5px 8px rgba(0, 0, 0, 0.7),
+        0 2px 5px rgba(0, 0, 0, 0.4);
+      transform: translateZ(22px);
+    }
+
+    .band::after {
+      position: absolute;
+      left: 16%;
+      top: 31%;
+      width: 68%;
+      height: 38%;
+      border-radius: 50%;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), transparent 55%);
+      content: "";
+    }
+
+    .brim {
+      position: absolute;
+      left: 2%;
+      top: 42%;
+      width: 96%;
+      height: 39%;
+      border-radius: 50%;
+      background:
+        radial-gradient(ellipse at 50% 50%, #9b0000 0 25%, #690000 46%, #270000 72%, #100000 100%);
+      box-shadow:
+        inset 0 0 0 2px rgba(255, 60, 60, 0.06),
+        inset 0 12px 20px rgba(255, 72, 72, 0.08),
+        inset 0 -18px 28px rgba(0, 0, 0, 0.62),
+        0 13px 22px rgba(0, 0, 0, 0.52);
+      transform: translateZ(10px);
+    }
+
+    .brim::before {
+      position: absolute;
+      left: 12%;
+      top: 23%;
+      width: 76%;
+      height: 54%;
+      border-radius: 50%;
+      background: radial-gradient(ellipse, rgba(255, 255, 255, 0.1), transparent 66%);
+      content: "";
+      filter: blur(1px);
+    }
+
+    .back {
+      transform: rotateY(180deg) !important;
+    }
+
+    .back .crown {
+      transform: translateZ(-18px) rotateY(180deg);
+    }
+
+    .back .band {
+      transform: translateZ(-22px) rotateY(180deg);
+    }
+
+    .back .brim {
+      transform: translateZ(-10px) rotateY(180deg);
+    }
+
+    .back .crown::before,
+    .back .band::after,
+    .back .brim::before,
+    .back .hat-surface::after {
+      opacity: 0.18;
+    }
+
+    .caption {
+      position: relative;
+      z-index: 3;
+      margin-top: -1.5%;
+      color: var(--caption);
+      font-size: clamp(0.66rem, 1.4vw, 0.78rem);
+      font-weight: 500;
+      letter-spacing: 0.22em;
+      line-height: 1.5;
+      text-align: center;
+      text-transform: uppercase;
+      text-shadow: 0 2px 18px rgba(0, 0, 0, 0.8);
+      transform: translateY(-1%);
+    }
+
+    canvas {
+      position: fixed;
+      inset: 0;
+      z-index: 4;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .vignette {
+      position: fixed;
+      inset: 0;
+      z-index: 5;
+      background: radial-gradient(ellipse at center, transparent 42%, rgba(0, 0, 0, 0.44) 100%);
+      pointer-events: none;
+    }
+
+    @keyframes hat-spin {
+      from { transform: rotateX(-8deg) rotateY(0deg); }
+      to { transform: rotateX(-8deg) rotateY(360deg); }
+    }
+
+    @media (max-width: 520px) {
+      .hero {
+        transform: translateY(-3vh);
+      }
+
+      .hat-wrap {
+        width: 80%;
+      }
+
+      .caption {
+        letter-spacing: 0.17em;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        animation: none !important;
+        scroll-behavior: auto !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="stage" id="stage" aria-label="A red fedora logo that dissolves into glowing particles">
+    <div class="hero" id="hero">
+      <div class="hat-wrap" id="hatWrap">
+        <div class="hat" id="hat">
+          <div class="hat-surface">
+            <div class="crown"></div>
+            <div class="band"></div>
+            <div class="brim"></div>
+          </div>
+          <div class="hat-surface back">
+            <div class="crown"></div>
+            <div class="band"></div>
+            <div class="brim"></div>
+          </div>
+        </div>
+      </div>
+      <div class="caption">The art of arriving</div>
+    </div>
+  </main>
+
+  <canvas id="particles" aria-hidden="true"></canvas>
+  <div class="vignette" aria-hidden="true"></div>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const stage = document.getElementById("stage");
+      const hero = document.getElementById("hero");
+      const hat = document.getElementById("hat");
+      const hatWrap = document.getElementById("hatWrap");
+      const canvas = document.getElementById("particles");
+      const ctx = canvas.getContext("2d", { alpha: true });
+      const reduceMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+      const hasFinePointer = window.matchMedia("(pointer: fine)").matches;
+      const TAU = Math.PI * 2;
+      const MAX_PARTICLES = 1450;
+      const ORBITERS = 18;
+
+      let particles = [];
+      let orbiters = [];
+      let samplePoints = [];
+      let width = 0;
+      let height = 0;
+      let dpr = 1;
+      let running = true;
+      let lastFrame = performance.now();
+      let interaction = false;
+      let interactionTimer = 0;
+      let dissolveProgress = 0;
+      let dissolveTarget = 0;
+      let dissolveDirection = 1;
+      let dissolveStartedAt = 0;
+      let lastPointer = { x: 0, y: 0 };
+      let frameId = 0;
+
+      const random = (min, max) => min + Math.random() * (max - min);
+      const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+      function easeInOutCubic(value) {
+        return value < 0.5
+          ? 4 * value * value * value
+          : 1 - Math.pow(-2 * value + 2, 3) / 2;
+      }
+
+      function easeOutCubic(value) {
+        return 1 - Math.pow(1 - value, 3);
+      }
+
+      function resize() {
+        dpr = Math.min(window.devicePixelRatio || 1, 2);
+        width = window.innerWidth;
+        height = window.innerHeight;
+        canvas.width = Math.round(width * dpr);
+        canvas.height = Math.round(height * dpr);
+        canvas.style.width = width + "px";
+        canvas.style.height = height + "px";
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        createSamplePoints();
+        createOrbiters();
+      }
+
+      function getHatBox() {
+        const box = hat.getBoundingClientRect();
+        const margin = Math.max(10, box.width * 0.055);
+        return {
+          left: box.left - margin,
+          top: box.top - margin,
+          right: box.right + margin,
+          bottom: box.bottom + margin,
+          width: box.width + margin * 2,
+          height: box.height + margin * 2
+        };
+      }
+
+      function pointInCrown(x, y, box) {
+        const nx = (x - box.left) / box.width - 0.5;
+        const ny = (y - box.top) / box.height - 0.34;
+        return (nx * nx) / 0.31 + (ny * ny) / 0.26 <= 1 && ny > -0.29;
+      }
+
+      function pointInBrim(x, y, box) {
+        const nx = (x - box.left) / box.width - 0.5;
+        const ny = (y - box.top) / box.height - 0.605;
+        const radius = Math.sqrt(nx * nx + ny * ny);
+        const inner = 0.135 + Math.max(0, -ny) * 0.08;
+        return radius <= 0.5 && radius >= inner && ny > -0.18;
+      }
+
+      function createSamplePoints() {
+        const box = getHatBox();
+        const area = box.width * box.height;
+        const count = clamp(Math.round(area / 155), 850, MAX_PARTICLES);
+        const points = [];
+        let attempts = 0;
+
+        while (points.length < count && attempts < count * 15) {
+          attempts += 1;
+          const x = random(box.left, box.right);
+          const y = random(box.top, box.bottom);
+          const inCrown = pointInCrown(x, y, box);
+          const inBrim = pointInBrim(x, y, box);
+          if (!inCrown && !inBrim) continue;
+
+          const crownWeight = inCrown ? 1.08 : 0;
+          const brimWeight = inBrim ? 1.12 : 0;
+          const weight = crownWeight + brimWeight;
+          points.push({
+            x,
+            y,
+            crown: inCrown,
+            brim: inBrim,
+            weight
+          });
+        }
+
+        samplePoints = points;
+        particles = points.map((point, index) => makeParticle(point, index, 0));
+      }
+
+      function makeParticle(point, index, progress) {
+        const box = getHatBox();
+        const centerX = box.left + box.width / 2;
+        const centerY = box.top + box.height / 2;
+        const sizeBase = Math.max(0.75, Math.min(1.65, box.width / 430));
+        const seed = Math.sin(index * 12.9898 + 4.1414) * 43758.5453;
+        const randomSeed = seed - Math.floor(seed);
+        const angle = Math.atan2(point.y - centerY, point.x - centerX);
+        const radius = Math.hypot(point.x - centerX, point.y - centerY);
+        const swirlDirection = index % 2 === 0 ? 1 : -1;
+        const phase = randomSeed * TAU;
+
+        return {
+          homeX: point.x,
+          homeY: point.y,
+          x: point.x,
+          y: point.y,
+          vx: 0,
+          vy: 0,
+          size: sizeBase * (0.58 + randomSeed * 0.9),
+          angle,
+          radius,
+          phase,
+          speed: random(0.18, 0.72),
+          drift: random(0.35, 1.2),
+          life: random(0.72, 1.2),
+          warmth: random(0.48, 1),
+          crown: point.crown,
+          brim: point.brim,
+          swirlDirection,
+          alpha: 0
+        };
+      }
+
+      function createOrbiters() {
+        const box = getHatBox();
+        const centerX = box.left + box.width / 2;
+        const centerY = box.top + box.height / 2;
+        const maxRadius = Math.min(box.width, box.height) * 0.62;
+
+        orbiters = Array.from({ length: ORBITERS }, (_, index) => {
+          const angle = random(0, TAU);
+          const radius = random(maxRadius * 0.46, maxRadius);
+          return {
+            x: centerX + Math.cos(angle) * radius,
+            y: centerY + Math.sin(angle) * radius * 0.56,
+            angle,
+            radius,
+            verticalRatio: random(0.42, 0.62),
+            speed: random(0.08, 0.24) * (index % 2 ? 1 : -1),
+            size: random(0.65, 1.45) * Math.max(0.75, box.width / 430),
+            phase: random(0, TAU),
+            alpha: 0
+          };
+        });
+      }
+
+      function beginDissolve() {
+        if (reduceMotionQuery.matches || interaction) return;
+        interaction = true;
+        dissolveTarget = 1;
+        dissolveDirection = 1;
+        dissolveStartedAt = performance.now();
+        particles.forEach((particle, index) => {
+          const box = getHatBox();
+          const centerX = box.left + box.width / 2;
+          const centerY = box.top + box.height / 2;
+          const angle = Math.atan2(particle.homeY - centerY, particle.homeX - centerX);
+          const outward = random(0.08, 0.24);
+          const tangential = random(0.1, 0.34) * particle.swirlDirection;
+          particle.vx = Math.cos(angle) * outward - Math.sin(angle) * tangential;
+          particle.vy = Math.sin(angle) * outward + Math.cos(angle) * tangential - random(0.02, 0.1);
+          particle.phase = angle + random(-0.35, 0.35);
+          particle.radius = Math.hypot(particle.homeX - centerX, particle.homeY - centerY) + random(8, 42);
+          particle.life = random(0.72, 1.2);
+          particle.seed = index;
+        });
+        hatWrap.style.pointerEvents = "none";
+      }
+
+      function endInteraction() {
+        if (!interaction) return;
+        interaction = false;
+        dissolveTarget = 0;
+        dissolveDirection = -1;
+        dissolveStartedAt = performance.now();
+        hatWrap.style.pointerEvents = "";
+      }
+
+      function pointerPosition(event) {
+        if (event.touches && event.touches[0]) {
+          return { x: event.touches[0].clientX, y: event.touches[0].clientY };
+        }
+        return { x: event.clientX, y: event.clientY };
+      }
+
+      function handlePointerMove(event) {
+        const point = pointerPosition(event);
+        lastPointer = point;
+        if (!interaction && !reduceMotionQuery.matches) {
+          const box = hatWrap.getBoundingClientRect();
+          const centerX = box.left + box.width / 2;
+          const centerY = box.top + box.height / 2;
+          const distance = Math.hypot(point.x - centerX, point.y - centerY);
+          const threshold = Math.max(box.width * 0.62, 90);
+          if (distance < threshold) beginDissolve();
+        }
+      }
+
+      if (hasFinePointer) {
+        stage.addEventListener("pointermove", handlePointerMove, { passive: true });
+        stage.addEventListener("pointerleave", endInteraction, { passive: true });
+      } else {
+        stage.addEventListener("touchstart", handlePointerMove, { passive: true });
+        stage.addEventListener("touchmove", handlePointerMove, { passive: true });
+        stage.addEventListener("touchend", endInteraction, { passive: true });
+        stage.addEventListener("touchcancel", endInteraction, { passive: true });
+      }
+
+      stage.addEventListener("click", () => {
+        if (interaction) endInteraction();
+        else beginDissolve();
+      });
+
+      function updateDissolve(now) {
+        const duration = 1750;
+        const elapsed = now - dissolveStartedAt;
+        const raw = clamp(elapsed / duration, 0, 1);
+        const eased = easeInOutCubic(raw);
+
+        if (dissolveDirection > 0) {
+          dissolveProgress = eased;
+          if (raw >= 1) {
+            dissolveDirection = -1;
+            dissolveStartedAt = now + 650;
+          }
+        } else if (elapsed >= 650) {
+          dissolveProgress = 1 - easeInOutCubic(clamp((elapsed - 650) / duration, 0, 1));
+          if ((elapsed - 650) / duration >= 1) {
+            dissolveProgress = 0;
+            interaction = false;
+            dissolveTarget = 0;
+            particles.forEach((particle) => {
+              particle.x = particle.homeX;
+              particle.y = particle.homeY;
+              particle.vx = 0;
+              particle.vy = 0;
+              particle.alpha = 0;
+            });
+          }
+        }
+      }
+
+      function updateParticle(particle, dt, now) {
+        const progress = dissolveProgress;
+        const box = getHatBox();
+        const centerX = box.left + box.width / 2;
+        const centerY = box.top + box.height / 2;
+        const maxRadius = Math.max(box.width, box.height) * 0.64;
+        const expansion = easeOutCubic(progress);
+        const swirl = Math.sin(now * 0.00055 + particle.seed * 0.71) * 0.08;
+        const targetRadius = particle.radius + expansion * maxRadius * (0.35 + particle.drift * 0.18);
+        const currentAngle = particle.phase + swirl + now * 0.00008 * particle.swirlDirection;
+        const targetX = centerX + Math.cos(currentAngle) * targetRadius;
+        const targetY = centerY + Math.sin(currentAngle) * targetRadius * particle.verticalRatio + Math.sin(now * 0.0008 + particle.phase) * 6;
+        const spring = 0.018 + expansion * 0.018;
+        const damping = 0.94 - expansion * 0.08;
+
+        particle.vx += (targetX - particle.x) * spring;
+        particle.vy += (targetY - particle.y) * spring;
+        particle.vx *= damping;
+        particle.vy *= damping;
+        particle.x += particle.vx * dt * 0.06;
+        particle.y += particle.vy * dt * 0.06;
+
+        const distanceHome = Math.hypot(particle.x - particle.homeX, particle.y - particle.homeY);
+        const maxDistance = Math.max(1, maxRadius * (0.35 + particle.drift * 0.18));
+        const away = clamp(distanceHome / maxDistance, 0, 1);
+        particle.alpha = progress < 0.98 ? 0.34 + away * 0.66 : clamp(1 - away * 0.92, 0.35, 1);
+      }
+
+      function drawParticle(particle) {
+        const glow = particle.size * (3.2 + particle.warmth * 2.2);
+        const red = Math.round(238 + particle.warmth * 17);
+        const green = Math.round(25 + particle.warmth * 42);
+        const blue = Math.round(28 + particle.warmth * 48);
+        const gradient = ctx.createRadialGradient(particle.x, particle.y, 0, particle.x, particle.y, glow);
+        gradient.addColorStop(0, `rgba(255, 244, 220, ${0.9 * particle.alpha})`);
+        gradient.addColorStop(0.16, `rgba(${red}, ${green}, ${blue}, ${0.72 * particle.alpha})`);
+        gradient.addColorStop(0.48, `rgba(190, 0, 0, ${0.2 * particle.alpha})`);
+        gradient.addColorStop(1, "rgba(100, 0, 0, 0)");
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(particle.x, particle.y, glow, 0, TAU);
+        ctx.fill();
+
+        ctx.fillStyle = `rgba(255, 244, 224, ${0.76 * particle.alpha})`;
+        ctx.beginPath();
+        ctx.arc(particle.x, particle.y, particle.size, 0, TAU);
+        ctx.fill();
+      }
+
+      function updateOrbiter(orbiter, dt, now) {
+        const active = dissolveProgress > 0.18 || interaction;
+        const targetAlpha = active ? 0.5 : 0;
+        orbiter.alpha += (targetAlpha - orbiter.alpha) * Math.min(1, dt * 0.004);
+        orbiter.angle += orbiter.speed * dt * 0.001;
+        orbiter.x = Math.cos(orbiter.angle) * orbiter.radius + getHatBox().left + getHatBox().width / 2;
+        orbiter.y = Math.sin(orbiter.angle) * orbiter.radius * orbiter.verticalRatio + getHatBox().top + getHatBox().height / 2;
+        orbiter.phase += dt * 0.001;
+      }
+
+      function drawOrbiter(orbiter) {
+        if (orbiter.alpha <= 0.01) return;
+        const box = getHatBox();
+        const centerX = box.left + box.width / 2;
+        const centerY = box.top + box.height / 2;
+        const tailLength = 0.055;
+        const gradient = ctx.createLinearGradient(
+          orbiter.x,
+          orbiter.y,
+          centerX + (orbiter.x - centerX) * (1 - tailLength),
+          centerY + (orbiter.y - centerY) * (1 - tailLength)
+        );
+        gradient.addColorStop(0, `rgba(255, 204, 170, ${0.44 * orbiter.alpha})`);
+        gradient.addColorStop(1, "rgba(255, 45, 45, 0)");
+        ctx.strokeStyle = gradient;
+        ctx.lineWidth = orbiter.size * 0.72;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(orbiter.x, orbiter.y);
+        ctx.lineTo(
+          centerX + (orbiter.x - centerX) * (1 - tailLength),
+          centerY + (orbiter.y - centerY) * (1 - tailLength)
+        );
+        ctx.stroke();
+
+        const glow = orbiter.size * 5;
+        const gradientDot = ctx.createRadialGradient(orbiter.x, orbiter.y, 0, orbiter.x, orbiter.y, glow);
+        gradientDot.addColorStop(0, `rgba(255, 226, 194, ${0.7 * orbiter.alpha})`);
+        gradientDot.addColorStop(0.25, `rgba(255, 62, 48, ${0.3 * orbiter.alpha})`);
+        gradientDot.addColorStop(1, "rgba(255, 40, 40, 0)");
+        ctx.fillStyle = gradientDot;
+        ctx.beginPath();
+        ctx.arc(orbiter.x, orbiter.y, glow, 0, TAU);
+        ctx.fill();
+        ctx.fillStyle = `rgba(255, 240, 220, ${0.9 * orbiter.alpha})`;
+        ctx.beginPath();
+        ctx.arc(orbiter.x, orbiter.y, orbiter.size * 0.7, 0, TAU);
+        ctx.fill();
+      }
+
+      function render(now) {
+        const dt = clamp(now - lastFrame, 0, 50);
+        lastFrame = now;
+
+        if (interaction) updateDissolve(now);
+
+        ctx.clearRect(0, 0, width, height);
+        ctx.globalCompositeOperation = "lighter";
+
+        if (dissolveProgress > 0.005 || interaction) {
+          for (const particle of particles) {
+            updateParticle(particle, dt, now);
+            drawParticle(particle);
+          }
+        } else {
+          for (const particle of particles) {
+            particle.alpha = 0;
+          }
+        }
+
+        for (const orbiter of orbiters) {
+          updateOrbiter(orbiter, dt, now);
+          drawOrbiter(orbiter);
+        }
+
+        ctx.globalCompositeOperation = "source-over";
+        hat.style.animationDuration = interaction ? "24s" : "8s";
+        frameId = requestAnimationFrame(render);
+      }
+
+      function setReducedMotion() {
+        if (reduceMotionQuery.matches) {
+          interaction = false;
+          dissolveProgress = 0;
+          dissolveTarget = 0;
+          hat.style.animationDuration = "0s";
+          particles.forEach((particle) => {
+            particle.x = particle.homeX;
+            particle.y = particle.homeY;
+            particle.alpha = 0;
+          });
+        } else {
+          hat.style.animationDuration = "8s";
+        }
+      }
+
+      if (reduceMotionQuery.addEventListener) {
+        reduceMotionQuery.addEventListener("change", setReducedMotion);
+      } else if (reduceMotionQuery.addListener) {
+        reduceMotionQuery.addListener(setReducedMotion);
+      }
+
+      setReducedMotion();
+      resize();
+      window.addEventListener("resize", resize, { passive: true });
+      frameId = requestAnimationFrame(render);
+
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+          cancelAnimationFrame(frameId);
+          running = false;
+        } else if (!running) {
+          running = true;
+          lastFrame = performance.now();
+          frameId = requestAnimationFrame(render);
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
