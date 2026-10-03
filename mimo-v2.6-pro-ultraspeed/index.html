@@ -1,0 +1,919 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fedora — an ember study</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: radial-gradient(125% 95% at 50% 40%, #17151b 0%, #100e14 42%, #08080c 78%, #050509 100%);
+    color: #f3ece7;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  .hero {
+    height: 100vh;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(10px, 2.4vh, 28px);
+    padding: clamp(10px, 3vh, 34px) clamp(12px, 4vw, 52px);
+  }
+  .stage {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+    width: min(1180px, 100%);
+    outline: none;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .stage:focus-visible {
+    border-radius: 16px;
+    box-shadow: 0 0 0 1px rgba(255, 132, 100, .35), 0 0 40px -12px rgba(224, 60, 40, .35);
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+  .fallback {
+    display: none;
+    position: absolute;
+    inset: 0;
+    place-content: center;
+    text-align: center;
+    font-family: ui-serif, Georgia, "Iowan Old Style", "Times New Roman", serif;
+    font-size: clamp(20px, 4vw, 34px);
+    letter-spacing: .3em;
+    text-indent: .3em;
+    color: #d9443a;
+    text-shadow: 0 0 60px rgba(224, 68, 58, .35);
+  }
+  .nogl .fallback { display: grid; }
+  .nogl canvas { display: none; }
+  .caption { text-align: center; user-select: none; pointer-events: none; }
+  .caption h1 {
+    margin: 0;
+    font-family: ui-serif, Georgia, "Iowan Old Style", "Times New Roman", serif;
+    font-weight: 500;
+    font-size: clamp(15px, 2.3vw, 22px);
+    letter-spacing: .44em;
+    text-indent: .44em;
+    text-transform: uppercase;
+    color: #f7f1ea;
+  }
+  .caption p {
+    margin: clamp(6px, 1.2vh, 13px) 0 0;
+    font-size: clamp(9px, 1.25vw, 11px);
+    letter-spacing: .30em;
+    text-indent: .30em;
+    text-transform: uppercase;
+    color: #7b7381;
+  }
+  .caption .hint { color: #c08b76; transition: color .6s ease; }
+  @media (max-height: 420px) {
+    .caption p { margin-top: 6px; }
+  }
+</style>
+</head>
+<body>
+<main class="hero">
+  <div class="stage" id="stage" tabindex="0" role="button"
+       aria-label="A red fedora turning slowly in three dimensions. Activate to scatter it into glowing embers and let it reform.">
+    <canvas id="c"></canvas>
+    <div class="fallback">Fedora</div>
+  </div>
+  <div class="caption">
+    <h1>Fedora</h1>
+    <p>an ember study &nbsp;&middot;&nbsp; <span class="hint" id="hint">hover or tap to let it drift</span></p>
+  </div>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  //--GEO-START
+  var TAU = Math.PI * 2;
+
+  function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+  function clamp01(x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
+  function sstep(a, b, x) { var t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function wrapPi(a) { return Math.atan2(Math.sin(a), Math.cos(a)); }
+
+  /* ---- value noise (shared by mesh vertices and particles) ---- */
+  function hash3(i, j, k) {
+    var n = Math.imul(i, 374761393) + Math.imul(j, 668265263) + Math.imul(k, 1442695041);
+    n = Math.imul(n ^ (n >>> 13), 1274126177);
+    return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
+  }
+  function vnoise(x, y, z) {
+    var xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+    var xf = x - xi, yf = y - yi, zf = z - zi;
+    var u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf), w = zf * zf * (3 - 2 * zf);
+    var c000 = hash3(xi, yi, zi),         c100 = hash3(xi + 1, yi, zi);
+    var c010 = hash3(xi, yi + 1, zi),     c110 = hash3(xi + 1, yi + 1, zi);
+    var c001 = hash3(xi, yi, zi + 1),     c101 = hash3(xi + 1, yi, zi + 1);
+    var c011 = hash3(xi, yi + 1, zi + 1), c111 = hash3(xi + 1, yi + 1, zi + 1);
+    var x00 = lerp(c000, c100, u), x10 = lerp(c010, c110, u);
+    var x01 = lerp(c001, c101, u), x11 = lerp(c011, c111, u);
+    return lerp(lerp(x00, x10, v), lerp(x01, x11, v), w);
+  }
+  /* dissolve field: hat-local, so mesh vertices and particle homes agree exactly */
+  function keyAt(x, y, z) {
+    var n = 0.62 * vnoise(x * 3.2, y * 3.2, z * 3.2) + 0.38 * vnoise(x * 8.1 + 7.7, y * 8.1 - 2.3, z * 8.1 + 4.1);
+    return clamp01((n - 0.199) / 0.6045);   /* normalised to fill [0,1] over the hat */
+  }
+  function texAt(x, y, z) { return vnoise(x * 21.0 + 3.1, y * 21.0 - 5.5, z * 21.0 + 1.7); }
+
+  /* ---- mat4 (column major) ---- */
+  function m4mul(a, b) {
+    var o = new Float32Array(16), c, r;
+    for (c = 0; c < 4; c++) for (r = 0; r < 4; r++) {
+      o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+    }
+    return o;
+  }
+  function m4persp(fovy, aspect, near, far) {
+    var f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far);
+    return new Float32Array([f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) * nf, -1, 0, 0, 2 * far * near * nf, 0]);
+  }
+  function m4look(eye, ctr, up) {
+    var z0 = eye[0] - ctr[0], z1 = eye[1] - ctr[1], z2 = eye[2] - ctr[2];
+    var l = 1 / Math.hypot(z0, z1, z2); z0 *= l; z1 *= l; z2 *= l;
+    var x0 = up[1] * z2 - up[2] * z1, x1 = up[2] * z0 - up[0] * z2, x2 = up[0] * z1 - up[1] * z0;
+    l = Math.hypot(x0, x1, x2); l = l ? 1 / l : 0; x0 *= l; x1 *= l; x2 *= l;
+    var y0 = z1 * x2 - z2 * x1, y1 = z2 * x0 - z0 * x2, y2 = z0 * x1 - z1 * x0;
+    return new Float32Array([
+      x0, y0, z0, 0, x1, y1, z1, 0, x2, y2, z2, 0,
+      -(x0 * eye[0] + x1 * eye[1] + x2 * eye[2]),
+      -(y0 * eye[0] + y1 * eye[1] + y2 * eye[2]),
+      -(z0 * eye[0] + z1 * eye[1] + z2 * eye[2]), 1
+    ]);
+  }
+  function m3from(m) {
+    return new Float32Array([m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]]);
+  }
+  function m4rotY(a) {
+    var s = Math.sin(a), c = Math.cos(a);
+    return new Float32Array([c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, 0, 0, 0, 1]);
+  }
+  function m4rotX(a) {
+    var s = Math.sin(a), c = Math.cos(a);
+    return new Float32Array([1, 0, 0, 0, 0, c, s, 0, 0, -s, c, 0, 0, 0, 0, 1]);
+  }
+  function m4rotZ(a) {
+    var s = Math.sin(a), c = Math.cos(a);
+    return new Float32Array([c, s, 0, 0, -s, c, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+  }
+
+  /* ---- fedora geometry ---- */
+  var YSHIFT = -0.45;      /* recentre the hat on the origin */
+  var ZSC = 0.955;         /* plan ovality */
+  var R_OUT = 2.02;        /* brim outer radius */
+  var R_IN = 1.00;         /* crown base radius */
+  var THICK = 0.05;        /* felt thickness */
+
+  function crSpline(a, b, c, d, t) {
+    var t2 = t * t, t3 = t2 * t;
+    return 0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3);
+  }
+  /* [radius, height] profile: base ring -> tapered wall -> shoulder -> crest -> dent floor */
+  var PROF = [
+    [1.000, 0.000], [0.998, 0.120], [0.992, 0.260], [0.982, 0.400],
+    [0.968, 0.540], [0.950, 0.665], [0.925, 0.780], [0.888, 0.882],
+    [0.833, 0.968], [0.755, 1.035], [0.650, 1.072], [0.525, 1.068],
+    [0.400, 1.028], [0.285, 0.968], [0.180, 0.918], [0.085, 0.890],
+    [0.000, 0.882]
+  ];
+  function profAt(t) {
+    var n = PROF.length - 1;
+    var s = clamp(t, 0, 1) * n;
+    var i = Math.floor(s); if (i > n - 1) i = n - 1; if (i < 0) i = 0;
+    var f = s - i;
+    var p0 = PROF[i > 0 ? i - 1 : 0], p1 = PROF[i], p2 = PROF[i + 1], p3 = PROF[i + 2 < n + 1 ? i + 2 : n];
+    var r = crSpline(p0[0], p1[0], p2[0], p3[0], f);
+    return [r > 0 ? r : 0, crSpline(p0[1], p1[1], p2[1], p3[1], f)];
+  }
+  /* front pinch + side creases, faded out towards the dent pole so the cap stays smooth */
+  function pinchAt(th, y, r) {
+    var dA = Math.abs(wrapPi(th));
+    var p = Math.exp(-Math.pow((dA - 0.60) / 0.42, 2)) + 0.5 * Math.exp(-Math.pow(dA / 0.55, 2));
+    var g = Math.exp(-Math.pow((y - 0.90) / 0.30, 2));
+    return p * g * sstep(0.12, 0.50, r);
+  }
+  function crownAt(u, v) {
+    var pr = profAt(v);
+    var r = pr[0], y = pr[1];
+    var th = u * TAU;
+    var a = pinchAt(th, y, r);
+    r *= 1 - 0.16 * a;
+    y -= 0.085 * a;
+    return [r * Math.sin(th), y + YSHIFT, ZSC * r * Math.cos(th)];
+  }
+  function crownAO(u, v) {
+    var pr = profAt(v);
+    var th = u * TAU;
+    var a = pinchAt(th, pr[1], pr[0]);
+    var rPlan = Math.hypot(pr[0] * Math.sin(th), ZSC * pr[0] * Math.cos(th));
+    var ao = 0.40 + 0.60 * sstep(0.0, 0.30, pr[1]);
+    ao *= 1 - 0.42 * sstep(0.85, 0.12, rPlan);   /* crease / dent shadow */
+    ao *= 1 - 0.30 * a;                          /* pinch folds */
+    return ao;
+  }
+  /* snap brim: dips at the front, lifts at the back and sides */
+  function brimY(u, v) {
+    var th = u * TAU, c = Math.cos(th);
+    var wf = Math.pow(0.5 + 0.5 * c, 2.2);
+    var wb = Math.pow(0.5 - 0.5 * c, 1.5);
+    var bend = -0.17 * wf + 0.32 * wb;
+    return bend * Math.pow(v, 1.55) + 0.08 * Math.pow(v, 4.0) - 0.012 * v;
+  }
+  function brimTopAt(u, v) {
+    var r = R_IN + (R_OUT - R_IN) * v, th = u * TAU;
+    return [r * Math.sin(th), brimY(u, v) + YSHIFT, ZSC * r * Math.cos(th)];
+  }
+  function brimTopAO(u, v) { return 0.42 + 0.50 * sstep(0.0, 0.34, v); }
+  function brimBotAt(u, w) {
+    var r = R_OUT * w, th = u * TAU;
+    var vv = clamp((r - R_IN) / (R_OUT - R_IN), 0, 1);
+    return [r * Math.sin(th), brimY(u, vv) - THICK + YSHIFT, ZSC * r * Math.cos(th)];
+  }
+  function brimBotAO(u, w) { return 0.10 + 0.32 * sstep(0.15, 1.0, w); }
+  function brimEdgeAt(u, w) {
+    var th = u * TAU;
+    return [R_OUT * Math.sin(th), brimY(u, 1.0) - THICK * w + YSHIFT, ZSC * R_OUT * Math.cos(th)];
+  }
+  function brimEdgeAO() { return 0.62; }
+
+  /* ---- parametric surface -> triangles, smooth normals from finite differences ---- */
+  function numNormal(fn, u, v, wrapU, flip, pole) {
+    var e = 0.0012;
+    var u1 = u + e, u0 = u - e;
+    if (!wrapU) { u1 = Math.min(1, u1); u0 = Math.max(0, u0); }
+    var v1 = Math.min(1, v + e), v0 = Math.max(0, v - e);
+    var a = fn(u1, v), b = fn(u0, v), c = fn(u, v1), d = fn(u, v0);
+    var ux = a[0] - b[0], uy = a[1] - b[1], uz = a[2] - b[2];
+    var vx = c[0] - d[0], vy = c[1] - d[1], vz = c[2] - d[2];
+    var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    var L = Math.hypot(nx, ny, nz);
+    if (L < 1e-9) return pole ? pole.slice() : [0, flip ? -1 : 1, 0];
+    nx /= L; ny /= L; nz /= L;
+    return flip ? [-nx, -ny, -nz] : [nx, ny, nz];
+  }
+  function buildGrid(out, fn, aoFn, nu, nv, wrapU, flip, pole) {
+    var base = out.vc, i, j;
+    for (j = 0; j <= nv; j++) {
+      var v = j / nv;
+      for (i = 0; i <= nu; i++) {
+        var u = i / nu;
+        var p = fn(u, v);
+        var n = numNormal(fn, u, v, wrapU, flip, pole);
+        out.pos.push(p[0], p[1], p[2]);
+        out.nor.push(n[0], n[1], n[2]);
+        out.aux.push(aoFn(u, v), keyAt(p[0], p[1], p[2]), texAt(p[0], p[1], p[2]));
+        out.vc++;
+      }
+    }
+    for (j = 0; j < nv; j++) for (i = 0; i < nu; i++) {
+      var a = base + j * (nu + 1) + i, b = a + 1, c = a + nu + 1, d = c + 1;
+      out.idx.push(a, b, d, a, d, c);
+    }
+  }
+  function emptyMesh() { return { pos: [], nor: [], aux: [], idx: [], vc: 0 }; }
+  //--GEO-END
+
+  /* ================= DOM / GL boot ================= */
+  var stage = document.getElementById('stage');
+  var canvas = document.getElementById('c');
+  var hintEl = document.getElementById('hint');
+  var opts = { alpha: false, antialias: true, depth: true, stencil: false, powerPreference: 'high-performance' };
+  var gl = canvas.getContext('webgl', opts) || canvas.getContext('experimental-webgl', opts);
+  if (!gl) { document.documentElement.className += ' nogl'; return; }
+
+  function sh(type, src) {
+    var s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+      console.error(gl.getShaderInfoLog(s), src);
+      return null;
+    }
+    return s;
+  }
+  function prog(vs, fs) {
+    var p = gl.createProgram();
+    gl.attachShader(p, sh(gl.VERTEX_SHADER, vs));
+    gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) { console.error(gl.getProgramInfoLog(p)); return null; }
+    return p;
+  }
+  function uni(p, names) {
+    var o = {}, i;
+    for (i = 0; i < names.length; i++) o[names[i]] = gl.getUniformLocation(p, names[i]);
+    var a = {};
+    o.attr = a; o.get = function (n) { if (!(n in a)) a[n] = gl.getAttribLocation(p, n); return a[n]; };
+    return o;
+  }
+  function buf(data, dynamic) {
+    var b = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, b);
+    gl.bufferData(gl.ARRAY_BUFFER, data, dynamic ? gl.DYNAMIC_DRAW : gl.STATIC_DRAW);
+    return b;
+  }
+
+  var LIGHT_GLSL = [
+    'vec3 shadePt(vec3 N, vec3 V, float ao, vec3 albedo){',
+    '  vec3 L1 = normalize(vec3(-0.55, 0.80, 0.62));',
+    '  vec3 L2 = normalize(vec3(0.80, 0.10, -0.45));',
+    '  float d1 = max((dot(N, L1) + 0.28) / 1.28, 0.0);',
+    '  float d2 = max(dot(N, L2), 0.0);',
+    '  vec3 H = normalize(L1 + V);',
+    '  float sp = pow(max(dot(N, H), 0.0), 26.0);',
+    '  float fr = pow(1.0 - max(dot(N, V), 0.0), 3.5);',
+    '  vec3 c = albedo * (vec3(0.10, 0.085, 0.115) + vec3(1.30, 1.04, 0.92) * d1 + vec3(0.30, 0.38, 0.62) * d2 * 0.55);',
+    '  c *= mix(0.26, 1.0, ao);',
+    '  c += vec3(1.0, 0.93, 0.88) * sp * 0.30 * (0.4 + 0.6 * ao);',
+    '  c += vec3(1.0, 0.36, 0.22) * fr * (0.16 + 0.30 * d1);',
+    '  return c;',
+    '}',
+    'vec3 tone(vec3 c){ return vec3(1.0) - exp(-c * 1.25); }'
+  ].join('\n');
+
+  /* ---- programs ---- */
+  var pBG = prog(
+    'attribute vec2 aPos; varying vec2 vUv;\nvoid main(){ vUv = aPos * 0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }',
+    ['precision mediump float; varying vec2 vUv; uniform vec2 uRes;',
+     'void main(){',
+     '  vec2 p = (vUv - 0.5) * 2.0; p.x *= uRes.x / max(uRes.y, 1.0);',
+     '  float r = length(p * vec2(0.85, 1.05));',
+     '  vec3 c = mix(vec3(0.128, 0.110, 0.132), vec3(0.030, 0.028, 0.037), smoothstep(0.08, 1.32, r));',
+     '  float h = length((p - vec2(0.0, -0.02)) * vec2(0.72, 1.25));',
+     '  c += vec3(0.120, 0.036, 0.028) * (1.0 - smoothstep(0.0, 1.0, h));',
+     '  float g = 1.0 - smoothstep(0.0, 0.55, length((p - vec2(0.0, -0.66)) * vec2(0.55, 1.7)));',
+     '  c += vec3(0.085, 0.048, 0.042) * g;',
+     '  c *= 1.0 - 0.52 * smoothstep(0.55, 1.8, r);',
+     '  gl_FragColor = vec4(c, 1.0);',
+     '}'].join('\n'));
+
+  var pShadow = prog(
+    ['attribute vec3 aPos; attribute vec2 aUv; varying vec2 vUv;',
+     'uniform mat4 uProj, uView;',
+     'void main(){ vUv = aUv; gl_Position = uProj * uView * vec4(aPos, 1.0); }'].join('\n'),
+    ['precision mediump float; varying vec2 vUv; uniform float uAmt;',
+     'void main(){',
+     '  vec2 q = (vUv - 0.5) * 2.0;',
+     '  float d = length(q * vec2(1.0, 1.12));',
+     '  float core = 1.0 - smoothstep(0.0, 0.55, d);',
+     '  float wide = 1.0 - smoothstep(0.0, 1.0, d);',
+     '  float a = (core * 0.42 + wide * wide * 0.36) * uAmt;',
+     '  gl_FragColor = vec4(0.0, 0.0, 0.0, a);',
+     '}'].join('\n'));
+
+  var PREC_FS = ['#ifdef GL_FRAGMENT_PRECISION_HIGH', 'precision highp float;', '#else', 'precision mediump float;', '#endif'].join('\n');
+
+  var pMesh = prog(
+    ['precision highp float;',
+     'attribute vec3 aPos, aNor, aAux;',
+     'uniform mat4 uProj, uView, uModel; uniform mat3 uNrm;',
+     'varying vec3 vN, vW, vAux;',
+     'void main(){',
+     '  vec4 wp = uModel * vec4(aPos, 1.0);',
+     '  vW = wp.xyz; vN = uNrm * aNor; vAux = aAux;',
+     '  gl_Position = uProj * uView * wp;',
+     '}'].join('\n'),
+    [PREC_FS,
+     'varying vec3 vN, vW, vAux;',
+     'uniform vec3 uCam, uEmber; uniform float uDiss;',
+     LIGHT_GLSL,
+     'void main(){',
+     '  float d = vAux.y - uDiss;',
+     '  if (d < 0.0) discard;',
+     '  vec3 N = normalize(vN);',
+     '  vec3 V = normalize(uCam - vW);',
+     '  vec3 alb = mix(vec3(0.50, 0.030, 0.042), vec3(0.63, 0.055, 0.055), vAux.z);',
+     '  vec3 c = shadePt(N, V, vAux.x, alb);',
+     '  float e = 1.0 - smoothstep(0.0, 0.085, d);',
+     '  c += uEmber * e * (0.7 + 0.7 * vAux.z);',
+     '  gl_FragColor = vec4(tone(c), 1.0);',
+     '}'].join('\n'));
+
+  var pPart = prog(
+    ['precision highp float;',
+     'attribute vec4 aP; attribute vec3 aN; attribute vec2 aS; attribute float aE;',
+     'uniform mat4 uProj, uView, uModel; uniform mat3 uNrm; uniform float uPS;',
+     'varying vec3 vN, vW; varying vec2 vS; varying vec2 vGE;',
+     'void main(){',
+     '  vec4 wp = uModel * vec4(aP.xyz, 1.0);',
+     '  vW = wp.xyz; vN = uNrm * aN; vS = aS;',
+     '  vGE = vec2(aP.w, aE);',
+     '  gl_Position = uProj * uView * wp;',
+     '  gl_PointSize = clamp(uPS * aS.x / max(gl_Position.w, 0.0001), 1.0, 26.0);',
+     '}'].join('\n'),
+    [PREC_FS,
+     'varying vec3 vN, vW; varying vec2 vS; varying vec2 vGE;',
+     'uniform vec3 uCam, uEmber;',
+     LIGHT_GLSL,
+     'void main(){',
+     '  vec2 q = gl_PointCoord * 2.0 - 1.0;',
+     '  float r2 = dot(q, q);',
+     '  if (r2 > 1.0) discard;',
+     '  float a = 1.0 - r2; a = a * a;',
+     '  vec3 N = normalize(vN);',
+     '  vec3 V = normalize(uCam - vW);',
+     '  vec3 hat = shadePt(N, V, 0.9, vec3(0.56, 0.040, 0.050));',
+     '  vec3 emb = uEmber * (0.90 + 1.10 * vS.y);',
+     '  vec3 c = mix(hat * 1.1, emb, vGE.y) * (0.55 + 1.05 * vS.y);',
+     '  gl_FragColor = vec4(tone(c) * a * vGE.x, 1.0);',
+     '}'].join('\n'));
+
+  var pTrail = prog(
+    ['precision highp float; attribute vec3 aPos; attribute vec4 aCol;',
+     'uniform mat4 uProj, uView, uModel; varying vec4 vCol;',
+     'void main(){ vCol = aCol; gl_Position = uProj * uView * uModel * vec4(aPos, 1.0); }'].join('\n'),
+    ['precision mediump float; varying vec4 vCol;',
+     'void main(){ gl_FragColor = vec4(vCol.rgb * vCol.a, 1.0); }'].join('\n'));
+
+  if (!pBG || !pShadow || !pMesh || !pPart || !pTrail) { document.documentElement.className += ' nogl'; return; }
+  var uBG = uni(pBG, ['uRes']);
+  var uShadow = uni(pShadow, ['uProj', 'uView', 'uAmt']);
+  var uMesh = uni(pMesh, ['uProj', 'uView', 'uModel', 'uNrm', 'uCam', 'uEmber', 'uDiss']);
+  var uPart = uni(pPart, ['uProj', 'uView', 'uModel', 'uNrm', 'uCam', 'uEmber', 'uPS']);
+  var uTrail = uni(pTrail, ['uProj', 'uView', 'uModel']);
+
+  /* ---- static geometry ---- */
+  var mesh = emptyMesh();
+  buildGrid(mesh, crownAt, crownAO, 144, 34, true, false, [0, 1, 0]);
+  buildGrid(mesh, brimTopAt, brimTopAO, 144, 16, true, true, [0, 1, 0]);
+  buildGrid(mesh, brimBotAt, brimBotAO, 144, 18, true, false, [0, -1, 0]);
+  buildGrid(mesh, brimEdgeAt, brimEdgeAO, 144, 2, true, true, [1, 0, 0]);
+  var bPos = buf(new Float32Array(mesh.pos));
+  var bNor = buf(new Float32Array(mesh.nor));
+  var bAux = buf(new Float32Array(mesh.aux));
+  var bIdx = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, bIdx);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(mesh.idx), gl.STATIC_DRAW);
+  var meshCount = mesh.idx.length;
+
+  var bQuad = buf(new Float32Array([-1, -1, 1, -1, 1, 1, -1, -1, 1, 1, -1, 1]));
+  var FLOOR = -1.05, SR = 2.45;
+  var bShadow = buf(new Float32Array([
+    -SR, FLOOR, -SR, 0, 0, SR, FLOOR, -SR, 1, 0, SR, FLOOR, SR, 1, 1,
+    -SR, FLOOR, -SR, 0, 0, SR, FLOOR, SR, 1, 1, -SR, FLOOR, SR, 0, 1
+  ]));
+
+  /* ---- particles ---- */
+  var small = Math.min(window.innerWidth || 1280, window.innerHeight || 800) < 620;
+  var NP = small ? 6500 : 10000;
+  var TRAIL = 26, MAXORB = 220;
+  var pPos = new Float32Array(NP * 3), pVel = new Float32Array(NP * 3);
+  var pHome = new Float32Array(NP * 3), pNor = new Float32Array(NP * 3);
+  var pKey = new Float32Array(NP), pSize = new Float32Array(NP), pEmb = new Float32Array(NP);
+  var pYT = new Float32Array(NP), pSeed = new Float32Array(NP);
+  var isOrb = new Uint8Array(NP);
+  var oRad = new Float32Array(MAXORB), oTilt = new Float32Array(MAXORB), oPh = new Float32Array(MAXORB);
+  var oOm = new Float32Array(MAXORB), oY = new Float32Array(MAXORB), oAmp = new Float32Array(MAXORB);
+  var oFr = new Float32Array(MAXORB), oPh2 = new Float32Array(MAXORB);
+  var orbIdx = [], orbOf = new Int32Array(NP).fill(-1);
+  var bP = new Float32Array(NP * 5), bN = new Float32Array(NP * 3), bS = new Float32Array(NP * 2);
+
+  function pick(i) {
+    var r = Math.random(), u = Math.random(), v, p, n;
+    if (r < 0.42) {
+      v = Math.pow(Math.random(), 0.85);
+      p = crownAt(u, v); n = numNormal(crownAt, u, v, true, false, [0, 1, 0]);
+    } else if (r < 0.84) {
+      v = Math.sqrt(Math.random());
+      p = brimTopAt(u, v); n = numNormal(brimTopAt, u, v, true, true, [0, 1, 0]);
+    } else if (r < 0.95) {
+      v = Math.sqrt(Math.random());
+      p = brimBotAt(u, v); n = numNormal(brimBotAt, u, v, true, false, [0, -1, 0]);
+    } else {
+      v = Math.random();
+      p = brimEdgeAt(u, v); n = numNormal(brimEdgeAt, u, v, true, true, [1, 0, 0]);
+    }
+    var j = i * 3;
+    pHome[j] = p[0]; pHome[j + 1] = p[1]; pHome[j + 2] = p[2];
+    pNor[j] = n[0]; pNor[j + 1] = n[1]; pNor[j + 2] = n[2];
+    pKey[i] = keyAt(p[0], p[1], p[2]);
+    pSize[i] = 0.011 + 0.020 * Math.pow(Math.random(), 1.7);
+    pEmb[i] = Math.random() < 0.24 ? 0.45 + 0.55 * Math.random() : Math.random() * 0.25;
+    pSeed[i] = Math.random() * 100;
+    pYT[i] = -0.35 + Math.random() * 1.0;
+    bN[j] = n[0]; bN[j + 1] = n[1]; bN[j + 2] = n[2];
+    bS[i * 2] = pSize[i]; bS[i * 2 + 1] = pEmb[i];
+  }
+  for (var i0 = 0; i0 < NP; i0++) pick(i0);
+
+  var bPB = buf(bP, true), bNB = buf(bN), bSB = buf(bS);
+
+  /* trails for the few embers that stay in orbit */
+  var tPos = new Float32Array(MAXORB * TRAIL * 3);
+  var tCol = new Float32Array(MAXORB * TRAIL * 4);
+  var tCnt = new Int32Array(MAXORB);
+  for (var oi = 0; oi < MAXORB; oi++) {
+    for (var tj = 0; tj < TRAIL; tj++) {
+      var q = tj / (TRAIL - 1), a4 = (oi * TRAIL + tj) * 4;
+      tCol[a4] = 0.62; tCol[a4 + 1] = 0.26; tCol[a4 + 2] = 0.11;
+      tCol[a4 + 3] = 0.34 * Math.pow(q, 1.8);
+    }
+  }
+  var bTCol = buf(tCol), bTPos = buf(tPos, true);
+
+  /* ---- camera / matrices ---- */
+  var FOV = 0.60, EL = 0.16, TARGET = 0.90, uPS = 600, proj, view, eye = [0, 0, 9];
+
+  /* coarse copy of the silhouette (plus the ember swarm envelope), used to frame
+     the shot exactly on any aspect ratio */
+  var fitPts = (function () {
+    var a = [], g = [emptyMesh(), emptyMesh(), emptyMesh(), emptyMesh()], i, q, s2, c, s1;
+    buildGrid(g[0], crownAt, crownAO, 30, 12, true, false, [0, 1, 0]);
+    buildGrid(g[1], brimTopAt, brimTopAO, 30, 8, true, true, [0, 1, 0]);
+    buildGrid(g[2], brimBotAt, brimBotAO, 30, 9, true, false, [0, -1, 0]);
+    buildGrid(g[3], brimEdgeAt, brimEdgeAO, 30, 2, true, true, [1, 0, 0]);
+    for (q = 0; q < g.length; q++) for (i = 0; i < g[q].pos.length; i += 3) {
+      a.push(g[q].pos[i], g[q].pos[i + 1], g[q].pos[i + 2]);
+    }
+    for (s2 = 0; s2 < 12; s2++) {              /* embers at full drift */
+      c = Math.cos(s2 * Math.PI / 6); s1 = Math.sin(s2 * Math.PI / 6);
+      a.push(c * 2.35, -0.65, s1 * 2.35, c * 2.35, 0.0, s1 * 2.35, c * 2.35, 0.6, s1 * 2.35);
+    }
+    return new Float32Array(a);
+  })();
+
+  function fitDistance(aspect) {
+    var d = 8, it, s, i, worst, m, w, x, y, pv;
+    for (it = 0; it < 5; it++) {
+      pv = m4persp(FOV, aspect, 0.5, 60);
+      var v2 = m4look([0, Math.sin(EL) * d, Math.cos(EL) * d], [0, -0.03, 0], [0, 1, 0]);
+      var vp = m4mul(pv, v2);
+      worst = 0;
+      for (s = 0; s < 8; s++) {
+        var mdl = m4mul(m4mul(m4rotZ(0.05), m4rotX(-0.09)), m4rotY(s * Math.PI / 4));
+        var m4 = m4mul(vp, mdl);
+        for (i = 0; i < fitPts.length; i += 3) {
+          x = m4[0] * fitPts[i] + m4[4] * fitPts[i + 1] + m4[8] * fitPts[i + 2] + m4[12];
+          y = m4[1] * fitPts[i] + m4[5] * fitPts[i + 1] + m4[9] * fitPts[i + 2] + m4[13];
+          w = m4[3] * fitPts[i] + m4[7] * fitPts[i + 1] + m4[11] * fitPts[i + 2] + m4[15];
+          if (w > 0.01) {
+            m = Math.max(Math.abs(x / w), Math.abs(y / w));
+            if (m > worst) worst = m;
+          }
+        }
+      }
+      if (worst < 1e-3) break;
+      d *= worst / TARGET;
+    }
+    return d;
+  }
+
+  var vw = 1, vh = 1;
+  function resize() {
+    var r = stage.getBoundingClientRect();
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var w = Math.max(2, Math.round(r.width * dpr)), h = Math.max(2, Math.round(r.height * dpr));
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+    vw = w; vh = h;
+    gl.viewport(0, 0, w, h);
+    var aspect = w / h;
+    proj = m4persp(FOV, aspect, 0.5, 60);
+    var d = fitDistance(aspect);
+    eye = [0, Math.sin(EL) * d, Math.cos(EL) * d];
+    view = m4look(eye, [0, -0.03, 0], [0, 1, 0]);
+    uPS = h / (2 * Math.tan(FOV / 2));
+  }
+
+  /* ---- state ---- */
+  var spin = 0.55, spinSpeed = 0, hover = false, orbLive = false, dissolve = 0, emberMix = 0;
+  var anim = { phase: 'idle', t: 0, x: 0 };
+  var tGlob = 0;
+  var mq = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  var reduced = mq ? mq.matches : false;
+
+  function setHint() {
+    hintEl.textContent = reduced ? 'tap for a quiet shift' : 'hover or tap to let it drift';
+  }
+  setHint();
+  if (mq) {
+    var onMQ = function (e) { reduced = e.matches; setHint(); ensureLoop(); };
+    if (mq.addEventListener) mq.addEventListener('change', onMQ);
+    else if (mq.addListener) mq.addListener(onMQ);
+  }
+
+  var T1 = 1.30, T2 = 1.05, T3 = 2.05;      /* scatter / swirl / reform */
+  var DT1 = 0.55, DT2 = 0.0, DT3 = 1.15;    /* reduced-motion pacing */
+  function dur() { return reduced ? [DT1, DT2, DT3] : [T1, T2, T3]; }
+
+  function resetParticles() {
+    for (var i = 0; i < NP; i++) {
+      if (isOrb[i] && orbLive) continue;          /* the orbiters stay in orbit */
+      var j = i * 3, o = i * 5;
+      pPos[j] = pHome[j] + pNor[j] * 0.012;
+      pPos[j + 1] = pHome[j + 1] + pNor[j + 1] * 0.012;
+      pPos[j + 2] = pHome[j + 2] + pNor[j + 2] * 0.012;
+      pVel[j] = pVel[j + 1] = pVel[j + 2] = 0;
+      bP[o] = pPos[j]; bP[o + 1] = pPos[j + 1]; bP[o + 2] = pPos[j + 2];
+      bP[o + 3] = 0; bP[o + 4] = 0;
+    }
+  }
+  function ignite() {
+    var ms = reduced ? 0.14 : 1.0;
+    for (var i = 0; i < NP; i++) {
+      if (isOrb[i] && orbLive) continue;
+      var j = i * 3;
+      var sp = (0.22 + 0.70 * Math.pow(Math.random(), 1.6)) * ms;
+      var tx = -pPos[j + 2], tz = pPos[j];
+      var tl = Math.hypot(tx, tz) || 1;
+      var sw = (0.12 + 0.42 * Math.random()) * ms;
+      pVel[j] = pNor[j] * sp + (tx / tl) * sw + (Math.random() - 0.5) * 0.24 * ms;
+      pVel[j + 1] = pNor[j + 1] * sp + (Math.random() - 0.5) * 0.16 * ms + 0.05 * ms;
+      pVel[j + 2] = pNor[j + 2] * sp + (tz / tl) * sw + (Math.random() - 0.5) * 0.24 * ms;
+    }
+  }
+  function chooseOrbiters() {
+    if (reduced || orbLive) return;
+    orbLive = true;
+    for (var i = 0; i < NP && orbIdx.length < MAXORB; i++) {
+      if (Math.random() < 0.017 && pEmb[i] > 0.35) {
+        var k = orbIdx.length;
+        isOrb[i] = 1; orbOf[i] = k; orbIdx.push(i);
+        oRad[k] = 1.35 + Math.random() * 1.45;
+        oTilt[k] = (Math.random() - 0.5) * 0.7;
+        oPh[k] = Math.random() * TAU;
+        oOm[k] = (0.14 + 0.30 * Math.random()) * (Math.random() < 0.5 ? -1 : 1);
+        oY[k] = -0.32 + Math.random() * 0.8;
+        oAmp[k] = 0.04 + 0.14 * Math.random();
+        oFr[k] = 0.30 + 0.55 * Math.random();
+        oPh2[k] = Math.random() * TAU;
+        tCnt[k] = 0;
+      }
+    }
+  }
+  function orbitPos(k, t, out) {
+    var a = oPh[k] + oOm[k] * t;
+    var x = Math.cos(a) * oRad[k], z = Math.sin(a) * oRad[k];
+    var y = oY[k] + oAmp[k] * Math.sin(t * oFr[k] + oPh2[k]);
+    var c = Math.cos(oTilt[k]), s = Math.sin(oTilt[k]);
+    out[0] = x; out[1] = y * c - z * s; out[2] = y * s + z * c;
+  }
+  function pushTrail(k, x, y, z) {
+    var base = k * TRAIL * 3;
+    tPos.copyWithin(base, base + 3, base + TRAIL * 3);
+    tPos[base + TRAIL * 3 - 3] = x;
+    tPos[base + TRAIL * 3 - 2] = y;
+    tPos[base + TRAIL * 3 - 1] = z;
+    if (tCnt[k] < TRAIL) tCnt[k]++;
+  }
+
+  function trigger() {
+    if (anim.phase !== 'idle') return;
+    resetParticles(); ignite();
+    anim.phase = 'out'; anim.t = 0; anim.x = 0;
+    ensureLoop();
+  }
+
+  /* ---- simulation ---- */
+  var tmpO = [0, 0, 0];
+  function step(dt) {
+    var ms = reduced ? 0.14 : 1.0;
+    if (anim.phase !== 'idle') {
+      var D = dur();
+      anim.t += dt;
+      if (anim.phase === 'out') {
+        dissolve = clamp01(anim.t / D[0]);
+        if (anim.t >= D[0]) { anim.phase = 'swirl'; anim.t = 0; dissolve = 1; }
+      } else if (anim.phase === 'swirl') {
+        dissolve = 1;
+        if (anim.t >= D[1]) { anim.phase = 'in'; anim.t = 0; anim.x = 0; chooseOrbiters(); }
+      } else {
+        anim.x = clamp01(anim.t / D[2]);
+        dissolve = 1 - clamp01((anim.x - 0.30) / 0.70);
+        if (anim.t >= D[2]) { anim.phase = 'idle'; anim.x = 0; dissolve = 0; }
+      }
+    }
+    emberMix = clamp01(dissolve * 1.4);
+
+    var rising = anim.phase !== 'in';
+    var x = anim.x;
+    var busy = anim.phase !== 'idle' || orbLive;
+    if (!busy) return;
+
+    /* swirl strength envelope */
+    var sw = 0.30;
+    if (anim.phase === 'out') sw = 0.35 + 0.55 * dissolve;
+    else if (anim.phase === 'swirl') sw = 0.95;
+    else if (anim.phase === 'in') sw = 0.95 * (1 - anim.x);
+    sw *= ms;
+    var turb = (anim.phase === 'in' ? 0.40 * (1 - anim.x) : 0.55) * ms;
+
+    for (var i = 0; i < NP; i++) {
+      var o = i * 5, j = i * 3;
+      var k = pKey[i];
+      var orb = isOrb[i] && orbLive;
+
+      /* embers that stayed behind: always on their orbit, trailing faint light */
+      if (orb && anim.phase !== 'in') {
+        orbitPos(orbOf[i], tGlob, tmpO);
+        pushTrail(orbOf[i], tmpO[0], tmpO[1], tmpO[2]);
+        bP[o] = tmpO[0]; bP[o + 1] = tmpO[1]; bP[o + 2] = tmpO[2];
+        bP[o + 3] = 0.85 + 0.15 * Math.sin(tGlob * 3.1 + pSeed[i]);
+        bP[o + 4] = 0.95;
+        continue;
+      }
+
+      var glow = rising ? sstep(k, k + 0.06, dissolve) : sstep(k - 0.06, k, dissolve);
+      if (glow <= 0.002) { bP[o + 3] = 0; bP[o + 4] = 0; continue; }
+
+      /* free flight: embers drifting, swirling, rising */
+      var px = pPos[j], py = pPos[j + 1], pz = pPos[j + 2];
+      var ax = 0, ay = 0, az = 0;
+      var rx = -pz, rz = px, rl = Math.hypot(rx, rz) || 1;
+      ax += (rx / rl) * sw * 0.9; az += (rz / rl) * sw * 0.9;
+      var rr = Math.hypot(px, pz) || 1, ex = rr - 2.05;
+      if (ex > 0) { ax -= (px / rr) * ex * 2.6; az -= (pz / rr) * ex * 2.6; }
+      ay += (pYT[i] - py) * 0.85 + 0.04 * ms;
+      var sd = pSeed[i];
+      ax += Math.sin(py * 1.9 + tGlob * 0.9 + sd * 6.3) * turb;
+      ay += Math.sin(pz * 1.7 - tGlob * 0.8 + sd * 4.1) * turb;
+      az += Math.sin(px * 1.8 + tGlob * 0.7 + sd * 2.7) * turb;
+      var dg = 1 - Math.min(0.9, 1.35 * dt);
+      pVel[j] = (pVel[j] + ax * dt) * dg;
+      pVel[j + 1] = (pVel[j + 1] + ay * dt) * dg;
+      pVel[j + 2] = (pVel[j + 2] + az * dt) * dg;
+      pPos[j] += pVel[j] * dt; pPos[j + 1] += pVel[j + 1] * dt; pPos[j + 2] += pVel[j + 2] * dt;
+
+      var dx = pPos[j], dy = pPos[j + 1], dz = pPos[j + 2];
+
+      if (anim.phase === 'in') {
+        /* blend from free flight to home (or into orbit) exactly on schedule */
+        var xL = 0.30 + 0.70 * (1 - k);
+        var xS = Math.max(0, xL - 0.55);
+        var pr = clamp01((x - xS) / Math.max(0.10, xL - xS));
+        var e = pr * pr * (3 - 2 * pr);
+        var tx2, ty2, tz2;
+        if (orb) {
+          orbitPos(orbOf[i], tGlob, tmpO);
+          tx2 = tmpO[0]; ty2 = tmpO[1]; tz2 = tmpO[2];
+        } else {
+          tx2 = pHome[j]; ty2 = pHome[j + 1]; tz2 = pHome[j + 2];
+        }
+        dx = lerp(pPos[j], tx2, e); dy = lerp(pPos[j + 1], ty2, e); dz = lerp(pPos[j + 2], tz2, e);
+        if (orb) {
+          pushTrail(orbOf[i], dx, dy, dz);
+          glow = 0.85 + 0.15 * Math.sin(tGlob * 3.1 + pSeed[i]);
+        }
+      }
+
+      bP[o] = dx; bP[o + 1] = dy; bP[o + 2] = dz;
+      bP[o + 3] = glow;
+      bP[o + 4] = orb ? 0.95 : emberMix * (0.55 + 0.45 * pEmb[i]) + 0.18 * pEmb[i];
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, bPB);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, bP);
+    if (orbLive) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, bTPos);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, tPos);
+    }
+  }
+
+  /* ---- render ---- */
+  var MAXA = gl.getParameter(gl.MAX_VERTEX_ATTRIBS) || 8;
+  function attribs(list) {
+    var on = [], i;
+    for (i = 0; i < MAXA; i++) on.push(false);
+    for (i = 0; i < list.length; i++) {
+      var a = list[i];
+      if (a[0] < 0 || a[0] >= MAXA) continue;
+      gl.bindBuffer(gl.ARRAY_BUFFER, a[1]);
+      gl.enableVertexAttribArray(a[0]);
+      gl.vertexAttribPointer(a[0], a[2], gl.FLOAT, false, a[3] || 0, a[4] || 0);
+      on[a[0]] = true;
+    }
+    for (i = 0; i < MAXA; i++) if (!on[i]) gl.disableVertexAttribArray(i);
+  }
+
+  var model, nrm;
+  function render() {
+    model = m4mul(m4mul(m4rotZ(0.05), m4rotX(-0.09)), m4rotY(spin));
+    nrm = m3from(model);
+    var camv = eye;
+
+    gl.depthMask(true);
+    gl.clearColor(0.03, 0.03, 0.04, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    gl.disable(gl.DEPTH_TEST); gl.depthMask(false); gl.disable(gl.BLEND);
+    gl.useProgram(pBG);
+    gl.uniform2f(uBG.uRes, vw, vh);
+    attribs([[uBG.get('aPos'), bQuad, 2]]);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.useProgram(pShadow);
+    gl.uniformMatrix4fv(uShadow.uProj, false, proj);
+    gl.uniformMatrix4fv(uShadow.uView, false, view);
+    gl.uniform1f(uShadow.uAmt, 0.95 - 0.72 * dissolve);
+    attribs([[uShadow.get('aPos'), bShadow, 3, 20, 0], [uShadow.get('aUv'), bShadow, 2, 20, 12]]);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    gl.enable(gl.DEPTH_TEST); gl.depthMask(true); gl.disable(gl.BLEND);
+    gl.useProgram(pMesh);
+    gl.uniformMatrix4fv(uMesh.uProj, false, proj);
+    gl.uniformMatrix4fv(uMesh.uView, false, view);
+    gl.uniformMatrix4fv(uMesh.uModel, false, model);
+    gl.uniformMatrix3fv(uMesh.uNrm, false, nrm);
+    gl.uniform3fv(uMesh.uCam, camv);
+    gl.uniform3f(uMesh.uEmber, 1.15, 0.42, 0.16);
+    gl.uniform1f(uMesh.uDiss, dissolve);
+    attribs([[uMesh.get('aPos'), bPos, 3], [uMesh.get('aNor'), bNor, 3], [uMesh.get('aAux'), bAux, 3]]);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, bIdx);
+    gl.drawElements(gl.TRIANGLES, meshCount, gl.UNSIGNED_SHORT, 0);
+
+    gl.depthMask(false); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+    if (anim.phase !== 'idle' || orbLive) {
+      gl.useProgram(pPart);
+      gl.uniformMatrix4fv(uPart.uProj, false, proj);
+      gl.uniformMatrix4fv(uPart.uView, false, view);
+      gl.uniformMatrix4fv(uPart.uModel, false, model);
+      gl.uniformMatrix3fv(uPart.uNrm, false, nrm);
+      gl.uniform3fv(uPart.uCam, camv);
+      gl.uniform3f(uPart.uEmber, 1.15, 0.42, 0.16);
+      gl.uniform1f(uPart.uPS, uPS);
+      attribs([
+        [uPart.get('aP'), bPB, 4, 20, 0],
+        [uPart.get('aE'), bPB, 1, 20, 16],
+        [uPart.get('aN'), bNB, 3],
+        [uPart.get('aS'), bSB, 2]
+      ]);
+      gl.drawArrays(gl.POINTS, 0, NP);
+    }
+
+    if (orbLive) {
+      gl.useProgram(pTrail);
+      gl.uniformMatrix4fv(uTrail.uProj, false, proj);
+      gl.uniformMatrix4fv(uTrail.uView, false, view);
+      gl.uniformMatrix4fv(uTrail.uModel, false, model);
+      attribs([[uTrail.get('aPos'), bTPos, 3], [uTrail.get('aCol'), bTCol, 4]]);
+      for (var kk = 0; kk < orbIdx.length; kk++) {
+        var n = tCnt[kk];
+        if (n > 1) gl.drawArrays(gl.LINE_STRIP, kk * TRAIL + (TRAIL - n), n);
+      }
+    }
+    gl.depthMask(true);
+  }
+
+  /* ---- loop ---- */
+  var rafId = 0, last = 0;
+  function spinTarget() { return reduced ? 0 : ((hover || anim.phase !== 'idle') ? 0.14 : 0.50); }
+  function needsFrames() {
+    if (anim.phase !== 'idle') return true;
+    if (Math.abs(spinSpeed - spinTarget()) > 0.0006) return true;
+    return !reduced;
+  }
+  function loop(now) {
+    rafId = 0;
+    var dt = last ? Math.min(0.05, (now - last) / 1000) : 0.016;
+    last = now; tGlob += dt;
+    spinSpeed += (spinTarget() - spinSpeed) * (1 - Math.exp(-dt / 0.45));
+    spin += spinSpeed * dt;
+    step(dt);
+    render();
+    if (needsFrames()) rafId = requestAnimationFrame(loop);
+  }
+  function ensureLoop() { if (!rafId) { last = 0; rafId = requestAnimationFrame(loop); } }
+
+  /* ---- events ---- */
+  var hoverTimer = 0;
+  stage.addEventListener('pointerenter', function () { hover = true; trigger(); });
+  stage.addEventListener('pointerleave', function () { hover = false; });
+  stage.addEventListener('pointerdown', function () {
+    hover = true; trigger();
+    clearTimeout(hoverTimer);
+    hoverTimer = setTimeout(function () { hover = false; }, 3600);
+  });
+  stage.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+      e.preventDefault(); hover = true; trigger();
+      clearTimeout(hoverTimer);
+      hoverTimer = setTimeout(function () { hover = false; }, 3600);
+    }
+  });
+  if (window.ResizeObserver) {
+    new window.ResizeObserver(function () { resize(); render(); }).observe(stage);
+  }
+  window.addEventListener('resize', function () { resize(); render(); });
+  window.addEventListener('orientationchange', function () { resize(); render(); });
+
+  resize();
+  render();
+  ensureLoop();
+})();
+</script>
+</body>
+</html>
