@@ -1,0 +1,911 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The Fedora — a study in light</title>
+<style>
+  :root { color-scheme: dark; }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+  }
+
+  body {
+    background: #06070a;
+    color: #ece6e4;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, sans-serif;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .hero {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-height: 100vh;
+    min-height: 100svh;
+    overflow: hidden;
+  }
+
+  #scene {
+    position: absolute;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    touch-action: manipulation;
+    cursor: default;
+    outline: none;
+  }
+
+  #scene:focus-visible {
+    outline: 1px solid rgba(255, 132, 112, 0.32);
+    outline-offset: -10px;
+    border-radius: 2px;
+  }
+
+  .caption {
+    position: absolute;
+    left: 50%;
+    bottom: clamp(24px, 7vh, 84px);
+    transform: translateX(-50%);
+    width: min(92vw, 640px);
+    text-align: center;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .eyebrow {
+    margin: 0 0 14px;
+    font-size: clamp(9px, 1.35vw, 11px);
+    letter-spacing: 0.46em;
+    text-transform: uppercase;
+    text-indent: 0.46em;
+    color: rgba(255, 122, 104, 0.62);
+    text-shadow: 0 0 18px rgba(180, 40, 30, 0.35);
+  }
+
+  .title {
+    margin: 0 0 12px;
+    font-size: clamp(15px, 2.4vw, 21px);
+    font-weight: 300;
+    letter-spacing: 0.30em;
+    text-indent: 0.30em;
+    text-transform: uppercase;
+    color: rgba(246, 236, 233, 0.92);
+    text-shadow: 0 1px 26px rgba(0, 0, 0, 0.6);
+  }
+
+  .sub {
+    margin: 0 auto 18px;
+    max-width: 34ch;
+    font-size: clamp(12px, 1.65vw, 14px);
+    font-weight: 300;
+    line-height: 1.75;
+    letter-spacing: 0.055em;
+    color: rgba(232, 222, 219, 0.52);
+    text-shadow: 0 1px 20px rgba(0, 0, 0, 0.55);
+  }
+
+  .hint {
+    margin: 0;
+    font-size: clamp(9.5px, 1.3vw, 11px);
+    letter-spacing: 0.30em;
+    text-indent: 0.30em;
+    text-transform: uppercase;
+    color: rgba(232, 222, 219, 0.30);
+    transition: color 900ms ease, opacity 900ms ease;
+  }
+
+  .hint.warm { color: rgba(255, 150, 120, 0.48); }
+
+  @media (max-height: 560px) {
+    .caption { bottom: clamp(16px, 5vh, 40px); }
+    .sub { display: none; }
+    .eyebrow { margin-bottom: 10px; }
+    .title { margin-bottom: 10px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hint { transition: none; }
+  }
+</style>
+</head>
+<body>
+<main class="hero">
+  <canvas id="scene" tabindex="0" role="img"
+    aria-label="A softly glowing red fedora turning slowly in three dimensions, drawn from thousands of tiny particles of light."></canvas>
+  <div class="caption">
+    <p class="eyebrow">A study in light</p>
+    <p class="title">The Fedora</p>
+    <p class="sub">Thousands of points of light, held together in a slow rotation above the dark.</p>
+    <p class="hint" id="hint">Hover or tap &nbsp;·&nbsp; let it drift apart</p>
+  </div>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ------------------------------------------------------------------ *
+   *  Elements & media
+   * ------------------------------------------------------------------ */
+  const canvas = document.getElementById('scene');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const hintEl = document.getElementById('hint');
+  const bgCanvas = document.createElement('canvas');
+
+  const mqReduce = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  let reduced = mqReduce ? mqReduce.matches : false;
+  const hintIdle = 'Hover or tap \u00b7 let it drift apart';
+  const hintStill = 'Motion is reduced \u00b7 the hat rests still';
+
+  /* ------------------------------------------------------------------ *
+   *  Math helpers
+   * ------------------------------------------------------------------ */
+  const clamp = (v, a, b) => (v < a ? a : (v > b ? b : v));
+  const smoothstep = (a, b, x) => {
+    const t = clamp((x - a) / (b - a), 0, 1);
+    return t * t * (3 - 2 * t);
+  };
+  const rand = (a, b) => a + Math.random() * (b - a);
+
+  /* ------------------------------------------------------------------ *
+   *  Layout
+   * ------------------------------------------------------------------ */
+  let W = 1, H = 1, DPR = 1;
+  let CX = 0, CY = 0, FIT = 300, FOCAL = 700;
+
+  const CAMD = 7.4;      // camera distance
+  const TILT = 0.235;    // camera looks slightly down at the hat
+  const CT = Math.cos(TILT), ST = Math.sin(TILT);
+  const Y_CENTER = 0.42; // world height that maps to the vertical centre
+
+  /* ------------------------------------------------------------------ *
+   *  Hat geometry (built as a point cloud)
+   * ------------------------------------------------------------------ */
+  const CROWN_H = 1.30;
+  const BRIM_IN = 0.94;
+  const BRIM_OUT = 2.14;
+  const BRIM_ZS = 0.845;
+  const BRIM_TH = 0.058;
+
+  function crownR(v) {
+    const base = 1.03 * (1 - 0.11 * v);
+    if (v <= 0.62) return base;
+    const s = (v - 0.62) / 0.38;
+    return base * Math.pow(Math.max(0, 1 - s * s), 0.40);
+  }
+
+  function crownPoint(u, v, out, extra) {
+    const r = crownR(v) + (extra || 0);
+    const cu = Math.cos(u), su = Math.sin(u);
+    let x = r * cu, z = r * su, y = v * CROWN_H;
+
+    // longitudinal centre crease
+    const topS = smoothstep(0.50, 1.0, v);
+    y -= 0.33 * topS * Math.exp(-(x * x) / (0.46 * 0.46));
+
+    // soft pinch at the top front
+    const rr = Math.max(0.02, r);
+    const front = clamp(z / rr, -1, 1) * 0.5 + 0.5;
+    const pin = 0.15 * topS * smoothstep(0.45, 1.0, front) * Math.exp(-(x * x) / (0.82 * 0.82));
+    x *= 1 - pin;
+
+    out[0] = x; out[1] = y; out[2] = z;
+  }
+
+  function brimPoint(u, t, out, bottom) {
+    const r = BRIM_IN + (BRIM_OUT - BRIM_IN) * t;
+    const cu = Math.cos(u), su = Math.sin(u);
+    const x = r * cu, z = r * BRIM_ZS * su;
+    const droop = 0.22 * t * t * (0.72 + 0.62 * Math.abs(su));
+    let y = 0.045 - droop;
+    if (bottom) y -= BRIM_TH;
+    out[0] = x; out[1] = y; out[2] = z;
+  }
+
+  function bandPoint(u, v, out) {
+    const y = 0.085 + 0.205 * v;
+    crownPoint(u, y / CROWN_H, out, 0.045);
+    out[1] = y;
+  }
+
+  /* particle storage (built with plain arrays, then packed) */
+  const HXa = [], HYa = [], HZa = [], NXa = [], NYa = [], NZa = [],
+        CRa = [], CGa = [], CBa = [], SZa = [];
+
+  function push(px, py, pz, nx, ny, nz, r, g, b, sz) {
+    HXa.push(px); HYa.push(py); HZa.push(pz);
+    NXa.push(nx); NYa.push(ny); NZa.push(nz);
+    CRa.push(r); CGa.push(g); CBa.push(b);
+    SZa.push(sz);
+  }
+
+  function sampleSurface(fn, nu, nv, opt) {
+    const e = 0.0045;
+    const a = [0, 0, 0], b = [0, 0, 0], c = [0, 0, 0];
+    const flip = !!opt.flip;
+    for (let iv = 0; iv < nv; iv++) {
+      const vt = (iv + 0.5) / nv;
+      const v = nv > 1 ? (opt.vpow ? Math.pow(vt, opt.vpow) : vt) : 0.5;
+      for (let iu = 0; iu < nu; iu++) {
+        const u = ((iu + (iv % 2) * 0.5) / nu) * Math.PI * 2;
+        fn(u, v, a);
+        fn(u + e, v, b);
+        fn(u, Math.min(1, v + e), c);
+        const t1x = b[0] - a[0], t1y = b[1] - a[1], t1z = b[2] - a[2];
+        const t2x = c[0] - a[0], t2y = c[1] - a[1], t2z = c[2] - a[2];
+        let nx = t1y * t2z - t1z * t2y;
+        let ny = t1z * t2x - t1x * t2z;
+        let nz = t1x * t2y - t1y * t2x;
+        const l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+        nx /= l; ny /= l; nz /= l;
+        if (flip) { nx = -nx; ny = -ny; nz = -nz; }
+        const col = opt.color(u, v, a);
+        push(a[0], a[1], a[2], nx, ny, nz, col[0], col[1], col[2],
+             opt.size * rand(0.80, 1.22));
+      }
+    }
+  }
+
+  function buildHat() {
+    // crown
+    sampleSurface(
+      (u, v, out) => crownPoint(u, v, out, 0),
+      70, 54,
+      {
+        flip: true,
+        vpow: 0.82,
+        size: 0.0365,
+        color: (u, v) => {
+          const lit = 1 + 0.12 * smoothstep(0.55, 1, v);
+          return [222 * lit, 34 * lit, 38 * lit];
+        }
+      }
+    );
+
+    // brim, top face
+    sampleSurface(
+      (u, t, out) => brimPoint(u, t, out, false),
+      72, 38,
+      {
+        flip: false,
+        size: 0.0375,
+        color: (u, t) => {
+          const k = 1 - 0.16 * t;
+          return [206 * k, 30 * k, 34 * k];
+        }
+      }
+    );
+
+    // brim, underside
+    sampleSurface(
+      (u, t, out) => brimPoint(u, t, out, true),
+      54, 20,
+      {
+        flip: true,
+        size: 0.0350,
+        color: () => [112, 17, 21]
+      }
+    );
+
+    // brim edge
+    const EDGE = 108;
+    for (let i = 0; i < EDGE; i++) {
+      const u = (i / EDGE) * Math.PI * 2;
+      const cu = Math.cos(u), su = Math.sin(u);
+      const x = BRIM_OUT * cu, z = BRIM_OUT * BRIM_ZS * su;
+      const droop = 0.22 * (0.72 + 0.62 * Math.abs(su));
+      for (let k = 0; k < 3; k++) {
+        const y = 0.045 - droop - (k / 2) * BRIM_TH;
+        push(x, y, z, cu, 0.12, su, 152, 25, 29, 0.0345);
+      }
+    }
+
+    // hat band
+    sampleSurface(
+      (u, v, out) => bandPoint(u, v, out),
+      72, 8,
+      {
+        flip: true,
+        size: 0.0345,
+        color: () => [50, 31, 37]
+      }
+    );
+  }
+
+  buildHat();
+
+  const N = HXa.length;
+  const HX = new Float32Array(HXa), HY = new Float32Array(HYa), HZ = new Float32Array(HZa);
+  const NX = new Float32Array(NXa), NY = new Float32Array(NYa), NZ = new Float32Array(NZa);
+  const CR = new Float32Array(CRa), CG = new Float32Array(CGa), CB = new Float32Array(CBa);
+  const SZ = new Float32Array(SZa);
+
+  const PX = new Float32Array(N), PY = new Float32Array(N), PZ = new Float32Array(N);
+  const VX = new Float32Array(N), VY = new Float32Array(N), VZ = new Float32Array(N);
+  const DELAY = new Float32Array(N), HEAT = new Float32Array(N);
+  const ARMED = new Uint8Array(N);
+  const GSX = new Float32Array(N), GSY = new Float32Array(N), GSZ = new Float32Array(N);
+  const SPRK = new Int32Array(N);
+
+  /* ------------------------------------------------------------------ *
+   *  Sprite cache (soft dots, tinted by quantised colour)
+   * ------------------------------------------------------------------ */
+  const spriteKeys = new Array(4096).fill(null);
+
+  function makeSprite(r, g, b) {
+    const S = 28;
+    const c = document.createElement('canvas');
+    c.width = S; c.height = S;
+    const g2 = c.getContext('2d');
+    const grd = g2.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    grd.addColorStop(0, 'rgba(' + r + ',' + g + ',' + b + ',1)');
+    grd.addColorStop(0.26, 'rgba(' + r + ',' + g + ',' + b + ',0.70)');
+    grd.addColorStop(0.58, 'rgba(' + r + ',' + g + ',' + b + ',0.22)');
+    grd.addColorStop(1, 'rgba(' + r + ',' + g + ',' + b + ',0)');
+    g2.fillStyle = grd;
+    g2.fillRect(0, 0, S, S);
+    return c;
+  }
+
+  function spriteKey(r, g, b) {
+    return ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+  }
+
+  function spriteAt(r, g, b) {
+    const key = spriteKey(r | 0, g | 0, b | 0);
+    let s = spriteKeys[key];
+    if (s === null) {
+      s = makeSprite(((r >> 4) << 4) + 8, ((g >> 4) << 4) + 8, ((b >> 4) << 4) + 8);
+      spriteKeys[key] = s;
+    }
+    return s;
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  Atmosphere: dust motes
+   * ------------------------------------------------------------------ */
+  const DUST = 130;
+  const dX = new Float32Array(DUST), dY = new Float32Array(DUST), dZ = new Float32Array(DUST);
+  const dS = new Float32Array(DUST), dA = new Float32Array(DUST), dP = new Float32Array(DUST);
+  for (let i = 0; i < DUST; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = rand(1.1, 6.4);
+    dX[i] = Math.cos(a) * r;
+    dZ[i] = Math.sin(a) * r * 0.8;
+    dY[i] = rand(-1.9, 2.6);
+    dS[i] = rand(0.008, 0.026);
+    dA[i] = rand(0.10, 0.42);
+    dP[i] = Math.random() * Math.PI * 2;
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  Orbiting embers (spawned once the hat has reformed)
+   * ------------------------------------------------------------------ */
+  const ORB = 54, TRA = 9;
+  const oP = new Float32Array(ORB), oSp = new Float32Array(ORB), oR = new Float32Array(ORB);
+  const oH = new Float32Array(ORB), oW = new Float32Array(ORB), oT = new Float32Array(ORB);
+  const oX = new Float32Array(ORB), oY = new Float32Array(ORB), oZ = new Float32Array(ORB);
+  const trail = new Float32Array(ORB * TRA * 3);
+  let orbActive = false, orbFade = 0;
+
+  function spawnOrbiters() {
+    orbActive = true;
+    orbFade = 0;
+    for (let i = 0; i < ORB; i++) {
+      oP[i] = Math.random() * Math.PI * 2;
+      oSp[i] = rand(0.10, 0.36) * (Math.random() < 0.32 ? -1 : 1);
+      oR[i] = rand(1.85, 3.7);
+      oH[i] = rand(-0.22, 1.62);
+      oW[i] = rand(0.06, 0.44);
+      oT[i] = rand(-0.55, 0.55);
+    }
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  State
+   * ------------------------------------------------------------------ */
+  let time = 0, spin = 0.62, spinFactor = 1, last = 0;
+  let effectT = -1, pointerInside = false, lastTrigger = -99, orbitSpawned = false;
+  let dotScale = 1, glowStride = 2, perfAcc = 0, perfN = 0, loopRunning = false;
+
+  /* key light (upper left, slightly in front) */
+  const _lv = [-0.46, 0.82, 0.46];
+  const _ll = Math.sqrt(_lv[0] * _lv[0] + _lv[1] * _lv[1] + _lv[2] * _lv[2]);
+  const LX = _lv[0] / _ll, LY = _lv[1] / _ll, LZ = _lv[2] / _ll;
+
+  /* ------------------------------------------------------------------ *
+   *  Background
+   * ------------------------------------------------------------------ */
+  function buildBackground() {
+    bgCanvas.width = canvas.width;
+    bgCanvas.height = canvas.height;
+    const b = bgCanvas.getContext('2d');
+    b.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+    const g = b.createRadialGradient(W * 0.5, H * 0.42, 0, W * 0.5, H * 0.52, Math.max(W, H) * 0.82);
+    g.addColorStop(0, '#171014');
+    g.addColorStop(0.38, '#0d0b10');
+    g.addColorStop(1, '#05060a');
+    b.fillStyle = g;
+    b.fillRect(0, 0, W, H);
+
+    const g2 = b.createLinearGradient(0, 0, 0, H);
+    g2.addColorStop(0, 'rgba(126,138,178,0.10)');
+    g2.addColorStop(0.42, 'rgba(0,0,0,0)');
+    g2.addColorStop(1, 'rgba(0,0,0,0.42)');
+    b.fillStyle = g2;
+    b.fillRect(0, 0, W, H);
+
+    const v = b.createRadialGradient(
+      W * 0.5, H * 0.46, Math.min(W, H) * 0.20,
+      W * 0.5, H * 0.50, Math.max(W, H) * 0.74
+    );
+    v.addColorStop(0, 'rgba(0,0,0,0)');
+    v.addColorStop(1, 'rgba(0,0,0,0.58)');
+    b.fillStyle = v;
+    b.fillRect(0, 0, W, H);
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  Sizing
+   * ------------------------------------------------------------------ */
+  function captionZone() {
+    return H < 620 ? H * 0.30 : Math.min(H * 0.24, 210);
+  }
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = Math.max(1, window.innerWidth || document.documentElement.clientWidth);
+    H = Math.max(1, window.innerHeight || document.documentElement.clientHeight);
+    canvas.width = Math.round(W * DPR);
+    canvas.height = Math.round(H * DPR);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+
+    const stage = Math.max(160, H - captionZone());
+    FIT = Math.min(W * 0.44, stage * 0.62);
+    CX = W * 0.5;
+    // the tilted hat reads slightly low on screen: compensate so it sits centred
+    const s = FIT / 2.28;
+    CY = stage * (W < H ? 0.54 : 0.47) - 0.35 * s;
+    FOCAL = FIT * CAMD / 2.28;
+
+    buildBackground();
+    if (reduced) {
+      snapHome();
+      render();
+    }
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  Simulation
+   * ------------------------------------------------------------------ */
+  function snapHome() {
+    const cs = Math.cos(spin), sn = Math.sin(spin);
+    for (let i = 0; i < N; i++) {
+      const x = HX[i] * cs + HZ[i] * sn;
+      const z = -HX[i] * sn + HZ[i] * cs;
+      const y = HY[i];
+      PX[i] = x;
+      PY[i] = y * CT - z * ST;
+      PZ[i] = y * ST + z * CT;
+      VX[i] = VY[i] = VZ[i] = 0;
+      HEAT[i] = 0;
+      ARMED[i] = 0;
+    }
+  }
+
+  function trigger() {
+    if (reduced) return;
+    if (effectT >= 0 && effectT < 5.0) return;
+    effectT = 0;
+    for (let i = 0; i < N; i++) {
+      ARMED[i] = 0;
+      HEAT[i] = 0;
+      DELAY[i] = Math.random() * 0.58;
+    }
+    hintEl.classList.add('warm');
+    window.setTimeout(() => hintEl.classList.remove('warm'), 5200);
+    if (!orbitSpawned) orbitSpawned = true;
+  }
+
+  function update(dt) {
+    time += dt;
+
+    const target = (pointerInside || effectT >= 0) ? 0.22 : 1;
+    spinFactor += (target - spinFactor) * Math.min(1, dt * 2.4);
+    spin += dt * 0.40 * spinFactor;
+    if (effectT >= 0) effectT += dt;
+
+    const cs = Math.cos(spin), sn = Math.sin(spin);
+
+    for (let i = 0; i < N; i++) {
+      // home position, transformed to world space
+      const wx = HX[i] * cs + HZ[i] * sn;
+      const wz = -HX[i] * sn + HZ[i] * cs;
+      const wy = HY[i];
+      const y2 = wy * CT - wz * ST;
+      const z2 = wy * ST + wz * CT;
+
+      if (effectT < 0) {
+        PX[i] = wx; PY[i] = y2; PZ[i] = z2;
+        continue;
+      }
+
+      const pt = effectT - DELAY[i];
+      if (pt < 0) {
+        PX[i] = wx; PY[i] = y2; PZ[i] = z2;
+        continue;
+      }
+
+      const px = PX[i], py = PY[i], pz = PZ[i];
+      const dx = px, dy = py - Y_CENTER, dz = pz;
+      const l = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+      const ux = dx / l, uy = dy / l, uz = dz / l;
+
+      if (!ARMED[i]) {
+        ARMED[i] = 1;
+        const sp = rand(0.75, 1.65);
+        const sw = rand(0.60, 1.50);
+        VX[i] = ux * sp - uz * sw + rand(-0.28, 0.28);
+        VY[i] = uy * sp * 0.60 + rand(0.12, 0.85);
+        VZ[i] = uz * sp + ux * sw + rand(-0.28, 0.28);
+      }
+
+      if (pt < 2.15) {
+        const fade = smoothstep(0, 2.15, pt);
+        const outward = 1.02 * (1 - 0.55 * fade);
+        const swirl = 1.30 * (1 - 0.35 * fade);
+        const tt = time * 1.05;
+        let fx = ux * outward - uz * swirl + Math.sin(py * 1.7 + tt + i * 0.61) * 0.42;
+        let fy = uy * outward * 0.55 + 0.36 + Math.cos(px * 1.5 - tt * 0.9 + i * 0.37) * 0.34;
+        let fz = uz * outward + ux * swirl + Math.sin(pz * 1.6 + tt * 0.8 + i * 0.83) * 0.42;
+        VX[i] += fx * dt; VY[i] += fy * dt; VZ[i] += fz * dt;
+        const dmp = Math.exp(-1.25 * dt);
+        VX[i] *= dmp; VY[i] *= dmp; VZ[i] *= dmp;
+      } else {
+        const rt = clamp((pt - 2.15) / 1.45, 0, 1);
+        const k = 2.5 + 30 * rt * rt;
+        VX[i] += (wx - px) * k * dt;
+        VY[i] += (y2 - py) * k * dt;
+        VZ[i] += (z2 - pz) * k * dt;
+        const sw = 1.5 * (1 - rt) * (1 - rt);
+        VX[i] += -uz * sw;
+        VZ[i] += ux * sw;
+        const dmp = Math.exp(-(2.6 + 4.8 * rt) * dt);
+        VX[i] *= dmp; VY[i] *= dmp; VZ[i] *= dmp;
+      }
+
+      PX[i] += VX[i] * dt;
+      PY[i] += VY[i] * dt;
+      PZ[i] += VZ[i] * dt;
+
+      if (pt > 4.35) {
+        const f = Math.min(1, dt * 10);
+        PX[i] += (wx - PX[i]) * f;
+        PY[i] += (y2 - PY[i]) * f;
+        PZ[i] += (z2 - PZ[i]) * f;
+        VX[i] *= 0.86; VY[i] *= 0.86; VZ[i] *= 0.86;
+      }
+
+      HEAT[i] = smoothstep(0, 0.5, pt) * (1 - smoothstep(2.15, 3.95, pt));
+    }
+
+    if (effectT > 5.4) {
+      effectT = -1;
+      snapHome();
+    }
+    if (orbitSpawned && !orbActive && (effectT < 0 || effectT > 4.7)) {
+      spawnOrbiters();
+    }
+
+    // orbiting embers
+    if (orbActive) {
+      orbFade = Math.min(1, orbFade + dt * 0.5);
+      for (let i = 0; i < ORB; i++) {
+        oP[i] += oSp[i] * dt;
+        const a = oP[i];
+        const x = Math.cos(a) * oR[i];
+        const z = Math.sin(a) * oR[i] * 0.82;
+        const y = oH[i] + Math.sin(a * 1.6 + i) * oW[i] + Math.sin(time * 0.5 + i) * 0.06;
+        // gentle roll of the orbit plane
+        const cT = Math.cos(oT[i]), sT = Math.sin(oT[i]);
+        oX[i] = x;
+        oY[i] = y * cT - z * sT * 0.22;
+        oZ[i] = z + y * sT * 0.22;
+        // trail history
+        const base = i * TRA * 3;
+        for (let j = TRA - 1; j > 0; j--) {
+          trail[base + j * 3] = trail[base + (j - 1) * 3];
+          trail[base + j * 3 + 1] = trail[base + (j - 1) * 3 + 1];
+          trail[base + j * 3 + 2] = trail[base + (j - 1) * 3 + 2];
+        }
+        trail[base] = oX[i]; trail[base + 1] = oY[i]; trail[base + 2] = oZ[i];
+      }
+    }
+
+    // dust drift
+    for (let i = 0; i < DUST; i++) {
+      dY[i] += dt * 0.055;
+      dX[i] += Math.sin(time * 0.22 + dP[i]) * dt * 0.05;
+      if (dY[i] > 3.0) { dY[i] = -2.2; }
+    }
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  Rendering
+   * ------------------------------------------------------------------ */
+  const PTMP = [0, 0, 0, 0];
+  function project(x, y, z) {
+    const y2 = y * CT - z * ST;
+    const z2 = y * ST + z * CT;
+    const s = FOCAL / (CAMD - z2);
+    PTMP[0] = CX + x * s;
+    PTMP[1] = CY - (y2 - Y_CENTER) * s;
+    PTMP[2] = s;
+    PTMP[3] = z2;
+    return PTMP;
+  }
+
+  function render() {
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.drawImage(bgCanvas, 0, 0, W, H);
+
+    const es = effectT < 0 ? 0 : smoothstep(0, 0.9, effectT) * (1 - smoothstep(3.4, 5.2, effectT));
+
+    /* --- contact shadow ------------------------------------------- */
+    const a0 = BRIM_OUT, b0 = BRIM_OUT * BRIM_ZS;
+    const rxUnits = Math.sqrt(Math.pow(a0 * Math.cos(spin), 2) + Math.pow(b0 * Math.sin(spin), 2));
+    const rx = FIT * (rxUnits / 2.28) * 1.08;
+    const ry = rx * 0.215;
+    const shY = CY + 1.12 * (FIT / 2.28);
+    const shadowA = 0.72 * (1 - 0.72 * es);
+
+    ctx.save();
+    ctx.translate(CX, shY);
+    ctx.scale(rx, ry);
+    const sg = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+    sg.addColorStop(0, 'rgba(0,0,0,' + shadowA.toFixed(3) + ')');
+    sg.addColorStop(0.48, 'rgba(0,0,0,' + (shadowA * 0.46).toFixed(3) + ')');
+    sg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = sg;
+    ctx.beginPath();
+    ctx.arc(0, 0, 1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    /* --- warm bounce + halo --------------------------------------- */
+    ctx.globalCompositeOperation = 'lighter';
+
+    const haloR = FIT * (1.32 + 1.05 * es);
+    const haloY = CY + 0.35 * (FIT / 2.28);
+    const hg = ctx.createRadialGradient(CX, haloY, 0, CX, haloY, haloR);
+    hg.addColorStop(0, 'rgba(122,26,24,' + (0.22 + 0.16 * es).toFixed(3) + ')');
+    hg.addColorStop(0.42, 'rgba(86,18,20,' + (0.11 + 0.09 * es).toFixed(3) + ')');
+    hg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = hg;
+    ctx.fillRect(CX - haloR, haloY - haloR, haloR * 2, haloR * 2);
+
+    const bg2 = ctx.createRadialGradient(CX, shY, 0, CX, shY, FIT * 1.5);
+    bg2.addColorStop(0, 'rgba(112,22,20,' + (0.14 * (1 - es)).toFixed(3) + ')');
+    bg2.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = bg2;
+    ctx.fillRect(CX - FIT * 1.5, shY - FIT * 1.5, FIT * 3, FIT * 3);
+
+    /* --- dust ------------------------------------------------------ */
+    for (let i = 0; i < DUST; i++) {
+      const p = project(dX[i], dY[i], dZ[i]);
+      const s = dS[i] * p[2] * 2.1;
+      if (p[0] < -20 || p[0] > W + 20 || p[1] < -20 || p[1] > H + 20) continue;
+      const depth = clamp((p[3] + 4) / 8, 0, 1);
+      ctx.globalAlpha = dA[i] * 0.30 * (0.35 + 0.75 * depth);
+      ctx.fillStyle = 'rgba(255,196,176,1)';
+      ctx.beginPath();
+      ctx.arc(p[0], p[1], Math.max(0.5, s), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    /* --- hat particles -------------------------------------------- */
+    ctx.globalCompositeOperation = 'source-over';
+    const cs = Math.cos(spin), sn = Math.sin(spin);
+
+    for (let i = 0; i < N; i++) {
+      const z = PZ[i];
+      const s = FOCAL / (CAMD - z);
+      const sx = CX + PX[i] * s;
+      if (sx < -40 || sx > W + 40) { GSZ[i] = 0; continue; }
+      const sy = CY - (PY[i] - Y_CENTER) * s;
+      if (sy < -40 || sy > H + 40) { GSZ[i] = 0; continue; }
+
+      // normal -> camera space
+      const nx = NX[i], ny = NY[i], nz = NZ[i];
+      const nx1 = nx * cs + nz * sn;
+      const nz1 = -nx * sn + nz * cs;
+      const ny2 = ny * CT - nz1 * ST;
+      const nz2 = ny * ST + nz1 * CT;
+
+      let d = nx1 * LX + ny2 * LY + nz2 * LZ;
+      if (d < 0) d = 0;
+      const rAbs = nz2 < 0 ? -nz2 : nz2;
+      const rim = (1 - rAbs);
+      const rimT = rim * rim * rim;
+      const shade = 0.185 + 1.04 * d + 0.34 * rimT + 0.10 * (ny2 * 0.5 + 0.5);
+
+      const dep = clamp((z + 2.9) / 5.8, 0, 1);
+
+      let r = CR[i] * shade, g = CG[i] * shade, b = CB[i] * shade;
+      const heat = HEAT[i];
+      if (heat > 0.002) {
+        const t2 = heat * 0.92;
+        r += (255 * (0.70 + 0.42 * shade) - r) * t2;
+        g += (178 * (0.52 + 0.58 * shade) - g) * t2;
+        b += (108 * (0.38 + 0.58 * shade) - b) * t2;
+      }
+      if (r > 255) r = 255;
+      if (g > 255) g = 255;
+      if (b > 255) b = 255;
+
+      let a = 0.34 + 0.56 * clamp(shade * 0.72, 0, 1);
+      a *= 0.60 + 0.58 * dep;
+      a *= 1 - 0.22 * es;
+
+      const size = SZ[i] * s * dotScale;
+      const sprite = spriteAt(r, g, b);
+      SPRK[i] = spriteKey(r | 0, g | 0, b | 0);
+      GSX[i] = sx; GSY[i] = sy; GSZ[i] = size;
+
+      ctx.globalAlpha = a;
+      ctx.drawImage(sprite, sx - size * 0.5, sy - size * 0.5, size, size);
+    }
+
+    /* --- soft bloom (sparse pass) --------------------------------- */
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < N; i += glowStride) {
+      const size = GSZ[i];
+      if (size <= 0) continue;
+      const heat = HEAT[i];
+      const g2 = size * 3.6;
+      ctx.globalAlpha = 0.048 + 0.115 * heat;
+      const sprite = spriteKeys[SPRK[i]];
+      if (!sprite) continue;
+      ctx.drawImage(sprite, GSX[i] - g2 * 0.5, GSY[i] - g2 * 0.5, g2, g2);
+    }
+
+    /* --- orbiting embers + trails --------------------------------- */
+    if (orbActive) {
+      for (let i = 0; i < ORB; i++) {
+        const base = i * TRA * 3;
+        for (let j = TRA - 1; j >= 0; j--) {
+          const tx = trail[base + j * 3], ty = trail[base + j * 3 + 1], tz = trail[base + j * 3 + 2];
+          const p = project(tx, ty, tz);
+          const f = 1 - j / TRA;
+          const size = (0.016 + 0.024 * f) * p[2] * dotScale;
+          ctx.globalAlpha = orbFade * f * f * 0.32 * (0.5 + 0.6 * clamp((p[3] + 3) / 6, 0, 1));
+          const sprite = spriteKeys[ORB_KEY];
+          ctx.drawImage(sprite, p[0] - size * 0.5, p[1] - size * 0.5, size, size);
+        }
+        const p = project(oX[i], oY[i], oZ[i]);
+        const size = 0.030 * p[2] * dotScale;
+        ctx.globalAlpha = orbFade * 0.62;
+        ctx.drawImage(spriteKeys[ORB_KEY], p[0] - size * 0.5, p[1] - size * 0.5, size, size);
+      }
+    }
+
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+  }
+
+  /* warm ember colour key used by the orbiters */
+  const ORB_KEY = spriteKey(255, 196, 148);
+  spriteKeys[ORB_KEY] = makeSprite(255, 196, 148);
+
+  /* ------------------------------------------------------------------ *
+   *  Main loop
+   * ------------------------------------------------------------------ */
+  function frame(now) {
+    if (reduced) { loopRunning = false; return; }   // motion switched off: stop the loop
+    requestAnimationFrame(frame);
+    if (document.hidden) { last = now; return; }
+    const dtRaw = (now - last) / 1000;
+    last = now;
+    const dt = clamp(isNaN(dtRaw) ? 0.016 : dtRaw, 0.0005, 0.05);
+
+    perfAcc += dt; perfN++;
+    if (perfN >= 90) {
+      const avg = perfAcc / perfN;
+      if (avg > 0.026 && glowStride < 4) { glowStride++; dotScale = Math.max(0.82, dotScale - 0.06); }
+      else if (avg < 0.017 && glowStride > 1) { glowStride--; dotScale = Math.min(1, dotScale + 0.04); }
+      perfAcc = 0; perfN = 0;
+    }
+
+    update(dt);
+    render();
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  Interaction
+   * ------------------------------------------------------------------ */
+  function onHoverStart() {
+    pointerInside = true;
+    if (reduced) return;
+    if (time - lastTrigger > 2.2) {
+      lastTrigger = time;
+      trigger();
+    }
+  }
+  function onTap(e) {
+    if (e && e.cancelable) e.preventDefault();
+    if (reduced) return;
+    if (effectT < 0 || effectT > 5.0) {
+      lastTrigger = time;
+      trigger();
+    }
+  }
+
+  function startLoop() {
+    if (loopRunning || reduced) return;
+    loopRunning = true;
+    last = performance.now();
+    requestAnimationFrame(frame);
+  }
+
+  canvas.addEventListener('pointerenter', onHoverStart);
+  canvas.addEventListener('pointerleave', () => { pointerInside = false; });
+  canvas.addEventListener('pointerdown', onTap);
+  canvas.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+      e.preventDefault();
+      onTap(null);
+    }
+  });
+
+  let resizeTimer = 0;
+  function queueResize() {
+    if (resizeTimer) window.clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(() => { resizeTimer = 0; resize(); }, 90);
+  }
+  window.addEventListener('resize', queueResize, { passive: true });
+  window.addEventListener('orientationchange', () => window.setTimeout(resize, 160));
+
+  if (mqReduce) {
+    const onChange = (e) => {
+      reduced = e.matches;
+      hintEl.textContent = reduced ? hintStill : hintIdle;
+      if (reduced) {
+        effectT = -1;
+        spinFactor = 1;
+        snapHome();
+        render();
+      } else {
+        startLoop();
+      }
+    };
+    if (mqReduce.addEventListener) mqReduce.addEventListener('change', onChange);
+    else if (mqReduce.addListener) mqReduce.addListener(onChange);
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  Boot
+   * ------------------------------------------------------------------ */
+  resize();
+  snapHome();
+  if (reduced) hintEl.textContent = hintStill;
+  render();
+  startLoop();
+})();
+</script>
+</body>
+</html>
