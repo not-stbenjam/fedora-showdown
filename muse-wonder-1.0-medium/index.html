@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fedora — Ember</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  :root{
+    --bg:#0a0a0f; --bg2:#12121c; --text:#f2f0eb; --muted:#9a97a3; --red:#e03a2f; --accent:#ff6b4a;
+  }
+  html,body{height:100%}
+  body{
+    background:radial-gradient(1200px 700px at 50% 38%, #1c1a2e 0%, var(--bg2) 42%, var(--bg) 78%);
+    color:var(--text);
+    font-family: ui-sans-system, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* soft vignette + grain-like depth */
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+    background:
+      radial-gradient(600px 320px at 50% 46%, rgba(224,58,47,.10), transparent 65%),
+      radial-gradient(900px 500px at 50% 110%, rgba(0,0,0,.55), transparent 60%);
+  }
+  body::after{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:3; opacity:.5;
+    background:radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.55) 100%);
+  }
+  .hero{
+    position:relative; z-index:1; min-height:100svh;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding: clamp(20px,4vw,48px) 20px 28px; text-align:center;
+  }
+  .eyebrow{
+    letter-spacing:.28em; text-transform:uppercase; font-size:11px; font-weight:600;
+    color:var(--muted); margin-bottom:14px;
+  }
+  .eyebrow b{color:var(--accent); font-weight:700}
+  h1{
+    font-size: clamp(28px, 5vw, 52px); line-height:.95; letter-spacing:-.02em; font-weight:750;
+    max-width:12ch;
+  }
+  h1 em{font-style:normal; color:var(--red); text-shadow:0 0 28px rgba(224,58,47,.35)}
+  .stage{
+    position:relative; width:min(92vw, 620px); aspect-ratio: 1 / .82;
+    margin: clamp(6px,2vh,18px) auto 2px; cursor:pointer; outline:none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .stage:focus-visible{ box-shadow:0 0 0 2px rgba(255,107,74,.6); border-radius:24px; }
+  canvas{ display:block; width:100%; height:100%; }
+  /* floor shadow / reflection */
+  .shadow{
+    position:absolute; left:50%; bottom:11%; width:56%; height:28px; transform:translateX(-50%);
+    background:radial-gradient(ellipse at center, rgba(0,0,0,.65) 0%, rgba(0,0,0,.28) 45%, transparent 70%);
+    filter:blur(6px); pointer-events:none; transition:opacity .6s, transform .6s;
+  }
+  .stage.is-dissolved .shadow{opacity:.25; transform:translateX(-50%) scaleX(1.25)}
+  .caption{
+    margin-top:2px; font-size:13.5px; line-height:1.5; color:var(--muted); letter-spacing:.01em;
+  }
+  .caption strong{color:#d8d5de; font-weight:600}
+  .hint{
+    margin-top:10px; display:inline-flex; align-items:center; gap:8px;
+    font-size:11px; letter-spacing:.18em; text-transform:uppercase; color:#6f6c7a;
+  }
+  .hint::before,.hint::after{content:""; width:22px; height:1px; background:#2a2836}
+  .hint .dot{width:6px;height:6px;border-radius:50%;background:var(--accent); box-shadow:0 0 10px rgba(255,107,74,.8); animation:pulse 2.4s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:.45; transform:scale(.85)}50%{opacity:1; transform:scale(1.15)}}
+  .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  @media (max-width:520px){ h1{max-width:14ch} .caption{font-size:13px; padding:0 8px} }
+  @media (prefers-reduced-motion: reduce){
+    .hint .dot{animation:none}
+    *{scroll-behavior:auto !important}
+  }
+</style>
+</head>
+<body>
+<main class="hero">
+  <p class="eyebrow"><b>●</b>&nbsp; Open &nbsp;·&nbsp; Elegant &nbsp;·&nbsp; Everywhere</p>
+  <h1>Wear the <em>future,</em><br>lightly.</h1>
+
+  <div class="stage" id="stage" role="button" tabindex="0" aria-label="Fedora logo. Activate to dissolve into particles and reform.">
+    <div class="shadow" aria-hidden="true"></div>
+    <canvas id="c" aria-hidden="true"></canvas>
+  </div>
+
+  <p class="caption"><strong>The fedora, reimagined.</strong> Hover or tap — it slows, scatters to embers, and finds its shape again.</p>
+  <p class="hint"><span class="dot"></span> Hover / Tap to dissolve <span class="dot" style="display:none"></span></p>
+  <p class="sr-only" id="live" aria-live="polite"></p>
+</main>
+
+<script>
+(() => {
+  const stage = document.getElementById('stage');
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const live = document.getElementById('live');
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+  let REDUCED = reduced.matches;
+
+  // ---------- Config ----------
+  const COUNT = 2600;            // thousands of particles (adaptive below)
+  const ORBIT_COUNT = 42;
+  const DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+  // ---------- Canvas sizing ----------
+  let W=0,H=0,CX=0,CY=0,S=1;
+  function resize(){
+    const r = stage.getBoundingClientRect();
+    W = r.width; H = r.height; CX = W/2; CY = H/2;
+    S = Math.min(W,H);
+    canvas.width = Math.round(W*DPR); canvas.height = Math.round(H*DPR);
+    canvas.style.width=W+'px'; canvas.style.height=H+'px';
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    buildTargets(); // rebuild geometry scale-independently (targets are normalized)
+  }
+
+  // ---------- Fedora geometry (normalized -1..1) ----------
+  // Particles live on brim + crown surface so shading / silhouette reads as a hat.
+  function fedoraPoint(){
+    const r = Math.random();
+    if(r < 0.58){
+      // BRIM: annulus with slight downturn at edge + front dip
+      const a = Math.random()*Math.PI*2;
+      const rad = 0.42 + Math.pow(Math.random(),0.65)*0.58; // 0.42..1.0
+      const x = Math.cos(a)*rad;
+      const z = Math.sin(a)*rad*0.92;
+      let y = -0.18 + (rad-0.42)*0.10;                 // rises slightly inward
+      y += Math.sin(a)*0.045*(rad-0.42);              // front/back curl
+      y -= Math.pow(Math.max(0,rad-0.82)/0.18,2)*0.10; // edge droop
+      return {x,y:y+0.22,z, part:'brim', a, rad};
+    } else if(r < 0.92){
+      // CROWN: tapered cylinder
+      const a = Math.random()*Math.PI*2;
+      const t = Math.random(); // 0 bottom ->1 top
+      const rad = 0.46 - t*0.10 + Math.sin(a*1)*0.015;
+      const x = Math.cos(a)*rad;
+      const z = Math.sin(a)*rad;
+      const y = -0.02 + t*0.52;
+      // center crease pinch near top
+      const pinch = t>0.72 ? (t-0.72)/0.28 : 0;
+      return {x:x*(1-pinch*0.08), y:y+0.22, z:z*(1-pinch*0.22), part:'crown', a, rad, t};
+    } else {
+      // CROWN TOP: slightly domed disc with crease valley
+      const a = Math.random()*Math.PI*2;
+      const rad = Math.sqrt(Math.random())*0.38;
+      const x = Math.cos(a)*rad, z = Math.sin(a)*rad;
+      let y = 0.52 - rad*rad*0.18;
+      y -= Math.exp(-Math.pow(z/0.09,2))*0.09*(1-rad/0.4); // crease
+      return {x, y:y+0.22, z, part:'top', a, rad};
+    }
+  }
+  function colorFor(p, light){
+    // Red Hat-style palette: deep red crown, darker brim underside, black band hint
+    if(p.part==='crown' && p.t!==undefined && p.t<0.22){
+      // band
+      const v = 18+light*28;
+      return `rgb(${v+8},${v},${v+10})`;
+    }
+    if(p.part==='brim'){
+      const base = 145+light*95;
+      return `rgb(${Math.min(255,base+28)},${Math.max(18,base*0.22)},${Math.max(16,base*0.20)})`;
+    }
+    const base = 155+light*100;
+    return `rgb(${Math.min(255,base+30)},${Math.max(20,base*0.24)},${Math.max(18,base*0.22)})`;
+  }
+
+  // ---------- Particles ----------
+  let particles=[], orbiters=[];
+  function makeParticles(n){
+    particles = Array.from({length:n},()=>{
+      const home = fedoraPoint();
+      return {
+        home, x:home.x,y:home.y,z:home.z,
+        vx:0,vy:0,vz:0,
+        // ember state
+        ex:home.x, ey:home.y, ez:home.z, evx:0,evy:0,evz:0,
+        seed: Math.random()*Math.PI*2,
+        size: 0.9+Math.random()*1.7,
+        hueShift: Math.random(),
+        swirl: 0.6+Math.random()*1.1,
+        delay: Math.random()*0.25,
+      };
+    });
+    orbiters = [];
+  }
+  function buildTargets(){ /* homes are normalized; nothing to recompute on resize */ }
+
+  // ---------- State machine ----------
+  // idle -> slowing -> dissolving -> swirling -> reforming -> idle (+ orbiters)
+  let state='idle';
+  let stateT=0;                 // seconds in state
+  let rotY=0.6, rotX=0.42;      // tilt
+  let spinSpeed=0.55;           // rad/s
+  let targetSpin=0.55;
+  let dissolve=0;               // 0 hat, 1 fully scattered
+  let hasReformed=false;
+  let pointerIn=false;
+
+  const DUR = { slowing:0.7, dissolving:1.45, swirling:1.6, reforming:1.55 };
+
+  function setState(s){
+    state=s; stateT=0;
+    stage.classList.toggle('is-dissolved', s==='dissolving'||s==='swirling');
+    if(s==='dissolving') initEmbers();
+    if(s==='reforming') live.textContent='Particles reforming into the fedora.';
+    if(s==='idle' && hasReformed) spawnOrbiters();
+    if(s==='idle') live.textContent = hasReformed ? 'Fedora reformed.' : '';
+  }
+  function initEmbers(){
+    for(const p of particles){
+      p.ex=p.x; p.ey=p.y; p.ez=p.z;
+      const a=Math.random()*Math.PI*2, up=(Math.random()-0.25)*0.9;
+      const sp=0.35+Math.random()*1.15;
+      p.evx=Math.cos(a)*sp*0.9; p.evz=Math.sin(a)*sp*0.9; p.evy=up*0.7;
+    }
+  }
+  function spawnOrbiters(){
+    orbiters = Array.from({length:ORBIT_COUNT},(_,i)=>({
+      angle: Math.random()*Math.PI*2,
+      radius: 0.72+Math.random()*0.55,
+      speed: (0.25+Math.random()*0.55)*(Math.random()<0.5?1:-1),
+      yBase: 0.08+Math.random()*0.55,
+      wobble: Math.random()*Math.PI*2,
+      size: 1+Math.random()*1.6,
+      trail: []
+    }));
+  }
+
+  function trigger(){
+    if(REDUCED) return;
+    if(state==='idle') { targetSpin=0.06; setState('slowing'); }
+  }
+  stage.addEventListener('pointerenter',()=>{pointerIn=true; trigger();});
+  stage.addEventListener('pointerleave',()=>{pointerIn=false;});
+  stage.addEventListener('click', trigger);
+  stage.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); trigger(); }});
+  // tap on touch: pointerdown also triggers (click may be delayed)
+  stage.addEventListener('pointerdown',e=>{ if(e.pointerType!=='mouse') trigger(); });
+
+  // ---------- Projection ----------
+  function project(x,y,z){
+    const cosY=Math.cos(rotY), sinY=Math.sin(rotY);
+    const cosX=Math.cos(rotX), sinX=Math.sin(rotX);
+    let X = x*cosY - z*sinY;
+    let Z = x*sinY + z*cosY;
+    let Y = y*cosX - Z*sinX;
+    Z = y*sinX + Z*cosX;
+    const f = 3.2, scale = f/(f+Z+1.6);
+    return { sx: CX + X*S*0.42*scale*1.55, sy: CY - Y*S*0.42*scale*1.55 + S*0.04, z:Z, scale };
+  }
+
+  // ---------- Loop ----------
+  let last=performance.now();
+  function frame(now){
+    const dt=Math.min(0.033,(now-last)/1000); last=now;
+    if(!REDUCED){
+      stateT+=dt;
+      // spin easing
+      spinSpeed += (targetSpin-spinSpeed)*Math.min(1,dt*4);
+      rotY += spinSpeed*dt;
+      // gentle bob
+      const bob = Math.sin(now*0.0011)*0.018;
+
+      // state transitions
+      if(state==='slowing' && stateT>=DUR.slowing){ setState('dissolving'); }
+      else if(state==='dissolving'){
+        dissolve=Math.min(1, dissolve+dt/DUR.dissolving);
+        if(stateT>=DUR.dissolving) setState('swirling');
+      } else if(state==='swirling'){
+        if(stateT>=DUR.swirling) setState('reforming');
+      } else if(state==='reforming'){
+        dissolve=Math.max(0, dissolve-dt/DUR.reforming);
+        if(stateT>=DUR.reforming){ dissolve=0; hasReformed=true; targetSpin=0.55; setState('idle'); }
+      }
+
+      // update ember drift + swirl
+      if(dissolve>0){
+        const swirlPhase = state==='swirling' ? 1 : (state==='dissolving'?0.45:0.25);
+        for(const p of particles){
+          if(state==='dissolving'||state==='swirling'){
+            // curl-ish swirl around center + upward ember drift
+            const cx=-p.ez, cz=p.ex;
+            p.evx += (cx*1.15*swirlPhase - p.evx*0.55)*dt * p.swirl;
+            p.evz += (cz*1.15*swirlPhase - p.evz*0.55)*dt * p.swirl;
+            p.evy += ((0.22+Math.sin(now*0.002+p.seed)*0.12) - p.evy*0.6)*dt;
+            p.ex+=p.evx*dt*0.9; p.ey+=p.evy*dt*0.9; p.ez+=p.evz*dt*0.9;
+          }
+        }
+      }
+      // orbiters physics
+      for(const o of orbiters){ o.angle+=o.speed*dt; }
+
+      draw(now, bob);
+    } else {
+      drawStatic();
+    }
+    requestAnimationFrame(frame);
+  }
+
+  function draw(now, bob){
+    ctx.clearRect(0,0,W,H);
+    // soft spotlight behind hat
+    const g=ctx.createRadialGradient(CX,CY-S*0.02,10,CX,CY,S*0.48);
+    g.addColorStop(0,'rgba(255,120,80,0.10)'); g.addColorStop(0.45,'rgba(180,40,35,0.06)'); g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+
+    // build render list
+    const list=[];
+    for(const p of particles){
+      let x,y,z;
+      if(dissolve<=0){ x=p.home.x; y=p.home.y+bob; z=p.home.z; }
+      else if(dissolve>=1 || state==='swirling' || state==='dissolving'){
+        // blend home->ember by per-particle delay for organic dissolve
+        const t = state==='reforming'
+          ? Math.max(0,Math.min(1,(1-dissolve - p.delay*0.4)/0.6)) // reform stagger
+          : Math.max(0,Math.min(1,(dissolve*1.25 - p.delay)/0.75));
+        const e = t*t*(3-2*t);
+        // during reform, ember continues slight drift then eases home
+        if(state==='reforming'){ p.ex+=(p.evx*0.98)*0.008; p.ey+=(p.evy*0.98)*0.008; p.ez+=(p.evz*0.98)*0.008; }
+        x = p.home.x + (p.ex-p.home.x)*e;
+        y = p.home.y+bob + (p.ey-p.home.y)*e;
+        z = p.home.z + (p.ez-p.home.z)*e;
+        p._e=e;
+      } else { x=p.home.x; y=p.home.y+bob; z=p.home.z; p._e=0; }
+      p.x=x;p.y=y;p.z=z;
+      const pr=project(x,y,z);
+      list.push({p, ...pr});
+    }
+    list.sort((a,b)=>b.z-a.z);
+
+    const scattered = dissolve>0.02;
+    for(const it of list){
+      const p=it.p;
+      const light = Math.max(0,Math.min(1, 0.55 - it.z*0.55)); // front brighter
+      const depthAlpha = 0.35+0.65*Math.max(0,Math.min(1,(1.2-it.z)/2.2));
+      const e = p._e||0;
+      const size = p.size * it.scale * (scattered ? (0.75+e*0.55) : 1);
+      // glow when scattered, crisp when formed
+      if(scattered && e>0.15){
+        const flicker = 0.75+0.25*Math.sin(now*0.012+p.seed*7);
+        ctx.beginPath();
+        ctx.fillStyle = `rgba(255,${Math.round(120+80*flicker)},60,${0.10*e})`;
+        ctx.arc(it.sx,it.sy,size*3.2,0,Math.PI*2); ctx.fill();
+        ctx.beginPath();
+        ctx.fillStyle = `rgba(255,${Math.round(165+60*p.hueShift)},${Math.round(90+40*flicker)},${Math.min(1,depthAlpha)* (0.55+0.45*e)})`;
+        ctx.arc(it.sx,it.sy,Math.max(0.6,size*0.85),0,Math.PI*2); ctx.fill();
+      } else {
+        ctx.beginPath();
+        ctx.fillStyle = colorFor(p.home, light);
+        ctx.globalAlpha = depthAlpha;
+        ctx.arc(it.sx,it.sy,Math.max(0.55,size),0,Math.PI*2); ctx.fill();
+        ctx.globalAlpha=1;
+        // tiny specular on front crown
+        if(p.home.part!=='brim' && it.z<-0.25 && Math.random()<0.02){}
+      }
+    }
+
+    // ---- orbiting particles with faint trails (after first reform) ----
+    if(hasReformed && state==='idle' && orbiters.length){
+      ctx.lineCap='round';
+      for(const o of orbiters){
+        const x=Math.cos(o.angle)*o.radius;
+        const z=Math.sin(o.angle)*o.radius;
+        const y=o.yBase + Math.sin(now*0.0016+o.wobble)*0.08;
+        const pr=project(x,y,z);
+        o.trail.push({x:pr.sx,y:pr.sy});
+        if(o.trail.length>14) o.trail.shift();
+        // trail
+        for(let i=1;i<o.trail.length;i++){
+          const a=i/o.trail.length;
+          ctx.beginPath();
+          ctx.strokeStyle=`rgba(255,140,80,${a*0.22})`;
+          ctx.lineWidth= o.size*a*0.9;
+          ctx.moveTo(o.trail[i-1].x,o.trail[i-1].y);
+          ctx.lineTo(o.trail[i].x,o.trail[i].y);
+          ctx.stroke();
+        }
+        // head glow (tasteful)
+        ctx.beginPath(); ctx.fillStyle='rgba(255,150,90,0.14)';
+        ctx.arc(pr.sx,pr.sy,o.size*3,0,Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.fillStyle='rgba(255,190,130,0.92)';
+        ctx.arc(pr.sx,pr.sy,o.size*0.75,0,Math.PI*2); ctx.fill();
+      }
+    }
+  }
+
+  function drawStatic(){
+    // Reduced-motion: one still, well-lit hat, no animation.
+    ctx.clearRect(0,0,W,H);
+    const g=ctx.createRadialGradient(CX,CY,10,CX,CY,S*0.48);
+    g.addColorStop(0,'rgba(255,120,80,0.08)'); g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+    const savedY=rotY, savedX=rotX; rotY=0.6; rotX=0.42;
+    const list=particles.map(p=>({p, ...project(p.home.x,p.home.y,p.home.z)})).sort((a,b)=>b.z-a.z);
+    for(const it of list){
+      const light=Math.max(0,Math.min(1,0.55-it.z*0.55));
+      const a=0.35+0.65*Math.max(0,Math.min(1,(1.2-it.z)/2.2));
+      ctx.globalAlpha=a; ctx.fillStyle=colorFor(it.p.home,light);
+      ctx.beginPath(); ctx.arc(it.sx,it.sy,Math.max(0.6,it.p.size*it.scale),0,Math.PI*2); ctx.fill();
+    }
+    ctx.globalAlpha=1; rotY=savedY; rotX=savedX;
+  }
+
+  // ---------- Init ----------
+  // Fewer particles on small / low-power screens keeps 60fps
+  const isSmall = Math.min(window.innerWidth, window.innerHeight) < 560;
+  makeParticles(isSmall ? 1700 : COUNT);
+  resize();
+  window.addEventListener('resize', resize);
+  reduced.addEventListener?.('change', e=>{ REDUCED=e.matches; if(REDUCED){ dissolve=0; orbiters=[]; state='idle'; } });
+  if(REDUCED) live.textContent='Reduced motion is on, so the fedora is shown still.';
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

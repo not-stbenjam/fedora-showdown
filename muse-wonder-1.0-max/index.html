@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fedora — Held in Light</title>
+<style>
+  :root{
+    --bg:#070606;
+    --ink:#ece5da;
+    --muted:#a79c8f;
+    --faint:#6f665c;
+    --red:#e8402f;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;
+    background:
+      radial-gradient(1100px 620px at 50% 38%, rgba(232,64,47,.075), transparent 62%),
+      radial-gradient(900px 700px at 50% 115%, rgba(120,40,28,.10), transparent 60%),
+      radial-gradient(ellipse at center, #141110 0%, #0a0908 52%, #050404 100%);
+    color:var(--ink);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    overflow-x:hidden;
+  }
+  body::after{
+    content:"";
+    position:fixed; inset:0;
+    pointer-events:none;
+    background:radial-gradient(ellipse at center, transparent 52%, rgba(0,0,0,.55) 100%);
+  }
+  .hero{
+    min-height:100svh;
+    display:grid;
+    place-items:center;
+    padding:clamp(20px,4vh,44px) 20px clamp(28px,5vh,52px);
+    position:relative;
+    z-index:1;
+  }
+  .stage-wrap{
+    width:min(92vw, 640px);
+    text-align:center;
+  }
+  .stage{
+    position:relative;
+    width:100%;
+    aspect-ratio: 1.18 / 1;
+    max-height: min(62svh, 520px);
+    margin-inline:auto;
+    cursor:pointer;
+    border-radius:24px;
+    outline:none;
+    -webkit-tap-highlight-color:transparent;
+    touch-action:manipulation;
+    user-select:none;
+  }
+  .stage:focus-visible{
+    box-shadow:0 0 0 1px rgba(236,229,218,.28), 0 0 0 6px rgba(232,64,47,.12);
+  }
+  .halo{
+    position:absolute;
+    inset:6% 8%;
+    border-radius:50%;
+    background:radial-gradient(closest-side, rgba(255,92,64,.14), rgba(232,64,47,.05) 46%, transparent 72%);
+    filter:blur(10px);
+    opacity:.85;
+    pointer-events:none;
+    transition:opacity .6s ease;
+  }
+  .stage.is-flashing .halo{opacity:1}
+  canvas{
+    position:relative;
+    display:block;
+    width:100%;
+    height:100%;
+  }
+  .caption{
+    margin:clamp(6px,1.5vh,14px) 0 0;
+    font-family: Georgia, "Times New Roman", serif;
+    font-style:italic;
+    font-weight:400;
+    font-size:clamp(17px, 2.4vw, 21px);
+    letter-spacing:.012em;
+    color:var(--ink);
+    text-wrap:balance;
+  }
+  .hint{
+    margin:9px 0 0;
+    font-size:12.5px;
+    line-height:1.5;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--faint);
+    transition:color .4s ease;
+  }
+  .stage-wrap:hover .hint{color:var(--muted)}
+  .sr-only{
+    position:absolute; width:1px; height:1px;
+    margin:-1px; padding:0; overflow:hidden;
+    clip:rect(0 0 0 0); white-space:nowrap; border:0;
+  }
+  @media (max-width:480px){
+    .stage{aspect-ratio:1.05 / 1}
+    .hint{letter-spacing:.11em}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .halo{transition:none}
+    .hint{transition:none}
+  }
+</style>
+</head>
+<body>
+<main class="hero">
+  <div class="stage-wrap">
+    <div class="stage" id="stage" tabindex="0" role="button"
+         aria-label="Red fedora logo. Activate to dissolve it into embers and watch it reform.">
+      <div class="halo" aria-hidden="true"></div>
+      <canvas id="scene" aria-hidden="true"></canvas>
+    </div>
+    <p class="caption">The fedora, held in light.</p>
+    <p class="hint" id="hint">Hover or tap the hat</p>
+    <p class="sr-only" id="sr-status" aria-live="polite"></p>
+  </div>
+</main>
+
+<script>
+"use strict";
+(function(){
+  var stage = document.getElementById("stage");
+  var hint  = document.getElementById("hint");
+  var sr    = document.getElementById("sr-status");
+  var canvas = document.getElementById("scene");
+  var ctx = canvas.getContext("2d");
+
+  var motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+  var reduced = !!motionQuery.matches;
+
+  /* ---------- glow sprites (pre-rendered, cheap) ---------- */
+  function makeSprite(r,g,b){
+    var c = document.createElement("canvas");
+    c.width = c.height = 32;
+    var x = c.getContext("2d");
+    var grad = x.createRadialGradient(16,16,0,16,16,16);
+    grad.addColorStop(0,   "rgba(255,255,255,0.95)");
+    grad.addColorStop(0.22,"rgba("+r+","+g+","+b+",0.95)");
+    grad.addColorStop(0.55,"rgba("+r+","+g+","+b+",0.28)");
+    grad.addColorStop(1,   "rgba("+r+","+g+","+b+",0)");
+    x.fillStyle = grad;
+    x.fillRect(0,0,32,32);
+    return c;
+  }
+  var SPRITES = [
+    makeSprite(255, 82, 56),   /* ember red   */
+    makeSprite(255, 138, 61),  /* orange      */
+    makeSprite(255, 196, 110), /* warm gold   */
+    makeSprite(255, 232, 200)  /* pale spark  */
+  ];
+  function pickSprite(){
+    var v = Math.random();
+    if (v < 0.52) return 0;
+    if (v < 0.80) return 1;
+    if (v < 0.94) return 2;
+    return 3;
+  }
+
+  /* ---------- hat geometry (unit space, centred at 0,0) ---------- */
+  function traceCrown(x){
+    x.beginPath();
+    x.moveTo(-0.58, 0.12);
+    x.bezierCurveTo(-0.56,-0.26, -0.45,-0.475, -0.25,-0.52);
+    x.bezierCurveTo(-0.155,-0.545, -0.075,-0.485, 0, -0.485);
+    x.bezierCurveTo( 0.075,-0.485,  0.155,-0.545,  0.25,-0.52);
+    x.bezierCurveTo( 0.45,-0.475,  0.56,-0.26,   0.58, 0.12);
+    x.bezierCurveTo( 0.30, 0.205, -0.30, 0.205, -0.58, 0.12);
+    x.closePath();
+  }
+  function traceBrim(x){
+    x.beginPath();
+    x.moveTo(-1.0, 0.10);
+    x.bezierCurveTo(-0.62, 0.385, 0.62, 0.385, 1.0, 0.02);
+    x.bezierCurveTo(1.035,-0.012, 0.965,-0.065, 0.78,-0.02);
+    x.bezierCurveTo(0.40, 0.105, -0.40, 0.105, -0.78,-0.02);
+    x.bezierCurveTo(-0.965,-0.065, -1.035, 0.035, -1.0, 0.10);
+    x.closePath();
+  }
+  function traceSilhouette(x){
+    traceCrown(x);
+    traceBrim(x);
+  }
+
+  function drawShadow(cx, cy, s, strength){
+    if (strength <= 0.01) return;
+    ctx.save();
+    ctx.translate(cx, cy + s * 0.56);
+    ctx.scale(1, 0.30);
+    var g = ctx.createRadialGradient(0,0,0, 0,0, s * 0.98);
+    g.addColorStop(0, "rgba(0,0,0," + (0.52 * strength).toFixed(3) + ")");
+    g.addColorStop(0.55, "rgba(0,0,0," + (0.28 * strength).toFixed(3) + ")");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, s * 0.98, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawHat(cx, cy, s, yaw, bob, alpha, now){
+    if (alpha <= 0.003) return;
+    var cosYaw = Math.cos(yaw);
+    var sinYaw = Math.sin(yaw);
+    var facing = Math.abs(cosYaw);
+    /* never fully edge-on: a whisper of width keeps the mark readable */
+    var sx = (cosYaw < 0 ? -1 : 1) * (0.16 + 0.84 * facing);
+    var sy = 1 - 0.055 * Math.abs(sinYaw);
+    var tilt = -0.055 + sinYaw * 0.035;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(cx, cy + bob);
+    ctx.rotate(tilt);
+    ctx.scale(sx * s, sy * s);
+
+    /* brim */
+    var brimGrad = ctx.createLinearGradient(0, -0.05, 0, 0.40);
+    brimGrad.addColorStop(0, "#d63a2c");
+    brimGrad.addColorStop(0.45, "#a31b13");
+    brimGrad.addColorStop(1, "#4d0805");
+    traceBrim(ctx);
+    ctx.fillStyle = brimGrad;
+    ctx.fill();
+
+    /* crown */
+    var crownGrad = ctx.createLinearGradient(0, -0.56, 0, 0.22);
+    crownGrad.addColorStop(0, "#ff6a54");
+    crownGrad.addColorStop(0.38, "#e03224");
+    crownGrad.addColorStop(0.78, "#a8160f");
+    crownGrad.addColorStop(1, "#7c0e09");
+    traceCrown(ctx);
+    ctx.fillStyle = crownGrad;
+    ctx.fill();
+
+    /* band, clipped to the crown */
+    ctx.save();
+    traceCrown(ctx);
+    ctx.clip();
+    ctx.beginPath();
+    ctx.moveTo(-0.60, -0.015);
+    ctx.bezierCurveTo(-0.30, 0.055, 0.30, 0.055, 0.60, -0.015);
+    ctx.lineTo(0.60, 0.135);
+    ctx.bezierCurveTo(0.30, 0.20, -0.30, 0.20, -0.60, 0.135);
+    ctx.closePath();
+    ctx.fillStyle = "#181112";
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.07)";
+    ctx.fillRect(-0.60, -0.015, 1.20, 0.022);
+
+    /* soft key light sweeping with the turn */
+    var lx = sinYaw * 0.38;
+    var light = ctx.createRadialGradient(lx, -0.34, 0.02, lx, -0.34, 0.85);
+    light.addColorStop(0, "rgba(255,214,178," + (0.34 * (0.35 + 0.65 * facing)).toFixed(3) + ")");
+    light.addColorStop(0.5, "rgba(255,160,120,0.08)");
+    light.addColorStop(1, "rgba(255,160,120,0)");
+    ctx.fillStyle = light;
+    ctx.fillRect(-1.05, -0.60, 2.10, 1.05);
+
+    /* lower shade for roundness */
+    var shade = ctx.createLinearGradient(0, 0.02, 0, 0.42);
+    shade.addColorStop(0, "rgba(40,2,0,0)");
+    shade.addColorStop(1, "rgba(40,2,0,0.30)");
+    ctx.fillStyle = shade;
+    ctx.fillRect(-1.05, -0.60, 2.10, 1.05);
+
+    /* back-of-the-turn shading */
+    if (cosYaw < 0){
+      ctx.fillStyle = "rgba(10,2,2," + (0.20 * facing + 0.08).toFixed(3) + ")";
+      ctx.fillRect(-1.05, -0.60, 2.10, 1.05);
+    }
+    ctx.restore(); /* unclip */
+
+    /* rim light along the crown */
+    ctx.beginPath();
+    ctx.moveTo(-0.52, -0.30);
+    ctx.bezierCurveTo(-0.42, -0.46, -0.28, -0.505, -0.16, -0.515);
+    ctx.strokeStyle = "rgba(255,196,164," + (0.42 * (0.30 + 0.70 * facing)).toFixed(3) + ")";
+    ctx.lineWidth = 0.016;
+    ctx.lineCap = "round";
+    ctx.stroke();
+
+    /* brim edge catch-light */
+    traceBrim(ctx);
+    ctx.strokeStyle = "rgba(255,170,140,0.20)";
+    ctx.lineWidth = 0.010;
+    ctx.stroke();
+
+    ctx.restore();
+    void now;
+  }
+
+  /* ---------- sample the silhouette into particle homes ---------- */
+  var particles = [];
+  function buildParticles(){
+    var MW = 640, MH = 400, MS = 268;
+    var mask = document.createElement("canvas");
+    mask.width = MW; mask.height = MH;
+    var m = mask.getContext("2d");
+    m.translate(MW / 2, MH / 2);
+    m.scale(MS, MS);
+    m.rotate(-0.055);
+    traceSilhouette(m);
+    m.fillStyle = "#fff";
+    m.fill();
+    var data;
+    try { data = m.getImageData(0, 0, MW, MH).data; }
+    catch (e) { data = null; }
+    var homes = [];
+    if (data){
+      for (var y = 0; y < MH; y += 3){
+        for (var x = 0; x < MW; x += 3){
+          if (data[(y * MW + x) * 4 + 3] > 120){
+            homes.push({ hx: (x - MW / 2) / MS, hy: (y - MH / 2) / MS });
+          }
+        }
+      }
+    }
+    /* shuffle, then keep a few thousand */
+    for (var i = homes.length - 1; i > 0; i--){
+      var j = (Math.random() * (i + 1)) | 0;
+      var t = homes[i]; homes[i] = homes[j]; homes[j] = t;
+    }
+    var small = Math.min(window.innerWidth || 800, window.innerHeight || 600) < 520;
+    var target = small ? 2300 : 3400;
+    homes = homes.slice(0, target);
+    particles = homes.map(function(h){
+      var ang = Math.atan2(h.hy - 0.02, h.hx);
+      return {
+        hx: h.hx, hy: h.hy,
+        seed: Math.random() * Math.PI * 2,
+        dir: ang + (Math.random() - 0.5) * 1.1,
+        dist: 0.22 + Math.pow(Math.random(), 1.6) * 1.05,
+        lift: 0.10 + Math.random() * 0.50,
+        swirlDir: Math.random() < 0.86 ? 1 : -1,
+        swirlSpeed: 1.15 + Math.random() * 2.1,
+        swirlWeight: 0.35 + Math.random() * 0.65,
+        size: 0.75 + Math.random() * 1.65,
+        sprite: pickSprite(),
+        flicker: 1.6 + Math.random() * 3.2
+      };
+    });
+  }
+
+  /* ---------- easing ---------- */
+  function clamp01(v){ return v < 0 ? 0 : (v > 1 ? 1 : v); }
+  function easeOutCubic(v){ v = clamp01(v); return 1 - Math.pow(1 - v, 3); }
+  function easeInOutCubic(v){
+    v = clamp01(v);
+    return v < 0.5 ? 4 * v * v * v : 1 - Math.pow(-2 * v + 2, 3) / 2;
+  }
+
+  /* ---------- sizing ---------- */
+  var W = 0, H = 0, DPR = 1;
+  function resize(){
+    var rect = stage.getBoundingClientRect();
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = Math.max(280, rect.width);
+    H = Math.max(240, rect.height);
+    canvas.width  = Math.round(W * DPR);
+    canvas.height = Math.round(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  if (window.ResizeObserver){
+    new ResizeObserver(resize).observe(stage);
+  }
+  window.addEventListener("resize", resize);
+
+  /* ---------- state ---------- */
+  var BASE_SPEED = 0.55;           /* rad / s, a calm turn */
+  var spinAngle = -0.35;
+  var mode = "idle";               /* idle | slowing | sequence */
+  var slowStart = 0, slowFrom = 0, slowTo = 0, slowDur = 600;
+  var seqStart = 0;
+  var DISSOLVE = 1500, SWIRL = 1900, REFORM = 1750, SETTLE = 380;
+  var SEQ_TOTAL = DISSOLVE + SWIRL + REFORM + SETTLE;
+  var orbiters = [];
+  var orbiterFade = 0;
+  var lastTs = 0;
+
+  function spawnOrbiters(s){
+    var n = (W < 520 ? 46 : 76);
+    orbiters = [];
+    for (var i = 0; i < n; i++){
+      var rx = s * (0.62 + Math.random() * 0.62);
+      orbiters.push({
+        a: Math.random() * Math.PI * 2,
+        rx: rx,
+        ry: rx * (0.30 + Math.random() * 0.12),
+        speed: (0.14 + Math.random() * 0.30) * (Math.random() < 0.82 ? 1 : -1),
+        tilt: -0.38 + (Math.random() - 0.5) * 0.14,
+        yOff: (Math.random() - 0.5) * s * 0.16,
+        size: 0.7 + Math.random() * 1.15,
+        sprite: pickSprite(),
+        trail: []
+      });
+    }
+    orbiterFade = 0;
+  }
+
+  /* position of one particle at sequence-time `el` (ms) */
+  function swirlPoint(p, cx, cy, s, sp){
+    var hx = cx + p.hx * s;
+    var hy = cy + p.hy * s;
+    var ox = Math.cos(p.dir) * p.dist * s;
+    var oy = Math.sin(p.dir) * p.dist * s * 0.72 - p.lift * s * 0.55;
+    var bx = hx + ox, by = hy + oy;
+    var rot = p.swirlDir * p.swirlSpeed * sp * p.swirlWeight;
+    var dx = bx - cx, dy = by - cy;
+    var c = Math.cos(rot), sn = Math.sin(rot);
+    return {
+      x: cx + dx * c - dy * sn,
+      y: cy + (dx * sn + dy * c) * 0.92
+    };
+  }
+
+  function drawParticles(el, cx, cy, s, now){
+    var globalA = 1;
+    var phaseGlow = 1;
+    if (el > DISSOLVE + SWIRL + REFORM){
+      globalA = 1 - clamp01((el - DISSOLVE - SWIRL - REFORM) / SETTLE);
+    }
+    if (globalA <= 0.01) return;
+
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    for (var i = 0; i < particles.length; i++){
+      var p = particles[i];
+      var hx = cx + p.hx * s;
+      var hy = cy + p.hy * s;
+      var x, y, spread;
+
+      if (el < DISSOLVE){
+        var q = easeOutCubic(el / DISSOLVE);
+        spread = q;
+        x = hx + Math.cos(p.dir) * p.dist * s * q
+              + Math.sin(now * 0.0016 + p.seed) * 3.2 * q;
+        y = hy + Math.sin(p.dir) * p.dist * s * 0.72 * q
+              - p.lift * s * 0.55 * q
+              - Math.sin(now * 0.0021 + p.seed * 1.7) * 2.4 * q;
+        phaseGlow = 0.55 + 0.45 * q;
+      } else if (el < DISSOLVE + SWIRL){
+        var sp = clamp01((el - DISSOLVE) / SWIRL);
+        var pt = swirlPoint(p, cx, cy, s, sp);
+        x = pt.x + Math.sin(now * 0.0024 + p.seed * 2.1) * 4.5;
+        y = pt.y + Math.cos(now * 0.0019 + p.seed) * 3.6
+              - Math.sin(sp * Math.PI) * s * 0.05;
+        phaseGlow = 1;
+      } else {
+        var rp = easeInOutCubic((el - DISSOLVE - SWIRL) / REFORM);
+        var end = swirlPoint(p, cx, cy, s, 1);
+        x = end.x + (hx - end.x) * rp;   /* rp = 1 lands exactly home */
+        y = end.y + (hy - end.y) * rp;
+        phaseGlow = 1 - rp * 0.45;
+      }
+
+      var flick = 0.72 + 0.28 * Math.sin(now * 0.001 * p.flicker + p.seed * 3.1);
+      var a = globalA * phaseGlow * flick * 0.82;
+      if (a <= 0.015) continue;
+      var dw = p.size * (s / 26) * (1 + phaseGlow * 0.35);
+      ctx.globalAlpha = a;
+      ctx.drawImage(SPRITES[p.sprite], x - dw / 2, y - dw / 2, dw, dw);
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  function drawOrbiters(cx, cy, dt, now){
+    if (!orbiters.length || reduced) return;
+    orbiterFade = Math.min(1, orbiterFade + dt * 0.7);
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    for (var i = 0; i < orbiters.length; i++){
+      var o = orbiters[i];
+      o.a += o.speed * dt;
+      var ex = Math.cos(o.a) * o.rx;
+      var ey = Math.sin(o.a) * o.ry;
+      var c = Math.cos(o.tilt), sn = Math.sin(o.tilt);
+      var x = cx + ex * c - ey * sn;
+      var y = cy + o.yOff + ex * sn + ey * c;
+      o.trail.push({ x: x, y: y });
+      if (o.trail.length > 16) o.trail.shift();
+
+      /* faint trailing light */
+      for (var t = 1; t < o.trail.length; t++){
+        var f = t / o.trail.length;
+        ctx.globalAlpha = f * f * 0.20 * orbiterFade;
+        ctx.strokeStyle = "#ff9a66";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(o.trail[t - 1].x, o.trail[t - 1].y);
+        ctx.lineTo(o.trail[t].x, o.trail[t].y);
+        ctx.stroke();
+      }
+      var dw = o.size * 7.5;
+      ctx.globalAlpha = 0.75 * orbiterFade * (0.8 + 0.2 * Math.sin(now * 0.002 + i));
+      ctx.drawImage(SPRITES[o.sprite], x - dw / 2, y - dw / 2, dw, dw);
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  /* ---------- interaction ---------- */
+  var nowRef = 0;
+  function setHint(text){ hint.textContent = text; }
+
+  function trigger(){
+    if (reduced){
+      stage.classList.add("is-flashing");
+      window.setTimeout(function(){ stage.classList.remove("is-flashing"); }, 450);
+      sr.textContent = "The fedora is shown still, in keeping with your reduced-motion setting.";
+      return;
+    }
+    if (mode !== "idle") return;
+    mode = "slowing";
+    slowStart = nowRef;
+    slowFrom = spinAngle;
+    var twoPi = Math.PI * 2;
+    var nextFront = Math.ceil((spinAngle - 0.001) / twoPi) * twoPi;
+    if (nextFront - spinAngle < 0.12) nextFront = spinAngle; /* already facing us */
+    slowTo = nextFront;
+    slowDur = 480 + Math.min(420, Math.abs(slowTo - slowFrom) * 700);
+    orbiters = [];
+    orbiterFade = 0;
+    setHint("Embers, drifting\u2026");
+    sr.textContent = "The fedora dissolves into embers.";
+  }
+
+  stage.addEventListener("pointerenter", function(e){
+    if (e.pointerType === "mouse") trigger();
+  });
+  stage.addEventListener("pointerdown", function(){ trigger(); });
+  stage.addEventListener("keydown", function(e){
+    if (e.key === "Enter" || e.key === " " || e.key === "Spacebar"){
+      e.preventDefault();
+      trigger();
+    }
+  });
+
+  function applyMotionPreference(){
+    reduced = !!motionQuery.matches;
+    if (reduced){
+      mode = "idle";
+      orbiters = [];
+      spinAngle = -0.35;
+      setHint("Shown still \u2014 reduced motion is on");
+      sr.textContent = "";
+    } else {
+      setHint("Hover or tap the hat");
+    }
+  }
+  if (motionQuery.addEventListener) motionQuery.addEventListener("change", applyMotionPreference);
+  else if (motionQuery.addListener) motionQuery.addListener(applyMotionPreference);
+
+  /* ---------- main loop ---------- */
+  function frame(ts){
+    nowRef = ts || 0;
+    var dt = lastTs ? Math.min(0.05, (ts - lastTs) / 1000) : 0.016;
+    lastTs = ts;
+
+    var cx = W / 2;
+    var cy = H * 0.47;
+    var s = Math.min(W * 0.365, H * 0.46, 252);
+    if (s < 80) s = 80;
+
+    var hatAlpha = 1;
+    var shadowStrength = 1;
+    var bob = reduced ? 0 : Math.sin(ts * 0.0011) * Math.min(7, s * 0.032);
+
+    if (!reduced){
+      if (mode === "idle"){
+        spinAngle += BASE_SPEED * dt;
+      } else if (mode === "slowing"){
+        var q = clamp01((ts - slowStart) / slowDur);
+        var e = 1 - Math.pow(1 - q, 3);
+        spinAngle = slowFrom + (slowTo - slowFrom) * e;
+        bob *= (1 - e);
+        if (q >= 1){
+          spinAngle = slowTo;
+          mode = "sequence";
+          seqStart = ts;
+        }
+      }
+    } else {
+      spinAngle = -0.35;
+    }
+
+    if (mode === "sequence"){
+      var el = ts - seqStart;
+      bob = 0;
+      if (el < 240) hatAlpha = 1 - easeOutCubic(el / 240);
+      else if (el > DISSOLVE + SWIRL + REFORM)
+        hatAlpha = easeInOutCubic((el - DISSOLVE - SWIRL - REFORM) / SETTLE);
+      else hatAlpha = 0;
+      shadowStrength = 0.35 + 0.65 * hatAlpha;
+      if (el >= SEQ_TOTAL){
+        mode = "idle";
+        spinAngle = slowTo; /* resumes facing forward, perfectly reformed */
+        spawnOrbiters(s);
+        setHint("Hover or tap the hat");
+        sr.textContent = "The fedora has reformed.";
+      }
+    }
+
+    ctx.clearRect(0, 0, W, H);
+    drawShadow(cx, cy, s, shadowStrength);
+    if (mode === "sequence") drawParticles(ts - seqStart, cx, cy, s, ts);
+    drawHat(cx, cy, s, spinAngle, bob, hatAlpha, ts);
+    drawOrbiters(cx, cy, dt, ts);
+
+    window.requestAnimationFrame(frame);
+  }
+
+  /* ---------- init ---------- */
+  resize();
+  buildParticles();
+  applyMotionPreference();
+  window.requestAnimationFrame(frame);
+})();
+
+</script>
+</body>
+</html>

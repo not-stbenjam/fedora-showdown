@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Red Fedora</title>
+<style>
+  :root {
+    --bg: #0c0b0d;
+    --ink: #ece7e1;
+    --muted: #a49c93;
+    --red: #cc0000;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background:
+      radial-gradient(120% 90% at 50% 38%, #1c191b 0%, var(--bg) 58%, #060506 100%);
+    color: var(--ink);
+    font-family: Georgia, "Times New Roman", serif;
+    min-height: 100svh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  main {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: clamp(0.4rem, 2vh, 1.1rem);
+    padding: 1rem;
+    width: 100%;
+  }
+  .stage {
+    position: relative;
+    width: min(92vw, 62svh, 620px);
+    aspect-ratio: 1 / 1;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    outline: none;
+  }
+  .stage:focus-visible {
+    outline: 1px solid rgba(236, 231, 225, 0.45);
+    outline-offset: 6px;
+    border-radius: 50%;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+  figcaption { text-align: center; }
+  .title {
+    font-size: clamp(1.05rem, 2.6vw, 1.45rem);
+    font-weight: 400;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  .title .dot { color: var(--red); }
+  .hint {
+    margin-top: 0.45rem;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: clamp(0.72rem, 2vw, 0.82rem);
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+  .visually-hidden {
+    position: absolute;
+    width: 1px; height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .stage { cursor: default; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1 class="visually-hidden">A red fedora, rendered in three dimensions</h1>
+  <figure style="display:contents">
+    <div class="stage" id="stage" tabindex="0" role="button"
+         aria-label="Scatter the fedora into particles and reform it">
+      <canvas id="scene" role="img"
+              aria-label="A red fedora hat slowly turning against a dark background"></canvas>
+    </div>
+    <figcaption>
+      <div class="title">The Red Fedora<span class="dot">.</span></div>
+      <p class="hint" id="hint">Hover or tap to scatter &mdash; watch it reform.</p>
+    </figcaption>
+  </figure>
+</main>
+<script>
+"use strict";
+(function () {
+  var canvas = document.getElementById("scene");
+  var stage = document.getElementById("stage");
+  var hint = document.getElementById("hint");
+  var ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  var motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+  var reduced = motionQuery.matches;
+
+  /* Deterministic RNG so the hat reforms perfectly every time. */
+  function mulberry32(seed) {
+    return function () {
+      seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+      var t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  var rand = mulberry32(20261225);
+  function rr(a, b) { return a + rand() * (b - a); }
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function easeInOut(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
+  function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
+
+  /* ----- Fedora geometry (hat-local space, Y up) ----- */
+  var OVAL = 0.88;
+  var BRIM_IN = 0.97, BRIM_OUT = 2.15, CROWN_H = 1.08;
+  var COL_RED = [198, 18, 24];
+  var COL_RED_UNDER = [118, 10, 14];
+  var COL_BAND = [26, 21, 23];
+
+  function brimY(r) {
+    var t = (r - BRIM_IN) / (BRIM_OUT - BRIM_IN);
+    return 0.09 * t * t - 0.02;
+  }
+  function crownR(v) { return 1.02 - 0.10 * v + 0.02 * Math.sin(v * Math.PI); }
+  function topY(x, z) {
+    var dent = 0.21 * Math.exp(-(x * x) / (2 * 0.30 * 0.30));
+    var fade = clamp(1 - 0.35 * Math.pow(Math.abs(z) / 0.82, 2), 0.6, 1);
+    return CROWN_H - dent * fade - 0.03 * (x * x + z * z);
+  }
+
+  /* ----- Solid mesh (drawn while formed) ----- */
+  var verts = [], faces = [];
+  function addVert(x, y, z) { verts.push([x, y, z]); return verts.length - 1; }
+  function addFace(idx, col) { faces.push({ idx: idx, col: col }); }
+  function ringGrid(rings, segs, posFn, colFn) {
+    var grid = [], i, j;
+    for (i = 0; i <= rings; i++) {
+      grid.push([]);
+      for (j = 0; j < segs; j++) {
+        var th = (j / segs) * Math.PI * 2;
+        var p = posFn(i / rings, th);
+        grid[i].push(addVert(p[0], p[1], p[2]));
+      }
+    }
+    for (i = 0; i < rings; i++) {
+      for (j = 0; j < segs; j++) {
+        var j2 = (j + 1) % segs;
+        addFace([grid[i][j], grid[i][j2], grid[i + 1][j2], grid[i + 1][j]],
+                colFn((i + 0.5) / rings));
+      }
+    }
+  }
+  var SEG = 72;
+  ringGrid(9, SEG, function (t, th) {
+    var r = BRIM_IN + t * (BRIM_OUT - BRIM_IN);
+    return [r * Math.cos(th), brimY(r), r * Math.sin(th) * OVAL];
+  }, function () { return COL_RED; });
+  ringGrid(9, SEG, function (t, th) {
+    var r = BRIM_IN + t * (BRIM_OUT - BRIM_IN);
+    return [r * Math.cos(th), brimY(r) - 0.05, r * Math.sin(th) * OVAL];
+  }, function () { return COL_RED_UNDER; });
+  ringGrid(10, SEG, function (v, th) {
+    var r = crownR(v);
+    return [r * Math.cos(th), v * CROWN_H, r * Math.sin(th) * OVAL];
+  }, function (v) { return v < 0.24 ? COL_BAND : COL_RED; });
+  (function buildTop() {
+    var topR = crownR(1), rings = 7, i, j;
+    var center = addVert(0, topY(0, 0), 0);
+    var grid = [];
+    for (i = 1; i <= rings; i++) {
+      grid.push([]);
+      for (j = 0; j < SEG; j++) {
+        var th = (j / SEG) * Math.PI * 2;
+        var r = topR * (i / rings);
+        var x = r * Math.cos(th), z = r * Math.sin(th) * OVAL;
+        grid[i - 1].push(addVert(x, topY(x, z), z));
+      }
+    }
+    for (j = 0; j < SEG; j++) {
+      addFace([center, grid[0][(j + 1) % SEG], grid[0][j]], COL_RED);
+    }
+    for (i = 0; i < rings - 1; i++) {
+      for (j = 0; j < SEG; j++) {
+        var j2 = (j + 1) % SEG;
+        addFace([grid[i][j], grid[i][j2], grid[i + 1][j2], grid[i + 1][j]], COL_RED);
+      }
+    }
+  })();
+
+  /* ----- Particles sampled on the same surfaces ----- */
+  var particles = [];
+  function addParticle(x, y, z, nx, ny, nz, col) {
+    var a = rand() * Math.PI * 2;
+    var dist = rr(0.7, 3.1);
+    var rl = Math.sqrt(x * x + z * z) || 1;
+    var j = rr(0.92, 1.08);
+    particles.push({
+      hx: x, hy: y, hz: z, nx: nx, ny: ny, nz: nz,
+      r: clamp(col[0] * j, 0, 255), g: clamp(col[1] * j, 0, 255),
+      b: clamp(col[2] * j, 0, 255),
+      ox: (Math.cos(a) * 0.85 + (x / rl) * 0.65) * dist,
+      oy: rr(0.1, 1.15) * dist * 0.55,
+      oz: (Math.sin(a) * 0.85 + (z / rl) * 0.65) * dist,
+      delay: rand() * 0.45,
+      phase: rand() * Math.PI * 2,
+      tw: rr(1.2, 3.2)
+    });
+  }
+  (function sampleParticles() {
+    var i, th, r, x, z, v;
+    for (i = 0; i < 1500; i++) {           /* brim, top */
+      th = rand() * Math.PI * 2;
+      r = Math.sqrt(rr(BRIM_IN * BRIM_IN, BRIM_OUT * BRIM_OUT));
+      addParticle(r * Math.cos(th), brimY(r), r * Math.sin(th) * OVAL,
+                  0, 1, 0, COL_RED);
+    }
+    for (i = 0; i < 650; i++) {            /* brim, underside */
+      th = rand() * Math.PI * 2;
+      r = Math.sqrt(rr(BRIM_IN * BRIM_IN, BRIM_OUT * BRIM_OUT));
+      addParticle(r * Math.cos(th), brimY(r) - 0.05, r * Math.sin(th) * OVAL,
+                  0, -1, 0, COL_RED_UNDER);
+    }
+    for (i = 0; i < 1650; i++) {           /* crown side + band */
+      th = rand() * Math.PI * 2;
+      v = rand();
+      r = crownR(v);
+      addParticle(r * Math.cos(th), v * CROWN_H, r * Math.sin(th) * OVAL,
+                  Math.cos(th), 0, Math.sin(th),
+                  v < 0.24 ? COL_BAND : COL_RED);
+    }
+    for (i = 0; i < 700; i++) {            /* crown top with centre dent */
+      th = rand() * Math.PI * 2;
+      r = crownR(1) * Math.sqrt(rand());
+      x = r * Math.cos(th); z = r * Math.sin(th) * OVAL;
+      addParticle(x, topY(x, z), z, 0, 1, 0, COL_RED);
+    }
+  })();
+
+  /* ----- Orbiting embers (appear after the first reform) ----- */
+  var orbiters = [];
+  for (var oi = 0; oi < 54; oi++) {
+    orbiters.push({
+      rad: rr(1.7, 3.0),
+      h: rr(-0.15, 1.25),
+      speed: rr(0.14, 0.42) * (rand() < 0.22 ? -1 : 1),
+      phase: rand() * Math.PI * 2,
+      bob: rr(0.05, 0.3),
+      trail: []
+    });
+  }
+
+  /* ----- State ----- */
+  var TILT = 0.42;
+  var cosT = Math.cos(TILT), sinT = Math.sin(TILT);
+  var LIGHT = [-0.42, 0.78, -0.46];
+  var spin = 0.6, spinSpeed = 0.55;
+  var phase = "idle", phaseTime = 0;
+  var DUR = { dissolve: 1.7, swirl: 1.5, reform: 1.9 };
+  var swirlAngle = 0;
+  var orbitersOn = false, orbiterFade = 0;
+  var rafId = null, lastTs = null;
+
+  var size = 300, cx = 150, cy = 150, focal = 400;
+  function resize() {
+    var w = canvas.clientWidth || 300;
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(w * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    size = w; cx = w / 2; cy = w / 2;
+    focal = w * 1.42;
+  }
+
+  /* Rotate (spin about Y, then tilt about X) and project. */
+  function project(x, y, z, cosS, sinS, out) {
+    var x1 = x * cosS + z * sinS;
+    var z1 = -x * sinS + z * cosS;
+    var y2 = y * cosT - z1 * sinT;
+    var z2 = y * sinT + z1 * cosT;
+    var s = focal / (z2 + 5.2);
+    out.sx = cx + x1 * s;
+    out.sy = cy - y2 * s;
+    out.vx = x1; out.vy = y2; out.vz = z2; out.s = s;
+    return out;
+  }
+  function rotateNormal(nx, ny, nz, cosS, sinS, out) {
+    var x1 = nx * cosS + nz * sinS;
+    var z1 = -nx * sinS + nz * cosS;
+    out.x = x1;
+    out.y = ny * cosT - z1 * sinT;
+    out.z = ny * sinT + z1 * cosT;
+    return out;
+  }
+  function shadeOf(n) {
+    var d = n.x * LIGHT[0] + n.y * LIGHT[1] + n.z * LIGHT[2];
+    return 0.30 + 0.70 * Math.max(0, d);
+  }
+
+  function drawShadow(scatter) {
+    var y = cy + size * 0.235;
+    var r = size * 0.31 * (1 + 0.35 * scatter);
+    ctx.save();
+    ctx.translate(cx, y);
+    ctx.scale(1, 0.20);
+    var g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+    var a = 0.52 - 0.27 * scatter;
+    g.addColorStop(0, "rgba(0,0,0," + a.toFixed(3) + ")");
+    g.addColorStop(0.6, "rgba(0,0,0," + (a * 0.45).toFixed(3) + ")");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  var pv = [];
+  for (var vi = 0; vi < verts.length; vi++) pv.push({});
+  var _n = {};
+  function drawMesh(alpha, cosS, sinS) {
+    var i, f, k;
+    for (i = 0; i < verts.length; i++) {
+      project(verts[i][0], verts[i][1] - 0.48, verts[i][2], cosS, sinS, pv[i]);
+    }
+    var order = [];
+    for (i = 0; i < faces.length; i++) {
+      f = faces[i];
+      var zSum = 0;
+      for (k = 0; k < f.idx.length; k++) zSum += pv[f.idx[k]].vz;
+      order.push({ f: f, z: zSum / f.idx.length });
+    }
+    order.sort(function (a, b) { return b.z - a.z; });
+    for (i = 0; i < order.length; i++) {
+      f = order[i].f;
+      var a = pv[f.idx[0]], b = pv[f.idx[1]], c = pv[f.idx[2]];
+      var ux = b.vx - a.vx, uy = b.vy - a.vy, uz = b.vz - a.vz;
+      var vx = c.vx - a.vx, vy = c.vy - a.vy, vz = c.vz - a.vz;
+      _n.x = uy * vz - uz * vy;
+      _n.y = uz * vx - ux * vz;
+      _n.z = ux * vy - uy * vx;
+      var len = Math.sqrt(_n.x * _n.x + _n.y * _n.y + _n.z * _n.z) || 1;
+      _n.x /= len; _n.y /= len; _n.z /= len;
+      if (_n.z > 0) { _n.x = -_n.x; _n.y = -_n.y; _n.z = -_n.z; }
+      var sh = shadeOf(_n);
+      ctx.fillStyle = "rgba(" + Math.round(f.col[0] * sh) + "," +
+        Math.round(f.col[1] * sh) + "," + Math.round(f.col[2] * sh) +
+        "," + alpha.toFixed(3) + ")";
+      ctx.beginPath();
+      ctx.moveTo(a.sx, a.sy);
+      for (k = 1; k < f.idx.length; k++) ctx.lineTo(pv[f.idx[k]].sx, pv[f.idx[k]].sy);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  function scatterFor(p, prog) {
+    if (phase === "dissolve") return easeOut(clamp((prog - p.delay) / 0.55, 0, 1));
+    if (phase === "swirl") return 1;
+    if (phase === "reform") {
+      return 1 - easeInOut(clamp((prog - (1 - p.delay) * 0.35) / 0.60, 0, 1));
+    }
+    return 0;
+  }
+
+  var _pp = {}, _pn = {};
+  function drawParticles(time, prog, cosS, sinS) {
+    var list = [], i, p, s;
+    for (i = 0; i < particles.length; i++) {
+      p = particles[i];
+      s = scatterFor(p, prog);
+      var ang = swirlAngle * (0.55 + p.tw * 0.14);
+      var ca = Math.cos(ang), sa = Math.sin(ang);
+      var ox = p.ox * ca + p.oz * sa;
+      var oz = -p.ox * sa + p.oz * ca;
+      var bob = Math.sin(time * p.tw + p.phase) * 0.08 * s;
+      project(p.hx + ox * s, p.hy + p.oy * s + bob - 0.48, p.hz + oz * s,
+              cosS, sinS, _pp);
+      rotateNormal(p.nx, p.ny, p.nz, cosS, sinS, _pn);
+      var sh = shadeOf(_pn);
+      var flicker = 0.85 + 0.15 * Math.sin(time * p.tw * 2.1 + p.phase);
+      var mix = s * 0.82;
+      list.push({
+        sx: _pp.sx, sy: _pp.sy, vz: _pp.vz, s: s,
+        rad: Math.max(0.55, (size / 300) * (1.55 - 0.45 * s) * (_pp.s / (focal / 5.2))),
+        r: Math.round((p.r * sh) * (1 - mix) + 255 * flicker * mix),
+        g: Math.round((p.g * sh) * (1 - mix) + 128 * flicker * mix),
+        b: Math.round((p.b * sh) * (1 - mix) + 52 * flicker * mix)
+      });
+    }
+    list.sort(function (a, b) { return b.vz - a.vz; });
+    for (i = 0; i < list.length; i++) {
+      var q = list[i];
+      if (q.s > 0.04) {
+        ctx.fillStyle = "rgba(255,112,48," + (0.075 * q.s).toFixed(3) + ")";
+        ctx.beginPath();
+        ctx.arc(q.sx, q.sy, q.rad * 3.1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = "rgb(" + q.r + "," + q.g + "," + q.b + ")";
+      ctx.beginPath();
+      ctx.arc(q.sx, q.sy, q.rad, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  var _op = {};
+  function drawOrbiters(time, behind) {
+    if (!orbitersOn || orbiterFade <= 0) return;
+    for (var i = 0; i < orbiters.length; i++) {
+      var o = orbiters[i];
+      var a = o.phase + time * o.speed * Math.PI * 2 * 0.22;
+      var x = o.rad * Math.cos(a);
+      var z = o.rad * Math.sin(a) * 0.72;
+      var y = o.h + Math.sin(a * 2 + o.phase) * o.bob - 0.48;
+      project(x, y, z, 1, 0, _op);
+      var isBehind = _op.vz > 0;
+      if (isBehind !== behind) continue;
+      o._sx = _op.sx; o._sy = _op.sy;
+      var tr = o.trail;
+      for (var k = 1; k < tr.length; k++) {
+        var f = 1 - k / tr.length;
+        ctx.strokeStyle = "rgba(255,150,80," + (0.20 * f * orbiterFade).toFixed(3) + ")";
+        ctx.lineWidth = 0.3 + 1.1 * f;
+        ctx.beginPath();
+        ctx.moveTo(tr[k - 1][0], tr[k - 1][1]);
+        ctx.lineTo(tr[k][0], tr[k][1]);
+        ctx.stroke();
+      }
+      ctx.fillStyle = "rgba(255,130,60," + (0.10 * orbiterFade).toFixed(3) + ")";
+      ctx.beginPath(); ctx.arc(_op.sx, _op.sy, 4.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "rgba(255,186,130," + (0.9 * orbiterFade).toFixed(3) + ")";
+      ctx.beginPath(); ctx.arc(_op.sx, _op.sy, 1.35, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  function stepTrails() {
+    if (!orbitersOn) return;
+    for (var i = 0; i < orbiters.length; i++) {
+      var o = orbiters[i];
+      if (o._sx === undefined) continue;
+      o.trail.push([o._sx, o._sy]);
+      if (o.trail.length > 16) o.trail.shift();
+    }
+  }
+
+  function render(time) {
+    var prog = phase === "idle" ? 0 : clamp(phaseTime / DUR[phase], 0, 1);
+    var globalScatter = 0, meshAlpha = 1;
+    if (phase === "dissolve") {
+      globalScatter = easeOut(clamp(prog * 1.5, 0, 1));
+      meshAlpha = 1 - easeOut(clamp(prog * 2.4, 0, 1));
+    } else if (phase === "swirl") {
+      globalScatter = 1; meshAlpha = 0;
+    } else if (phase === "reform") {
+      globalScatter = 1 - easeInOut(prog);
+      meshAlpha = easeInOut(clamp((prog - 0.55) / 0.45, 0, 1));
+    }
+    var cosS = Math.cos(spin), sinS = Math.sin(spin);
+    ctx.clearRect(0, 0, size, size);
+    drawShadow(globalScatter);
+    drawOrbiters(time, true);
+    if (meshAlpha > 0.003) drawMesh(meshAlpha, cosS, sinS);
+    if (phase !== "idle") drawParticles(time, prog, cosS, sinS);
+    drawOrbiters(time, false);
+    stepTrails();
+  }
+
+  function frame(ts) {
+    rafId = requestAnimationFrame(frame);
+    if (lastTs === null) lastTs = ts;
+    var dt = Math.min(0.05, (ts - lastTs) / 1000);
+    lastTs = ts;
+    var time = ts / 1000;
+
+    var target = phase === "idle" ? 0.55 : phase === "reform" ? 0.30 : 0.06;
+    spinSpeed += (target - spinSpeed) * Math.min(1, dt * 3.2);
+    spin += spinSpeed * dt;
+
+    if (phase !== "idle") {
+      phaseTime += dt;
+      swirlAngle += dt * (phase === "swirl" ? 0.85 : 0.45);
+      if (phaseTime >= DUR[phase]) {
+        phaseTime = 0;
+        if (phase === "dissolve") phase = "swirl";
+        else if (phase === "swirl") phase = "reform";
+        else { phase = "idle"; orbitersOn = true; }
+      }
+    }
+    if (orbitersOn && orbiterFade < 1) {
+      orbiterFade = Math.min(1, orbiterFade + dt * 0.7);
+    }
+    render(time);
+  }
+
+  function trigger() {
+    if (reduced || phase !== "idle") return;
+    phase = "dissolve";
+    phaseTime = 0;
+  }
+  stage.addEventListener("pointerenter", function (e) {
+    if (e.pointerType !== "touch") trigger();
+  });
+  stage.addEventListener("pointerdown", function () { trigger(); });
+  stage.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+      e.preventDefault();
+      trigger();
+    }
+  });
+
+  function start() {
+    resize();
+    if (reduced) {
+      spin = 0.65;
+      if (hint) hint.textContent =
+        "A still rendering \u2014 reduced motion is on for this device.";
+      stage.removeAttribute("role");
+      stage.removeAttribute("tabindex");
+      render(0);
+      return;
+    }
+    if (rafId === null) rafId = requestAnimationFrame(frame);
+  }
+  function onResize() {
+    resize();
+    if (reduced) render(0);
+    for (var i = 0; i < orbiters.length; i++) orbiters[i].trail.length = 0;
+  }
+  window.addEventListener("resize", onResize);
+  if (typeof motionQuery.addEventListener === "function") {
+    motionQuery.addEventListener("change", function (e) {
+      reduced = e.matches;
+      if (reduced && rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null; lastTs = null;
+        phase = "idle"; phaseTime = 0; orbitersOn = false; orbiterFade = 0;
+      }
+      start();
+    });
+  }
+  start();
+})();
+</script>
+</body>
+</html>
