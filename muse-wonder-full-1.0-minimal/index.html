@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fedora</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; overflow: hidden; background: #07080c; color: #e9e6df;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: grid; place-items: center;
+  }
+  .hero {
+    position: relative; width: 100vw; height: 100svh; min-height: 480px;
+    display: grid; place-items: center; isolation: isolate;
+    background:
+      radial-gradient(ellipse 62% 44% at 50% 42%, rgba(238,0,0,.14), transparent 68%),
+      radial-gradient(ellipse 90% 70% at 50% 110%, rgba(70,80,120,.10), transparent 60%),
+      linear-gradient(180deg, #0b0d13 0%, #07080c 55%, #05060a 100%);
+  }
+  .hero::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 3;
+    background: radial-gradient(ellipse 120% 100% at 50% 45%, transparent 55%, rgba(0,0,0,.55) 100%);
+  }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: manipulation; cursor: pointer; }
+  .caption {
+    position: absolute; left: 50%; bottom: clamp(28px, 7vh, 64px); transform: translateX(-50%);
+    z-index: 4; text-align: center; pointer-events: none; width: min(92vw, 640px);
+  }
+  .caption h1 {
+    margin: 0 0 .35rem; font-size: clamp(1.35rem, 3.2vw, 2rem); font-weight: 650;
+    letter-spacing: .14em; text-transform: uppercase;
+  }
+  .caption p { margin: 0; font-size: clamp(.82rem, 1.6vw, .95rem); letter-spacing: .08em; color: rgba(233,230,223,.58); }
+  .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+</style>
+</head>
+<body>
+<main class="hero" id="hero">
+  <canvas id="scene" aria-label="A red fedora slowly spinning. Hover or tap to dissolve it into glowing particles and reform it."></canvas>
+  <p class="sr-only">A red fedora with a black band, slowly spinning against a dark background.</p>
+  <div class="caption">
+    <h1>Fedora</h1>
+    <p>Hover or tap the hat — watch it come apart, and come back together.</p>
+  </div>
+</main>
+<script>
+"use strict";
+const canvas = document.getElementById("scene");
+const hero = document.getElementById("hero");
+const ctx = canvas.getContext("2d");
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+
+let W = 0, H = 0, DPR = 1, scale = 1, cx = 0, cy = 0;
+function resize() {
+  DPR = Math.min(devicePixelRatio || 1, 2);
+  W = hero.clientWidth; H = hero.clientHeight;
+  canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
+  cx = W / 2; cy = H * 0.44;
+  scale = Math.min(W, H) * 0.34;
+}
+addEventListener("resize", resize); resize();
+
+/* ---------- Fedora geometry: a lathed crown + brim, pinched at the top ---------- */
+const SEG = 72;                 // radial segments
+// Profile from brim edge (r,y) up over the crown to the centre of the top.
+// kind: 0 = felt (red), 1 = band (near-black)
+const profile = [
+  [2.05, -0.16, 0], [1.95, -0.10, 0], [1.80, -0.045, 0], [1.62, -0.01, 0],
+  [1.44,  0.02, 0], [1.26,  0.05, 0], [1.10,  0.09, 0],  // brim, gently drooping
+  [1.02,  0.16, 1], [1.00,  0.30, 1], [1.00,  0.46, 1],  // band
+  [1.01,  0.58, 0], [1.00,  0.78, 0], [0.96,  0.98, 0], [0.88, 1.14, 0],
+  [0.74,  1.26, 0], [0.54,  1.33, 0], [0.30,  1.36, 0], [0.00, 1.34, 0] // crown top
+];
+function pinch(x, y, z) {
+  // Centre-dent crease along z + front pinches, fading below the top of the crown.
+  const t = Math.max(0, Math.min(1, (y - 0.55) / 0.8));
+  const dent = Math.exp(-(x * x) / 0.10) * 0.20 * t;
+  const side = Math.exp(-((Math.abs(x) - 0.62) ** 2) / 0.03 - (z * z) / 0.5) * 0.05 * t;
+  return [x, y - dent, z - Math.sign(z) * side];
+}
+const verts = [], faces = [];
+for (let j = 0; j < profile.length; j++) {
+  const [r, y] = profile[j];
+  for (let i = 0; i < SEG; i++) {
+    const a = (i / SEG) * Math.PI * 2;
+    verts.push(pinch(Math.cos(a) * r, y, Math.sin(a) * r));
+  }
+}
+for (let j = 0; j < profile.length - 1; j++) {
+  for (let i = 0; i < SEG; i++) {
+    const a = j * SEG + i, b = j * SEG + (i + 1) % SEG;
+    const c = (j + 1) * SEG + (i + 1) % SEG, d = (j + 1) * SEG + i;
+    faces.push({ idx: [a, b, c, d], band: profile[j][2] === 1 && profile[j + 1][2] === 1 });
+  }
+}
+
+/* ---------- Particles sampled from the hat surface ---------- */
+const N = 3200, particles = [];
+function samplePoint() {
+  const f = faces[(Math.random() * faces.length) | 0];
+  const [a, b, , d] = f.idx.map(i => verts[i]);
+  const u = Math.random(), v = Math.random();
+  return { p: [a[0] + (b[0]-a[0])*u + (d[0]-a[0])*v,
+                a[1] + (b[1]-a[1])*u + (d[1]-a[1])*v,
+                a[2] + (b[2]-a[2])*u + (d[2]-a[2])*v], band: f.band };
+}
+for (let i = 0; i < N; i++) {
+  const s = samplePoint();
+  const th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1);
+  const drift = 0.7 + Math.random() * 1.9;
+  particles.push({
+    home: s.p, band: s.band,
+    out: [Math.sin(ph) * Math.cos(th) * drift, (Math.random() * 0.9 + 0.25) * drift * 0.7, Math.sin(ph) * Math.sin(th) * drift],
+    swirl: 0.6 + Math.random() * 1.6, phase: Math.random() * Math.PI * 2,
+    delay: Math.random() * 0.35, size: 0.7 + Math.random() * 1.5, flick: Math.random() * Math.PI * 2
+  });
+}
+const orbiters = Array.from({ length: 26 }, (_, i) => ({
+  r: 2.3 + Math.random() * 0.9, h: -0.1 + Math.random() * 1.5,
+  speed: (0.25 + Math.random() * 0.35) * (i % 2 ? 1 : -1),
+  phase: Math.random() * Math.PI * 2, trail: []
+}));
+
+/* ---------- Animation state ---------- */
+let angle = 0.6, spin = 0, targetSpin = 0.45;      // rad/s
+let dissolve = 0, phase = "idle", phaseT = 0, interacted = false, orbiterGlow = 0;
+const DUR = { out: 1.6, swirl: 1.5, back: 1.9 };
+function trigger() {
+  if (reducedMotion.matches || phase !== "idle") return;
+  phase = "out"; phaseT = 0; interacted = true;
+}
+hero.addEventListener("pointerenter", trigger);
+hero.addEventListener("pointerdown", trigger);
+canvas.addEventListener("click", trigger);
+
+const easeIO = t => t < .5 ? 4*t*t*t : 1 - ((-2*t + 2) ** 3) / 2;
+const clamp01 = t => Math.max(0, Math.min(1, t));
+
+function project(p, cosA, sinA) {
+  const tilt = 0.42, cosT = Math.cos(tilt), sinT = Math.sin(tilt);
+  let [x, y, z] = p;
+  const rx = x * cosA - z * sinA, rz = x * sinA + z * cosA;   // spin about Y
+  const ry = y * cosT - rz * sinT, rz2 = y * sinT + rz * cosT; // tilt about X
+  const f = 4.6 / (4.6 + rz2);
+  return [cx + rx * scale * f, cy - (ry - 0.55) * scale * f, rz2, f, rx, ry];
+}
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const still = reducedMotion.matches;
+  const time = now / 1000;
+
+  // Spin eases down while dissolved, back up when whole.
+  targetSpin = still ? 0 : (phase === "idle" ? 0.45 : 0.08);
+  spin += (targetSpin - spin) * Math.min(1, dt * 2.2);
+  if (!still) angle += spin * dt;
+  orbiterGlow += (((interacted && phase === "idle") ? 1 : interacted ? 0.35 : 0) - orbiterGlow) * Math.min(1, dt * 1.5);
+
+  if (!still && phase !== "idle") {
+    phaseT += dt;
+    if (phase === "out")   { dissolve = clamp01(phaseT / DUR.out);  if (phaseT >= DUR.out)   { phase = "swirl"; phaseT = 0; } }
+    if (phase === "swirl") { dissolve = 1;                          if (phaseT >= DUR.swirl) { phase = "back";  phaseT = 0; } }
+    if (phase === "back")  { dissolve = 1 - clamp01(phaseT / DUR.back); if (phaseT >= DUR.back) { phase = "idle"; dissolve = 0; } }
+  } else if (still) { dissolve = 0; phase = "idle"; }
+
+  draw(time, still);
+  requestAnimationFrame(frame);
+}
+
+function draw(time, still) {
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  const cosA = Math.cos(angle), sinA = Math.sin(angle);
+  const bob = still ? 0 : Math.sin(time * 0.7) * 0.035;
+
+  // Soft contact shadow on the floor.
+  const shW = scale * 2.15 * (1 + dissolve * 0.25);
+  const g = ctx.createRadialGradient(cx, cy + scale * 1.05, 0, cx, cy + scale * 1.05, shW);
+  g.addColorStop(0, `rgba(0,0,0,${0.55 - dissolve * 0.3})`); g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.save(); ctx.translate(cx, cy + scale * 1.05); ctx.scale(1, 0.22); ctx.translate(-cx, -(cy + scale * 1.05));
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy + scale * 1.05, shW, 0, 7); ctx.fill(); ctx.restore();
+
+  const proj = verts.map(v => project([v[0], v[1] + bob, v[2]], cosA, sinA));
+  const light = [-0.45, 0.75, -0.55];
+  const hatAlpha = 1 - easeIO(clamp01(dissolve * 1.6));
+
+  // Hat faces, painter-sorted back to front.
+  if (hatAlpha > 0.01) {
+    const sorted = faces.map(f => ({ f, z: f.idx.reduce((s, i) => s + proj[i][2], 0) / 4 }))
+                        .sort((a, b) => b.z - a.z);
+    for (const { f } of sorted) {
+      const p = f.idx.map(i => proj[i]);
+      const ux = p[1][4]-p[0][4], uy = p[1][5]-p[0][5], uz = p[1][2]-p[0][2];
+      const vx = p[3][4]-p[0][4], vy = p[3][5]-p[0][5], vz = p[3][2]-p[0][2];
+      let nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx;
+      const len = Math.hypot(nx, ny, nz) || 1; nx/=len; ny/=len; nz/=len;
+      const diff = Math.max(0, nx*light[0] + ny*light[1] + nz*light[2]);
+      const spec = Math.max(0, nz) ** 6 * 0.10;
+      const amb = 0.22, lum = amb + diff * 0.85 + spec;
+      ctx.beginPath(); ctx.moveTo(p[0][0], p[0][1]);
+      ctx.lineTo(p[1][0], p[1][1]); ctx.lineTo(p[2][0], p[2][1]); ctx.lineTo(p[3][0], p[3][1]); ctx.closePath();
+      ctx.fillStyle = f.band
+        ? `rgba(${18*lum+8|0},${18*lum+8|0},${24*lum+10|0},${hatAlpha})`
+        : `rgba(${Math.min(255, 204*lum+22)|0},${Math.min(255, 26*lum+4)|0},${Math.min(255, 30*lum+4)|0},${hatAlpha})`;
+      ctx.fill();
+    }
+  }
+
+  // Dissolved particles: drift out, swirl like embers, flow home.
+  if (dissolve > 0.001) {
+    ctx.save(); ctx.globalCompositeOperation = "lighter";
+    const pts = [];
+    for (const pt of particles) {
+      const local = clamp01((dissolve - pt.delay * (phase === "back" ? 0.5 : 1)) / (1 - pt.delay * 0.6));
+      const e = easeIO(local);
+      const sw = e * pt.swirl, a = pt.phase + (still ? 0 : time * 0.7) * e;
+      const p = [
+        pt.home[0] + pt.out[0] * e + Math.cos(a) * 0.28 * sw * e,
+        pt.home[1] + bob + pt.out[1] * e + Math.sin(a * 1.3 + pt.phase) * 0.16 * e + (still ? 0 : Math.sin(time * 1.4 + pt.flick) * 0.05 * e),
+        pt.home[2] + pt.out[2] * e + Math.sin(a) * 0.28 * sw * e
+      ];
+      const q = project(p, cosA, sinA);
+      pts.push({ q, pt, e });
+    }
+    pts.sort((a, b) => b.q[2] - a.q[2]);
+    for (const { q, pt, e } of pts) {
+      const flick = 0.75 + 0.25 * Math.sin(time * 3 + pt.flick);
+      const alpha = Math.min(1, e * 2) * (0.35 + 0.45 * q[3]) * flick * (phase === "back" && dissolve < 0.06 ? dissolve / 0.06 : 1);
+      const r = pt.size * q[3] * (0.7 + e * 0.5) * Math.max(0.6, scale / 180);
+      const col = pt.band ? "255,190,140" : "255,120,80";
+      const rg = ctx.createRadialGradient(q[0], q[1], 0, q[0], q[1], r * 3.2);
+      rg.addColorStop(0, `rgba(255,225,190,${alpha})`);
+      rg.addColorStop(0.35, `rgba(${col},${alpha * 0.55})`);
+      rg.addColorStop(1, `rgba(${col},0)`);
+      ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(q[0], q[1], r * 3.2, 0, 7); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // A few embers keep orbiting after the hat reforms, trailing faint light.
+  if (orbiterGlow > 0.02) {
+    ctx.save(); ctx.globalCompositeOperation = "lighter";
+    for (const o of orbiters) {
+      const a = o.phase + (still ? 0 : time * o.speed) + angle * 0.4;
+      const q = project([Math.cos(a) * o.r, o.h + bob + Math.sin(a * 2) * 0.08, Math.sin(a) * o.r], cosA, sinA);
+      if (!still) { o.trail.push([q[0], q[1]]); if (o.trail.length > 14) o.trail.shift(); }
+      for (let i = 1; i < o.trail.length; i++) {
+        ctx.strokeStyle = `rgba(255,150,100,${(i / o.trail.length) * 0.16 * orbiterGlow})`;
+        ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(o.trail[i-1][0], o.trail[i-1][1]); ctx.lineTo(o.trail[i][0], o.trail[i][1]); ctx.stroke();
+      }
+      const r = 1.6 * q[3] * Math.max(0.6, scale / 180);
+      const rg = ctx.createRadialGradient(q[0], q[1], 0, q[0], q[1], r * 3.5);
+      rg.addColorStop(0, `rgba(255,230,200,${0.75 * orbiterGlow})`);
+      rg.addColorStop(0.4, `rgba(255,130,85,${0.35 * orbiterGlow})`);
+      rg.addColorStop(1, "rgba(255,130,85,0)");
+      ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(q[0], q[1], r * 3.5, 0, 7); ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

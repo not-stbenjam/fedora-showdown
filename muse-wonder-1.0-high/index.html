@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Fedora — Ember Dissolve</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{color-scheme:dark;--bg:#070507;--ink:#f3ecec;--muted:#a89ea0;--red:#e00}
+html,body{height:100%}
+body{
+  font-family:ui-sans-system,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+  background:
+    radial-gradient(900px 520px at 50% 38%,rgba(238,0,0,.13),transparent 62%),
+    radial-gradient(700px 500px at 50% 110%,rgba(120,20,30,.12),transparent 60%),
+    radial-gradient(1200px 800px at 50% 40%,#171014 0%,#0a0709 52%,var(--bg) 100%);
+  color:var(--ink);overflow:hidden;
+}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;
+  background:radial-gradient(90% 70% at 50% 45%,transparent 55%,rgba(0,0,0,.55) 100%)}
+main{min-height:100dvh;display:grid;place-items:center;padding:24px 16px 28px}
+.hero{display:grid;justify-items:center;text-align:center;gap:6px;width:min(96vw,860px)}
+.eyebrow{letter-spacing:.32em;text-transform:uppercase;font-size:11px;color:#cbbfc2}
+h1{font-size:clamp(28px,5vw,52px);font-weight:650;letter-spacing:-.02em;line-height:1}
+h1 em{font-style:normal;color:#ff2a2a;text-shadow:0 0 22px rgba(238,0,0,.35)}
+.stage{position:relative;width:min(92vw,680px);aspect-ratio:1/.82;max-height:62dvh;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;outline:none}
+.stage:focus-visible{border-radius:24px;box-shadow:0 0 0 2px rgba(255,80,80,.55)}
+canvas{width:100%;height:100%;display:block}
+.caption{color:var(--muted);font-size:clamp(13px,2.4vw,15px);line-height:1.6;max-width:52ch}
+.caption strong{color:#e8dde0;font-weight:600}
+.hint{margin-top:6px;font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#7e7377}
+.hint b{color:#ff5a5a;font-weight:600}
+@media (max-width:520px){.stage{width:96vw}main{padding-top:10px}}
+@media (prefers-reduced-motion:reduce){.hint b{color:#cbbfc2}}
+</style>
+</head>
+<body>
+<main>
+  <section class="hero" aria-label="Spinning red fedora that dissolves into glowing particles on hover or tap">
+    <p class="eyebrow">Shadowman &middot; Reimagined</p>
+    <h1>The <em>Fedora</em>, in embers.</h1>
+    <div class="stage" id="stage" tabindex="0" role="button" aria-label="Scatter the fedora into particles and reform it">
+      <canvas id="c" aria-hidden="true"></canvas>
+    </div>
+    <p class="caption"><strong>Hover or tap the hat</strong> — it slows, scatters into thousands of glowing embers, swirls, and flows back together. A few sparks keep orbiting when it reforms.</p>
+    <p class="hint" id="hint">Hover / tap &nbsp;<b>to dissolve</b></p>
+  </section>
+</main>
+
+<script>
+(() => {
+  "use strict";
+  const canvas = document.getElementById('c');
+  const stage  = document.getElementById('stage');
+  const hint   = document.getElementById('hint');
+  const ctx    = canvas.getContext('2d', { alpha:true });
+
+  const reducedMQ = matchMedia('(prefers-reduced-motion: reduce)');
+  let reduced = reducedMQ.matches;
+  reducedMQ.addEventListener?.('change', e => { reduced = e.matches; if (reduced) resetToHat(true); });
+
+  /* ---------- sizing ---------- */
+  let W=0,H=0,DPR=1,CX=0,CY=0,SCALE=1;
+  function resize(){
+    const r = stage.getBoundingClientRect();
+    DPR = Math.min(devicePixelRatio||1, 2);
+    W=r.width; H=r.height; CX=W/2; CY=H*0.52;
+    SCALE = Math.min(W,H)/5.6;
+    canvas.width  = Math.round(W*DPR);
+    canvas.height = Math.round(H*DPR);
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  addEventListener('resize', resize);
+
+  /* ---------- hat point cloud (local coords, Y up) ---------- */
+  // Fedora: wide curled brim + tapered crown with centre dent + black band.
+  const rand=(a=1,b)=> b===undefined ? Math.random()*a : a+Math.random()*(b-a);
+  function sampleHat(){
+    const r=Math.random();
+    if(r<0.52){ // brim — annulus, slight up-curl at edge, top+underside
+      const a=rand(Math.PI*2), rr=1.48+Math.pow(Math.random(),0.7)*1.02;
+      const curl=Math.pow((rr-1.48)/1.02,2)*0.20;
+      const under=Math.random()<0.28;
+      return {x:Math.cos(a)*rr, z:Math.sin(a)*rr, y:curl+(under?-0.035:0), part:under?'under':'brim'};
+    }
+    if(r<0.90){ // crown wall — tapers in, subtle front pinch
+      const a=rand(Math.PI*2), t=Math.random();
+      const rad=1.52-0.44*t + Math.sin(a)*0.03*t;
+      const pinch = 1 - 0.06*t*Math.max(0,Math.cos(a)); // front slightly narrower
+      return {x:Math.cos(a)*rad*pinch, z:Math.sin(a)*rad, y:0.02+t*1.12, part:(t<0.20?'band':'crown')};
+    }
+    // crown top — domed ring closing to a shallow centre dent
+    const a=rand(Math.PI*2), t=Math.random(); // t: 0 edge -> 1 centre
+    const rad=1.08*(1-t);
+    const y=1.14 + Math.sin(t*Math.PI)*0.10 - t*t*0.20;
+    return {x:Math.cos(a)*rad, z:Math.sin(a)*rad*0.96, y, part:'crown'};
+  }
+
+  const N = matchMedia('(max-width: 600px)').matches ? 3000 : 4200;
+  const P = [];
+  for(let i=0;i<N;i++){
+    const h=sampleHat();
+    P.push({
+      hx:h.x, hy:h.y, hz:h.z, part:h.part,
+      ox:0, oy:0, oz:0,          // dissolve offset (world-ish, unrotated applied after)
+      vx:0, vy:0, vz:0,
+      size:rand(0.7,1.7), seed:rand(Math.PI*2), speed:rand(0.75,1.3),
+      delay:Math.random(), orbiter:false,
+      orbA:0, orbR:0, orbS:0, orbY:0, orbPh:0, trail:[]
+    });
+  }
+
+  /* colours per part: [r,g,b] base, shaded per-frame by light */
+  const BASE = {
+    brim:[196,18,22], crown:[214,24,28], under:[105,10,14],
+    band:[22,18,20], ember:[255,120,52], orbit:[255,176,92]
+  };
+
+  /* ---------- state machine ---------- */
+  // idle -> slowing -> dissolve -> swirl -> reform -> idle (with orbiters)
+  let mode='idle', modeT=0, angle=-0.6, omega=reduced?0:0.85, omegaTarget=omega;
+  let orbitersActive=false;
+
+  function resetToHat(instant){
+    for(const p of P){ p.ox=p.oy=p.oz=p.vx=p.vy=p.vz=0; p.orbiter=false; p.trail.length=0; }
+    orbitersActive=false; mode='idle'; modeT=0;
+    omega = reduced?0:0.85;
+    if(instant) angle=-0.6;
+    hint.innerHTML='Hover / tap &nbsp;<b>to dissolve</b>';
+  }
+
+  function trigger(){
+    if(reduced || mode!=='idle') return;
+    mode='slowing'; modeT=0;
+    for(const p of P) if(p.orbiter){ p.orbiter=false; p.trail.length=0; }
+    orbitersActive=false;
+    hint.innerHTML='Slowing &hellip;';
+  }
+  function explode(){
+    mode='dissolve'; modeT=0;
+    for(const p of P){
+      const a=rand(Math.PI*2), up=rand(0.25,1.15), out=rand(0.35,1.7);
+      p.vx=Math.cos(a)*out*p.speed; p.vz=Math.sin(a)*out*p.speed;
+      p.vy=up*p.speed; p.ox=p.oy=p.oz=0;
+    }
+    hint.innerHTML='Embers &hellip;';
+  }
+  function pickOrbiters(){
+    const idx=[...P.keys()].sort(()=>Math.random()-0.5).slice(0,64);
+    for(const i of idx){
+      const p=P[i]; p.orbiter=true;
+      p.orbR=rand(2.75,3.55); p.orbS=rand(0.35,0.7)*(Math.random()<0.5?-1:1);
+      p.orbPh=rand(Math.PI*2); p.orbY=rand(-0.55,1.25); p.orbA=p.orbPh; p.trail.length=0;
+    }
+    orbitersActive=true;
+  }
+
+  stage.addEventListener('pointerenter', trigger);
+  stage.addEventListener('pointerdown', trigger);
+  stage.addEventListener('click', trigger);
+  stage.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); trigger(); }});
+
+  /* ---------- helpers ---------- */
+  const easeIO=t=> t<.5 ? 4*t*t*t : 1-Math.pow(-2*t+2,3)/2;
+  const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+
+  /* pre-rendered soft glow sprite (tinted via offscreen copies) */
+  function makeSprite(r,g,b){
+    const s=document.createElement('canvas'); s.width=s.height=32;
+    const x=s.getContext('2d'), gr=x.createRadialGradient(16,16,0,16,16,16);
+    gr.addColorStop(0,`rgba(${r},${g},${b},1)`);
+    gr.addColorStop(0.35,`rgba(${r},${g},${b},.55)`);
+    gr.addColorStop(1,`rgba(${r},${g},${b},0)`);
+    x.fillStyle=gr; x.fillRect(0,0,32,32); return s;
+  }
+  const SPR = {
+    brim:makeSprite(238,42,44), crown:makeSprite(255,58,54), under:makeSprite(150,24,28),
+    band:makeSprite(70,62,68), ember:makeSprite(255,150,70), orbit:makeSprite(255,196,110)
+  };
+
+  /* ---------- frame ---------- */
+  let last=performance.now();
+  function frame(now){
+    const dt=Math.min(0.05,(now-last)/1000); last=now;
+    modeT+=dt;
+
+    /* spin: ease omega toward target for a graceful slow-down */
+    omegaTarget = reduced?0 : (mode==='slowing'?0.10 : mode==='idle'?0.85 : 0.22);
+    omega += (omegaTarget-omega)*Math.min(1,dt*3.2);
+    if(mode!=='dissolve'&&mode!=='swirl') angle+=omega*dt;
+    else angle+=omega*dt*0.35; // hat keeps turning faintly beneath the swirl
+
+    /* state transitions */
+    if(mode==='slowing' && modeT>0.65) explode();
+    else if(mode==='dissolve' && modeT>0.85){ mode='swirl'; modeT=0; }
+    else if(mode==='swirl' && modeT>1.9){ mode='reform'; modeT=0; hint.innerHTML='Reforming &hellip;'; }
+    else if(mode==='reform' && modeT>1.7){ mode='idle'; modeT=0; pickOrbiters(); hint.innerHTML='Hover / tap &nbsp;<b>to dissolve again</b>'; }
+
+    /* particle offsets */
+    const swirling = mode==='dissolve'||mode==='swirl';
+    for(const p of P){
+      if(p.orbiter && mode==='idle'){
+        p.orbA += p.orbS*dt*(reduced?0:1);
+        continue;
+      }
+      if(swirling){
+        // ember physics: buoyant rise + curl-like swirl + light drag
+        const sw = mode==='swirl'?1:0.35;
+        const rx=p.ox, rz=p.oz, rl=Math.hypot(rx,rz)||0.001;
+        p.vx += (-rz/rl)*sw*dt*1.6 + Math.sin(now*0.001*p.speed+p.seed)*dt*0.35;
+        p.vz += ( rx/rl)*sw*dt*1.6 + Math.cos(now*0.0013*p.speed+p.seed)*dt*0.35;
+        p.vy += dt*0.28;                                  // embers rise
+        p.vx*= (1-dt*0.55); p.vy*=(1-dt*0.75); p.vz*=(1-dt*0.55);
+        p.ox+=p.vx*dt*1.6; p.oy+=p.vy*dt*1.6; p.oz+=p.vz*dt*1.6;
+      } else if(mode==='reform'){
+        const t=clamp((modeT-p.delay*0.55)/1.05,0,1), e=easeIO(t);
+        p.ox*= (1-e*0.16); p.oy*=(1-e*0.16); p.oz*=(1-e*0.16);
+        if(t>=1){ p.ox=p.oy=p.oz=0; }
+      }
+    }
+
+    draw(now, swirling);
+    requestAnimationFrame(frame);
+  }
+
+  function draw(now, swirling){
+    ctx.clearRect(0,0,W,H);
+    const ca=Math.cos(angle), sa=Math.sin(angle);
+    const bob = reduced?0:Math.sin(now*0.0011)*0.05;
+    const tilt=0.42, ct=Math.cos(tilt), st=Math.sin(tilt); // fixed 3/4 view
+
+    /* soft contact shadow */
+    const shW=SCALE*2.35, shH=shW*0.20;
+    const shY=CY+SCALE*1.28+bob*SCALE*0.3;
+    const g=ctx.createRadialGradient(CX,shY,0,CX,shY,shW);
+    g.addColorStop(0,'rgba(0,0,0,.55)'); g.addColorStop(0.6,'rgba(0,0,0,.28)'); g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.save(); ctx.translate(CX,shY); ctx.scale(1,shH/shW); ctx.translate(-CX,-shY);
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(CX,shY,shW,0,7); ctx.fill(); ctx.restore();
+
+    /* project all particles */
+    const cam=6.2, pts=[];
+    for(const p of P){
+      let X,Y,Z;
+      if(p.orbiter && mode==='idle'){
+        X=Math.cos(p.orbA)*p.orbR; Z=Math.sin(p.orbA)*p.orbR;
+        Y=p.orbY + Math.sin(p.orbA*2+p.orbPh)*0.14;
+      } else {
+        // rotate local hat point around Y, then add dissolve offset
+        const rx=p.hx*ca - p.hz*sa, rz=p.hx*sa + p.hz*ca, ry=p.hy;
+        X=rx+p.ox; Z=rz+p.oz; Y=ry+p.oy;
+      }
+      // tilt around X for depth
+      const y2=Y*ct - Z*st, z2=Y*st + Z*ct;
+      const s=cam/(cam+z2+2.6);
+      const sx=CX + X*SCALE*s;
+      const sy=CY - (y2-0.55+bob)*SCALE*s;
+      // simple light: brighter when facing camera / raised
+      const light=clamp(0.55 + ( -z2*0.16) + Y*0.14, 0.25, 1.15);
+      pts.push({p,sx,sy,s,z:z2,light});
+    }
+    pts.sort((a,b)=>b.z-a.z); // painter's order: far first
+
+    /* orbiter trails (faint light) */
+    if(orbitersActive && !reduced){
+      ctx.save(); ctx.globalCompositeOperation='lighter'; ctx.lineCap='round';
+      for(const q of pts){
+        if(!q.p.orbiter) continue;
+        const tr=q.p.trail; tr.push([q.sx,q.sy]); if(tr.length>18) tr.shift();
+        for(let i=1;i<tr.length;i++){
+          const a=i/tr.length;
+          ctx.strokeStyle=`rgba(255,170,90,${a*0.16})`; ctx.lineWidth=a*1.6;
+          ctx.beginPath(); ctx.moveTo(tr[i-1][0],tr[i-1][1]); ctx.lineTo(tr[i][0],tr[i][1]); ctx.stroke();
+        }
+      }
+      ctx.restore();
+    } else {
+      for(const q of pts) if(q.p.orbiter) q.p.trail.length=0;
+    }
+
+    /* particles */
+    ctx.save();
+    if(swirling) ctx.globalCompositeOperation='lighter';
+    for(const q of pts){
+      const p=q.p;
+      const ember = swirling || p.orbiter;
+      const spr = p.orbiter?SPR.orbit : ember?SPR.ember : SPR[p.part];
+      const flick = swirling ? 0.75+0.25*Math.sin(now*0.012*p.speed+p.seed*7) : 1;
+      const baseSize = (p.orbiter?7.5:5.6) * p.size * q.s;
+      const sz = baseSize * (ember?1.25:1) * flick;
+      ctx.globalAlpha = clamp((ember?0.85:0.92)*q.light,0.08,1);
+      // sprite gives soft glow; a tiny hot core keeps the hat reading as solid
+      ctx.drawImage(spr, q.sx-sz, q.sy-sz, sz*2, sz*2);
+      if(!ember){
+        const [r,gg,b]=BASE[p.part], L=q.light;
+        ctx.globalAlpha=0.9;
+        ctx.fillStyle=`rgb(${Math.min(255,r*L)|0},${Math.min(255,gg*L)|0},${Math.min(255,b*L)|0})`;
+        ctx.beginPath(); ctx.arc(q.sx,q.sy,Math.max(0.6,1.35*p.size*q.s),0,7); ctx.fill();
+      } else if(!p.orbiter){
+        ctx.globalAlpha=0.9*flick; ctx.fillStyle='#ffd9a8';
+        ctx.beginPath(); ctx.arc(q.sx,q.sy,Math.max(0.5,0.9*q.s),0,7); ctx.fill();
+      }
+    }
+    ctx.restore();
+    ctx.globalAlpha=1;
+  }
+
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

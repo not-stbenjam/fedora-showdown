@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fedora — Ember</title>
+<style>
+  :root{
+    --bg:#08090c; --bg2:#10131a; --red:#e2231a; --red-dark:#8f100c;
+    --text:#e8e6e1; --muted:#8b8d94;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    font-family: ui-sans-system, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background:
+      radial-gradient(1100px 620px at 50% 38%, #1b202c 0%, var(--bg2) 42%, var(--bg) 78%),
+      var(--bg);
+    color:var(--text);
+    min-height:100svh;
+    display:flex; align-items:center; justify-content:center;
+    overflow:hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* soft vignette + floor glow for depth */
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none;
+    background:radial-gradient(ellipse at center, transparent 52%, rgba(0,0,0,.55) 100%);
+  }
+  body::after{
+    content:""; position:fixed; left:50%; top:64%; width:min(72vw,560px); height:120px;
+    transform:translate(-50%,-50%); pointer-events:none; filter:blur(10px);
+    background:radial-gradient(ellipse at center, rgba(226,35,26,.16), transparent 65%);
+  }
+  main{
+    position:relative; z-index:1; text-align:center;
+    padding:2rem 1.25rem; width:min(92vw,760px);
+  }
+  .stage{
+    position:relative; width:min(78vw,420px); aspect-ratio:1/1;
+    margin:0 auto; perspective:1100px; cursor:pointer; outline:none;
+    touch-action:manipulation;
+  }
+  .stage:focus-visible{border-radius:24px; box-shadow:0 0 0 2px rgba(232,230,225,.5)}
+  /* ground shadow */
+  .shadow{
+    position:absolute; left:50%; bottom:11%; width:62%; height:34px;
+    transform:translateX(-50%);
+    background:radial-gradient(ellipse at center, rgba(0,0,0,.62), transparent 68%);
+    filter:blur(6px);
+    animation:shadowPulse 7s ease-in-out infinite;
+  }
+  .tilt{
+    position:absolute; inset:0; transform-style:preserve-3d;
+    transform:rotateX(8deg);
+  }
+  .spinner{
+    position:absolute; inset:0; display:grid; place-items:center;
+    transform-style:preserve-3d;
+    animation:spin 7s linear infinite;
+    will-change:transform;
+  }
+  .stage.slowing .spinner{animation-duration:2.8s}
+  .stage.dissolved .spinner, .stage.dissolved .shadow{opacity:0; transition:opacity .25s ease}
+  .spinner, .shadow{transition:opacity .25s ease}
+  svg.hat{width:82%; height:auto; overflow:visible; filter:drop-shadow(0 22px 22px rgba(0,0,0,.45))}
+  #particles{
+    position:absolute; inset:0; width:100%; height:100%; pointer-events:none;
+  }
+  h1{
+    margin-top:.4rem; font-size:clamp(1.35rem,3.4vw,2rem); font-weight:650;
+    letter-spacing:.14em; text-transform:uppercase;
+  }
+  p.caption{
+    margin-top:.65rem; color:var(--muted); font-size:clamp(.92rem,2.4vw,1.02rem);
+    letter-spacing:.04em; line-height:1.6;
+  }
+  p.hint{margin-top:1.1rem; color:#55585f; font-size:.78rem; letter-spacing:.18em; text-transform:uppercase}
+  @keyframes spin{from{transform:rotateY(0deg)}to{transform:rotateY(360deg)}}
+  @keyframes shadowPulse{0%,100%{transform:translateX(-50%) scaleX(1);opacity:.9}50%{transform:translateX(-50%) scaleX(.86);opacity:.7}}
+  @media (prefers-reduced-motion: reduce){
+    .spinner,.shadow{animation:none !important}
+    .stage{cursor:default}
+    p.hint{display:none}
+  }
+</style>
+</head>
+<body>
+<main>
+  <div class="stage" id="stage" role="img" tabindex="0"
+       aria-label="A red fedora. Activate to see it dissolve into embers and reform.">
+    <div class="shadow"></div>
+    <div class="tilt"><div class="spinner" id="spinner">
+      <svg class="hat" viewBox="0 0 400 260" aria-hidden="true">
+        <defs>
+          <linearGradient id="crown" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#f04438"/><stop offset=".55" stop-color="#e2231a"/><stop offset="1" stop-color="#a8140e"/>
+          </linearGradient>
+          <linearGradient id="brim" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#d81e14"/><stop offset="1" stop-color="#7e0d09"/>
+          </linearGradient>
+          <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stop-color="#fff" stop-opacity="0"/>
+            <stop offset=".5" stop-color="#fff" stop-opacity=".28"/>
+            <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <!-- brim -->
+        <path d="M200 178 C110 178 28 196 14 216 C4 231 26 246 78 252 C140 259 260 259 322 252 C374 246 396 231 386 216 C372 196 290 178 200 178 Z" fill="url(#brim)"/>
+        <ellipse cx="200" cy="214" rx="150" ry="22" fill="#5f0906" opacity=".55"/>
+        <!-- crown -->
+        <path d="M104 196 C100 150 108 96 132 72 C152 52 176 62 200 62 C224 62 248 52 268 72 C292 96 300 150 296 196 C262 210 138 210 104 196 Z" fill="url(#crown)"/>
+        <!-- pinch -->
+        <path d="M158 66 C172 82 186 88 200 88 C214 88 228 82 242 66 C230 96 218 104 200 104 C182 104 170 96 158 66 Z" fill="#8f100c" opacity=".65"/>
+        <!-- band -->
+        <path d="M102 168 C140 182 260 182 298 168 L296 196 C262 210 138 210 104 196 Z" fill="#15161a"/>
+        <path d="M102 168 C140 182 260 182 298 168 L297 178 C260 192 140 192 103 178 Z" fill="#26272d"/>
+        <!-- sheen sweep -->
+        <path d="M104 196 C100 150 108 96 132 72 C152 52 176 62 200 62 C224 62 248 52 268 72 C292 96 300 150 296 196 C262 210 138 210 104 196 Z" fill="url(#sheen)" opacity=".55"/>
+      </svg>
+    </div></div>
+    <canvas id="particles" aria-hidden="true"></canvas>
+  </div>
+  <h1>Fedora</h1>
+  <p class="caption">Crafted in the open. Worn with purpose.</p>
+  <p class="hint">Hover or tap the hat</p>
+</main>
+
+<script>
+(() => {
+  const stage = document.getElementById('stage');
+  const canvas = document.getElementById('particles');
+  const ctx = canvas.getContext('2d');
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+  let W = 0, H = 0, particles = [], orbiters = [], mode = 'idle', t0 = 0, raf = null;
+
+  // Hat silhouette used for sampling particle targets (matches the SVG viewBox 400x260).
+  const crown = new Path2D('M104 196 C100 150 108 96 132 72 C152 52 176 62 200 62 C224 62 248 52 268 72 C292 96 300 150 296 196 C262 210 138 210 104 196 Z');
+  const brim  = new Path2D('M200 178 C110 178 28 196 14 216 C4 231 26 246 78 252 C140 259 260 259 322 252 C374 246 396 231 386 216 C372 196 290 178 200 178 Z');
+  const band  = new Path2D('M102 168 C140 182 260 182 298 168 L296 196 C262 210 138 210 104 196 Z');
+
+  function resize(){
+    const r = stage.getBoundingClientRect();
+    W = r.width; H = r.height;
+    canvas.width = W * DPR; canvas.height = H * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  function sampleTargets(count){
+    // Render the hat offscreen, then pick random filled pixels as reform targets.
+    const off = document.createElement('canvas');
+    const S = 2; off.width = 400 * S; off.height = 260 * S;
+    const o = off.getContext('2d'); o.scale(S, S);
+    o.fillStyle = '#e2231a'; o.fill(crown); o.fill(brim);
+    o.fillStyle = '#15161a'; o.fill(band);
+    const data = o.getImageData(0, 0, off.width, off.height).data;
+    const filled = [];
+    for (let y = 0; y < off.height; y += 2)
+      for (let x = 0; x < off.width; x += 2)
+        if (data[(y * off.width + x) * 4 + 3] > 128) filled.push([x / S, y / S, data[(y * off.width + x) * 4]]);
+    const scale = (W * 0.82) / 400, ox = (W - 400 * scale) / 2, oy = (H - 260 * scale) / 2;
+    const out = [];
+    for (let i = 0; i < count; i++){
+      const p = filled[(Math.random() * filled.length) | 0];
+      out.push({ x: ox + p[0] * scale, y: oy + p[1] * scale, dark: p[2] < 60 });
+    }
+    return out;
+  }
+
+  function startDissolve(){
+    if (mode !== 'idle' || reduced.matches) return;
+    mode = 'dissolve'; t0 = performance.now();
+    stage.classList.add('slowing');
+    // Brief slow-spin beat, then burst.
+    setTimeout(() => {
+      stage.classList.add('dissolved');
+      const N = Math.min(2600, Math.max(1200, (W * H) / 90 | 0));
+      particles = sampleTargets(N).map(p => ({
+        hx: p.x, hy: p.y, x: p.x, y: p.y,
+        vx: (Math.random() - .5) * 1.6, vy: -(Math.random() * 1.8 + .4),
+        a: Math.random() * Math.PI * 2, r: Math.random() * 90 + 30,
+        size: Math.random() * 1.9 + .6, hue: p.dark ? 220 : 12 + Math.random() * 22,
+        dark: p.dark, delay: Math.random() * 260
+      }));
+      orbiters = [];
+      if (!raf) raf = requestAnimationFrame(frame);
+    }, 650);
+  }
+
+  function frame(now){
+    raf = requestAnimationFrame(frame);
+    const elapsed = now - t0;
+    ctx.clearRect(0, 0, W, H);
+
+    if (mode === 'dissolve'){
+      // Phases: burst/drift (0-1.6s) -> swirl (1.6-3.2s) -> reform (3.2-4.6s)
+      const cx = W / 2, cy = H / 2;
+      let allHome = elapsed > 3200;
+      for (const p of particles){
+        if (elapsed < 1600){
+          if (elapsed > p.delay){ p.x += p.vx; p.y += p.vy; p.vy -= .004; p.vx += Math.sin((elapsed + p.delay) * .004) * .01; }
+        } else if (elapsed < 3200){
+          p.a += .022; p.x += (cx + Math.cos(p.a) * p.r - p.x) * .045;
+          p.y += (cy + Math.sin(p.a) * p.r * .62 - p.y) * .045;
+        } else {
+          p.x += (p.hx - p.x) * .075; p.y += (p.hy - p.y) * .075;
+          if (Math.abs(p.hx - p.x) + Math.abs(p.hy - p.y) > 1.2) allHome = false;
+        }
+        const flicker = .55 + Math.random() * .45;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, 7);
+        ctx.fillStyle = p.dark ? `rgba(150,160,190,${.5 * flicker})` : `hsla(${p.hue},92%,${58 + flicker * 14}%,${.85 * flicker})`;
+        ctx.shadowColor = p.dark ? 'transparent' : 'rgba(255,110,50,.8)';
+        ctx.shadowBlur = p.dark ? 0 : 7;
+        ctx.fill(); ctx.shadowBlur = 0;
+      }
+      if (elapsed > 3200 && allHome){
+        mode = 'idle'; particles = [];
+        stage.classList.remove('dissolved', 'slowing');
+        // A few embers keep orbiting, trailing faint light.
+        for (let i = 0; i < 14; i++)
+          orbiters.push({ a: Math.random() * Math.PI * 2, r: 105 + Math.random() * 65, s: .004 + Math.random() * .007, size: Math.random() * 1.6 + .8, trail: [] });
+      }
+    } else if (orbiters.length){
+      const cx = W / 2, cy = H / 2;
+      for (const o of orbiters){
+        o.a += o.s;
+        const x = cx + Math.cos(o.a) * o.r, y = cy + Math.sin(o.a) * o.r * .6;
+        o.trail.push([x, y]); if (o.trail.length > 16) o.trail.shift();
+        o.trail.forEach((pt, i) => {
+          ctx.beginPath(); ctx.arc(pt[0], pt[1], o.size * (i / o.trail.length), 0, 7);
+          ctx.fillStyle = `rgba(255,130,70,${(i / o.trail.length) * .35})`; ctx.fill();
+        });
+        ctx.beginPath(); ctx.arc(x, y, o.size, 0, 7);
+        ctx.fillStyle = 'rgba(255,170,100,.9)'; ctx.shadowColor = 'rgba(255,110,50,.8)'; ctx.shadowBlur = 8;
+        ctx.fill(); ctx.shadowBlur = 0;
+      }
+    } else {
+      cancelAnimationFrame(raf); raf = null;
+    }
+  }
+
+  if (!reduced.matches){
+    stage.addEventListener('pointerenter', startDissolve);
+    stage.addEventListener('click', startDissolve);
+    stage.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startDissolve(); } });
+  }
+})();
+</script>
+</body>
+</html>

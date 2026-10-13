@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fedora — Embers</title>
+<style>
+  :root{color-scheme:dark;--bg:#070708;--ink:#ece7df;--muted:#9b958c;--red:#e03a3a}
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:
+      radial-gradient(1100px 620px at 50% 38%,#1c1b1c 0%,#101010 42%,var(--bg) 78%),
+      var(--bg);
+    color:var(--ink);
+    font-family:Georgia,"Times New Roman",serif;
+    display:flex;align-items:center;justify-content:center;
+    min-height:100svh;overflow:hidden;
+  }
+  body::after{content:"";position:fixed;inset:0;pointer-events:none;
+    background:radial-gradient(120% 90% at 50% 45%,transparent 55%,rgba(0,0,0,.55) 100%)}
+  .hero{display:flex;flex-direction:column;align-items:center;text-align:center;
+    padding:24px 16px 32px;width:100%}
+  .stage{
+    position:relative;width:min(88vw,620px);aspect-ratio:1/.94;
+    max-height:72svh;cursor:pointer;outline:none;-webkit-tap-highlight-color:transparent;
+    touch-action:manipulation;
+  }
+  .stage:focus-visible{box-shadow:0 0 0 1px rgba(236,231,223,.35);border-radius:50%}
+  canvas{display:block;width:100%;height:100%}
+  .caption{margin:6px 0 0;font-size:clamp(15px,2.4vw,19px);letter-spacing:.02em;color:var(--ink)}
+  .hint{margin:8px 0 0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+    font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<main class="hero">
+  <div class="stage" id="stage" tabindex="0" role="button"
+       aria-label="Red fedora. Activate to scatter it into embers and reform it.">
+    <canvas id="scene" aria-hidden="true"></canvas>
+  </div>
+  <p class="caption">The red fedora, rendered in light.</p>
+  <p class="hint" id="hint">Hover or tap the hat</p>
+</main>
+<script>
+(() => {
+"use strict";
+const stage = document.getElementById("stage");
+const canvas = document.getElementById("scene");
+const hint = document.getElementById("hint");
+const ctx = canvas.getContext("2d");
+const reducedMQ = matchMedia("(prefers-reduced-motion: reduce)");
+let reduced = reducedMQ.matches;
+
+/* ---------- geometry: a fedora as parametric surfaces ---------- */
+const TAU = Math.PI * 2;
+const lerp = (a,b,t)=>a+(b-a)*t;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const easeOut=t=>1-Math.pow(1-t,3);
+const easeInOut=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
+
+// local space: y up, hat centred near origin, brim at y=0
+function brimPoint(th,t){
+  const r = lerp(0.76,1.52,t);
+  return [Math.cos(th)*r*1.16, -0.02+0.15*t*t+0.03*Math.sin(th*2)*t, Math.sin(th)*r*0.92];
+}
+function crownPoint(th,t){
+  const r = 0.80-0.15*t+0.025*Math.sin(t*Math.PI);
+  const pinch = 1-0.07*t*Math.abs(Math.cos(th));       // gentle front/back pinch near top
+  return [Math.cos(th)*r*1.06*pinch, lerp(0,0.78,t), Math.sin(th)*r*0.90];
+}
+function topPoint(th,t){
+  const r = t*0.66;
+  const dent = -0.17*(1-t*t);                            // centre crease dips down
+  return [Math.cos(th)*r*1.02, 0.78+dent-0.03*Math.exp(-Math.pow(Math.sin(th)*r/0.18,2))*(1-t), Math.sin(th)*r*0.86];
+}
+const RED=[196,18,38], RED_HI=[232,52,58], DARK=[22,18,20], DARK2=[38,30,32];
+function faceColor(kind,th,t,side){
+  if(kind==="band") return side? [16,13,15]:DARK;
+  if(kind==="brim") return side? [122,10,24]:RED;
+  if(kind==="top")  return RED_HI;
+  return RED;
+}
+// build solid faces once: [p1,p2,p3,p4, baseRGB]
+const faces=[];
+function quad(fn,kind,a1,a2,b1,b2,side){
+  const p=[fn(a1,b1),fn(a1,b2),fn(a2,b2),fn(a2,b1)];
+  if(side) p.reverse();
+  faces.push({p, c:faceColor(kind,(a1+a2)/2,(b1+b2)/2,side)});
+}
+(function buildHat(){
+  const A=96;
+  for(let i=0;i<A;i++){
+    const a1=i/A*TAU, a2=(i+1)/A*TAU;
+    for(let j=0;j<10;j++) quad(brimPoint,"brim",a1,a2,j/10,(j+1)/10,false);
+    for(let j=0;j<10;j++) quad(brimPoint,"brim",a1,a2,j/10,(j+1)/10,true);
+    for(let j=0;j<14;j++){
+      const t1=j/14,t2=(j+1)/14;
+      quad(crownPoint, t2<=0.30?"band":"crown", a1,a2,t1,t2,false);
+    }
+    for(let j=0;j<8;j++) quad(topPoint,"top",a1,a2,j/8,(j+1)/8,false);
+  }
+})();
+
+/* ---------- transform / projection ---------- */
+let W=0,H=0,DPR=1, CX=0, CY=0, SCALE=100;
+function resize(){
+  const r = stage.getBoundingClientRect();
+  DPR = Math.min(devicePixelRatio||1, 2);
+  W = Math.max(280, r.width); H = Math.max(260, r.height);
+  canvas.width = Math.round(W*DPR); canvas.height = Math.round(H*DPR);
+  CX = W/2; CY = H*0.52; SCALE = Math.min(W,H)*0.335;
+  if(reduced) draw(0);
+}
+const TILT=-0.34, LIGHT=(()=>{const v=[-0.55,0.85,0.65],l=Math.hypot(...v);return v.map(x=>x/l);})();
+let angle=-0.55, bob=0;
+function xform(p){
+  const ca=Math.cos(angle), sa=Math.sin(angle);
+  const x=p[0]*ca-p[2]*sa, z=p[0]*sa+p[2]*ca, y=p[1]+bob;
+  const ct=Math.cos(TILT), st=Math.sin(TILT);
+  return [x, y*ct-z*st, y*st+z*ct];
+}
+function project(p){
+  const f=3.4, s=f/(f-p[2]);
+  return [CX+p[0]*SCALE*s, CY-p[1]*SCALE*s, s, p[2]];
+}
+function drawShadow(alpha){
+  const y=CY+SCALE*0.98, w=SCALE*1.62, h=SCALE*0.30;
+  const g=ctx.createRadialGradient(CX,y,0,CX,y,w);
+  g.addColorStop(0,`rgba(0,0,0,${0.62*alpha})`);
+  g.addColorStop(0.55,`rgba(0,0,0,${0.28*alpha})`);
+  g.addColorStop(1,"rgba(0,0,0,0)");
+  ctx.save(); ctx.translate(CX,y); ctx.scale(1,h/w); ctx.translate(-CX,-y);
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(CX,y,w,0,TAU); ctx.fill(); ctx.restore();
+}
+function drawSpot(){
+  const g=ctx.createRadialGradient(CX,CY-SCALE*0.4,0,CX,CY,SCALE*2.5);
+  g.addColorStop(0,"rgba(255,214,170,0.07)"); g.addColorStop(1,"rgba(255,214,170,0)");
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+}
+let solidAlpha=1;
+function drawHat(){
+  if(solidAlpha<=0.003) return;
+  const items=[];
+  for(const f of faces){
+    const q=f.p.map(xform);
+    const ux=q[1][0]-q[0][0], uy=q[1][1]-q[0][1], uz=q[1][2]-q[0][2];
+    const vx=q[2][0]-q[0][0], vy=q[2][1]-q[0][1], vz=q[2][2]-q[0][2];
+    let nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+    const nl=Math.hypot(nx,ny,nz)||1; nx/=nl; ny/=nl; nz/=nl;
+    const diff=Math.max(0,nx*LIGHT[0]+ny*LIGHT[1]+nz*LIGHT[2]);
+    const shade=0.30+0.78*diff, z=(q[0][2]+q[1][2]+q[2][2]+q[3][2])/4;
+    items.push({q,z,c:f.c,shade});
+  }
+  items.sort((a,b)=>a.z-b.z);
+  ctx.save(); ctx.globalAlpha=solidAlpha;
+  for(const it of items){
+    const pts=it.q.map(project);
+    ctx.beginPath(); ctx.moveTo(pts[0][0],pts[0][1]);
+    for(let i=1;i<4;i++) ctx.lineTo(pts[i][0],pts[i][1]);
+    ctx.closePath();
+    const r=clamp(it.c[0]*it.shade,0,255)|0, g=clamp(it.c[1]*it.shade,0,255)|0, b=clamp(it.c[2]*it.shade,0,255)|0;
+    ctx.fillStyle=`rgb(${r},${g},${b})`; ctx.fill();
+  }
+  ctx.restore();
+}
+
+/* ---------- particles: thousands of embers sampled from the hat ---------- */
+function makeSprite(rgb){
+  const s=document.createElement("canvas"); s.width=s.height=64;
+  const c=s.getContext("2d"), g=c.createRadialGradient(32,32,0,32,32,32);
+  g.addColorStop(0,`rgba(255,244,220,0.95)`);
+  g.addColorStop(0.22,`rgba(${rgb},0.85)`);
+  g.addColorStop(0.55,`rgba(${rgb},0.22)`);
+  g.addColorStop(1,`rgba(${rgb},0)`);
+  c.fillStyle=g; c.fillRect(0,0,64,64); return s;
+}
+const SPRITES=[makeSprite("255,92,52"),makeSprite("255,150,64"),makeSprite("238,44,54"),makeSprite("255,196,110")];
+const COUNT=3400, ORBITERS=64;
+const particles=[];
+function homeLocal(p){
+  if(p.kind===0) return brimPoint(p.th,p.v);
+  if(p.kind===1) return crownPoint(p.th,p.v);
+  return topPoint(p.th,p.v);
+}
+for(let i=0;i<COUNT;i++){
+  const pick=Math.random();
+  const kind = pick<0.42?0 : pick<0.86?1 : 2;
+  const th=Math.random()*TAU;
+  const v = kind===1 ? Math.pow(Math.random(),0.9) : Math.random();
+  const isBand = kind===1 && v<=0.30;
+  particles.push({
+    kind, th, v, isBand,
+    sprite: isBand ? 2 : (Math.random()<0.45?0 : Math.random()<0.6?1 : Math.random()<0.7?3:2),
+    size: 0.7+Math.random()*1.6, seed: Math.random()*TAU,
+    freq: 0.6+Math.random()*1.8, delay: Math.random()*0.28,
+    pos:[0,0,0], vel:[0,0,0], active:false, alpha:0,
+    orbiter:false, oR:1.05+Math.random()*0.55, oH:-0.15+Math.random()*0.95,
+    oA:Math.random()*TAU, oS:(0.25+Math.random()*0.45)*(Math.random()<0.5?1:-1),
+    oTilt:(Math.random()-0.5)*0.5, trail:[]
+  });
+}
+function assignOrbiters(){
+  particles.forEach(p=>{p.orbiter=false; p.trail.length=0;});
+  let n=0;
+  while(n<ORBITERS){
+    const p=particles[(Math.random()*particles.length)|0];
+    if(!p.orbiter){ p.orbiter=true; n++; }
+  }
+}
+let phase="idle"; // idle | dissolve | swirl | reform | settle | orbit
+let phaseT=0, angleVel=0.55, hasOrbited=false;
+const DUR={dissolve:1500, swirl:1900, reform:1700, settle:450};
+function startDissolve(){
+  if(reduced || (phase!=="idle" && phase!=="orbit")) return;
+  for(const p of particles){
+    p.pos = xform(homeLocal(p));
+    // ember burst: outward from centre + a warm upward drift
+    const cx=p.pos[0], cy=p.pos[1]-0.3, cz=p.pos[2];
+    const cl=Math.hypot(cx,cy,cz)||1, burst=0.55+Math.random()*1.15;
+    p.vel=[cx/cl*burst+(Math.random()-0.5)*0.7,
+           cy/cl*burst*0.6+0.35+Math.random()*0.75,
+           cz/cl*burst+(Math.random()-0.5)*0.7];
+    p.active=true; p.alpha=0; p.trail.length=0;
+  }
+  phase="dissolve"; phaseT=0;
+  hint.textContent="Embers on the wind";
+}
+function updateParticles(dt,t){
+  const cx=0, cy=0.28;
+  for(const p of particles){
+    if(!p.active) continue;
+    if(phase==="dissolve"){
+      const k=Math.max(0,1-dt*1.4);
+      p.vel[0]*=k; p.vel[2]*=k;
+      p.vel[1]=p.vel[1]*Math.max(0,1-dt*0.7)+dt*0.55; // embers rise
+      p.pos[0]+=p.vel[0]*dt; p.pos[1]+=p.vel[1]*dt; p.pos[2]+=p.vel[2]*dt;
+      p.alpha=Math.min(0.9,p.alpha+dt*3.2);
+    } else if(phase==="swirl"){
+      // tangential swirl around the hat's axis, held in a loose shell
+      const dx=p.pos[0]-cx, dz=p.pos[2], r=Math.hypot(dx,dz)||0.001;
+      const sw=dt*1.15;
+      p.vel[0]+=(-dz/r)*sw + (-dx/r)*(r-1.25)*dt*0.9 + Math.sin(t*0.001*p.freq+p.seed)*dt*0.35;
+      p.vel[2]+=( dx/r)*sw + (-dz/r)*(r-1.25)*dt*0.9;
+      p.vel[1]+=((cy+Math.sin(t*0.0007*p.freq+p.seed)*0.45)-p.pos[1])*dt*0.9;
+      p.vel[0]*=Math.max(0,1-dt*1.1); p.vel[1]*=Math.max(0,1-dt*1.1); p.vel[2]*=Math.max(0,1-dt*1.1);
+      p.pos[0]+=p.vel[0]*dt; p.pos[1]+=p.vel[1]*dt; p.pos[2]+=p.vel[2]*dt;
+      p.alpha=Math.min(0.9,p.alpha+dt*2);
+    } else if(phase==="reform"){
+      const prog=clamp((phaseT/DUR.reform-p.delay)/(1-0.28),0,1);
+      const home=xform(homeLocal(p));
+      const pull=lerp(0.6,9, easeInOut(prog));
+      p.vel[0]+=(home[0]-p.pos[0])*pull*dt*6;
+      p.vel[1]+=(home[1]-p.pos[1])*pull*dt*6;
+      p.vel[2]+=(home[2]-p.pos[2])*pull*dt*6;
+      const damp=Math.max(0,1-dt*lerp(2.2,7,prog));
+      p.vel[0]*=damp; p.vel[1]*=damp; p.vel[2]*=damp;
+      p.pos[0]+=p.vel[0]*dt; p.pos[1]+=p.vel[1]*dt; p.pos[2]+=p.vel[2]*dt;
+      if(prog>=1){ p.pos=home; p.vel=[0,0,0]; }
+      p.alpha=0.9;
+    } else if(phase==="settle"){
+      p.pos=xform(homeLocal(p));
+      p.alpha=0.9*(1-phaseT/DUR.settle);
+    }
+  }
+}
+function drawParticles(t){
+  ctx.save(); ctx.globalCompositeOperation="lighter";
+  for(const p of particles){
+    if(!p.active || p.alpha<=0.01) continue;
+    if(phase==="orbit" && !p.orbiter) continue;
+    let pos=p.pos;
+    if(phase==="orbit" && p.orbiter){
+      p.oA += p.oS*0.016;
+      pos=[Math.cos(p.oA)*p.oR, p.oH+Math.sin(p.oA*2+p.seed)*0.06, Math.sin(p.oA)*p.oR*0.62];
+      // apply the hat's gentle tilt so orbits sit in the same space
+      const ct=Math.cos(TILT), st=Math.sin(TILT);
+      pos=[pos[0], pos[1]*ct-pos[2]*st+bob, pos[1]*st+pos[2]*ct];
+      p.trail.push(project(pos));
+      if(p.trail.length>14) p.trail.shift();
+      // faint trailing light
+      if(p.trail.length>2){
+        ctx.beginPath(); ctx.moveTo(p.trail[0][0],p.trail[0][1]);
+        for(const q of p.trail) ctx.lineTo(q[0],q[1]);
+        ctx.strokeStyle="rgba(255,150,80,0.16)"; ctx.lineWidth=1; ctx.stroke();
+      }
+      p.alpha=0.75;
+    }
+    const s=project(pos);
+    const flick=0.78+0.22*Math.sin(t*0.006*p.freq+p.seed*7);
+    const size=p.size*7*s[2]*flick;
+    ctx.globalAlpha=clamp(p.alpha*flick,0,0.9);
+    ctx.drawImage(SPRITES[p.sprite], s[0]-size/2, s[1]-size/2, size, size);
+  }
+  ctx.restore();
+}
+
+/* ---------- main loop & phase machine ---------- */
+function draw(t){
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.clearRect(0,0,W,H);
+  drawSpot();
+  const shadowA = phase==="idle"||phase==="orbit" ? 1 : Math.max(0.12, solidAlpha);
+  drawShadow(shadowA);
+  drawHat();
+  drawParticles(t||0);
+}
+let last=performance.now();
+function frame(now){
+  const dt=clamp((now-last)/1000,0,0.033); last=now;
+  phaseT+=dt*1000;
+  if(phase==="idle" || phase==="orbit"){
+    angleVel += (0.55-angleVel)*Math.min(1,dt*1.6); // ease spin back up
+    angle += angleVel*dt;
+    bob = Math.sin(now*0.0011)*0.028;
+  } else if(phase==="dissolve"){
+    angleVel *= Math.pow(0.12, dt/1.1);              // spin slows to a stop
+    angle += angleVel*dt;
+    solidAlpha = 1-easeOut(clamp(phaseT/650,0,1));
+    if(phaseT>=DUR.dissolve){ phase="swirl"; phaseT=0; hint.textContent="Swirling…"; }
+  } else if(phase==="swirl"){
+    if(phaseT>=DUR.swirl){ phase="reform"; phaseT=0; hint.textContent="Reforming…"; }
+  } else if(phase==="reform"){
+    solidAlpha=0;
+    if(phaseT>=DUR.reform){ phase="settle"; phaseT=0; }
+  } else if(phase==="settle"){
+    solidAlpha = easeInOut(clamp(phaseT/DUR.settle,0,1));
+    if(phaseT>=DUR.settle){
+      solidAlpha=1; assignOrbiters(); hasOrbited=true;
+      particles.forEach(p=>{ if(!p.orbiter){ p.active=false; p.alpha=0; } });
+      phase="orbit"; phaseT=0; hint.textContent="Hover or tap the hat";
+    }
+  }
+  if(phase!=="idle" && phase!=="orbit") updateParticles(dt,now);
+  draw(now);
+  if(!reduced) requestAnimationFrame(frame);
+}
+// interaction: hover (fine pointers) or tap / click / keyboard
+let hoverArmed=true;
+stage.addEventListener("pointerenter", e=>{ if(e.pointerType!=="touch") startDissolve(); });
+stage.addEventListener("pointerdown", ()=>startDissolve());
+stage.addEventListener("keydown", e=>{
+  if(e.key==="Enter"||e.key===" "){ e.preventDefault(); startDissolve(); }
+});
+addEventListener("resize", resize);
+function applyMotionPref(){
+  reduced = reducedMQ.matches;
+  if(reduced){
+    angle=-0.55; angleVel=0; bob=0; solidAlpha=1;
+    phase="idle"; particles.forEach(p=>{p.active=false;p.alpha=0;});
+    hint.textContent="Motion reduced — the fedora rests still";
+    draw(0);
+  } else {
+    hint.textContent="Hover or tap the hat";
+    last=performance.now(); requestAnimationFrame(frame);
+  }
+}
+if(reducedMQ.addEventListener) reducedMQ.addEventListener("change", applyMotionPref);
+resize(); applyMotionPref();
+})();
+</script>
+</body>
+</html>

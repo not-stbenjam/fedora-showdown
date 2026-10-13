@@ -1,0 +1,660 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Red Fedora</title>
+<style>
+  :root{
+    --bg:#0a0909;
+    --ink:#ece6df;
+    --muted:#a79e93;
+    --accent:#ee0000;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;
+    background:
+      radial-gradient(120% 90% at 50% 38%, #201c1a 0%, #141110 46%, var(--bg) 78%);
+    color:var(--ink);
+    font-family:ui-sans-system, system-ui, "Segoe UI", Helvetica, Arial, sans-serif;
+    overflow:hidden;
+  }
+  /* faint floor sheen, kept separate from the canvas shadow */
+  body::after{
+    content:"";
+    position:fixed;
+    left:50%; bottom:6%;
+    width:min(88vw, 900px); height:34vh;
+    transform:translateX(-50%);
+    background:radial-gradient(50% 50% at 50% 50%, rgba(238,0,0,.055), rgba(0,0,0,0) 70%);
+    pointer-events:none;
+  }
+  main{
+    min-height:100dvh;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    padding:clamp(16px, 4vmin, 40px);
+  }
+  figure{
+    margin:0;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    width:min(94vw, 900px);
+  }
+  .stage{
+    position:relative;
+    width:100%;
+    aspect-ratio: 4 / 3;
+    max-height:72dvh;
+    cursor:pointer;
+    border-radius:8px;
+    outline:none;
+    -webkit-tap-highlight-color:transparent;
+    touch-action:manipulation;
+  }
+  .stage:focus-visible{
+    box-shadow:0 0 0 2px rgba(236,230,223,.85), 0 0 0 5px rgba(238,0,0,.55);
+  }
+  canvas{
+    position:absolute;
+    inset:0;
+    width:100%;
+    height:100%;
+    display:block;
+  }
+  figcaption{
+    margin-top:clamp(10px, 2.5vmin, 22px);
+    text-align:center;
+  }
+  .title{
+    font-family:Georgia, "Times New Roman", serif;
+    font-size:clamp(20px, 3.4vmin, 30px);
+    font-weight:400;
+    letter-spacing:.01em;
+    margin:0;
+  }
+  .title em{color:#ff4b40; font-style:normal}
+  .hint{
+    margin:8px 0 0;
+    font-size:clamp(12px, 1.7vmin, 14px);
+    line-height:1.5;
+    color:var(--muted);
+    letter-spacing:.02em;
+  }
+  .sr-only{
+    position:absolute; width:1px; height:1px;
+    overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap;
+  }
+  @media (max-aspect-ratio: 3/4){
+    .stage{aspect-ratio:1/1; max-height:62dvh}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .stage{cursor:default}
+  }
+</style>
+</head>
+<body>
+<main>
+  <figure>
+    <div class="stage" id="stage" role="button" tabindex="0"
+         aria-label="Red fedora. Activate to scatter it into particles and reform it.">
+      <canvas id="scene" aria-hidden="true"></canvas>
+    </div>
+    <figcaption>
+      <h1 class="title">The <em>red</em> fedora</h1>
+      <p class="hint" id="hint">Hover or tap the hat — it scatters to embers, then finds its way back.</p>
+      <p class="sr-only" id="status" aria-live="polite"></p>
+    </figcaption>
+  </figure>
+</main>
+
+<script>
+"use strict";
+(function () {
+  var stage = document.getElementById("stage");
+  var canvas = document.getElementById("scene");
+  var hint = document.getElementById("hint");
+  var statusEl = document.getElementById("status");
+  var ctx = canvas.getContext("2d");
+
+  var motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+  var reducedMotion = !!motionQuery.matches;
+
+  /* ---------- Fedora geometry: a lathe profile, elliptical in plan ---------- */
+  // [radius, height, material]  material: 0 red, 1 black band, 2 dark underside, 3 top
+  var PROFILE = [
+    [0.00, 1.18, 3], [0.35, 1.20, 3], [0.65, 1.28, 3], [0.92, 1.36, 3],
+    [1.05, 1.22, 0], [1.14, 0.92, 0], [1.20, 0.62, 0],
+    [1.24, 0.58, 1], [1.26, 0.22, 1], [1.25, 0.12, 1],
+    [1.35, 0.06, 0], [1.70, 0.00, 0], [2.05, 0.02, 0], [2.35, 0.14, 0], [2.42, 0.10, 0],
+    [2.35, 0.02, 2], [2.00, -0.06, 2], [1.60, -0.07, 2], [1.20, -0.06, 2], [0.00, -0.06, 2]
+  ];
+  var SEGMENTS = 72;
+  var PLAN_Z = 0.80;              // depth squash: a fedora is oval, not round
+  var MATERIALS = [
+    [204, 18, 18],                // red felt
+    [26, 24, 24],                 // band
+    [112, 12, 12],                // brim underside
+    [192, 16, 16]                 // crown top
+  ];
+
+  // One point on the hat surface in object space (before spin / tilt).
+  function surfacePoint(profileIndex, theta, out) {
+    var p = PROFILE[profileIndex];
+    var r = p[0], y = p[1];
+    var x = r * Math.cos(theta);
+    var z = r * Math.sin(theta) * PLAN_Z;
+    // Longitudinal centre crease across the crown top.
+    if (profileIndex <= 3 && r > 0.01) {
+      var g = Math.exp(-Math.pow(x / 0.34, 2));
+      y -= 0.10 * g * (r / 0.92);
+    }
+    // Gentle front pinch on the crown.
+    if (profileIndex >= 4 && profileIndex <= 7) {
+      var front = Math.max(0, Math.sin(theta));
+      var pinch = Math.exp(-Math.pow((Math.abs(Math.cos(theta)) - 0.72) / 0.28, 2));
+      var s = 1 - 0.07 * front * pinch;
+      x *= s; z *= s;
+    }
+    out.x = x; out.y = y; out.z = z;
+    return out;
+  }
+
+  // Pre-build the mesh: vertices[profile][segment], faces between them.
+  var vertices = [];
+  for (var pi = 0; pi < PROFILE.length; pi++) {
+    var ring = [];
+    for (var si = 0; si < SEGMENTS; si++) {
+      ring.push(surfacePoint(pi, (si / SEGMENTS) * Math.PI * 2, { x: 0, y: 0, z: 0 }));
+    }
+    vertices.push(ring);
+  }
+  var faces = [];
+  for (var fi = 0; fi < PROFILE.length - 1; fi++) {
+    for (var fj = 0; fj < SEGMENTS; fj++) {
+      var fj2 = (fj + 1) % SEGMENTS;
+      // Skip degenerate quads at the two centre points; triangles remain via the ring.
+      faces.push({
+        a: vertices[fi][fj], b: vertices[fi][fj2],
+        c: vertices[fi + 1][fj2], d: vertices[fi + 1][fj],
+        mat: PROFILE[fi + 1][2], depth: 0
+      });
+    }
+  }
+
+  /* ---------- Camera / view ---------- */
+  var TILT_X = 0.42;              // look slightly down on the crown
+  var view = { w: 0, h: 0, cx: 0, cy: 0, scale: 100, dpr: 1 };
+
+  function resize() {
+    var rect = stage.getBoundingClientRect();
+    view.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    view.w = Math.max(1, rect.width);
+    view.h = Math.max(1, rect.height);
+    canvas.width = Math.round(view.w * view.dpr);
+    canvas.height = Math.round(view.h * view.dpr);
+    view.cx = view.w / 2;
+    view.cy = view.h * 0.54;
+    view.scale = Math.min(view.w * 0.135, view.h * 0.175);
+    if (reducedMotion) drawStatic();
+  }
+
+  // Rotate around Y (spin), then tilt around X, then perspective-project.
+  function project(x, y, z, spin, out) {
+    var cs = Math.cos(spin), sn = Math.sin(spin);
+    var rx = x * cs + z * sn;
+    var rz = -x * sn + z * cs;
+    var ct = Math.cos(TILT_X), st = Math.sin(TILT_X);
+    var ty = y * ct - rz * st;
+    var tz = y * st + rz * ct;
+    var f = 7.5;
+    var persp = f / (f - tz);
+    out.x = view.cx + rx * view.scale * persp;
+    out.y = view.cy - ty * view.scale * persp;
+    out.z = tz;
+    out.s = persp;
+    return out;
+  }
+  // Same rotation without the camera tilt: the space particles live in.
+  function spinPoint(x, y, z, spin, out) {
+    var cs = Math.cos(spin), sn = Math.sin(spin);
+    out.x = x * cs + z * sn;
+    out.y = y;
+    out.z = -x * sn + z * cs;
+    return out;
+  }
+
+  var LIGHT = (function () {
+    var l = { x: -0.45, y: 0.85, z: 0.65 };
+    var m = Math.hypot(l.x, l.y, l.z);
+    l.x /= m; l.y /= m; l.z /= m;
+    return l;
+  })();
+
+  /* ---------- Glow sprites (pre-rendered; no per-particle shadowBlur) ---------- */
+  function makeSprite(r, g, b) {
+    var c = document.createElement("canvas");
+    c.width = 32; c.height = 32;
+    var g2 = c.getContext("2d");
+    var grad = g2.createRadialGradient(16, 16, 0, 16, 16, 16);
+    grad.addColorStop(0, "rgba(255,250,240,1)");
+    grad.addColorStop(0.25, "rgba(" + r + "," + g + "," + b + ",0.95)");
+    grad.addColorStop(0.6, "rgba(" + r + "," + g + "," + b + ",0.28)");
+    grad.addColorStop(1, "rgba(" + r + "," + g + "," + b + ",0)");
+    g2.fillStyle = grad;
+    g2.fillRect(0, 0, 32, 32);
+    return c;
+  }
+  var SPRITES = [
+    makeSprite(255, 70, 52),      // red felt -> warm red ember
+    makeSprite(255, 170, 96),     // sparse hot embers
+    makeSprite(196, 172, 148),    // black band -> pale ash
+    makeSprite(255, 96, 70)       // underside
+  ];
+
+  /* ---------- Particles sampled from the same surface as the mesh ---------- */
+  var PARTICLE_COUNT = (window.innerWidth < 640 || window.innerHeight < 500) ? 2400 : 4200;
+  var particles = [];
+  (function buildParticles() {
+    // Weight profile segments by approximate surface area (length x mean radius).
+    var weights = [], total = 0, i;
+    for (i = 0; i < PROFILE.length - 1; i++) {
+      var dr = PROFILE[i + 1][0] - PROFILE[i][0];
+      var dy = PROFILE[i + 1][1] - PROFILE[i][1];
+      var w = Math.hypot(dr, dy) * Math.max(0.08, (PROFILE[i][0] + PROFILE[i + 1][0]) / 2);
+      if (i === PROFILE.length - 2) w *= 0.25; // hidden underside centre
+      weights.push(w); total += w;
+    }
+    function pickSegment() {
+      var t = Math.random() * total;
+      for (var i2 = 0; i2 < weights.length; i2++) { t -= weights[i2]; if (t <= 0) return i2; }
+      return weights.length - 1;
+    }
+    for (i = 0; i < PARTICLE_COUNT; i++) {
+      var seg = pickSegment();
+      var f = Math.random();
+      var theta = Math.random() * Math.PI * 2;
+      // Interpolate the profile, then reuse the crease/pinch shaping via two samples.
+      var pa = surfacePoint(seg, theta, { x: 0, y: 0, z: 0 });
+      var pb = surfacePoint(seg + 1, theta, { x: 0, y: 0, z: 0 });
+      var mat = PROFILE[seg + 1][2];
+      var sprite = mat === 1 ? 2 : (mat === 2 ? 3 : (Math.random() < 0.16 ? 1 : 0));
+      particles.push({
+        hx: pa.x + (pb.x - pa.x) * f,
+        hy: pa.y + (pb.y - pa.y) * f,
+        hz: pa.z + (pb.z - pa.z) * f,
+        x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0,
+        delay: Math.random() * 0.35 + Math.max(0, 1.2 - (pa.y + (pb.y - pa.y) * f)) * 0.08,
+        phase: Math.random() * Math.PI * 2,
+        freq: 0.7 + Math.random() * 1.6,
+        size: 0.65 + Math.random() * 1.05,
+        sprite: sprite,
+        sx: 0, sy: 0, sz: 0, ss: 1
+      });
+    }
+  })();
+
+  /* ---------- Orbiters that linger after a reform ---------- */
+  var orbiters = [];
+  for (var oi = 0; oi < 24; oi++) {
+    orbiters.push({
+      radius: 2.75 + Math.random() * 1.05,
+      height: 0.15 + Math.random() * 1.35,
+      phase: Math.random() * Math.PI * 2,
+      speed: (0.22 + Math.random() * 0.3) * (Math.random() < 0.25 ? -1 : 1),
+      bob: 0.06 + Math.random() * 0.14,
+      sprite: Math.random() < 0.3 ? 1 : 0,
+      trail: []
+    });
+  }
+
+  /* ---------- Rendering ---------- */
+  var tmpA = { x: 0, y: 0, z: 0, s: 1 };
+  var tmpB = { x: 0, y: 0, z: 0, s: 1 };
+  var tmpC = { x: 0, y: 0, z: 0, s: 1 };
+  var tmpD = { x: 0, y: 0, z: 0, s: 1 };
+  var homeTmp = { x: 0, y: 0, z: 0 };
+
+  function shade(base, amount) {
+    var r = Math.min(255, Math.round(base[0] * amount));
+    var g = Math.min(255, Math.round(base[1] * amount));
+    var b = Math.min(255, Math.round(base[2] * amount));
+    return "rgb(" + r + "," + g + "," + b + ")";
+  }
+
+  function drawShadow(strength, spread) {
+    var rx = view.scale * 2.45 * spread;
+    var ry = rx * 0.20;
+    var y = view.cy + view.scale * 0.72;
+    ctx.save();
+    ctx.translate(view.cx, y);
+    ctx.scale(1, ry / rx);
+    var grad = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+    grad.addColorStop(0, "rgba(0,0,0," + (0.55 * strength).toFixed(3) + ")");
+    grad.addColorStop(0.55, "rgba(0,0,0," + (0.30 * strength).toFixed(3) + ")");
+    grad.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(0, 0, rx, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawMesh(spin, alpha) {
+    if (alpha <= 0.003) return;
+    var i, face;
+    // Project once per vertex into scratch fields on the vertex objects.
+    for (i = 0; i < vertices.length; i++) {
+      for (var j = 0; j < vertices[i].length; j++) {
+        var v = vertices[i][j];
+        project(v.x, v.y, v.z, spin, tmpA);
+        v.px = tmpA.x; v.py = tmpA.y; v.pz = tmpA.z;
+        // World (tilted) position for the face normal.
+        spinPoint(v.x, v.y, v.z, spin, homeTmp);
+        var ct = Math.cos(TILT_X), st = Math.sin(TILT_X);
+        v.wx = homeTmp.x;
+        v.wy = homeTmp.y * ct - homeTmp.z * st;
+        v.wz = homeTmp.y * st + homeTmp.z * ct;
+      }
+    }
+    for (i = 0; i < faces.length; i++) {
+      face = faces[i];
+      face.depth = (face.a.pz + face.b.pz + face.c.pz + face.d.pz) / 4;
+    }
+    faces.sort(function (p, q) { return p.depth - q.depth; });
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    for (i = 0; i < faces.length; i++) {
+      face = faces[i];
+      var ux = face.b.wx - face.a.wx, uy = face.b.wy - face.a.wy, uz = face.b.wz - face.a.wz;
+      var vx = face.d.wx - face.a.wx, vy = face.d.wy - face.a.wy, vz = face.d.wz - face.a.wz;
+      var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      var nl = Math.hypot(nx, ny, nz) || 1;
+      nx /= nl; ny /= nl; nz /= nl;
+      // Keep normals facing outward from the hat's vertical axis / top.
+      var cxw = (face.a.wx + face.c.wx) / 2, cyw = (face.a.wy + face.c.wy) / 2;
+      if (nx * cxw + ny * (cyw - 0.45) < 0 && Math.abs(cxw) + Math.abs(cyw - 0.45) > 0.05) {
+        nx = -nx; ny = -ny; nz = -nz;
+      }
+      var diff = Math.max(0, nx * LIGHT.x + ny * LIGHT.y + nz * LIGHT.z);
+      var rim = Math.pow(1 - Math.abs(nz), 3) * 0.10;
+      var amount = 0.34 + 0.78 * diff + rim;
+      ctx.fillStyle = shade(MATERIALS[face.mat], amount);
+      ctx.beginPath();
+      ctx.moveTo(face.a.px, face.a.py);
+      ctx.lineTo(face.b.px, face.b.py);
+      ctx.lineTo(face.c.px, face.c.py);
+      ctx.lineTo(face.d.px, face.d.py);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawParticles(alpha) {
+    if (alpha <= 0.003) return;
+    particles.sort(function (p, q) { return p.sz - q.sz; });
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    for (var i = 0; i < particles.length; i++) {
+      var p = particles[i];
+      var depthFade = 0.55 + 0.45 * Math.min(1, Math.max(0, (p.sz + 3.5) / 7));
+      ctx.globalAlpha = alpha * depthFade * 0.92;
+      var size = p.size * p.ss * view.scale * 0.055;
+      size = Math.max(1.6, Math.min(size, 15));
+      ctx.drawImage(SPRITES[p.sprite], p.sx - size / 2, p.sy - size / 2, size, size);
+    }
+    ctx.restore();
+  }
+
+  function drawOrbiters(time) {
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    for (var i = 0; i < orbiters.length; i++) {
+      var o = orbiters[i];
+      var a = o.phase + time * o.speed;
+      var x = Math.cos(a) * o.radius;
+      var z = Math.sin(a) * o.radius * PLAN_Z;
+      var y = o.height + Math.sin(time * 0.8 + o.phase) * o.bob;
+      project(x, y, z, 0, tmpA);
+      o.trail.push({ x: tmpA.x, y: tmpA.y });
+      if (o.trail.length > 14) o.trail.shift();
+      if (o.trail.length > 2) {
+        ctx.beginPath();
+        ctx.moveTo(o.trail[0].x, o.trail[0].y);
+        for (var t = 1; t < o.trail.length; t++) ctx.lineTo(o.trail[t].x, o.trail[t].y);
+        ctx.strokeStyle = "rgba(255,120,90,0.16)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+      var size = Math.max(2, Math.min(9, view.scale * 0.032 * tmpA.s));
+      ctx.globalAlpha = 0.55;
+      ctx.drawImage(SPRITES[o.sprite], tmpA.x - size / 2, tmpA.y - size / 2, size, size);
+    }
+    ctx.restore();
+  }
+
+  /* ---------- Animation state ---------- */
+  var NORMAL_SPEED = 0.85;        // rad/s, about one turn every 7.4 s
+  var SLOW_SPEED = 0.10;
+  var SCATTER_END = 1.55;
+  var SWIRL_END = 2.45;
+  var REFORM_END = 4.25;
+
+  var state = "idle";             // idle | animating
+  var stateTime = 0;
+  var spin = -0.55;
+  var spinSpeed = NORMAL_SPEED;
+  var orbitersOn = false;
+  var hoverArmed = true;
+  var elapsed = 0;
+
+  function smoothstep(a, b, x) {
+    var t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+    return t * t * (3 - 2 * t);
+  }
+  function clamp01(x) { return Math.min(1, Math.max(0, x)); }
+
+  function startDissolve() {
+    if (reducedMotion || state !== "idle") return;
+    state = "animating";
+    stateTime = 0;
+    orbitersOn = false;
+    for (var i = 0; i < orbiters.length; i++) orbiters[i].trail.length = 0;
+    for (var j = 0; j < particles.length; j++) {
+      var p = particles[j];
+      spinPoint(p.hx, p.hy, p.hz, spin, homeTmp);
+      p.x = homeTmp.x; p.y = homeTmp.y; p.z = homeTmp.z;
+      var radial = Math.hypot(p.x, p.z) || 0.001;
+      var out = 0.55 + Math.random() * 1.15;
+      p.vx = (p.x / radial) * out + (Math.random() - 0.5) * 0.7;
+      p.vz = (p.z / radial) * out + (Math.random() - 0.5) * 0.7;
+      p.vy = 0.25 + Math.random() * 0.95;   // embers rise
+    }
+    statusEl.textContent = "The fedora scatters into embers, then reforms.";
+  }
+
+  function updateParticles(dt) {
+    var reforming = stateTime >= SWIRL_END;
+    var reformT = reforming ? clamp01((stateTime - SWIRL_END) / (REFORM_END - SWIRL_END)) : 0;
+    var springK = 10 + 34 * reformT;
+    var settle = smoothstep(REFORM_END - 0.55, REFORM_END, stateTime);
+
+    for (var i = 0; i < particles.length; i++) {
+      var p = particles[i];
+      spinPoint(p.hx, p.hy, p.hz, spin, homeTmp);
+
+      if (!reforming) {
+        if (stateTime > p.delay) {
+          var radial = Math.hypot(p.x, p.z) || 0.001;
+          // Tangential swirl around the vertical axis, plus a slow curl.
+          var swirl = stateTime < SCATTER_END ? 1.15 : 1.65;
+          p.vx += (-p.z / radial) * swirl * dt;
+          p.vz += (p.x / radial) * swirl * dt;
+          p.vx += Math.sin(elapsed * p.freq + p.phase) * 0.35 * dt;
+          p.vz += Math.cos(elapsed * p.freq * 0.9 + p.phase) * 0.35 * dt;
+          p.vy += (0.10 + Math.sin(elapsed * p.freq + p.phase) * 0.12) * dt;
+          // A soft ceiling and floor keep the cloud framed.
+          if (p.y > 2.6) p.vy -= 1.4 * dt;
+          if (p.y < -0.55) p.vy += 1.4 * dt;
+          if (radial > 3.9) { p.vx -= (p.x / radial) * 1.6 * dt; p.vz -= (p.z / radial) * 1.6 * dt; }
+          var drag = Math.exp(-0.55 * dt);
+          p.vx *= drag; p.vy *= drag; p.vz *= drag;
+          p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+        } else {
+          p.x = homeTmp.x; p.y = homeTmp.y; p.z = homeTmp.z;
+        }
+      } else {
+        // Spring home with strong damping, then an exact settle onto the surface.
+        p.vx += (homeTmp.x - p.x) * springK * dt;
+        p.vy += (homeTmp.y - p.y) * springK * dt;
+        p.vz += (homeTmp.z - p.z) * springK * dt;
+        var damp = Math.exp(-(3.2 + 4.5 * reformT) * dt);
+        p.vx *= damp; p.vy *= damp; p.vz *= damp;
+        p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+        if (settle > 0) {
+          var k = settle * (1 - Math.exp(-14 * dt));
+          p.x += (homeTmp.x - p.x) * k;
+          p.y += (homeTmp.y - p.y) * k;
+          p.z += (homeTmp.z - p.z) * k;
+        }
+      }
+
+      project(p.x, p.y, p.z, 0, tmpB);
+      p.sx = tmpB.x; p.sy = tmpB.y; p.sz = tmpB.z; p.ss = tmpB.s;
+    }
+  }
+
+  function alphas() {
+    if (state === "idle") return { mesh: 1, particles: 0, shadow: 1, spread: 1 };
+    var meshOut = 1 - smoothstep(0, 0.5, stateTime);
+    var meshIn = smoothstep(REFORM_END - 0.6, REFORM_END, stateTime);
+    var mesh = Math.max(meshOut, meshIn);
+    var partIn = smoothstep(0, 0.4, stateTime);
+    var partOut = 1 - smoothstep(REFORM_END - 0.55, REFORM_END, stateTime);
+    var cloud = smoothstep(0.2, SCATTER_END, stateTime) * (1 - smoothstep(SWIRL_END, REFORM_END, stateTime));
+    return {
+      mesh: mesh,
+      particles: Math.min(partIn, Math.max(partOut, 0)) * (stateTime >= REFORM_END ? 0 : 1),
+      shadow: 1 - 0.62 * cloud,
+      spread: 1 + 0.16 * cloud
+    };
+  }
+
+  function render() {
+    ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+    ctx.clearRect(0, 0, view.w, view.h);
+    var a = alphas();
+    drawShadow(a.shadow, a.spread);
+    drawMesh(spin, a.mesh);
+    drawParticles(a.particles);
+    if (state === "idle" && orbitersOn) drawOrbiters(elapsed);
+  }
+
+  function drawStatic() {
+    if (!view.w) return;
+    spin = -0.55;
+    ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+    ctx.clearRect(0, 0, view.w, view.h);
+    drawShadow(1, 1);
+    drawMesh(spin, 1);
+  }
+
+  var lastTs = null;
+  var rafId = 0;
+  function frame(ts) {
+    rafId = requestAnimationFrame(frame);
+    if (lastTs === null) lastTs = ts;
+    var dt = Math.min(0.05, Math.max(0, (ts - lastTs) / 1000));
+    lastTs = ts;
+    elapsed += dt;
+
+    var targetSpeed = state === "animating" ? SLOW_SPEED : NORMAL_SPEED;
+    spinSpeed += (targetSpeed - spinSpeed) * (1 - Math.exp(-2.2 * dt));
+    spin += spinSpeed * dt;
+
+    if (state === "animating") {
+      stateTime += dt;
+      updateParticles(dt);
+      if (stateTime >= REFORM_END) {
+        state = "idle";
+        stateTime = 0;
+        orbitersOn = true;
+        statusEl.textContent = "The fedora has reformed.";
+      }
+    }
+    render();
+  }
+
+  function startLoop() {
+    if (rafId) return;
+    lastTs = null;
+    rafId = requestAnimationFrame(frame);
+  }
+  function stopLoop() {
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = 0;
+    lastTs = null;
+  }
+
+  function applyMotionPreference() {
+    if (reducedMotion) {
+      stopLoop();
+      state = "idle";
+      orbitersOn = false;
+      hint.textContent = "Reduced motion is on, so the hat is shown still.";
+      stage.setAttribute("aria-label", "Red fedora, shown still because reduced motion is on.");
+      drawStatic();
+    } else {
+      hint.textContent = "Hover or tap the hat — it scatters to embers, then finds its way back.";
+      stage.setAttribute("aria-label", "Red fedora. Activate to scatter it into particles and reform it.");
+      startLoop();
+    }
+  }
+
+  /* ---------- Interaction ---------- */
+  stage.addEventListener("pointerenter", function (event) {
+    if (event.pointerType === "touch") return;
+    if (!hoverArmed) return;
+    hoverArmed = false;
+    startDissolve();
+  });
+  stage.addEventListener("pointerleave", function () { hoverArmed = true; });
+  stage.addEventListener("pointerdown", function () { startDissolve(); });
+  stage.addEventListener("keydown", function (event) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      startDissolve();
+    }
+  });
+
+  if (typeof motionQuery.addEventListener === "function") {
+    motionQuery.addEventListener("change", function (event) {
+      reducedMotion = !!event.matches;
+      applyMotionPreference();
+    });
+  } else if (typeof motionQuery.addListener === "function") {
+    motionQuery.addListener(function (event) {
+      reducedMotion = !!event.matches;
+      applyMotionPreference();
+    });
+  }
+
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) { stopLoop(); }
+    else if (!reducedMotion) { startLoop(); }
+  });
+
+  window.addEventListener("resize", resize);
+  resize();
+  applyMotionPreference();
+})();
+</script>
+</body>
+</html>
