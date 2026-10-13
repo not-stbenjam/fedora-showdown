@@ -1,0 +1,1947 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>The Red Fedora — Interactive 3D Study</title>
+<style>
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  :root {
+    --bg-core: #0a080c;
+    --bg-edge: #040306;
+    --text-primary: rgba(246, 241, 243, 0.88);
+    --text-secondary: rgba(168, 156, 162, 0.54);
+    --accent-ember: rgba(238, 0, 0, 0.75);
+  }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: var(--bg-edge);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .hero {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background:
+      radial-gradient(circle at 50% 44%, rgba(165, 14, 22, 0.075) 0%, rgba(70, 6, 12, 0.03) 34%, transparent 68%),
+      radial-gradient(circle at 50% 50%, var(--bg-core) 0%, var(--bg-edge) 100%);
+    overflow: hidden;
+  }
+
+  .hero::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse 80% 55% at 50% 45%, transparent 50%, rgba(0, 0, 0, 0.55) 100%);
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  #stage {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    z-index: 2;
+    touch-action: manipulation;
+  }
+
+  .interaction-target {
+    position: relative;
+    z-index: 3;
+    width: min(440px, 78vw);
+    height: min(360px, 54vh);
+    border-radius: 50%;
+    cursor: pointer;
+    outline: none;
+    background: transparent;
+    border: none;
+    transform: translateY(-4vh);
+  }
+
+  .interaction-target:focus-visible {
+    box-shadow: 0 0 0 1.5px rgba(238, 40, 40, 0.45);
+  }
+
+  .caption-wrap {
+    position: absolute;
+    bottom: clamp(2.2rem, 7.5vh, 4.5rem);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 4;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.42rem;
+    text-align: center;
+    pointer-events: none;
+    padding: 0 1.25rem;
+    width: 100%;
+    max-width: 460px;
+  }
+
+  .caption-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-size: clamp(0.78rem, 1.35vw, 0.88rem);
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--text-primary);
+  }
+
+  .caption-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #e01b24;
+    box-shadow: 0 0 8px rgba(238, 30, 36, 0.65);
+    transition: transform 0.6s ease, background-color 0.6s ease, box-shadow 0.6s ease;
+  }
+
+  .hero[data-state="dissolving"] .caption-dot {
+    background: #ff7a29;
+    box-shadow: 0 0 12px rgba(255, 128, 40, 0.85);
+    transform: scale(1.25);
+  }
+
+  .caption-sub {
+    font-size: clamp(0.72rem, 1.15vw, 0.8rem);
+    font-weight: 400;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+    transition: opacity 0.45s ease, color 0.45s ease;
+  }
+
+  @media (max-height: 540px) {
+    .interaction-target {
+      height: 56vh;
+      transform: translateY(-5vh);
+    }
+    .caption-wrap {
+      bottom: 1.1rem;
+      gap: 0.2rem;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .caption-dot,
+    .caption-sub {
+      transition: none;
+    }
+  }
+</style>
+</head>
+<body>
+  <main class="hero" id="hero" data-state="idle">
+    <canvas id="stage" aria-hidden="true"></canvas>
+    <button
+      type="button"
+      class="interaction-target"
+      id="hitZone"
+      aria-label="3D Red Hat style fedora logo. Hover or tap to dissolve into glowing embers and reform."
+    ></button>
+    <figcaption class="caption-wrap">
+      <div class="caption-title">
+        <span class="caption-dot" aria-hidden="true"></span>
+        <span>Shadowman Fedora</span>
+      </div>
+      <p class="caption-sub" id="captionSub">Hover or tap to dissolve into embers</p>
+    </figcaption>
+  </main>
+
+<script>
+(() => {
+  'use strict';
+
+  const canvas = document.getElementById('stage');
+  const heroEl = document.getElementById('hero');
+  const hitZone = document.getElementById('hitZone');
+  const captionSub = document.getElementById('captionSub');
+
+  const gl = canvas.getContext('webgl', {
+    alpha: false,
+    antialias: true,
+    depth: true,
+    stencil: false,
+    powerPreference: 'high-performance'
+  });
+
+  if (!gl) {
+    captionSub.textContent = 'WebGL is required to view this 3D scene.';
+    return;
+  }
+
+  // OES_standard_derivatives for crisp procedural felt micro-detail if available
+  gl.getExtension('OES_standard_derivatives');
+
+  // Reduced motion preference
+  const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+  let reducedMotion = motionQuery.matches;
+  const onMotionChange = (e) => {
+    reducedMotion = e.matches;
+  };
+  if (motionQuery.addEventListener) {
+    motionQuery.addEventListener('change', onMotionChange);
+  } else if (motionQuery.addListener) {
+    motionQuery.addListener(onMotionChange);
+  }
+
+  // ============================================================================
+  // 1. MATHEMATICAL 3D SCULPTING OF THE RED HAT FEDORA
+  // ============================================================================
+
+  function smoothstep(edge0, edge1, x) {
+    const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+    return t * t * (3 - 2 * t);
+  }
+
+  function mix(a, b, t) {
+    return a + (b - a) * t;
+  }
+
+  // Compact deterministic 3D value/simplex-style noise in JS (matches GLSL dissolve pattern)
+  function hash3(x, y, z) {
+    let n = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453123;
+    return n - Math.floor(n);
+  }
+
+  function noise3D(x, y, z) {
+    const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z);
+    const fx = x - ix, fy = y - iy, fz = z - iz;
+    const ux = fx * fx * (3 - 2 * fx);
+    const uy = fy * fy * (3 - 2 * fy);
+    const uz = fz * fz * (3 - 2 * fz);
+
+    const n000 = hash3(ix, iy, iz);
+    const n100 = hash3(ix + 1, iy, iz);
+    const n010 = hash3(ix, iy + 1, iz);
+    const n110 = hash3(ix + 1, iy + 1, iz);
+    const n001 = hash3(ix, iy, iz + 1);
+    const n101 = hash3(ix + 1, iy, iz + 1);
+    const n011 = hash3(ix, iy + 1, iz + 1);
+    const n111 = hash3(ix + 1, iy + 1, iz + 1);
+
+    const nx00 = mix(n000, n100, ux);
+    const nx10 = mix(n010, n110, ux);
+    const nx01 = mix(n001, n101, ux);
+    const nx11 = mix(n011, n111, ux);
+
+    const nxy0 = mix(nx00, nx10, uy);
+    const nxy1 = mix(nx01, nx11, uy);
+
+    return mix(nxy0, nxy1, uz);
+  }
+
+  function fbm3D(x, y, z) {
+    let v = 0.0;
+    v += 0.55 * noise3D(x, y, z);
+    v += 0.30 * noise3D(x * 2.07 + 13.1, y * 2.07 + 7.7, z * 2.07 + 19.3);
+    v += 0.15 * noise3D(x * 4.13 + 5.3, y * 4.13 + 29.1, z * 4.13 + 3.7);
+    return v;
+  }
+
+  // Compute the exact dissolve threshold [0, 1] for any local 3D point on the hat
+  function computeDissolveMetric(px, py, pz) {
+    const n = fbm3D(px * 2.35 + 4.2, py * 2.35 + 1.9, pz * 2.35 + 8.6);
+    const radial = Math.sqrt(px * px + pz * pz);
+    // Outer brim edges & crown crest ignite slightly earlier, propagating organically inward
+    const edgeFactor = Math.min(1.0, (radial / 1.65) * 0.52 + Math.max(0.0, (py + 0.25) / 1.1) * 0.28);
+    return Math.max(0.02, Math.min(0.98, n * 0.62 + (1.0 - edgeFactor) * 0.38));
+  }
+
+  function angleDiff(a, b) {
+    let d = a - b;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return d;
+  }
+
+  /**
+   * Evaluates the 3D surface position and metadata of the fedora for (u, v) in [0, 1]^2.
+   * u: radial profile from crown center top -> crown wall -> ribbon -> brim top -> brim lip -> brim underside
+   * v: azimuthal angle around the hat (theta = v * 2 * PI)
+   * Coordinate convention:
+   *   +X = Right, +Y = Up, +Z = Front
+   */
+  function evaluateFedoraPoint(u, v) {
+    const theta = v * Math.PI * 2.0;
+    const cosT = Math.cos(theta);
+    const sinT = Math.sin(theta); // +1 at front (+Z), -1 at back (-Z)
+
+    let r = 0.0;
+    let y = 0.0;
+    let matId = 0.0; // 0 = red felt, 1 = dark silk ribbon, 2 = dark inner underside
+    let ao = 1.0;
+
+    // Oval elongation: slightly longer front-to-back than side-to-side
+    let ex = 1.0;
+    let ez = 1.17;
+
+    if (u <= 0.27) {
+      // ZONE 1: Crown Top & Teardrop Lengthwise Crease
+      const t = u / 0.27; // 0 at center -> 1 at crown top shoulder
+      r = t * 0.605;
+
+      // Base dome height before crease
+      const shoulder = Math.sin(t * Math.PI * 0.5);
+      y = 0.69 + 0.095 * Math.sin(t * Math.PI * 0.82);
+
+      // Forward rake: front of the crown stands slightly taller than the back
+      y += 0.065 * sinT * smoothstep(0.15, 0.95, t);
+
+      // Classic Fedora Center Lengthwise Crease (runs front-to-back along X = 0)
+      const xLocal = r * cosT;
+      const zLocal = r * sinT;
+      const insideRidge = 1.0 - smoothstep(0.55, 0.96, t);
+      const centerGutter = Math.exp(-(xLocal * xLocal) / (0.21 * 0.21));
+      const teardropBasin = Math.exp(-((xLocal * xLocal) / 0.14 + ((zLocal + 0.04) * (zLocal + 0.04)) / 0.22));
+
+      const creaseDepth = (0.21 * centerGutter + 0.07 * teardropBasin) * insideRidge;
+      y -= creaseDepth;
+
+      // Slight raised side ridges flanking the center crease
+      const sideRidge = smoothstep(0.45, 0.85, t) * (1.0 - smoothstep(0.85, 1.0, t)) * (0.35 + 0.65 * Math.abs(cosT));
+      y += 0.048 * sideRidge;
+
+      ao = 0.72 + 0.28 * (1.0 - creaseDepth * 2.1);
+    } else if (u <= 0.46) {
+      // ZONE 2: Crown Side Walls (with classic front side pinches)
+      const t = (u - 0.27) / 0.19; // 0 at top shoulder -> 1 at top of ribbon
+      // Smooth S-curve profile down the crown wall
+      const easeT = smoothstep(0.0, 1.0, t);
+      r = mix(0.605, 0.715, Math.pow(t, 0.88));
+
+      // Top shoulder height matches Zone 1 end (t=1 in Zone 1 has sin(0.82*pi) = 0.5358)
+      const yTop = 0.69 + 0.095 * Math.sin(Math.PI * 0.82) + 0.065 * sinT;
+      const yBot = 0.168;
+      // Rounded crown shoulder at top transitioning into tapered side wall
+      const shoulderRound = Math.pow(1.0 - t, 2.6) * 0.032;
+      y = mix(yTop, yBot, easeT) + shoulderRound;
+
+      ao = mix(0.98, 0.78, t * t);
+    } else if (u <= 0.54) {
+      // ZONE 3: Silk Grosgrain Hatband (Ribbon) + Left Side Bow Detail
+      const t = (u - 0.46) / 0.08; // 0 at ribbon top -> 1 at crown base
+      r = mix(0.715, 0.732, t);
+      y = mix(0.168, 0.008, t);
+
+      // Crisp ribbon relief stepping slightly out from the felt crown
+      const bevel = smoothstep(0.0, 0.11, t) * smoothstep(1.0, 0.89, t);
+      let ribbonRelief = 0.016 * bevel;
+
+      // Classic left-side grosgrain bow / keeper detail (around theta = PI + 0.32)
+      const bowDist = angleDiff(theta, Math.PI + 0.32);
+      const bowEnv = Math.exp(-(bowDist * bowDist) / (0.28 * 0.28));
+      // Two bow wings with a center knot pinch
+      const bowWave = 0.55 + 0.45 * Math.cos(bowDist * 18.0);
+      ribbonRelief += 0.022 * bowEnv * bevel * bowWave;
+
+      r += ribbonRelief;
+      matId = 1.0;
+      ao = mix(0.82, 0.58, t);
+    } else if (u <= 0.77) {
+      // ZONE 4: Brim Top Surface (Asymmetric Red Hat Snap-Brim Sweep)
+      const b = (u - 0.54) / 0.23; // 0 at crown base -> 1 at outer brim edge
+      const bEase = Math.pow(b, 0.95);
+      r = mix(0.732, 1.50, bEase);
+      ex = mix(1.0, 1.02, b);
+      ez = mix(1.17, 1.15, b);
+
+      y = evaluateBrimHeight(b, theta);
+
+      // Subtle rolled lip upward curl at the very outer rim of the brim
+      const lipCurl = Math.pow(smoothstep(0.82, 1.0, b), 2.0);
+      y += lipCurl * 0.032;
+      r -= lipCurl * 0.012;
+
+      // Ambient occlusion in the crease where crown meets brim
+      ao = mix(0.46, 0.98, Math.pow(b, 0.45));
+    } else if (u <= 0.81) {
+      // ZONE 5: Rounded Outer Brim Edge (gives real felt thickness)
+      const t = (u - 0.77) / 0.04; // 0 at top rim -> 1 at bottom rim
+      const edgeAngle = t * Math.PI;
+      const b = 1.0;
+      ex = 1.02;
+      ez = 1.15;
+
+      const baseR = 1.50 - 0.012 + Math.sin(edgeAngle) * 0.018;
+      const topY = evaluateBrimHeight(b, theta) + 0.032;
+      const thick = 0.042;
+      r = baseR;
+      y = topY - (1.0 - Math.cos(edgeAngle)) * 0.5 * thick;
+      ao = mix(0.92, 0.65, t);
+    } else if (u <= 0.95) {
+      // ZONE 6: Brim Underside
+      const t = (u - 0.81) / 0.14; // 0 at outer rim -> 1 at inner crown base
+      const b = 1.0 - t;
+      const bEase = Math.pow(b, 0.95);
+      r = mix(0.70, 1.50 - 0.012, bEase);
+      ex = mix(1.0, 1.02, b);
+      ez = mix(1.17, 1.15, b);
+
+      const lipCurl = Math.pow(smoothstep(0.82, 1.0, b), 2.0);
+      const topY = evaluateBrimHeight(b, theta) + lipCurl * 0.032;
+      y = topY - 0.042;
+      ao = mix(0.62, 0.22, t);
+    } else {
+      // ZONE 7: Recessed Dark Crown Interior Seal (prevents seeing inside from below)
+      const t = (u - 0.95) / 0.05;
+      r = (1.0 - t) * 0.70;
+      y = -0.042 + smoothstep(0.0, 1.0, t) * 0.18;
+      matId = 2.0;
+      ao = 0.10;
+    }
+
+    // Apply the signature Fedora Front Side Pinches (Dimples) across the upper & mid crown
+    if (u <= 0.46) {
+      const pinchHeightEnv = smoothstep(0.08, 0.25, u) * smoothstep(0.46, 0.30, u);
+      // Two front-side pinch hollows at ~34 degrees left and right of front (+Z is PI/2)
+      const dRight = angleDiff(theta, Math.PI * 0.5 - 0.58);
+      const dLeft = angleDiff(theta, Math.PI * 0.5 + 0.58);
+      const pinchR = Math.exp(-(dRight * dRight) / (0.37 * 0.37));
+      const pinchL = Math.exp(-(dLeft * dLeft) / (0.37 * 0.37));
+      const pinchAmount = (pinchR + pinchL) * pinchHeightEnv;
+
+      r -= 0.125 * pinchAmount;
+      y -= 0.022 * pinchAmount;
+      ao *= (1.0 - 0.24 * pinchAmount);
+
+      // Proud front prow ridge between the two pinches
+      const dFront = angleDiff(theta, Math.PI * 0.5);
+      const frontProw = Math.exp(-(dFront * dFront) / (0.28 * 0.28)) * pinchHeightEnv;
+      r += 0.026 * frontProw;
+    }
+
+    const x = r * cosT * ex;
+    const z = r * sinT * ez;
+
+    // Center the hat vertically around y = 0 for balanced rotation
+    return { x, y: y - 0.22, z, matId, ao };
+  }
+
+  function evaluateBrimHeight(b, theta) {
+    // Classic Red Hat snap-brim wave:
+    // Dipped downward in the front/front-right, sweeping gracefully upward at the back/back-left and sides
+    const snapDir = Math.PI * 0.5 - 0.20; // Front-right bias
+    const frontAlign = 0.5 + 0.5 * Math.cos(theta - snapDir);
+    const snapWeight = smoothstep(0.14, 0.88, frontAlign);
+
+    // Front snap-down curve
+    const yFront = -0.255 * (0.36 * b + 0.64 * Math.pow(b, 1.65));
+    // Back & side upward curl
+    const backAlign = 0.5 + 0.5 * Math.cos(theta - (-Math.PI * 0.5 - 0.20));
+    const backBoost = 1.0 + 0.25 * backAlign;
+    const yBackSide = (-0.028 * b + 0.215 * Math.pow(b, 2.05)) * backBoost;
+
+    return mix(yBackSide, yFront, snapWeight);
+  }
+
+  // Build high-resolution indexed triangle mesh + compute analytical finite-difference normals
+  function buildFedoraMesh(uSteps, vSteps) {
+    const numVerts = (uSteps + 1) * (vSteps + 1);
+    const positions = new Float32Array(numVerts * 3);
+    const normals = new Float32Array(numVerts * 3);
+    const uvs = new Float32Array(numVerts * 2);
+    const props = new Float32Array(numVerts * 3); // matId, ao, dissolveMetric
+
+    const epsU = 0.0018;
+    const epsV = 0.0018;
+
+    let ptr3 = 0;
+    let ptr2 = 0;
+
+    for (let iu = 0; iu <= uSteps; iu++) {
+      const u = iu / uSteps;
+      for (let iv = 0; iv <= vSteps; iv++) {
+        const v = iv / vSteps;
+        const p = evaluateFedoraPoint(u, v);
+
+        // Finite difference tangents for smooth normals
+        const uMinus = Math.max(0.0005, u - epsU);
+        const uPlus = Math.min(0.9995, u + epsU);
+        const pU1 = evaluateFedoraPoint(uMinus, v);
+        const pU2 = evaluateFedoraPoint(uPlus, v);
+
+        const pV1 = evaluateFedoraPoint(u, v - epsV);
+        const pV2 = evaluateFedoraPoint(u, v + epsV);
+
+        const tux = pU2.x - pU1.x;
+        const tuy = pU2.y - pU1.y;
+        const tuz = pU2.z - pU1.z;
+
+        const tvx = pV2.x - pV1.x;
+        const tvy = pV2.y - pV1.y;
+        const tvz = pV2.z - pV1.z;
+
+        // Cross product tv x tu points outward
+        let nx = tvy * tuz - tvz * tuy;
+        let ny = tvz * tux - tvx * tuz;
+        let nz = tvx * tuy - tvy * tux;
+        const len = Math.hypot(nx, ny, nz) || 1.0;
+        nx /= len;
+        ny /= len;
+        nz /= len;
+
+        positions[ptr3] = p.x;
+        positions[ptr3 + 1] = p.y;
+        positions[ptr3 + 2] = p.z;
+
+        normals[ptr3] = nx;
+        normals[ptr3 + 1] = ny;
+        normals[ptr3 + 2] = nz;
+
+        uvs[ptr2] = u;
+        uvs[ptr2 + 1] = v;
+
+        const dMetric = computeDissolveMetric(p.x, p.y, p.z);
+        props[ptr3] = p.matId;
+        props[ptr3 + 1] = p.ao;
+        props[ptr3 + 2] = dMetric;
+
+        ptr3 += 3;
+        ptr2 += 2;
+      }
+    }
+
+    const numTris = uSteps * vSteps * 2;
+    const indices = new Uint32Array(numTris * 3);
+    const extUint = gl.getExtension('OES_element_index_uint');
+    const IndexArrayType = extUint ? Uint32Array : Uint16Array;
+    const indexBufferData = new IndexArrayType(numTris * 3);
+
+    let iPtr = 0;
+    const stride = vSteps + 1;
+    for (let iu = 0; iu < uSteps; iu++) {
+      for (let iv = 0; iv < vSteps; iv++) {
+        const a = iu * stride + iv;
+        const b = a + 1;
+        const c = (iu + 1) * stride + iv;
+        const d = c + 1;
+
+        indexBufferData[iPtr++] = a;
+        indexBufferData[iPtr++] = c;
+        indexBufferData[iPtr++] = b;
+
+        indexBufferData[iPtr++] = b;
+        indexBufferData[iPtr++] = c;
+        indexBufferData[iPtr++] = d;
+      }
+    }
+
+    return {
+      positions,
+      normals,
+      uvs,
+      props,
+      indices: indexBufferData,
+      indexType: extUint ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT,
+      count: indexBufferData.length
+    };
+  }
+
+  // Generate 18,000 surface-coupled ember particles distributed across the visible fedora
+  function buildEmberParticles(count) {
+    const homePos = new Float32Array(count * 3);
+    const homeNorm = new Float32Array(count * 3);
+    const partMeta = new Float32Array(count * 4); // x: dissolveMetric, y: seed, z: size, w: colorTone
+    const driftDir = new Float32Array(count * 3);
+
+    for (let i = 0; i < count; i++) {
+      // Sample predominantly on the visible outer crown, ribbon, and brim (u in [0.02, 0.83])
+      // with area-weighted bias toward wider radii
+      const rRand = Math.random();
+      let u;
+      if (rRand < 0.42) {
+        // Crown top and walls
+        u = Math.pow(Math.random(), 0.78) * 0.46;
+      } else if (rRand < 0.51) {
+        // Hatband / ribbon region
+        u = 0.46 + Math.random() * 0.08;
+      } else {
+        // Brim top and rolled lip
+        u = 0.54 + Math.pow(Math.random(), 0.85) * 0.27;
+      }
+      const v = Math.random();
+
+      const p = evaluateFedoraPoint(u, v);
+      const pU = evaluateFedoraPoint(Math.min(0.94, u + 0.002), v);
+      const pV = evaluateFedoraPoint(u, v + 0.002);
+
+      const tux = pU.x - p.x, tuy = pU.y - p.y, tuz = pU.z - p.z;
+      const tvx = pV.x - p.x, tvy = pV.y - p.y, tvz = pV.z - p.z;
+      let nx = tvy * tuz - tvz * tuy;
+      let ny = tvz * tux - tvx * tuz;
+      let nz = tvx * tuy - tvy * tux;
+      const len = Math.hypot(nx, ny, nz) || 1.0;
+      nx /= len; ny /= len; nz /= len;
+
+      const idx3 = i * 3;
+      const idx4 = i * 4;
+
+      // Tiny jitter along tangent so particles don't show grid lines
+      homePos[idx3] = p.x;
+      homePos[idx3 + 1] = p.y;
+      homePos[idx3 + 2] = p.z;
+
+      homeNorm[idx3] = nx;
+      homeNorm[idx3 + 1] = ny;
+      homeNorm[idx3 + 2] = nz;
+
+      const dMetric = computeDissolveMetric(p.x, p.y, p.z);
+      const seed = Math.random();
+      // Distribution of ember sizes: mostly fine glowing dust, a few brighter sparks
+      const size = 0.58 + Math.pow(Math.random(), 2.6) * 1.55;
+      // Color tone: ribbon embers vs crimson felt embers vs warm gold sparks
+      const colorTone = p.matId === 1.0 ? 0.85 + Math.random() * 0.15 : Math.random() * 0.82;
+
+      partMeta[idx4] = dMetric;
+      partMeta[idx4 + 1] = seed;
+      partMeta[idx4 + 2] = size;
+      partMeta[idx4 + 3] = colorTone;
+
+      // Buoyant 3D outward drift vector per particle
+      const phi = Math.random() * Math.PI * 2.0;
+      const cosTheta = Math.random() * 2.0 - 1.0;
+      const sinTheta = Math.sqrt(Math.max(0.0, 1.0 - cosTheta * cosTheta));
+      const spread = 0.45 + Math.random() * 0.95;
+
+      driftDir[idx3] = (nx * 0.55 + Math.cos(phi) * sinTheta * 0.75) * spread;
+      driftDir[idx3 + 1] = (Math.abs(ny) * 0.45 + 0.38 + (cosTheta * 0.5 + 0.5) * 0.85) * spread;
+      driftDir[idx3 + 2] = (nz * 0.55 + Math.sin(phi) * sinTheta * 0.75) * spread;
+    }
+
+    return { count, homePos, homeNorm, partMeta, driftDir };
+  }
+
+  // ============================================================================
+  // 2. SHADERS (FLOOR SHADOW, FEDORA MESH, EMBER CLOUD, ORBITING TRAILS)
+  // ============================================================================
+
+  function compileShader(type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      console.error('Shader compile error:', gl.getShaderInfoLog(shader));
+      gl.deleteShader(shader);
+      return null;
+    }
+    return shader;
+  }
+
+  function createProgram(vsSource, fsSource) {
+    const vs = compileShader(gl.VERTEX_SHADER, vsSource);
+    const fs = compileShader(gl.FRAGMENT_SHADER, fsSource);
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      console.error('Program link error:', gl.getProgramInfoLog(prog));
+      return null;
+    }
+    return prog;
+  }
+
+  // --- PASS 1: STUDIO FLOOR SHADOW & AMBIENT BOUNCE SHADER ---
+  const floorVS = `
+    attribute vec3 aPos;
+    uniform mat4 uViewProj;
+    varying vec3 vWorldPos;
+    void main() {
+      vWorldPos = aPos;
+      gl_Position = uViewProj * vec4(aPos, 1.0);
+    }
+  `;
+
+  const floorFS = `
+    precision highp float;
+    varying vec3 vWorldPos;
+    uniform float uHatYaw;
+    uniform float uHatBob;
+    uniform float uDissolve;
+    uniform float uSwirlIntensity;
+    uniform float uOrbitVisibility;
+
+    void main() {
+      // Shift shadow slightly opposite the key light direction (-0.65, 0.85, 0.75)
+      vec2 p = vWorldPos.xz - vec2(0.18, -0.20);
+
+      // Rotate into hat yaw frame
+      float c = cos(-uHatYaw);
+      float s = sin(-uHatYaw);
+      vec2 rPos = vec2(c * p.x - s * p.y, s * p.x + c * p.y);
+
+      // Elliptical fedora brim footprint
+      float brimDist = length(rPos / vec2(1.48, 1.72));
+      float crownDist = length(rPos / vec2(0.78, 0.92));
+
+      // Soften shadow when hat bobs higher or dissolves into embers
+      float heightScale = 1.0 + uHatBob * 0.25 + uDissolve * 0.85;
+      float umbra = exp(-crownDist * crownDist * 2.1 / heightScale) * 0.62;
+      float penumbra = exp(-brimDist * brimDist * 1.45 / heightScale) * 0.52;
+
+      float shadowStrength = (umbra + penumbra) * (1.0 - uDissolve * 0.72);
+
+      // Subtle warm crimson floor bounce from the red felt & glowing embers
+      float bounceDist = length(vWorldPos.xz / vec2(2.2, 2.2));
+      float feltBounce = exp(-bounceDist * bounceDist * 1.1) * 0.055 * (1.0 - uDissolve * 0.4);
+      float emberPool = exp(-bounceDist * bounceDist * 0.75) * (uSwirlIntensity * 0.11 + uOrbitVisibility * 0.022);
+
+      vec3 bounceColor = vec3(0.75, 0.06, 0.07) * feltBounce + vec3(0.95, 0.26, 0.08) * emberPool;
+      float totalAlpha = clamp(shadowStrength + feltBounce + emberPool, 0.0, 0.88);
+
+      // Blend dark studio shadow with subtle warm crimson floor reflection
+      vec3 finalRgb = bounceColor / max(totalAlpha, 0.0001);
+      float darkFactor = clamp(1.0 - shadowStrength * 0.92, 0.0, 1.0);
+      gl_FragColor = vec4( bounceColor, shadowStrength * 0.78 );
+    }
+  `;
+
+  // Wait: for the floor quad, using standard alpha blending (SRC_ALPHA, ONE_MINUS_SRC_ALPHA),
+  // if we want both dark shadow AND warm crimson floor bounce in one pass:
+  const floorFSUnified = `
+    precision highp float;
+    varying vec3 vWorldPos;
+    uniform float uHatYaw;
+    uniform float uHatBob;
+    uniform float uDissolve;
+    uniform float uSwirlIntensity;
+    uniform float uOrbitVisibility;
+
+    void main() {
+      vec2 p = vWorldPos.xz - vec2(0.16, -0.18);
+      float c = cos(-uHatYaw);
+      float s = sin(-uHatYaw);
+      vec2 rPos = vec2(c * p.x - s * p.y, s * p.x + c * p.y);
+
+      float brimDist = length(rPos / vec2(1.46, 1.70));
+      float crownDist = length(rPos / vec2(0.76, 0.90));
+
+      float spread = 1.0 + uHatBob * 0.22 + uDissolve * 0.95;
+      float umbra = exp(-crownDist * crownDist * 2.2 / spread) * 0.58;
+      float penumbra = exp(-brimDist * brimDist * 1.55 / spread) * 0.46;
+      float shadowAlpha = clamp((umbra + penumbra) * (1.0 - uDissolve * 0.68), 0.0, 0.78);
+
+      float glowDist = length(vWorldPos.xz / vec2(2.1, 2.1));
+      float emberGlow = exp(-glowDist * glowDist * 0.9) * (uSwirlIntensity * 0.14 + uOrbitVisibility * 0.028 + 0.025);
+
+      vec3 glowCol = mix(vec3(0.65, 0.04, 0.06), vec3(1.0, 0.30, 0.08), uSwirlIntensity);
+      float alpha = clamp(shadowAlpha + emberGlow, 0.0, 0.85);
+      vec3 rgb = (glowCol * emberGlow) / max(alpha, 0.001);
+
+      gl_FragColor = vec4(rgb, alpha);
+    }
+  `;
+
+  // --- PASS 2: HIGH-RESOLUTION 3D FEDORA MESH SHADER ---
+  const fedoraVS = `
+    attribute vec3 aPos;
+    attribute vec3 aNormal;
+    attribute vec2 aUv;
+    attribute vec3 aProps; // x: matId, y: ao, z: dissolveMetric
+
+    uniform mat4 uModel;
+    uniform mat4 uViewProj;
+    uniform mat3 uNormalMat;
+
+    varying vec3 vLocalPos;
+    varying vec3 vWorldPos;
+    varying vec3 vNormal;
+    varying vec2 vUv;
+    varying float vMatId;
+    varying float vAo;
+    varying float vDissolveMetric;
+
+    void main() {
+      vLocalPos = aPos;
+      vec4 worldPos = uModel * vec4(aPos, 1.0);
+      vWorldPos = worldPos.xyz;
+      vNormal = normalize(uNormalMat * aNormal);
+      vUv = aUv;
+      vMatId = aProps.x;
+      vAo = aProps.y;
+      vDissolveMetric = aProps.z;
+
+      gl_Position = uViewProj * worldPos;
+    }
+  `;
+
+  const fedoraFS = `
+    precision highp float;
+
+    varying vec3 vLocalPos;
+    varying vec3 vWorldPos;
+    varying vec3 vNormal;
+    varying vec2 vUv;
+    varying float vMatId;
+    varying float vAo;
+    varying float vDissolveMetric;
+
+    uniform vec3 uCamPos;
+    uniform float uDissolve;
+    uniform float uEmberEdgeBoost;
+    uniform mat3 uInvModelRot;
+
+    float hash31(vec3 p) {
+      p = fract(p * 0.1031);
+      p += dot(p, p.yzx + 33.33);
+      return fract((p.x + p.y) * p.z);
+    }
+
+    void main() {
+      // Seamless spatial dissolve synchronized with surface ember particles
+      float diff = vDissolveMetric - uDissolve;
+      if (diff < 0.0) {
+        discard;
+      }
+
+      vec3 N = normalize(vNormal);
+      if (!gl_FrontFacing) {
+        N = -N;
+      }
+      vec3 V = normalize(uCamPos - vWorldPos);
+
+      // Studio 3-point lighting setup
+      vec3 keyDir = normalize(vec3(-0.58, 0.78, 0.68));
+      vec3 rimDir = normalize(vec3(0.72, 0.42, -0.78));
+      vec3 fillDir = normalize(vec3(0.55, -0.35, 0.45));
+
+      // Analytical self-shadowing: Crown casting soft shadow onto the Brim
+      float crownShadow = 1.0;
+      if (vUv.x > 0.53 && vUv.x < 0.80) {
+        vec3 localKey = normalize(uInvModelRot * keyDir);
+        // Ray from brim point toward key light in hat-local coordinates
+        float tRay = max(0.0, (0.18 - vLocalPos.y) / max(localKey.y, 0.15));
+        vec2 hitXZ = vLocalPos.xz + localKey.xz * tRay;
+        float ellipDist = length(hitXZ / vec2(0.72, 0.85));
+        crownShadow = mix(0.42, 1.0, smoothstep(0.78, 1.14, ellipDist));
+      }
+
+      // Base material properties
+      vec3 baseColor;
+      float sheenStrength;
+      float specPower;
+      float specStrength;
+
+      if (vMatId < 0.5) {
+        // Signature Red Hat Crimson Wool Felt
+        float microGrain = (hash31(vLocalPos * 140.0) - 0.5) * 0.022;
+        baseColor = vec3(0.84, 0.028, 0.042) + microGrain;
+        sheenStrength = 0.46;
+        specPower = 14.0;
+        specStrength = 0.08;
+      } else if (vMatId < 1.5) {
+        // Deep Obsidian-Crimson Silk Grosgrain Hatband Ribbon
+        float rib = sin(vUv.x * 950.0) * 0.5 + 0.5;
+        baseColor = vec3(0.085, 0.012, 0.020) * (0.92 + 0.16 * rib);
+        sheenStrength = 0.18;
+        specPower = 42.0;
+        specStrength = 0.34 * (0.85 + 0.3 * rib);
+      } else {
+        // Dark interior crown underside
+        baseColor = vec3(0.04, 0.008, 0.012);
+        sheenStrength = 0.05;
+        specPower = 10.0;
+        specStrength = 0.02;
+      }
+
+      // Wrapped Oren-Nayar / velvet diffuse for soft studio light wrap
+      float nDotKey = max(0.0, (dot(N, keyDir) + 0.22) / 1.22) * crownShadow;
+      float nDotFill = max(0.0, (dot(N, fillDir) + 0.35) / 1.35);
+      float nDotRim = max(0.0, dot(N, rimDir));
+
+      // Fresnel grazing velvet sheen (characteristic of fine felt)
+      float nDotV = max(0.0, dot(N, V));
+      float fresnel = pow(1.0 - nDotV, 3.0);
+      float rimFresnel = pow(1.0 - nDotV, 2.2) * (0.35 + 0.65 * nDotRim);
+
+      // Specular highlight
+      vec3 H = normalize(keyDir + V);
+      float spec = pow(max(0.0, dot(N, H)), specPower) * specStrength * crownShadow;
+
+      vec3 Hrim = normalize(rimDir + V);
+      float specRim = pow(max(0.0, dot(N, Hrim)), specPower * 0.8) * specStrength * 0.6;
+
+      // Combine lighting with baked sculptural ambient occlusion
+      vec3 ambient = baseColor * vec3(0.19, 0.13, 0.16) * vAo;
+      vec3 keyContrib = baseColor * vec3(1.06, 0.98, 0.95) * nDotKey * (0.55 + 0.45 * vAo);
+      vec3 fillContrib = baseColor * vec3(0.28, 0.26, 0.34) * nDotFill * vAo;
+      vec3 velvetSheen = mix(baseColor, vec3(1.0, 0.28, 0.22), 0.55) * fresnel * sheenStrength * (0.4 + 0.6 * nDotKey);
+      vec3 rimLight = vec3(0.95, 0.18, 0.14) * rimFresnel * 0.42 * vAo;
+      vec3 specLight = vec3(1.0, 0.92, 0.90) * (spec + specRim);
+
+      vec3 color = ambient + keyContrib + fillContrib + velvetSheen + rimLight + specLight;
+
+      // Glowing ember frontier right along the active dissolve boundary
+      if (uEmberEdgeBoost > 0.001 && diff < 0.13) {
+        float edgeT = 1.0 - (diff / 0.13);
+        float edgeGlow = pow(edgeT, 1.75) * uEmberEdgeBoost;
+        vec3 emberCore = mix(vec3(0.95, 0.12, 0.02), vec3(1.0, 0.72, 0.24), pow(edgeT, 2.2));
+        color = mix(color, emberCore * 1.45, clamp(edgeGlow * 1.15, 0.0, 1.0));
+      }
+
+      // Subtle filmic tone mapping
+      color = color / (1.0 + color * 0.18);
+      gl_FragColor = vec4(color, 1.0);
+    }
+  `;
+
+  // --- PASS 3: 18,000+ 3D CURL-NOISE EMBER PARTICLE SHADER ---
+  const particleVS = `
+    attribute vec3 aHomePos;
+    attribute vec3 aHomeNorm;
+    attribute vec4 aMeta; // x: dissolveMetric, y: seed, z: size, w: colorTone
+    attribute vec3 aDrift;
+
+    uniform mat4 uModel;
+    uniform mat4 uViewProj;
+    uniform mat3 uNormalMat;
+    uniform float uTime;
+    uniform float uDissolve;
+    uniform float uSwirlPhase;
+    uniform float uReformPhase;
+    uniform float uPixelRatio;
+    uniform float uReducedMotion;
+
+    varying float vAlpha;
+    varying float vColorTone;
+    varying float vHeat;
+    varying float vSeed;
+
+    // Divergence-free 3D harmonic curl field for fluid ember swirling
+    vec3 curlField(vec3 p, float t, float seed) {
+      float s = seed * 6.28318;
+      vec3 v1 = vec3(
+        sin(p.y * 1.85 + t * 1.4 + s) * cos(p.z * 1.65 - t * 1.1),
+        sin(p.z * 1.75 + t * 1.2 + s) * cos(p.x * 1.85 + t * 0.9),
+        cos(p.x * 1.65 - t * 1.3 + s) * sin(p.y * 1.75 + t * 1.2)
+      );
+      vec3 v2 = vec3(
+        cos(p.y * 3.4 - t * 2.1 + s) * sin(p.z * 3.2 + t * 1.7),
+        sin(p.z * 3.3 + t * 1.9 - s) * cos(p.x * 3.5 - t * 1.6),
+        sin(p.x * 3.2 + t * 2.2 + s) * cos(p.y * 3.4 + t * 1.8)
+      ) * 0.42;
+      return v1 + v2;
+    }
+
+    void main() {
+      float dMetric = aMeta.x;
+      float seed = aMeta.y;
+      float baseSize = aMeta.z;
+      vColorTone = aMeta.w;
+      vSeed = seed;
+
+      // Exact detachment amount synchronized with the mesh's dissolve threshold
+      // Starts igniting slightly before the mesh fragment discards (dMetric - 0.08)
+      float rawDetach = clamp((uDissolve - (dMetric - 0.08)) / 0.34, 0.0, 1.0);
+      float detach = smoothstep(0.0, 1.0, rawDetach);
+
+      // True world-space home position on the rotating fedora
+      vec4 worldHome4 = uModel * vec4(aHomePos, 1.0);
+      vec3 worldHome = worldHome4.xyz;
+      vec3 worldNorm = normalize(uNormalMat * aHomeNorm);
+
+      if (detach <= 0.001) {
+        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+        gl_PointSize = 0.0;
+        vAlpha = 0.0;
+        vHeat = 0.0;
+        return;
+      }
+
+      vec3 pos = worldHome;
+
+      if (uReducedMotion > 0.5) {
+        // Respect reduced motion: gentle stationary ember shimmer in-place
+        float breathe = sin(uTime * 2.2 + seed * 6.2831) * 0.018;
+        pos += worldNorm * (detach * 0.035 + breathe * detach);
+      } else {
+        // Full 3D ember drift, vortex swirl, and curved reformation flow
+        float displaceEnv = pow(detach, 1.35);
+
+        // 1. Outward surface release + warm thermal updraft
+        vec3 releaseVec = worldNorm * (0.24 + 0.35 * seed) + aDrift * (0.85 + 0.55 * uSwirlPhase);
+        releaseVec.y += (0.28 + 0.48 * seed) * displaceEnv;
+
+        // 2. Coherent 3D curl turbulence
+        vec3 curl = curlField(aHomePos * 1.25, uTime * 0.95, seed) * (0.52 + 0.45 * uSwirlPhase);
+
+        vec3 offset = (releaseVec + curl) * displaceEnv;
+        vec3 displacedPos = worldHome + offset;
+
+        // 3. Global 3D vortex swirl + curved spiral homing during reformation
+        // Differential orbital twist around Y and slightly tilted axis
+        float radialDist = length(displacedPos.xz);
+        float vortexAngle = displaceEnv * (1.25 + 0.85 / (0.6 + radialDist)) * (0.6 + 0.65 * sin(seed * 6.283))
+                          + uReformPhase * displaceEnv * (1.0 - displaceEnv) * 2.2;
+
+        float ca = cos(vortexAngle);
+        float sa = sin(vortexAngle);
+        vec2 rotXZ = vec2(
+          ca * displacedPos.x - sa * displacedPos.z,
+          sa * displacedPos.x + ca * displacedPos.z
+        );
+        displacedPos.x = rotXZ.x;
+        displacedPos.z = rotXZ.y;
+
+        // Smooth blend back to exact worldHome as detach returns to 0
+        pos = mix(worldHome, displacedPos, smoothstep(0.0, 0.25, detach));
+      }
+
+      vec4 clipPos = uViewProj * vec4(pos, 1.0);
+      gl_Position = clipPos;
+
+      // Subtle ember flicker
+      float flicker = 0.78 + 0.22 * sin(uTime * (5.5 + seed * 7.0) + seed * 25.0);
+
+      // Alpha envelope: ignites smoothly as mesh erodes, stays luminous while swirling,
+      // and blends seamlessly back into the solid surface upon reformation
+      float surfaceFade = smoothstep(0.0, 0.16, rawDetach);
+      vAlpha = surfaceFade * flicker * (0.34 + 0.24 * (1.0 - detach * 0.35));
+      vHeat = clamp((1.0 - detach * 0.45) * flicker, 0.0, 1.0);
+
+      // Perspective point size scaling
+      float dist = max(1.2, clipPos.w);
+      float sizeScale = mix(0.85, 1.28, sin(detach * 3.14159));
+      gl_PointSize = clamp((baseSize * sizeScale * 17.5 * uPixelRatio) / dist, 1.2, 22.0);
+    }
+  `;
+
+  const particleFS = `
+    precision highp float;
+
+    varying float vAlpha;
+    varying float vColorTone;
+    varying float vHeat;
+    varying float vSeed;
+
+    void main() {
+      vec2 uv = gl_PointCoord * 2.0 - 1.0;
+      float r2 = dot(uv, uv);
+      if (r2 > 1.0) {
+        discard;
+      }
+
+      // Soft tasteful radial glow: warm pinpoint core + gentle crimson halo
+      float core = exp(-r2 * 6.5);
+      float halo = exp(-r2 * 2.3) * 0.55;
+      float shape = core + halo;
+
+      // Ember color palette: deep Red Hat crimson -> warm vermilion -> soft gold core
+      vec3 deepCrimson = vec3(0.88, 0.08, 0.06);
+      vec3 warmAmber = vec3(1.0, 0.42, 0.10);
+      vec3 hotCore = vec3(1.0, 0.86, 0.62);
+
+      vec3 baseEmber = mix(deepCrimson, warmAmber, clamp(vColorTone * 0.75 + vHeat * 0.35, 0.0, 1.0));
+      vec3 col = mix(baseEmber, hotCore, core * 0.68);
+
+      float alpha = shape * vAlpha;
+      gl_FragColor = vec4(col * alpha, alpha);
+    }
+  `;
+
+  // --- PASS 4: ORBITING EMBER LIGHT TRAILS (3D TAPERED RIBBONS) ---
+  const trailVS = `
+    attribute vec3 aPos;
+    attribute vec3 aTangent;
+    attribute vec2 aTrailUv; // x: u along trail (0=head, 1=tail), y: side (-1 or +1)
+    attribute float aOrbiterSeed;
+
+    uniform mat4 uViewProj;
+    uniform vec3 uCamPos;
+    uniform float uOrbitAlpha;
+
+    varying vec2 vTrailUv;
+    varying float vSeed;
+    varying float vAlpha;
+
+    void main() {
+      vTrailUv = aTrailUv;
+      vSeed = aOrbiterSeed;
+
+      vec3 toCam = normalize(uCamPos - aPos);
+      vec3 sideDir = normalize(cross(aTangent, toCam));
+
+      // Taper ribbon width smoothly from ember head (u=0) to tail (u=1)
+      float taper = pow(1.0 - aTrailUv.x, 1.35);
+      float halfWidth = (0.011 + 0.005 * sin(aOrbiterSeed * 12.0)) * taper;
+
+      vec3 worldPos = aPos + sideDir * (aTrailUv.y * halfWidth);
+      gl_Position = uViewProj * vec4(worldPos, 1.0);
+
+      vAlpha = uOrbitAlpha * pow(1.0 - aTrailUv.x, 1.85);
+    }
+  `;
+
+  const trailFS = `
+    precision highp float;
+
+    varying vec2 vTrailUv;
+    varying float vSeed;
+    varying float vAlpha;
+
+    void main() {
+      // Soft cross-sectional gaussian falloff across the ribbon width
+      float crossFade = exp(-vTrailUv.y * vTrailUv.y * 3.8);
+      float alpha = crossFade * vAlpha * 0.44;
+      if (alpha < 0.002) {
+        discard;
+      }
+
+      // Faint warm crimson-amber trail color
+      vec3 headCol = vec3(1.0, 0.56, 0.22);
+      vec3 tailCol = vec3(0.86, 0.09, 0.08);
+      vec3 col = mix(headCol, tailCol, smoothstep(0.0, 0.75, vTrailUv.x));
+
+      gl_FragColor = vec4(col * alpha, alpha);
+    }
+  `;
+
+  // --- PASS 5: ORBITING EMBER HEAD SPRITES ---
+  const orbiterHeadVS = `
+    attribute vec3 aPos;
+    attribute float aSeed;
+
+    uniform mat4 uViewProj;
+    uniform float uPixelRatio;
+    uniform float uOrbitAlpha;
+    uniform float uTime;
+
+    varying float vAlpha;
+    varying float vSeed;
+
+    void main() {
+      vec4 clipPos = uViewProj * vec4(aPos, 1.0);
+      gl_Position = clipPos;
+      vSeed = aSeed;
+
+      float pulse = 0.82 + 0.18 * sin(uTime * 3.8 + aSeed * 19.0);
+      vAlpha = uOrbitAlpha * pulse;
+
+      float dist = max(1.2, clipPos.w);
+      gl_PointSize = clamp((24.0 * (0.85 + 0.35 * fract(aSeed * 7.3)) * uPixelRatio) / dist, 2.5, 24.0);
+    }
+  `;
+
+  const orbiterHeadFS = `
+    precision highp float;
+
+    varying float vAlpha;
+    varying float vSeed;
+
+    void main() {
+      vec2 uv = gl_PointCoord * 2.0 - 1.0;
+      float r2 = dot(uv, uv);
+      if (r2 > 1.0) {
+        discard;
+      }
+
+      float core = exp(-r2 * 7.5);
+      float halo = exp(-r2 * 2.1) * 0.48;
+      float intensity = (core + halo) * vAlpha * 0.76;
+
+      vec3 haloCol = mix(vec3(0.92, 0.14, 0.08), vec3(1.0, 0.48, 0.14), fract(vSeed * 3.7));
+      vec3 col = mix(haloCol, vec3(1.0, 0.92, 0.76), core * 0.78);
+
+      gl_FragColor = vec4(col * intensity, intensity);
+    }
+  `;
+
+  // Compile all shader programs
+  const floorProg = createProgram(floorVS, floorFSUnified);
+  const fedoraProg = createProgram(fedoraVS, fedoraFS);
+  const particleProg = createProgram(particleVS, particleFS);
+  const trailProg = createProgram(trailVS, trailFS);
+  const orbiterHeadProg = createProgram(orbiterHeadVS, orbiterHeadFS);
+
+  // ============================================================================
+  // 3. GEOMETRY BUFFERS & INITIALIZATION
+  // ============================================================================
+
+  // 3A. Floor Quad Buffer (at y = -1.16)
+  const floorY = -1.16;
+  const floorSize = 4.6;
+  const floorVerts = new Float32Array([
+    -floorSize, floorY, -floorSize,
+     floorSize, floorY, -floorSize,
+    -floorSize, floorY,  floorSize,
+     floorSize, floorY,  floorSize
+  ]);
+  const floorVbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, floorVbo);
+  gl.bufferData(gl.ARRAY_BUFFER, floorVerts, gl.STATIC_DRAW);
+
+  // 3B. High-Resolution Fedora Mesh Buffers (150 x 200 = 30,000 vertices)
+  const meshData = buildFedoraMesh(150, 200);
+
+  const meshPosVbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, meshPosVbo);
+  gl.bufferData(gl.ARRAY_BUFFER, meshData.positions, gl.STATIC_DRAW);
+
+  const meshNormVbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, meshNormVbo);
+  gl.bufferData(gl.ARRAY_BUFFER, meshData.normals, gl.STATIC_DRAW);
+
+  const meshUvVbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, meshUvVbo);
+  gl.bufferData(gl.ARRAY_BUFFER, meshData.uvs, gl.STATIC_DRAW);
+
+  const meshPropsVbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, meshPropsVbo);
+  gl.bufferData(gl.ARRAY_BUFFER, meshData.props, gl.STATIC_DRAW);
+
+  const meshIbo = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, meshIbo);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, meshData.indices, gl.STATIC_DRAW);
+
+  // 3C. 18,000 Surface-Coupled Ember Particle Buffers
+  const PARTICLE_COUNT = 18000;
+  const emberData = buildEmberParticles(PARTICLE_COUNT);
+
+  const partHomePosVbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, partHomePosVbo);
+  gl.bufferData(gl.ARRAY_BUFFER, emberData.homePos, gl.STATIC_DRAW);
+
+  const partHomeNormVbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, partHomeNormVbo);
+  gl.bufferData(gl.ARRAY_BUFFER, emberData.homeNorm, gl.STATIC_DRAW);
+
+  const partMetaVbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, partMetaVbo);
+  gl.bufferData(gl.ARRAY_BUFFER, emberData.partMeta, gl.STATIC_DRAW);
+
+  const partDriftVbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, partDriftVbo);
+  gl.bufferData(gl.ARRAY_BUFFER, emberData.driftDir, gl.STATIC_DRAW);
+
+  // 3D. Persistent Orbiting Ember Satellites & Ribbon Trails (22 satellites, 36 history nodes each)
+  const NUM_ORBITERS = 22;
+  const TRAIL_LEN = 36;
+  const orbiters = [];
+
+  for (let i = 0; i < NUM_ORBITERS; i++) {
+    const u = 0.18 + Math.random() * 0.58;
+    const v = i / NUM_ORBITERS + (Math.random() - 0.5) * 0.04;
+    const home = evaluateFedoraPoint(u, v);
+
+    // Graceful inclined 3D elliptical orbits around the reformed fedora
+    const radius = 1.52 + Math.random() * 0.82;
+    const eccentricity = 0.88 + Math.random() * 0.24;
+    const inclination = (Math.random() - 0.5) * 0.92; // Tilt angle of orbital plane
+    const ascNode = (i / NUM_ORBITERS) * Math.PI * 2.0 + Math.random() * 0.5;
+    const speed = (0.52 + Math.random() * 0.42) * (i % 5 === 0 ? -0.85 : 1.0);
+    const phase = (i / NUM_ORBITERS) * Math.PI * 2.0;
+    const yOffset = (Math.random() - 0.45) * 0.36;
+    const seed = Math.random();
+
+    const history = new Float32Array(TRAIL_LEN * 3);
+    orbiters.push({
+      home,
+      radius,
+      eccentricity,
+      inclination,
+      ascNode,
+      speed,
+      phase,
+      yOffset,
+      seed,
+      history,
+      initialized: false
+    });
+  }
+
+  // Dynamic buffers for orbiting trails and head points
+  // Each orbiter has (TRAIL_LEN - 1) quads = (TRAIL_LEN - 1) * 6 vertices
+  const vertsPerOrbiterTrail = (TRAIL_LEN - 1) * 6;
+  const totalTrailVerts = NUM_ORBITERS * vertsPerOrbiterTrail;
+  // Interleaved: pos(3) + tangent(3) + trailUv(2) + seed(1) = 9 floats per vertex
+  const trailBufferData = new Float32Array(totalTrailVerts * 9);
+  const trailVbo = gl.createBuffer();
+
+  // Orbiter head points: pos(3) + seed(1) = 4 floats per orbiter
+  const orbiterHeadData = new Float32Array(NUM_ORBITERS * 4);
+  const orbiterHeadVbo = gl.createBuffer();
+
+  // ============================================================================
+  // 4. MATRIX & CAMERA UTILITIES
+  // ============================================================================
+
+  function createMat4() {
+    return new Float32Array(16);
+  }
+
+  function perspectiveMat4(out, fovy, aspect, near, far) {
+    const f = 1.0 / Math.tan(fovy * 0.5);
+    const nf = 1.0 / (near - far);
+    out.fill(0);
+    out[0] = f / aspect;
+    out[5] = f;
+    out[10] = (far + near) * nf;
+    out[11] = -1.0;
+    out[14] = (2.0 * far * near) * nf;
+    return out;
+  }
+
+  function lookAtMat4(out, eye, center, up) {
+    let zx = eye[0] - center[0];
+    let zy = eye[1] - center[1];
+    let zz = eye[2] - center[2];
+    let len = Math.hypot(zx, zy, zz) || 1.0;
+    zx /= len; zy /= len; zz /= len;
+
+    let xx = up[1] * zz - up[2] * zy;
+    let xy = up[2] * zx - up[0] * zz;
+    let xz = up[0] * zy - up[1] * zx;
+    len = Math.hypot(xx, xy, xz) || 1.0;
+    xx /= len; xy /= len; xz /= len;
+
+    const yx = zy * xz - zz * xy;
+    const yy = zz * xx - zx * xz;
+    const yz = zx * xy - zy * xx;
+
+    out[0] = xx; out[1] = yx; out[2] = zx; out[3] = 0;
+    out[4] = xy; out[5] = yy; out[6] = zy; out[7] = 0;
+    out[8] = xz; out[9] = yz; out[10] = zz; out[11] = 0;
+    out[12] = -(xx * eye[0] + xy * eye[1] + xz * eye[2]);
+    out[13] = -(yx * eye[0] + yy * eye[1] + yz * eye[2]);
+    out[14] = -(zx * eye[0] + zy * eye[1] + zz * eye[2]);
+    out[15] = 1;
+    return out;
+  }
+
+  function multiplyMat4(out, a, b) {
+    const a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+    const a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+    const a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+    const a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
+
+    for (let i = 0; i < 4; i++) {
+      const b0 = b[i * 4], b1 = b[i * 4 + 1], b2 = b[i * 4 + 2], b3 = b[i * 4 + 3];
+      out[i * 4]     = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+      out[i * 4 + 1] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+      out[i * 4 + 2] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+      out[i * 4 + 3] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+    }
+    return out;
+  }
+
+  function composeFedoraModelMatrix(modelOut, normMatOut, invRotOut, yaw, pitch, roll, yOffset) {
+    // World rotation: Yaw around Y, then subtle rakish fedora tilt (pitch X & roll Z)
+    const cy = Math.cos(yaw), sy = Math.sin(yaw);
+    const cx = Math.cos(pitch), sx = Math.sin(pitch);
+    const cz = Math.cos(roll), sz = Math.sin(roll);
+
+    // R = Ry(yaw) * Rx(pitch) * Rz(roll)
+    const r00 = cy * cz + sy * sx * sz;
+    const r01 = -cy * sz + sy * sx * cz;
+    const r02 = sy * cx;
+
+    const r10 = cx * sz;
+    const r11 = cx * cz;
+    const r12 = -sx;
+
+    const r20 = -sy * cz + cy * sx * sz;
+    const r21 = sy * sz + cy * sx * cz;
+    const r22 = cy * cx;
+
+    modelOut[0] = r00; modelOut[1] = r10; modelOut[2] = r20; modelOut[3] = 0;
+    modelOut[4] = r01; modelOut[5] = r11; modelOut[6] = r21; modelOut[7] = 0;
+    modelOut[8] = r02; modelOut[9] = r12; modelOut[10] = r22; modelOut[11] = 0;
+    modelOut[12] = 0;  modelOut[13] = yOffset; modelOut[14] = 0; modelOut[15] = 1;
+
+    // Normal matrix (pure rotation, so identical to 3x3 upper-left)
+    normMatOut[0] = r00; normMatOut[1] = r10; normMatOut[2] = r20;
+    normMatOut[3] = r01; normMatOut[4] = r11; normMatOut[5] = r21;
+    normMatOut[6] = r02; normMatOut[7] = r12; normMatOut[8] = r22;
+
+    // Inverse rotation (transpose of orthogonal rotation matrix)
+    invRotOut[0] = r00; invRotOut[1] = r01; invRotOut[2] = r02;
+    invRotOut[3] = r10; invRotOut[4] = r11; invRotOut[5] = r12;
+    invRotOut[6] = r20; invRotOut[7] = r21; invRotOut[8] = r22;
+  }
+
+  function transformPointMat4(out, p, m) {
+    out.x = m[0] * p.x + m[4] * p.y + m[8] * p.z + m[12];
+    out.y = m[1] * p.x + m[5] * p.y + m[9] * p.z + m[13];
+    out.z = m[2] * p.x + m[6] * p.y + m[10] * p.z + m[14];
+  }
+
+  // ============================================================================
+  // 5. UNIFORM & ATTRIBUTE LOCATIONS
+  // ============================================================================
+
+  const floorLocs = {
+    aPos: gl.getAttribLocation(floorProg, 'aPos'),
+    uViewProj: gl.getUniformLocation(floorProg, 'uViewProj'),
+    uHatYaw: gl.getUniformLocation(floorProg, 'uHatYaw'),
+    uHatBob: gl.getUniformLocation(floorProg, 'uHatBob'),
+    uDissolve: gl.getUniformLocation(floorProg, 'uDissolve'),
+    uSwirlIntensity: gl.getUniformLocation(floorProg, 'uSwirlIntensity'),
+    uOrbitVisibility: gl.getUniformLocation(floorProg, 'uOrbitVisibility')
+  };
+
+  const fedoraLocs = {
+    aPos: gl.getAttribLocation(fedoraProg, 'aPos'),
+    aNormal: gl.getAttribLocation(fedoraProg, 'aNormal'),
+    aUv: gl.getAttribLocation(fedoraProg, 'aUv'),
+    aProps: gl.getAttribLocation(fedoraProg, 'aProps'),
+    uModel: gl.getUniformLocation(fedoraProg, 'uModel'),
+    uViewProj: gl.getUniformLocation(fedoraProg, 'uViewProj'),
+    uNormalMat: gl.getUniformLocation(fedoraProg, 'uNormalMat'),
+    uCamPos: gl.getUniformLocation(fedoraProg, 'uCamPos'),
+    uDissolve: gl.getUniformLocation(fedoraProg, 'uDissolve'),
+    uEmberEdgeBoost: gl.getUniformLocation(fedoraProg, 'uEmberEdgeBoost'),
+    uInvModelRot: gl.getUniformLocation(fedoraProg, 'uInvModelRot')
+  };
+
+  const partLocs = {
+    aHomePos: gl.getAttribLocation(particleProg, 'aHomePos'),
+    aHomeNorm: gl.getAttribLocation(particleProg, 'aHomeNorm'),
+    aMeta: gl.getAttribLocation(particleProg, 'aMeta'),
+    aDrift: gl.getAttribLocation(particleProg, 'aDrift'),
+    uModel: gl.getUniformLocation(particleProg, 'uModel'),
+    uViewProj: gl.getUniformLocation(particleProg, 'uViewProj'),
+    uNormalMat: gl.getUniformLocation(particleProg, 'uNormalMat'),
+    uTime: gl.getUniformLocation(particleProg, 'uTime'),
+    uDissolve: gl.getUniformLocation(particleProg, 'uDissolve'),
+    uSwirlPhase: gl.getUniformLocation(particleProg, 'uSwirlPhase'),
+    uReformPhase: gl.getUniformLocation(particleProg, 'uReformPhase'),
+    uPixelRatio: gl.getUniformLocation(particleProg, 'uPixelRatio'),
+    uReducedMotion: gl.getUniformLocation(particleProg, 'uReducedMotion')
+  };
+
+  const trailLocs = {
+    aPos: gl.getAttribLocation(trailProg, 'aPos'),
+    aTangent: gl.getAttribLocation(trailProg, 'aTangent'),
+    aTrailUv: gl.getAttribLocation(trailProg, 'aTrailUv'),
+    aOrbiterSeed: gl.getAttribLocation(trailProg, 'aOrbiterSeed'),
+    uViewProj: gl.getUniformLocation(trailProg, 'uViewProj'),
+    uCamPos: gl.getUniformLocation(trailProg, 'uCamPos'),
+    uOrbitAlpha: gl.getUniformLocation(trailProg, 'uOrbitAlpha')
+  };
+
+  const orbiterHeadLocs = {
+    aPos: gl.getAttribLocation(orbiterHeadProg, 'aPos'),
+    aSeed: gl.getAttribLocation(orbiterHeadProg, 'aSeed'),
+    uViewProj: gl.getUniformLocation(orbiterHeadProg, 'uViewProj'),
+    uPixelRatio: gl.getUniformLocation(orbiterHeadProg, 'uPixelRatio'),
+    uOrbitAlpha: gl.getUniformLocation(orbiterHeadProg, 'uOrbitAlpha'),
+    uTime: gl.getUniformLocation(orbiterHeadProg, 'uTime')
+  };
+
+  // ============================================================================
+  // 6. INTERACTION & CHOREOGRAPHY STATE MACHINE
+  // ============================================================================
+
+  const CYCLE_DURATION = 5.4; // Full dissolve -> drift & swirl -> flow back & reform duration (seconds)
+  let cycleActive = false;
+  let cycleElapsed = 0.0;
+  let hasCompletedCycleOnce = false;
+  let orbitAfterglow = 0.0; // Persists at 1.0 after first dissolve so orbiting embers remain
+
+  // Rotation & camera state
+  const BASE_SPIN_SPEED = 0.64; // rad/s
+  const SLOW_SPIN_SPEED = 0.11; // slowed spin during dissolve/swirl
+  let currentSpinSpeed = BASE_SPIN_SPEED;
+  let hatYaw = -0.52; // Iconic 3/4 starting angle
+
+  // Subtle pointer parallax
+  let targetParallaxX = 0.0;
+  let targetParallaxY = 0.0;
+  let currentParallaxX = 0.0;
+  let currentParallaxY = 0.0;
+
+  function triggerDissolveCycle() {
+    if (cycleActive) return;
+    cycleActive = true;
+    cycleElapsed = 0.0;
+    heroEl.setAttribute('data-state', 'dissolving');
+    captionSub.textContent = 'Drifting apart into embers…';
+  }
+
+  // Trigger on hover into the central fedora target or tap/click
+  hitZone.addEventListener('pointerenter', (e) => {
+    if (e.pointerType === 'mouse' || e.pointerType === 'pen') {
+      triggerDissolveCycle();
+    }
+  });
+
+  hitZone.addEventListener('click', () => {
+    triggerDissolveCycle();
+  });
+
+  // Also allow tapping anywhere near the center on touch devices
+  canvas.addEventListener('pointerdown', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const nx = (e.clientX - rect.left) / rect.width - 0.5;
+    const ny = (e.clientY - rect.top) / rect.height - 0.46;
+    if (Math.hypot(nx, ny) < 0.36) {
+      triggerDissolveCycle();
+    }
+  });
+
+  window.addEventListener('pointermove', (e) => {
+    const nx = (e.clientX / window.innerWidth) * 2.0 - 1.0;
+    const ny = (e.clientY / window.innerHeight) * 2.0 - 1.0;
+    targetParallaxX = nx * 0.14;
+    targetParallaxY = ny * 0.09;
+  }, { passive: true });
+
+  // Resize handling
+  let pixelRatio = 1.0;
+  let aspect = 1.0;
+
+  function resize() {
+    pixelRatio = Math.min(window.devicePixelRatio || 1.0, 2.0);
+    const width = Math.max(1, Math.floor(window.innerWidth * pixelRatio));
+    const height = Math.max(1, Math.floor(window.innerHeight * pixelRatio));
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    aspect = width / height;
+    gl.viewport(0, 0, width, height);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // Expose state inspection hook for automated testing/verification
+  window.__fedoraScene = {
+    triggerDissolve: triggerDissolveCycle,
+    setCycleTime: (t) => {
+      cycleActive = true;
+      cycleElapsed = t;
+    },
+    getState: () => ({
+      cycleActive,
+      cycleElapsed,
+      hasCompletedCycleOnce,
+      orbitAfterglow,
+      hatYaw
+    })
+  };
+
+  // ============================================================================
+  // 7. ORBITING EMBER SATELLITE & TRAIL SIMULATION
+  // ============================================================================
+
+  const tempWorldHome = { x: 0, y: 0, z: 0 };
+
+  function updateOrbitersAndTrails(time, dt, modelMat, dissolveVal, orbitBlend) {
+    let vPtr = 0;
+    let hPtr = 0;
+
+    for (let i = 0; i < NUM_ORBITERS; i++) {
+      const orb = orbiters[i];
+      transformPointMat4(tempWorldHome, orb.home, modelMat);
+
+      // Compute 3D inclined elliptical orbit position around the hat
+      const angle = orb.phase + (reducedMotion ? time * 0.12 : time * orb.speed);
+      const oxLocal = Math.cos(angle) * orb.radius;
+      const ozLocal = Math.sin(angle) * orb.radius * orb.eccentricity;
+      const oyLocal = Math.sin(angle * 2.0 + orb.seed * 6.28) * 0.12 + orb.yOffset;
+
+      // Rotate by orbital inclination (around X) and ascending node (around Y)
+      const ci = Math.cos(orb.inclination), si = Math.sin(orb.inclination);
+      const yInc = oyLocal * ci - ozLocal * si;
+      const zInc = oyLocal * si + ozLocal * ci;
+
+      const cn = Math.cos(orb.ascNode), sn = Math.sin(orb.ascNode);
+      const orbitX = oxLocal * cn + zInc * sn;
+      const orbitY = yInc;
+      const orbitZ = -oxLocal * sn + zInc * cn;
+
+      // Blend from exact hat surface point into the 3D orbital path
+      const px = mix(tempWorldHome.x, orbitX, orbitBlend);
+      const py = mix(tempWorldHome.y, orbitY, orbitBlend);
+      const pz = mix(tempWorldHome.z, orbitZ, orbitBlend);
+
+      const hist = orb.history;
+      if (!orb.initialized) {
+        for (let k = 0; k < TRAIL_LEN; k++) {
+          hist[k * 3] = px;
+          hist[k * 3 + 1] = py;
+          hist[k * 3 + 2] = pz;
+        }
+        orb.initialized = true;
+      } else {
+        // Shift trail history backward
+        for (let k = TRAIL_LEN - 1; k > 0; k--) {
+          const dst = k * 3;
+          const src = (k - 1) * 3;
+          hist[dst] = hist[src];
+          hist[dst + 1] = hist[src + 1];
+          hist[dst + 2] = hist[src + 2];
+        }
+        hist[0] = px;
+        hist[1] = py;
+        hist[2] = pz;
+      }
+
+      // Record orbiter head point
+      orbiterHeadData[hPtr++] = px;
+      orbiterHeadData[hPtr++] = py;
+      orbiterHeadData[hPtr++] = pz;
+      orbiterHeadData[hPtr++] = orb.seed;
+
+      // Build camera-facing ribbon segments along the trail history
+      for (let k = 0; k < TRAIL_LEN - 1; k++) {
+        const i0 = k * 3;
+        const i1 = (k + 1) * 3;
+
+        const p0x = hist[i0], p0y = hist[i0 + 1], p0z = hist[i0 + 2];
+        const p1x = hist[i1], p1y = hist[i1 + 1], p1z = hist[i1 + 2];
+
+        let tx = p0x - p1x;
+        let ty = p0y - p1y;
+        let tz = p0z - p1z;
+        const tLen = Math.hypot(tx, ty, tz);
+        if (tLen > 0.00001) {
+          tx /= tLen; ty /= tLen; tz /= tLen;
+        } else {
+          tx = 1.0; ty = 0.0; tz = 0.0;
+        }
+
+        const u0 = k / (TRAIL_LEN - 1);
+        const u1 = (k + 1) / (TRAIL_LEN - 1);
+
+        // Two triangles per trail segment: (p0,-1), (p0,+1), (p1,-1) and (p0,+1), (p1,+1), (p1,-1)
+        // Vertex 1: (p0, -1)
+        trailBufferData[vPtr++] = p0x; trailBufferData[vPtr++] = p0y; trailBufferData[vPtr++] = p0z;
+        trailBufferData[vPtr++] = tx;  trailBufferData[vPtr++] = ty;  trailBufferData[vPtr++] = tz;
+        trailBufferData[vPtr++] = u0;  trailBufferData[vPtr++] = -1.0;
+        trailBufferData[vPtr++] = orb.seed;
+
+        // Vertex 2: (p0, +1)
+        trailBufferData[vPtr++] = p0x; trailBufferData[vPtr++] = p0y; trailBufferData[vPtr++] = p0z;
+        trailBufferData[vPtr++] = tx;  trailBufferData[vPtr++] = ty;  trailBufferData[vPtr++] = tz;
+        trailBufferData[vPtr++] = u0;  trailBufferData[vPtr++] = 1.0;
+        trailBufferData[vPtr++] = orb.seed;
+
+        // Vertex 3: (p1, -1)
+        trailBufferData[vPtr++] = p1x; trailBufferData[vPtr++] = p1y; trailBufferData[vPtr++] = p1z;
+        trailBufferData[vPtr++] = tx;  trailBufferData[vPtr++] = ty;  trailBufferData[vPtr++] = tz;
+        trailBufferData[vPtr++] = u1;  trailBufferData[vPtr++] = -1.0;
+        trailBufferData[vPtr++] = orb.seed;
+
+        // Vertex 4: (p0, +1)
+        trailBufferData[vPtr++] = p0x; trailBufferData[vPtr++] = p0y; trailBufferData[vPtr++] = p0z;
+        trailBufferData[vPtr++] = tx;  trailBufferData[vPtr++] = ty;  trailBufferData[vPtr++] = tz;
+        trailBufferData[vPtr++] = u0;  trailBufferData[vPtr++] = 1.0;
+        trailBufferData[vPtr++] = orb.seed;
+
+        // Vertex 5: (p1, +1)
+        trailBufferData[vPtr++] = p1x; trailBufferData[vPtr++] = p1y; trailBufferData[vPtr++] = p1z;
+        trailBufferData[vPtr++] = tx;  trailBufferData[vPtr++] = ty;  trailBufferData[vPtr++] = tz;
+        trailBufferData[vPtr++] = u1;  trailBufferData[vPtr++] = 1.0;
+        trailBufferData[vPtr++] = orb.seed;
+
+        // Vertex 6: (p1, -1)
+        trailBufferData[vPtr++] = p1x; trailBufferData[vPtr++] = p1y; trailBufferData[vPtr++] = p1z;
+        trailBufferData[vPtr++] = tx;  trailBufferData[vPtr++] = ty;  trailBufferData[vPtr++] = tz;
+        trailBufferData[vPtr++] = u1;  trailBufferData[vPtr++] = -1.0;
+        trailBufferData[vPtr++] = orb.seed;
+      }
+    }
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, trailVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, trailBufferData, gl.DYNAMIC_DRAW);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, orbiterHeadVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, orbiterHeadData, gl.DYNAMIC_DRAW);
+  }
+
+  // ============================================================================
+  // 8. MAIN RENDER LOOP
+  // ============================================================================
+
+  const projMat = createMat4();
+  const viewMat = createMat4();
+  const viewProjMat = createMat4();
+  const modelMat = createMat4();
+  const normalMat = new Float32Array(9);
+  const invModelRot = new Float32Array(9);
+
+  let lastTime = performance.now();
+
+  function render(now) {
+    requestAnimationFrame(render);
+
+    const dt = Math.min(0.05, Math.max(0.001, (now - lastTime) * 0.001));
+    lastTime = now;
+    const time = now * 0.001;
+
+    // 1. Update dissolve / swirl / reform choreography
+    let dissolve = 0.0;
+    let swirlPhase = 0.0;
+    let reformPhase = 0.0;
+    let emberEdgeBoost = 0.0;
+    let targetSpin = BASE_SPIN_SPEED;
+
+    if (cycleActive) {
+      cycleElapsed += dt;
+      const tNorm = cycleElapsed / CYCLE_DURATION;
+
+      if (tNorm >= 1.0) {
+        cycleActive = false;
+        cycleElapsed = 0.0;
+        hasCompletedCycleOnce = true;
+        orbitAfterglow = 1.0;
+        heroEl.setAttribute('data-state', 'idle');
+        captionSub.textContent = 'Hover or tap to dissolve into embers';
+      } else {
+        // Phase A (0.00 -> 0.30): Slow spin down & dissolve hat into drifting embers
+        // Phase B (0.30 -> 0.62): Full ember cloud swirls in 3D space
+        // Phase C (0.62 -> 1.00): Embers flow back together & reform the hat perfectly
+        const dissolveIn = smoothstep(0.02, 0.34, tNorm);
+        const reformOut = 1.0 - smoothstep(0.60, 0.95, tNorm);
+        dissolve = dissolveIn * reformOut * 1.14; // Reaches > 1.02 at peak so 100% of the hat dissolves
+
+        swirlPhase = smoothstep(0.12, 0.48, tNorm) * (1.0 - smoothstep(0.68, 0.96, tNorm));
+        reformPhase = smoothstep(0.54, 0.94, tNorm);
+
+        // Glowing ember frontier intensity on the mesh
+        emberEdgeBoost = smoothstep(0.0, 0.08, dissolve) * smoothstep(1.08, 0.86, dissolve);
+
+        // Decelerate spin during dissolve & swirl, smoothly accelerate as hat reforms
+        const slowFactor = smoothstep(0.0, 0.22, tNorm) * (1.0 - smoothstep(0.66, 0.96, tNorm));
+        targetSpin = mix(BASE_SPIN_SPEED, SLOW_SPIN_SPEED, slowFactor);
+
+        // Activate persistent orbiting satellites as embers lift off
+        orbitAfterglow = Math.max(orbitAfterglow, smoothstep(0.18, 0.55, tNorm));
+
+        // Update caption status smoothly
+        if (tNorm > 0.62 && captionSub.textContent !== 'Reforming the fedora…') {
+          captionSub.textContent = 'Reforming the fedora…';
+        }
+      }
+    }
+
+    // Smooth angular velocity damping
+    currentSpinSpeed += (targetSpin - currentSpinSpeed) * Math.min(1.0, dt * 6.0);
+    if (!reducedMotion) {
+      hatYaw += currentSpinSpeed * dt;
+    }
+
+    // Smooth pointer parallax damping
+    currentParallaxX += (targetParallaxX - currentParallaxX) * Math.min(1.0, dt * 5.0);
+    currentParallaxY += (targetParallaxY - currentParallaxY) * Math.min(1.0, dt * 5.0);
+
+    // Subtle floating bob & rakish fedora tilt
+    const hatBob = reducedMotion ? 0.0 : Math.sin(time * 1.35) * 0.045;
+    const hatPitch = 0.14 + (reducedMotion ? 0.0 : Math.sin(time * 0.9) * 0.025);
+    const hatRoll = -0.09 + (reducedMotion ? 0.0 : Math.cos(time * 0.85) * 0.02);
+
+    composeFedoraModelMatrix(modelMat, normalMat, invModelRot, hatYaw, hatPitch, hatRoll, hatBob);
+
+    // Responsive camera distance so the fedora & wide ember swirl never clip on narrow screens
+    const narrowFactor = Math.max(0.0, (1.15 - aspect) * 1.85);
+    const camDist = 4.35 + narrowFactor;
+    const camX = reducedMotion ? 0.0 : currentParallaxX * 0.55;
+    const camY = 0.66 + (reducedMotion ? 0.0 : -currentParallaxY * 0.42);
+    const camZ = camDist;
+
+    const eye = [camX, camY, camZ];
+    const center = [0.0, -0.08, 0.0];
+    const up = [0.0, 1.0, 0.0];
+
+    perspectiveMat4(projMat, 38.0 * (Math.PI / 180.0), aspect, 0.2, 25.0);
+    lookAtMat4(viewMat, eye, center, up);
+    multiplyMat4(viewProjMat, projMat, viewMat);
+
+    // Update orbiting satellites and their 3D ribbon trails
+    if (orbitAfterglow > 0.001) {
+      const orbitBlend = hasCompletedCycleOnce ? 1.0 : smoothstep(0.15, 0.48, cycleElapsed / CYCLE_DURATION);
+      updateOrbitersAndTrails(time, dt, modelMat, dissolve, orbitBlend);
+    }
+
+    // Clear frame
+    gl.clearColor(0.031, 0.024, 0.039, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    // --- PASS 1: STUDIO FLOOR SHADOW & AMBIENT GLOW ---
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.disable(gl.DEPTH_TEST);
+    gl.depthMask(false);
+
+    gl.useProgram(floorProg);
+    gl.uniformMatrix4fv(floorLocs.uViewProj, false, viewProjMat);
+    gl.uniform1f(floorLocs.uHatYaw, hatYaw);
+    gl.uniform1f(floorLocs.uHatBob, hatBob);
+    gl.uniform1f(floorLocs.uDissolve, Math.min(1.0, dissolve));
+    gl.uniform1f(floorLocs.uSwirlIntensity, swirlPhase);
+    gl.uniform1f(floorLocs.uOrbitVisibility, orbitAfterglow);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, floorVbo);
+    gl.enableVertexAttribArray(floorLocs.aPos);
+    gl.vertexAttribPointer(floorLocs.aPos, 3, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.disableVertexAttribArray(floorLocs.aPos);
+
+    // --- PASS 2: SOLID 3D FEDORA MESH (with synchronized ember-edge dissolve) ---
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
+    gl.depthMask(true);
+    gl.disable(gl.BLEND);
+
+    if (dissolve < 1.02) {
+      gl.useProgram(fedoraProg);
+      gl.uniformMatrix4fv(fedoraLocs.uModel, false, modelMat);
+      gl.uniformMatrix4fv(fedoraLocs.uViewProj, false, viewProjMat);
+      gl.uniformMatrix3fv(fedoraLocs.uNormalMat, false, normalMat);
+      gl.uniformMatrix3fv(fedoraLocs.uInvModelRot, false, invModelRot);
+      gl.uniform3f(fedoraLocs.uCamPos, eye[0], eye[1], eye[2]);
+      gl.uniform1f(fedoraLocs.uDissolve, dissolve);
+      gl.uniform1f(fedoraLocs.uEmberEdgeBoost, emberEdgeBoost);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, meshPosVbo);
+      gl.enableVertexAttribArray(fedoraLocs.aPos);
+      gl.vertexAttribPointer(fedoraLocs.aPos, 3, gl.FLOAT, false, 0, 0);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, meshNormVbo);
+      gl.enableVertexAttribArray(fedoraLocs.aNormal);
+      gl.vertexAttribPointer(fedoraLocs.aNormal, 3, gl.FLOAT, false, 0, 0);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, meshUvVbo);
+      gl.enableVertexAttribArray(fedoraLocs.aUv);
+      gl.vertexAttribPointer(fedoraLocs.aUv, 2, gl.FLOAT, false, 0, 0);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, meshPropsVbo);
+      gl.enableVertexAttribArray(fedoraLocs.aProps);
+      gl.vertexAttribPointer(fedoraLocs.aProps, 3, gl.FLOAT, false, 0, 0);
+
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, meshIbo);
+      gl.drawElements(gl.TRIANGLES, meshData.count, meshData.indexType, 0);
+
+      gl.disableVertexAttribArray(fedoraLocs.aPos);
+      gl.disableVertexAttribArray(fedoraLocs.aNormal);
+      gl.disableVertexAttribArray(fedoraLocs.aUv);
+      gl.disableVertexAttribArray(fedoraLocs.aProps);
+    }
+
+    // --- PASS 3: 18,000 GLOWING EMBER PARTICLES (Additive Premultiplied Blend) ---
+    gl.enable(gl.BLEND);
+    // Tasteful soft additive-premultiplied blend (prevents harsh white blowout)
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.depthMask(false);
+
+    if (dissolve > 0.001) {
+      gl.useProgram(particleProg);
+      gl.uniformMatrix4fv(partLocs.uModel, false, modelMat);
+      gl.uniformMatrix4fv(partLocs.uViewProj, false, viewProjMat);
+      gl.uniformMatrix3fv(partLocs.uNormalMat, false, normalMat);
+      gl.uniform1f(partLocs.uTime, time);
+      gl.uniform1f(partLocs.uDissolve, dissolve);
+      gl.uniform1f(partLocs.uSwirlPhase, swirlPhase);
+      gl.uniform1f(partLocs.uReformPhase, reformPhase);
+      gl.uniform1f(partLocs.uPixelRatio, pixelRatio);
+      gl.uniform1f(partLocs.uReducedMotion, reducedMotion ? 1.0 : 0.0);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, partHomePosVbo);
+      gl.enableVertexAttribArray(partLocs.aHomePos);
+      gl.vertexAttribPointer(partLocs.aHomePos, 3, gl.FLOAT, false, 0, 0);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, partHomeNormVbo);
+      gl.enableVertexAttribArray(partLocs.aHomeNorm);
+      gl.vertexAttribPointer(partLocs.aHomeNorm, 3, gl.FLOAT, false, 0, 0);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, partMetaVbo);
+      gl.enableVertexAttribArray(partLocs.aMeta);
+      gl.vertexAttribPointer(partLocs.aMeta, 4, gl.FLOAT, false, 0, 0);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, partDriftVbo);
+      gl.enableVertexAttribArray(partLocs.aDrift);
+      gl.vertexAttribPointer(partLocs.aDrift, 3, gl.FLOAT, false, 0, 0);
+
+      gl.drawArrays(gl.POINTS, 0, PARTICLE_COUNT);
+
+      gl.disableVertexAttribArray(partLocs.aHomePos);
+      gl.disableVertexAttribArray(partLocs.aHomeNorm);
+      gl.disableVertexAttribArray(partLocs.aMeta);
+      gl.disableVertexAttribArray(partLocs.aDrift);
+    }
+
+    // --- PASS 4 & 5: ORBITING EMBER PARTICLES & FAINT 3D LIGHT TRAILS ---
+    if (orbitAfterglow > 0.005) {
+      // Pass 4: 3D Tapered Ribbon Light Trails (depth-tested against solid fedora!)
+      if (!reducedMotion) {
+        gl.useProgram(trailProg);
+        gl.uniformMatrix4fv(trailLocs.uViewProj, false, viewProjMat);
+        gl.uniform3f(trailLocs.uCamPos, eye[0], eye[1], eye[2]);
+        gl.uniform1f(trailLocs.uOrbitAlpha, orbitAfterglow);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, trailVbo);
+        const stride = 9 * 4;
+        gl.enableVertexAttribArray(trailLocs.aPos);
+        gl.vertexAttribPointer(trailLocs.aPos, 3, gl.FLOAT, false, stride, 0);
+
+        gl.enableVertexAttribArray(trailLocs.aTangent);
+        gl.vertexAttribPointer(trailLocs.aTangent, 3, gl.FLOAT, false, stride, 12);
+
+        gl.enableVertexAttribArray(trailLocs.aTrailUv);
+        gl.vertexAttribPointer(trailLocs.aTrailUv, 2, gl.FLOAT, false, stride, 24);
+
+        gl.enableVertexAttribArray(trailLocs.aOrbiterSeed);
+        gl.vertexAttribPointer(trailLocs.aOrbiterSeed, 1, gl.FLOAT, false, stride, 32);
+
+        gl.drawArrays(gl.TRIANGLES, 0, totalTrailVerts);
+
+        gl.disableVertexAttribArray(trailLocs.aPos);
+        gl.disableVertexAttribArray(trailLocs.aTangent);
+        gl.disableVertexAttribArray(trailLocs.aTrailUv);
+        gl.disableVertexAttribArray(trailLocs.aOrbiterSeed);
+      }
+
+      // Pass 5: Orbiting Ember Glow Heads
+      gl.useProgram(orbiterHeadProg);
+      gl.uniformMatrix4fv(orbiterHeadLocs.uViewProj, false, viewProjMat);
+      gl.uniform1f(orbiterHeadLocs.uPixelRatio, pixelRatio);
+      gl.uniform1f(orbiterHeadLocs.uOrbitAlpha, orbitAfterglow);
+      gl.uniform1f(orbiterHeadLocs.uTime, time);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, orbiterHeadVbo);
+      gl.enableVertexAttribArray(orbiterHeadLocs.aPos);
+      gl.vertexAttribPointer(orbiterHeadLocs.aPos, 3, gl.FLOAT, false, 16, 0);
+
+      gl.enableVertexAttribArray(orbiterHeadLocs.aSeed);
+      gl.vertexAttribPointer(orbiterHeadLocs.aSeed, 1, gl.FLOAT, false, 16, 12);
+
+      gl.drawArrays(gl.POINTS, 0, NUM_ORBITERS);
+
+      gl.disableVertexAttribArray(orbiterHeadLocs.aPos);
+      gl.disableVertexAttribArray(orbiterHeadLocs.aSeed);
+    }
+
+    gl.depthMask(true);
+  }
+
+  requestAnimationFrame(render);
+})();
+</script>
+</body>
+</html>
