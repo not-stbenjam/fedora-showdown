@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Fedora — Emberlight</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: radial-gradient(130% 100% at 50% 36%, #151a22 0%, #0b0e13 48%, #05070a 100%);
+    overflow: hidden;
+    font-family: "Avenir Next", "Segoe UI", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+  }
+  .hero { position: fixed; inset: 0; }
+  canvas {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    display: block; cursor: pointer; touch-action: manipulation;
+  }
+  .caption {
+    position: absolute; left: 50%; bottom: clamp(26px, 7vh, 72px);
+    transform: translateX(-50%);
+    width: 100%; text-align: center; pointer-events: none; padding: 0 24px;
+  }
+  .cap-dot {
+    display: block; width: 6px; height: 6px; margin: 0 auto 16px;
+    background: #e8140a; transform: rotate(45deg);
+    box-shadow: 0 0 14px rgba(232, 20, 10, .55), 0 0 36px rgba(232, 20, 10, .22);
+    opacity: 0; animation: appear 1.6s .2s ease-out forwards;
+  }
+  .cap-title {
+    font-size: clamp(13px, 1.9vw, 16px); font-weight: 600;
+    letter-spacing: .42em; text-indent: .42em; text-transform: uppercase;
+    color: #c3cad4; opacity: 0; animation: rise 1.4s .35s ease-out forwards;
+  }
+  .cap-sub {
+    margin-top: 10px; font-size: clamp(11px, 1.4vw, 13px);
+    letter-spacing: .14em; color: #5f6773;
+    opacity: 0; animation: rise 1.4s .6s ease-out forwards;
+  }
+  .cap-hint {
+    margin-top: 7px; font-size: clamp(10px, 1.2vw, 11.5px);
+    letter-spacing: .24em; text-indent: .24em; text-transform: uppercase;
+    color: #3f4750; opacity: 0; animation: rise 1.4s .85s ease-out forwards;
+  }
+  @keyframes rise   { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @keyframes appear { from { opacity: 0; } to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    .cap-dot, .cap-title, .cap-sub, .cap-hint { animation: none; opacity: 1; }
+    .cap-hint { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="hero">
+  <canvas id="scene" role="img"
+    aria-label="A red fedora spun from thousands of glowing ember particles, slowly turning in the dark"></canvas>
+  <div class="caption">
+    <span class="cap-dot" aria-hidden="true"></span>
+    <p class="cap-title">The Fedora</p>
+    <p class="cap-sub">Shadow and ember, woven into felt.</p>
+    <p class="cap-hint">Hover or tap to unravel</p>
+  </div>
+</div>
+<script>
+(() => {
+  "use strict";
+
+  const canvas = document.getElementById("scene");
+  const ctx = canvas.getContext("2d");
+  const reducedMQ = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+  // ------------------------------------------------------------------ config
+  const TILT = 0.46;            // camera pitch (looking down at the hat)
+  const CAMD = 7.5;             // camera distance
+  const IDLE_SPIN = 0.5;         // rad/s while resting
+  const SLOW_SPIN = 0.06;        // rad/s while dissolving
+  const NS = 24;                // shading palette levels
+
+  let W = 0, H = 0, DPR = 1, cx = 0, cy = 0, unit = 1;
+
+  // -------------------------------------------------- fedora surface (Y is up)
+  const BRIM_IN = 0.98, BRIM_OUT = 2.05, XSCALE = 1.08;
+
+  const brimY = (t, th) => -(0.22 + 0.10 * Math.cos(2 * th)) * t * t;
+  const brimTop = (th, t) => {
+    const r = BRIM_IN + (BRIM_OUT - BRIM_IN) * t;
+    return [r * Math.cos(th), brimY(t, th), r * Math.sin(th)];
+  };
+  const brimEdge = (th, t) => {
+    const r = BRIM_OUT + 0.012;
+    return [r * Math.cos(th), brimY(1, th) + 0.075 * t, r * Math.sin(th)];
+  };
+  const crownH = (th) => {
+    const f = Math.max(0, Math.cos(th)), b = Math.max(0, -Math.cos(th));
+    return 1.18 - (0.26 * Math.pow(f, 1.8) + 0.10 * Math.pow(b, 1.8));
+  };
+  const crownSide = (th, u) => {
+    const r = 0.98 + (0.80 - 0.98) * u + 0.05 * Math.sin(Math.PI * u);
+    return [r * Math.cos(th), crownH(th) * u, r * Math.sin(th)];
+  };
+  const crownTop = (th, rn) => {
+    const R = 0.80;
+    const x = rn * R * Math.cos(th), z = rn * R * Math.sin(th);
+    const dent = 0.30 * Math.exp(-(z * z) / (0.34 * 0.34)) * (1 - Math.pow(rn, 1.7));
+    return [x, crownH(th) - dent, z];
+  };
+
+  // numeric surface normal from partial derivatives
+  function surfNormal(f, a, b, orient) {
+    const e = 1e-3;
+    const p1 = f(a + e, b), p0 = f(a - e, b), q1 = f(a, b + e), q0 = f(a, b - e);
+    const ux = p1[0] - p0[0], uy = p1[1] - p0[1], uz = p1[2] - p0[2];
+    const vx = q1[0] - q0[0], vy = q1[1] - q0[1], vz = q1[2] - q0[2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const l = Math.hypot(nx, ny, nz);
+    if (l < 1e-9) return [0, 1, 0];
+    nx /= l; ny /= l; nz /= l;
+    if (orient(nx, ny, nz, a, b) < 0) { nx = -nx; ny = -ny; nz = -nz; }
+    return [nx, ny, nz];
+  }
+
+  // ------------------------------------------------------------- particles
+  const small = Math.min(screen.width, screen.height) < 600;
+  const N = small ? 3400 : 5200;
+
+  const homeX = new Float32Array(N), homeY = new Float32Array(N), homeZ = new Float32Array(N);
+  const posX  = new Float32Array(N), posY  = new Float32Array(N), posZ  = new Float32Array(N);
+  const velX  = new Float32Array(N), velY  = new Float32Array(N), velZ  = new Float32Array(N);
+  const nrmX  = new Float32Array(N), nrmY  = new Float32Array(N), nrmZ  = new Float32Array(N);
+  const delayA = new Float32Array(N), emberA = new Float32Array(N), reformA = new Float32Array(N);
+  const sR = new Float32Array(N), sY = new Float32Array(N);
+  const sDir = new Float32Array(N), spd = new Float32Array(N), phase = new Float32Array(N), jit = new Float32Array(N);
+  const arrived = new Uint8Array(N), kicked = new Uint8Array(N);
+
+  (function buildParticles() {
+    const rnd = Math.random, TAU = Math.PI * 2;
+    const nBrim = Math.round(N * 0.42), nEdge = Math.round(N * 0.06),
+          nSide = Math.round(N * 0.31), nTop = N - nBrim - nEdge - nSide;
+    let i = 0;
+    const put = (p, n) => {
+      homeX[i] = posX[i] = p[0] * XSCALE;
+      homeY[i] = posY[i] = p[1];
+      homeZ[i] = posZ[i] = p[2];
+      let nx = n[0] / XSCALE, ny = n[1], nz = n[2];          // normal under x-scale
+      const l = Math.hypot(nx, ny, nz) || 1;
+      nrmX[i] = nx / l; nrmY[i] = ny / l; nrmZ[i] = nz / l;
+      phase[i] = rnd() * TAU;
+      jit[i] = 0.7 + 0.6 * rnd();
+      sR[i] = 1.35 + 0.95 * rnd();
+      sY[i] = 0.30 + 0.75 * rnd();
+      sDir[i] = rnd() < 0.85 ? 1 : -1;
+      arrived[i] = 1;
+      i++;
+    };
+    const upO = (nx, ny) => ny;
+    const outO = (nx, ny, nz, th) => nx * Math.cos(th) + nz * Math.sin(th);
+    for (let k = 0; k < nBrim; k++) {
+      const th = rnd() * TAU, t = Math.sqrt(rnd());
+      put(brimTop(th, t), surfNormal(brimTop, th, t, upO));
+    }
+    for (let k = 0; k < nEdge; k++) {
+      const th = rnd() * TAU, t = rnd();
+      put(brimEdge(th, t), surfNormal(brimEdge, th, t, outO));
+    }
+    for (let k = 0; k < nSide; k++) {
+      const th = rnd() * TAU, u = rnd();
+      put(crownSide(th, u), surfNormal(crownSide, th, u, outO));
+    }
+    for (let k = 0; k < nTop; k++) {
+      const th = rnd() * TAU, rn = 0.03 + 0.97 * Math.sqrt(rnd());
+      put(crownTop(th, rn), surfNormal(crownTop, th, rn, upO));
+    }
+  })();
+
+  // ---------------------------------------------------------------- sprites
+  function makeSprite(r, g, b) {
+    const s = document.createElement("canvas"); s.width = s.height = 32;
+    const c = s.getContext("2d");
+    const gr = c.createRadialGradient(16, 16, 0, 16, 16, 16);
+    gr.addColorStop(0.00, "rgba(255,244,235,0.85)");
+    gr.addColorStop(0.20, `rgba(${r},${g},${b},0.80)`);
+    gr.addColorStop(0.48, `rgba(${(r*0.6)|0},${(g*0.6)|0},${(b*0.6)|0},0.30)`);
+    gr.addColorStop(1.00, `rgba(${(r*0.3)|0},${(g*0.3)|0},${(b*0.3)|0},0)`);
+    c.fillStyle = gr; c.fillRect(0, 0, 32, 32);
+    return s;
+  }
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const sprites = [], emberSprites = [];
+  for (let k = 0; k < NS; k++) {
+    const t = k / (NS - 1);
+    let r, g, b;
+    if (t < 0.6) { const u = t / 0.6; r = lerp(84, 238, u); g = lerp(7, 16, u); b = lerp(14, 8, u); }
+    else { const u = (t - 0.6) / 0.4; r = lerp(238, 255, u); g = lerp(16, 96, u); b = lerp(8, 58, u); }
+    sprites.push(makeSprite(r | 0, g | 0, b | 0));
+    emberSprites.push(makeSprite(lerp(150, 255, t) | 0, lerp(45, 208, t) | 0, lerp(14, 138, t) | 0));
+  }
+
+  // ------------------------------------------------------------------ state
+  let angle = 0.6, spinSpeed = IDLE_SPIN, spinTarget = IDLE_SPIN;
+  const burst = { active: false, t: 0, inflight: 0 };
+  let orbiters = [];
+  let lastBurstEnd = -1e9;
+
+  function spawnOrbiters() {
+    const rnd = Math.random, n = 34;
+    for (let k = 0; k < n; k++) {
+      orbiters.push({
+        R: 1.35 + 1.15 * rnd(), y0: 0.10 + 1.00 * rnd(),
+        w: (0.30 + 0.55 * rnd()) * (rnd() < 0.25 ? -1 : 1),
+        ph: rnd() * Math.PI * 2, ph2: rnd() * Math.PI * 2,
+        wb: 0.7 + 0.8 * rnd(), ab: 0.18 + 0.30 * rnd(),
+        alpha: 0, target: 0.30 + 0.18 * rnd(),
+        dying: false, trail: []
+      });
+    }
+  }
+
+  function trigger() {
+    if (reducedMQ.matches || burst.active) return;
+    const now = performance.now() / 1000;
+    if (now - lastBurstEnd < 0.4) return;
+    burst.active = true; burst.t = 0; burst.inflight = N;
+    spinTarget = SLOW_SPIN;
+    for (let i = 0; i < N; i++) {
+      arrived[i] = 0; kicked[i] = 0; spd[i] = 0;
+      delayA[i] = Math.random() * 0.30;
+      emberA[i] = 0.90 + Math.random() * 0.50;
+      reformA[i] = Math.max(0, Math.min(1, (homeY[i] + 0.35) / 1.55)) * 0.90 + Math.random() * 0.35;
+    }
+    for (const o of orbiters) o.dying = true;
+    spawnOrbiters();
+  }
+
+  // ---------------------------------------------------------------- physics
+  function physics(dt, T) {
+    const t = burst.t;
+    let inflight = 0;
+    for (let i = 0; i < N; i++) {
+      if (arrived[i]) continue;
+      inflight++;
+      const x = posX[i], y = posY[i], z = posZ[i];
+      let vx = velX[i], vy = velY[i], vz = velZ[i];
+      const t0 = delayA[i];
+      const tEmber = t0 + emberA[i];
+      const tSwirl = tEmber + 1.35;
+      const tReform = tSwirl + reformA[i];
+
+      if (t < t0) { spd[i] = 0; continue; }
+
+      if (!kicked[i]) {                       // initial ember kick
+        kicked[i] = 1;
+        const m = 1.0 + 2.6 * Math.random();
+        vx = nrmX[i] * m + (Math.random() - 0.5) * 1.8;
+        vy = nrmY[i] * m + 0.8 + 1.4 * Math.random();
+        vz = nrmZ[i] * m + (Math.random() - 0.5) * 1.8;
+      }
+
+      if (t < tEmber) {                       // drift apart like embers
+        vx += Math.sin(2.1 * y + 1.7 * z + T * 1.8) * 1.6 * dt;
+        vy += (1.5 + Math.sin(1.3 * x - T * 1.2) * 0.8) * dt;
+        vz += Math.cos(2.3 * x - 1.9 * y + T * 1.5) * 1.6 * dt;
+        const d = Math.exp(-1.5 * dt); vx *= d; vy *= d; vz *= d;
+      } else if (t < tReform) {               // swirl around the ghost of the hat
+        const r = Math.hypot(x, z) || 1e-4;
+        const tx = -z / r * sDir[i], tz = x / r * sDir[i];
+        const pull = (sR[i] - r) * 3.0;
+        vx += (tx * 2.0 + pull * (x / r)) * dt;
+        vz += (tz * 2.0 + pull * (z / r)) * dt;
+        vy += (sY[i] - y) * 2.4 * dt;
+        const d = Math.exp(-2.6 * dt); vx *= d; vy *= d; vz *= d;
+      } else {                                // spring home, brim sweeping up
+        const ramp = Math.min(1, (t - tReform) / 0.25);
+        const k = 9 * ramp, c = 4.2;
+        vx += ((homeX[i] - x) * k - vx * c) * dt;
+        vy += ((homeY[i] - y) * k - vy * c) * dt;
+        vz += ((homeZ[i] - z) * k - vz * c) * dt;
+        const dx = homeX[i] - x, dy = homeY[i] - y, dz = homeZ[i] - z;
+        if (dx * dx + dy * dy + dz * dz < 0.0004 &&
+            vx * vx + vy * vy + vz * vz < 0.0025) {
+          posX[i] = homeX[i]; posY[i] = homeY[i]; posZ[i] = homeZ[i];
+          velX[i] = velY[i] = velZ[i] = 0; spd[i] = 0;
+          arrived[i] = 1; continue;
+        }
+      }
+
+      posX[i] = x + vx * dt; posY[i] = y + vy * dt; posZ[i] = z + vz * dt;
+      velX[i] = vx; velY[i] = vy; velZ[i] = vz;
+      spd[i] = Math.hypot(vx, vy, vz);
+    }
+    burst.inflight = inflight;
+    if (inflight === 0) {
+      burst.active = false;
+      lastBurstEnd = performance.now() / 1000;
+      spinTarget = IDLE_SPIN;
+    }
+  }
+
+  function updateOrbiters(dt, T) {
+    for (let k = orbiters.length - 1; k >= 0; k--) {
+      const o = orbiters[k];
+      o.ph += o.w * dt;
+      const target = o.dying ? 0 : o.target;
+      o.alpha += (target - o.alpha) * (1 - Math.exp(-(o.dying ? 5 : 0.8) * dt));
+      if (o.dying && o.alpha < 0.01) { orbiters.splice(k, 1); continue; }
+      const px = o.R * Math.cos(o.ph);
+      const py = o.y0 + o.ab * Math.sin(T * o.wb + o.ph2);
+      const pz = o.R * Math.sin(o.ph);
+      o.trail.unshift([px, py, pz]);
+      if (o.trail.length > 9) o.trail.pop();
+    }
+  }
+
+  // ------------------------------------------------------------------ render
+  const Lx = -0.42, Ly = 0.78, Lz = 0.46;   // key light (already ~unit length)
+
+  function render(T) {
+    ctx.clearRect(0, 0, W, H);
+    const cs = Math.cos(angle), sn = Math.sin(angle);
+    const cb = Math.cos(TILT), sb = Math.sin(TILT);
+    const inflightFrac = burst.active ? burst.inflight / N : 0;
+
+    // ---- floor: warm light pool + contact shadow
+    const fy = -0.55;
+    const z2f = fy * sb, pf = CAMD / (CAMD - z2f);
+    const scx = cx, scy = cy - fy * cb * unit * pf;
+    const rx = 2.35 * unit * pf;
+    ctx.save();
+    ctx.translate(scx, scy); ctx.scale(1, 0.34);
+    let g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+    g.addColorStop(0, `rgba(238,54,36,${0.10 + 0.08 * inflightFrac})`);
+    g.addColorStop(1, "rgba(238,54,36,0)");
+    ctx.fillStyle = g; ctx.fillRect(-rx, -rx, rx * 2, rx * 2);
+    g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx * 0.8);
+    g.addColorStop(0, "rgba(0,0,0,0.5)");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g; ctx.fillRect(-rx, -rx, rx * 2, rx * 2);
+    ctx.restore();
+
+    ctx.globalCompositeOperation = "lighter";
+
+    // ---- ambient bloom behind the hat
+    g = ctx.createRadialGradient(cx, cy - unit * 0.35, 0, cx, cy - unit * 0.35, unit * 2.4);
+    g.addColorStop(0, `rgba(238,42,28,${0.055 + 0.025 * Math.sin(T * 0.6) + 0.10 * inflightFrac})`);
+    g.addColorStop(1, "rgba(238,42,28,0)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+    // ---- the hat (and its embers)
+    for (let i = 0; i < N; i++) {
+      const x = posX[i], y = posY[i], z = posZ[i];
+      const x1 = x * cs + z * sn, z1 = z * cs - x * sn;
+      const y2 = y * cb - z1 * sb, z2 = y * sb + z1 * cb;
+      const persp = CAMD / (CAMD - z2);
+      const sx = cx + x1 * unit * persp;
+      const sy = cy - y2 * unit * persp;
+
+      const heat = burst.active && !arrived[i] ? Math.min(1, spd[i] * 0.30) : 0;
+      let spr, a, s;
+      const df = 0.55 + 0.45 * Math.min(1, Math.max(0, (z2 + 2.6) / 5.0));
+      if (heat > 0.05) {
+        spr = emberSprites[Math.min(NS - 1, ((0.25 + 0.75 * heat) * NS) | 0)];
+        a = (0.5 + 0.5 * heat) * df;
+        s = unit * 0.036 * jit[i] * persp * (1 + 0.7 * heat);
+      } else {
+        const nx1 = nrmX[i] * cs + nrmZ[i] * sn, nz1 = nrmZ[i] * cs - nrmX[i] * sn;
+        const ny2 = nrmY[i] * cb - nz1 * sb, nz2 = nrmY[i] * sb + nz1 * cb;
+        const lam = nx1 * Lx + ny2 * Ly + nz2 * Lz;
+        let b = 0.20 + 0.88 * (lam > 0 ? lam : 0) + 0.10 * (lam < 0 ? -lam : 0);
+        b *= 0.92 + 0.08 * Math.sin(T * 2.1 + phase[i]);
+        if (b > 1.35) b = 1.35;
+        spr = sprites[Math.min(NS - 1, (b * NS) | 0)];
+        a = (0.30 + 0.55 * Math.min(1, b)) * df;
+        s = unit * 0.036 * jit[i] * persp;
+      }
+      ctx.globalAlpha = a;
+      ctx.drawImage(spr, sx - s, sy - s, s * 2, s * 2);
+    }
+
+    // ---- lingering orbiters with faint trails
+    for (const o of orbiters) {
+      if (o.alpha <= 0.01) continue;
+      for (let k = o.trail.length - 1; k >= 1; k--) {
+        const p = o.trail[k];
+        const x1 = p[0] * cs + p[2] * sn, z1 = p[2] * cs - p[0] * sn;
+        const y2 = p[1] * cb - z1 * sb, z2 = p[1] * sb + z1 * cb;
+        const persp = CAMD / (CAMD - z2);
+        const sx = cx + x1 * unit * persp, sy = cy - y2 * unit * persp;
+        const fade = 1 - k / o.trail.length;
+        const s = unit * 0.016 * persp * (0.5 + 0.5 * fade);
+        ctx.globalAlpha = o.alpha * 0.28 * fade * fade;
+        ctx.drawImage(emberSprites[NS - 1], sx - s, sy - s, s * 2, s * 2);
+      }
+      const p = o.trail[0];
+      if (p) {
+        const x1 = p[0] * cs + p[2] * sn, z1 = p[2] * cs - p[0] * sn;
+        const y2 = p[1] * cb - z1 * sb, z2 = p[1] * sb + z1 * cb;
+        const persp = CAMD / (CAMD - z2);
+        const sx = cx + x1 * unit * persp, sy = cy - y2 * unit * persp;
+        const s = unit * 0.026 * persp;
+        ctx.globalAlpha = o.alpha;
+        ctx.drawImage(emberSprites[NS - 1], sx - s, sy - s, s * 2, s * 2);
+      }
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  // ------------------------------------------------------------------- loop
+  let raf = 0, lastT = 0;
+
+  function frame(ts) {
+    const t = ts / 1000;
+    let dt = t - lastT; lastT = t;
+    if (!(dt > 0) || dt > 0.05) dt = 0.016;
+    spinSpeed += (spinTarget - spinSpeed) * (1 - Math.exp(-2.5 * dt));
+    angle += spinSpeed * dt;
+    if (burst.active) { burst.t += dt; physics(dt, t); }
+    updateOrbiters(dt, t);
+    render(t);
+    raf = requestAnimationFrame(frame);
+  }
+
+  function renderStatic() {
+    burst.active = false; orbiters = []; spinTarget = spinSpeed = 0;
+    for (let i = 0; i < N; i++) {
+      posX[i] = homeX[i]; posY[i] = homeY[i]; posZ[i] = homeZ[i];
+      velX[i] = velY[i] = velZ[i] = spd[i] = 0; arrived[i] = 1;
+    }
+    render(1.0);
+  }
+
+  function applyMotionPreference() {
+    if (reducedMQ.matches) {
+      cancelAnimationFrame(raf); raf = 0;
+      angle = 0.85;
+      renderStatic();
+    } else if (!raf) {
+      lastT = performance.now() / 1000;
+      raf = requestAnimationFrame(frame);
+    }
+  }
+
+  // ----------------------------------------------------------------- events
+  function resize() {
+    DPR = Math.min(2, window.devicePixelRatio || 1);
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    cx = W / 2; cy = H * 0.44;
+    unit = Math.min(W, H * 1.15) / 6.4;
+    if (reducedMQ.matches) renderStatic();
+  }
+
+  window.addEventListener("resize", resize);
+  canvas.addEventListener("pointerenter", (e) => { if (e.pointerType !== "touch") trigger(); });
+  canvas.addEventListener("pointerdown", trigger);
+  window.addEventListener("keydown", (e) => {
+    if ((e.key === " " || e.key === "Enter") && e.target === document.body) {
+      e.preventDefault(); trigger();
+    }
+  });
+  if (reducedMQ.addEventListener) reducedMQ.addEventListener("change", applyMotionPreference);
+
+  resize();
+  applyMotionPreference();
+})();
+</script>
+</body>
+</html>
