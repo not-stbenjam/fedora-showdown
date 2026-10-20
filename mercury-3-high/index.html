@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#04050a">
+<title>Red Hat Fedora</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: radial-gradient(120% 95% at 50% 36%, #161b28 0%, #0a0d16 44%, #03040a 100%);
+    overflow: hidden;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  #hero { position: fixed; inset: 0; }
+  canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    display: block; cursor: pointer;
+    touch-action: manipulation;
+  }
+  #caption {
+    position: absolute; left: 0; right: 0;
+    bottom: max(22px, 6vh);
+    text-align: center;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .t1 {
+    font-size: clamp(13px, 2.2vw, 21px);
+    font-weight: 600;
+    letter-spacing: 0.62em;
+    text-indent: 0.62em;
+    color: rgba(255, 255, 255, 0.86);
+    text-shadow: 0 2px 24px rgba(0, 0, 0, 0.7);
+  }
+  .t2 {
+    margin-top: 6px;
+    font-size: clamp(9px, 1.15vw, 11px);
+    letter-spacing: 0.48em;
+    text-indent: 0.48em;
+    color: rgba(255, 255, 255, 0.42);
+  }
+  .hint {
+    margin-top: 12px;
+    font-size: clamp(8px, 1vw, 9.5px);
+    letter-spacing: 0.36em;
+    text-indent: 0.36em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.26);
+  }
+</style>
+</head>
+<body>
+<div id="hero">
+  <canvas id="cv"></canvas>
+  <div id="caption">
+    <div class="t1">FEDORA</div>
+    <div class="t2">red hat &middot; classic</div>
+    <div class="hint">hover &middot; disperse</div>
+  </div>
+</div>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+
+  var W = 0, H = 0, DPR = 1, minD = 0;
+  var u = 1, focal = 1, camZpx = 1, aimYpx = 0;
+  var cx = 0, cy = 0, ptrX = 0, ptrY = 0;
+
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var TAU = Math.PI * 2;
+  var rand = Math.random;
+  var clamp = function (v, a, b) { return v < a ? a : (v > b ? b : v); };
+
+  /* ------------------------------------------------- geometry ---- */
+
+  var N = 0;
+  var HOME = new Float32Array(4220 * 3);
+  var NRM = new Float32Array(4220 * 3);
+  var MAT = new Uint8Array(4220);
+  var BASE = new Uint8ClampedArray(4220 * 3);
+  var SIZ = new Float32Array(4220);
+  var SEED = new Float32Array(4220);
+
+  var POS = new Float32Array(4220 * 3);
+  var VEL = new Float32Array(4220 * 3);
+  var FLAG = new Uint8Array(4220);            // 0 attached, 1 free, 2 orbit
+  var REL = new Float32Array(4220);            // release time
+  var edgeIdxs = [];
+
+  function add(x, y, z, nx, ny, nz, mat, r, g, b) {
+    var i3 = N * 3;
+    HOME[i3] = x; HOME[i3 + 1] = y; HOME[i3 + 2] = z;
+    POS[i3] = x; POS[i3 + 1] = y; POS[i3 + 2] = z;
+    NRM[i3] = nx; NRM[i3 + 1] = ny; NRM[i3 + 2] = nz;
+    MAT[N] = mat;
+    BASE[i3] = r; BASE[i3 + 1] = g; BASE[i3 + 2] = b;
+    SIZ[N] = 0.75 + rand() * 0.55;
+    SEED[N] = rand() * TAU;
+    FLAG[N] = 0;
+    N++;
+  }
+
+  // brim top annulus
+  (function () {
+    var RI = 1.16, RO = 1.90, y = 0.03;
+    for (var k = 0; k < 920; k++) {
+      var th = rand() * TAU;
+      var r = Math.sqrt(RI * RI + (RO * RO - RI * RI) * rand());
+      add(r * Math.cos(th), y, r * Math.sin(th), 0, 1, 0, 2,
+        136 + rand() * 20, 22 + rand() * 12, 34 + rand() * 14);
+    }
+    // brim edge ring
+    for (var e = 0; e < 220; e++) {
+      th = rand() * TAU;
+      add(RO * Math.cos(th), (rand() - 0.5) * 0.06, RO * Math.sin(th),
+          Math.cos(th), 0, Math.sin(th), 2,
+          166 + rand() * 20, 40 + rand() * 14, 48 + rand() * 14);
+      edgeIdxs.push(N - 1);
+    }
+  })();
+
+  // brim bottom
+  (function () {
+    var RI = 1.16, RO = 1.90, y = -0.03;
+    for (var k = 0; k < 420; k++) {
+      var th = rand() * TAU;
+      var r = Math.sqrt(RI * RI + (RO * RO - RI * RI) * rand());
+      add(r * Math.cos(th), y, r * Math.sin(th), 0, -1, 0, 2,
+         108 + rand() * 14, 16 + rand() * 10, 26 + rand() * 12);
+    }
+  })();
+
+  // crown side
+  (function () {
+    var R0 = 1.16, R1 = 1.02, CH = 1.32, dr = (R1 - R0) / CH;
+    for (var k = 0; k < 1500; k++) {
+      var t = rand();
+      var R = R0 * (1 - t) + R1 * t;
+      var th = rand() * TAU;
+      var c = Math.cos(th), s = Math.sin(th);
+      var nl = Math.sqrt(c * c + dr * dr + s * s);
+      add(R * c, t * CH, R * s, c / nl, dr / nl, s / nl, 0,
+         170 + rand() * 18, 28 + rand() * 12, 42 + rand() * 12);
+    }
+  })();
+
+  // dome cap (squashed hemisphere)
+  (function () {
+    var R1 = 1.02, CH = 1.32, sq = 0.16;
+    for (var k = 0; k < 640; k++) {
+      var psi = Math.acos(1 - rand());
+      var th = rand() * TAU;
+      var r = R1 * Math.sin(psi);
+      var y = CH + R1 * sq * (1 - Math.cos(psi));
+      var nx = Math.sin(psi) * Math.cos(th);
+      var ny = sq * Math.cos(psi);
+      var nz = Math.sin(psi) * Math.sin(th);
+      var nl = Math.sqrt(nx * nx + ny * ny + nz * nz);
+      add(r * Math.cos(th), y, r * Math.sin(th), nx / nl, ny / nl, nz / nl, 1,
+         196 + rand() * 16, 52 + rand() * 10, 60 + rand() * 10);
+    }
+  })();
+
+  // band
+  (function () {
+    var R = 1.19;
+    for (var k = 0; k < 520; k++) {
+      var th = rand() * TAU;
+      var y = 0.07 + rand() * 0.20;
+      add(R * Math.cos(th), y, R * Math.sin(th),
+          Math.cos(th), 0, Math.sin(th), 3,
+         30 + rand() * 10, 18 + rand() * 8, 22 + rand() * 8);
+    }
+  })();
+
+  /* ------------------------------------------------- lighting ---- */
+
+  var LX, LY, LZ, RX, RY, RZ;
+  (function () {
+    var l = Math.sqrt(0.42 * 0.42 + 0.82 * 0.82 + 0.36 * 0.36);
+    LX = -0.42 / l; LY = 0.82 / l; LZ = 0.36 / l;
+    var rl = Math.sqrt(0.55 * 0.55 + 0.20 * 0.20 + 0.80 * 0.80);
+    RX = 0.55 / rl; RY = 0.20 / rl; RZ = -0.80 / rl;
+  })();
+
+  function litColor(m, r, g, b, nx, ny, nz, out) {
+    var ndl = nx * LX + ny * LY + nz * LZ;
+    if (ndl < 0) ndl = 0;
+    var ndr = nx * RX + ny * RY + nz * RZ;
+    if (ndr < 0) ndr = 0;
+    var amb, dif, rim, spec, spw;
+    if (m === 0)      { amb = 0.30; dif = 0.85; rim = 0.42; spec = 0.08; spw = 30; }
+    else if (m === 1) { amb = 0.34; dif = 0.90; rim = 0.50; spec = 0.25; spw = 30; }
+    else if (m === 2) { amb = 0.26; dif = 0.80; rim = 0.30; spec = 0.04; spw = 40; }
+    else              { amb = 0.22; dif = 0.70; rim = 0.25; spec = 0.80; spw = 22; }
+    var s = 0;
+    if (spec > 0) {
+      var hx = LX, hy = LY + 1, hz = LZ;
+      var hn = Math.sqrt(hx * hx + hy * hy + hz * hz);
+      hx /= hn; hy /= hn; hz /= hn;
+      var ndh = nx * hx + ny * hy + nz * hz;
+      if (ndh > 0) s = spec * Math.pow(ndh, spw);
+    }
+    out[0] = r * (amb + dif * ndl) + 255 * rim * ndr + 255 * s;
+    out[1] = g * (amb + dif * ndl) + 232 * rim * ndr + 232 * s;
+    out[2] = b * (amb + dif * ndl) + 205 * rim * ndr + 205 * s;
+  }
+
+  /* ------------------------------------------------- sprites ---- */
+
+  var sprWarm, sprCool, sprShadow, sprPool;
+
+  function makeGlow(stops) {
+    var c = document.createElement('canvas');
+    c.width = c.height = 64;
+    var g = c.getContext('2d');
+    var gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    for (var i = 0; i < stops.length; i++) gr.addColorStop(stops[i][0], stops[i][1]);
+    g.fillStyle = gr;
+    g.fillRect(0, 0, 64, 64);
+    return c;
+  }
+
+  function makeSprites() {
+    sprWarm = makeGlow([
+      [0.00, 'rgba(255,246,226,1)'],
+      [0.22, 'rgba(255,190,100,0.85)'],
+      [0.52, 'rgba(255,120,48,0.38)'],
+      [1.00, 'rgba(255,90,40,0)']
+    ]);
+    sprCool = makeGlow([
+      [0.00, 'rgba(228,240,255,0.95)'],
+      [0.35, 'rgba(160,195,255,0.35)'],
+      [1.00, 'rgba(120,170,255,0)']
+    ]);
+    sprShadow = makeGlow([
+      [0.00, 'rgba(0,0,0,0.9)'],
+      [0.45, 'rgba(0,0,0,0.5)'],
+      [1.00, 'rgba(0,0,0,0)']
+    ]);
+    sprPool = makeGlow([
+      [0.00, 'rgba(255,120,80,0.10)'],
+      [0.40, 'rgba(255,90,70,0.045)'],
+      [1.00, 'rgba(120,70,90,0)']
+    ]);
+  }
+
+  /* ------------------------------------------------- state ---- */
+
+  var hovering = false, touchMode = false, engaged = false;
+  var mode = 'idle', T = 0, DUR = 3.6;
+  var spin = 0.45, spinV = 0, spinTarget = 0.45;
+  var angle = 0.35;
+  var time = 0;
+
+  var MOTES = [];
+  (function () {
+    for (var i = 0; i < 70; i++) {
+      MOTES.push({
+        x: (rand() - 0.5) * 5.2,
+        y: 0.1 + rand() * 2.9,
+        z: (rand() - 0.5) * 4.8,
+        v: 0.05 + rand() * 0.12,
+        ph: rand() * TAU,
+        sp: 0.6 + rand() * 2.2
+      });
+    }
+  })();
+
+  var O = []; // orbiting particle records
+
+  function prepareBurst() {
+    for (var i = 0; i < N; i++) {
+      if (FLAG[i] === 0) {
+        REL[i] = rand() * 0.30;
+      } else if (FLAG[i] === 2) {
+        // orbiting particles join the burst from wherever they are
+        FLAG[i] = 1;
+        REL[i] = 0;
+        var i3 = i * 3;
+        VEL[i3] = (rand() - 0.5) * 1.4;
+        VEL[i3 + 1] = 0.6 + rand() * 1.0;
+        VEL[i3 + 2] = (rand() - 0.5) * 1.4;
+      }
+    }
+    O.length = 0;
+  }
+
+  function engage() {
+    if (reduced) return;
+    if (mode !== 'idle') return;
+    mode = 'burst';
+    T = 0;
+    prepareBurst();
+  }
+
+  function selectOrbiters() {
+    var n = Math.min(22, edgeIdxs.length);
+    var pool = edgeIdxs.slice();
+    for (var k = 0; k < n; k++) {
+      var j = (rand() * pool.length) | 0;
+      var id = pool.splice(j, 1)[0];
+      FLAG[id] = 2;
+      O.push({
+        id: id,
+        R: 2.15 + rand() * 0.95,
+        sp: 0.28 + rand() * 0.42,
+        ph: rand() * TAU,
+        y: 0.25 + rand() * 0.95,
+        amp: 0.10 + rand() * 0.20,
+        mod: 0.6 + rand() * 1.4,
+        trail: []
+      });
+    }
+  }
+
+  /* ------------------------------------------------- physics ---- */
+
+  function update(dt) {
+    time += dt;
+
+    // spin easing
+    if (mode !== 'idle') spinTarget = 0.03;
+    else if (hovering) spinTarget = 0.12;
+    else spinTarget = 0.45;
+    spinV += (spinTarget - spinV) * Math.min(1, dt * 2.2);
+    spin += spinV * dt;
+
+    if (mode !== 'idle') {
+      T += dt;
+      if (T >= DUR) {
+        mode = 'idle';
+        selectOrbiters();
+        engaged = false;
+        if (touchMode) hovering = false;
+      }
+    }
+
+    // release / integrate free particles
+    for (var i = 0; i < N; i++) {
+      var st = FLAG[i];
+      var i3 = i * 3;
+      if (st === 0) {
+        if (mode === 'burst' || mode === 'swirl' || mode === 'reform') {
+          if (T >= REL[i]) {
+            // convert to free with a burst along the normal
+            var nx = NRM[i3], ny = NRM[i3 + 1], nz = NRM[i3 + 2];
+            var sp = 0.85 + rand() * 1.25;
+            var tx = rand() - 0.5, ty = rand() - 0.5, tz = rand() - 0.5;
+            var dot = nx * tx + ny * ty + nz * tz;
+            VEL[i3] = nx * sp + (tx - nx * dot) * 1.1;
+            VEL[i3 + 1] = ny * sp + 0.55 + (ty - ny * dot) * 1.1;
+            VEL[i3 + 2] = nz * sp + (tz - nz * dot) * 1.1;
+            FLAG[i] = 1;
+          }
+        }
+        continue;
+      }
+      if (st === 2) continue; // orbits handled separately
+
+      var x = POS[i3], y = POS[i3 + 1], z = POS[i3 + 2];
+      var ax = 0, ay = 0, az = 0;
+
+      // swirl vortex
+      if (T < 2.2) {
+        var vyc = 0.42 + 0.14 * Math.sin(T * 2.1);
+        var dx = x, dyz = z, rr2 = dx * dx + dyz * dyz;
+        var rr = Math.sqrt(rr2) + 1e-4;
+        var str = 1.15 * Math.exp(-rr2 / (2 * 1.05 * 1.05));
+        ax += (-dyz / rr) * str;
+        az += (dx / rr) * str;
+        ay += str * 0.12;
+        ax += (dx / rr) * str * 0.38;
+        az += (dyz / rr) * str * 0.38;
+      }
+
+      // reform spring
+      if (T > 2.0) {
+        var k = clamp((T - 2.0) / 0.9, 0, 1) * 22;
+        var hx = HOME[i3], hy = HOME[i3 + 1], hz = HOME[i3 + 2];
+        ax += (hx - x) * k;
+        ay += (hy - y) * k;
+        az += (hz - z) * k;
+      }
+
+      // gentle buoyancy
+      ay += 0.10;
+      ax += Math.sin(time * 3 + SEED[i] * 7) * 0.06;
+      az += Math.cos(time * 2.6 + SEED[i] * 5) * 0.06;
+
+      var drag = Math.exp(-1.55 * dt);
+      VEL[i3] = VEL[i3] * drag + ax * dt;
+      VEL[i3 + 1] = VEL[i3 + 1] * drag + ay * dt;
+      VEL[i3 + 2] = VEL[i3 + 2] * drag + az * dt;
+
+      var s2 = VEL[i3] * VEL[i3] + VEL[i3 + 1] * VEL[i3 + 1] + VEL[i3 + 2] * VEL[i3 + 2];
+      if (s2 > 36) {
+        var sc = 6 / Math.sqrt(s2);
+        VEL[i3] *= sc; VEL[i3 + 1] *= sc; VEL[i3 + 2] *= sc;
+      }
+
+      POS[i3] += VEL[i3] * dt;
+      POS[i3 + 1] += VEL[i3 + 1] * dt;
+      POS[i3 + 2] += VEL[i3 + 2] * dt;
+
+      // snap back
+      if (T > 2.1) {
+        var ddx = POS[i3] - HOME[i3];
+        var ddy = POS[i3 + 1] - HOME[i3 + 1];
+        var ddz = POS[i3 + 2] - HOME[i3 + 2];
+        if (ddx * ddx + ddy * ddy + ddz * ddz < 0.004) {
+          POS[i3] = HOME[i3]; POS[i3 + 1] = HOME[i3 + 1]; POS[i3 + 2] = HOME[i3 + 2];
+          VEL[i3] = 0; VEL[i3 + 1] = 0; VEL[i3 + 2] = 0;
+          FLAG[i] = 0;
+        }
+      }
+    }
+
+    // force-attach stragglers at the very end
+    if (mode !== 'idle' && T > 3.45) {
+      for (var q = 0; q < N; q++) {
+        if (FLAG[q] === 1) {
+          var q3 = q * 3;
+          POS[q3] = HOME[q3]; POS[q3 + 1] = HOME[q3 + 1]; POS[q3 + 2] = HOME[q3 + 2];
+          VEL[q3] = 0; VEL[q3 + 1] = 0; VEL[q3 + 2] = 0;
+          FLAG[q] = 0;
+        }
+      }
+    }
+
+    // orbiting particles
+    for (var oi = 0; oi < O.length; oi++) {
+      var ob = O[oi];
+      var id = ob.id;
+      ob.ph += ob.sp * dt;
+      var i3b = id * 3;
+      var ox = Math.cos(ob.ph) * ob.R;
+      var oz = Math.sin(ob.ph) * ob.R;
+      var oy = ob.y + Math.sin(time * ob.mod + ob.ph * 2) * ob.amp;
+      POS[i3b] = ox; POS[i3b + 1] = oy; POS[i3b + 2] = oz;
+      var sp2 = [0, 0];
+      project(ox, oy, oz, sp2);
+      var sx = sp2[0], sy = sp2[1];
+      ob.trail.unshift({ x: sx, y: sy, r: 2.6 });
+      if (ob.trail.length > 16) ob.trail.length = 16;
+    }
+
+    // ambient motes
+    for (var mi = 0; mi < MOTES.length; mi++) {
+      var m = MOTES[mi];
+      m.y += m.v * dt;
+      m.x += Math.sin(time * m.sp + m.ph) * 0.012;
+      m.z += Math.cos(time * m.sp * 0.8 + m.ph) * 0.012;
+      if (m.y > 3.0) { m.y = 0.05; m.x = (rand() - 0.5) * 5.2; m.z = (rand() - 0.5) * 4.8; }
+    }
+  }
+
+  function project(x, y, z, out) {
+    var d = camZpx - z * u;
+    if (d < 1) d = 1;
+    var f = focal / d;
+    out[0] = cx + x * u * f;
+    out[1] = cy - (y * u - aimYpx) * f;
+    return f;
+  }
+
+  /* ------------------------------------------------- render ---- */
+
+  var lit = [0, 0, 0];
+  var bucketMap = new Map();
+
+  function render() {
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+
+    // light pool behind the hat
+    ctx.globalCompositeOperation = 'lighter';
+    var pr = minD * 0.55;
+    ctx.globalAlpha = 0.5;
+    ctx.drawImage(sprPool, cx - pr, cy - pr * 1.1, pr * 2, pr * 2.2);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+
+    // ground shadow
+    var shD = camZpx;
+    var shF = focal / shD;
+    var shY = cy - (0 - aimYpx) * shF; // ground ~ y=0
+    var shR = 1.95 * u * shF;
+    ctx.globalAlpha = 0.55;
+    ctx.drawImage(sprShadow, cx - shR, shY - shR * 0.16, shR * 2, shR * 0.32);
+    ctx.globalAlpha = 1;
+
+    var co = Math.cos(spin), si = Math.sin(spin);
+
+    // ---- attached hat (lit, bucketed) ----
+    bucketMap.clear();
+    for (var i = 0; i < N; i++) {
+      if (FLAG[i] !== 0) continue;
+      var i3 = i * 3;
+      var hx = HOME[i3], hy = HOME[i3 + 1], hz = HOME[i3 + 2];
+      var x = hx * co + hz * si;
+      var z = -hx * si + hz * co;
+      var y = hy;
+      var nx = NRM[i3], ny = NRM[i3 + 1], nz = NRM[i3 + 2];
+      var nrx = nx * co + nz * si;
+      var nrz = -nx * si + nz * co;
+
+      litColor(MAT[i], BASE[i3], BASE[i3 + 1], BASE[i3 + 2], nrx, ny, nrz, lit);
+      var R = lit[0], G = lit[1], B = lit[2];
+      if (R > 255) R = 255; if (G > 255) G = 255; if (B > 255) B = 255;
+      var key = ((R / 16) | 0) << 8 | ((G / 16) | 0) << 4 | ((B / 16) | 0);
+
+      var d = camZpx - z * u;
+      if (d < 1) d = 1;
+      var f = focal / d;
+      var sx = cx + x * u * f;
+      var sy = cy - (y * u - aimYpx) * f;
+      var rr = SIZ[i] * u * f * 0.024;
+      if (rr < 0.25) rr = 0.25;
+
+      var entry = bucketMap.get(key);
+      if (!entry) { entry = { d: 0, c: 0, p: new Path2D() }; bucketMap.set(key, entry); }
+      entry.p.moveTo(sx, sy);
+      entry.p.arc(sx, sy, rr, 0, TAU);
+      entry.d += d; entry.c++;
+    }
+
+    ctx.globalCompositeOperation = 'lighter';
+    bucketMap.forEach(function (e, key) {
+      var avD = e.d / e.c;
+      var a = clamp(1.18 - avD / (u * 9), 0.22, 1) * 0.62;
+      ctx.globalAlpha = a;
+      ctx.fillStyle = 'rgb(' + (((key >> 8) & 15) << 4) + ',' + (((key >> 4) & 15) << 4) + ',' + ((key & 15) << 4) + ')';
+      ctx.fill(e.p);
+    });
+    ctx.globalAlpha = 1;
+
+    // ---- free embers ----
+    var ret = T > 2.0 ? clamp((T - 2.0) / 1.2, 0, 1) : 0;
+    for (var j = 0; j < N; j++) {
+      if (FLAG[j] !== 1) continue;
+      var j3 = j * 3;
+      var xj = POS[j3], yj = POS[j3 + 1], zj = POS[j3 + 2];
+      var dj = camZpx - zj * u;
+      if (dj < 1) dj = 1;
+      var fj = focal / dj;
+      var sxj = cx + xj * u * fj;
+      var syj = cy - (yj * u - aimYpx) * fj;
+      var tw = 0.72 + 0.28 * Math.sin(time * 6 + SEED[j] * 9);
+      var rj = (2.0 + 3.4 * SIZ[j]) * u * fj * 0.012 * (1 - ret * 0.5) * tw;
+      if (rj < 0.5) rj = 0.5;
+      var fade = mode === 'burst' && T < 0.3 ? 0.75 + 0.25 * (T / 0.3) : 1;
+      ctx.globalAlpha = (0.42 + 0.20 * tw) * (1 - ret * 0.45) * fade;
+      ctx.drawImage(sprWarm, sxj - rj, syj - rj, rj * 2, rj * 2);
+      if (rj > 2.6) {
+        ctx.globalAlpha = (0.5 + 0.2 * tw) * (1 - ret * 0.4) * fade;
+        ctx.drawImage(sprWarm, sxj - rj * 0.42, syj - rj * 0.42, rj * 0.84, rj * 0.84);
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // ---- orbiting trails and cores ----
+    for (var oi = 0; oi < O.length; oi++) {
+      var ob = O[oi];
+      var tl = ob.trail;
+      for (var k = tl.length - 1; k >= 1; k--) {
+        var a2 = ((tl.length - k) / tl.length) * 0.34;
+        var r2 = tl[k].r * (0.45 + 0.55 * (tl.length - k) / tl.length);
+        ctx.globalAlpha = a2;
+        ctx.drawImage(sprCool, tl[k].x - r2, tl[k].y - r2, r2 * 2, r2 * 2);
+      }
+      var idc = ob.id;
+      var i3c = idc * 3;
+      var dc = camZpx - POS[i3c + 2] * u;
+      if (dc < 1) dc = 1;
+      var fc = focal / dc;
+      var sxc = cx + POS[i3c] * u * fc;
+      var syc = cy - (POS[i3c + 1] * u - aimYpx) * fc;
+      var rcore = 2.2 * u * fc * 0.012;
+      ctx.globalAlpha = 0.55;
+      ctx.drawImage(sprCool, sxc - rcore * 2, syc - rcore * 2, rcore * 4, rcore * 4);
+      ctx.globalAlpha = 0.7;
+      ctx.drawImage(sprWarm, sxc - rcore, syc - rcore, rcore * 2, rcore * 2);
+    }
+    ctx.globalAlpha = 1;
+
+    // ---- ambient motes ----
+    ctx.globalCompositeOperation = 'lighter';
+    for (var mi = 0; mi < MOTES.length; mi++) {
+      var m = MOTES[mi];
+      var dm = camZpx - m.z * u;
+      if (dm < 1) dm = 1;
+      var fm = focal / dm;
+      var mx = cx + m.x * u * fm;
+      var my = cy - (m.y * u - aimYpx) * fm;
+      var a3 = 0.05 + 0.04 * Math.sin(time * m.sp + m.ph);
+      if (a3 <= 0.02) continue;
+      var r3 = 1.1 * u * fm * 0.012;
+      ctx.globalAlpha = a3;
+      ctx.drawImage(sprCool, mx - r3, my - r3, r3 * 2, r3 * 2);
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  /* ------------------------------------------------- setup ---- */
+
+  function resize() {
+    DPR = Math.min(2, window.devicePixelRatio || 1);
+    W = cv.clientWidth; H = cv.clientHeight;
+    cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+    minD = Math.min(W, H);
+    u = minD / 4.6;
+    focal = minD * 0.88;
+    camZpx = 6.4 * u;
+    aimYpx = 0.15 * u;
+    cx = W / 2 + ptrX * 8;
+    cy = H / 2 + ptrY * 6;
+  }
+
+  function onPointerMove(e) {
+    var r = cv.getBoundingClientRect();
+    var nx = ((e.clientX - r.left) / r.width) * 2 - 1;
+    var ny = ((e.clientY - r.top) / r.height) * 2 - 1;
+    ptrX = clamp(nx, -1, 1);
+    ptrY = clamp(ny, -1, 1);
+    cx = W / 2 + ptrX * 8;
+    cy = H / 2 + ptrY * 6;
+  }
+
+  cv.addEventListener('pointermove', function (e) {
+    if (e.pointerType === 'touch') return;
+    onPointerMove(e);
+    if (!hovering) { hovering = true; engage(); }
+  });
+
+  cv.addEventListener('pointerenter', function (e) {
+    if (e.pointerType === 'touch') return;
+    hovering = true;
+    engage();
+  });
+
+  cv.addEventListener('pointerleave', function (e) {
+    if (e.pointerType === 'touch') return;
+    hovering = false;
+  });
+
+  cv.addEventListener('pointerdown', function (e) {
+    touchMode = e.pointerType === 'touch';
+    onPointerMove(e);
+    hovering = true;
+    engage();
+  });
+
+  cv.addEventListener('pointerup', function () {
+    if (touchMode && mode === 'idle') hovering = false;
+  });
+
+  window.addEventListener('resize', resize);
+
+  /* ------------------------------------------------- loop ---- */
+
+  makeSprites();
+  resize();
+
+  var last = performance.now();
+  function frame(ts) {
+    var dt = Math.min(0.05, (ts - last) / 1000);
+    last = ts;
+    if (!reduced) update(dt);
+    render();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
