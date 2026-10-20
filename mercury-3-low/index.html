@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Shadowman's Fedora</title>
+<style>
+  :root {
+    --bg1: #07070c;
+    --bg2: #0c0c16;
+    --ink: #e9e4d8;
+    --ink-dim: rgba(233,228,216,0.55);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background:
+      radial-gradient(120% 90% at 50% 8%, #12121f 0%, var(--bg2) 42%, var(--bg1) 78%);
+    color: var(--ink);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+                 Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  .hero {
+    position: relative;
+    width: 100%;
+    height: 100dvh;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(10px, 3.5vh, 34px);
+  }
+
+  /* soft atmospheric glows behind the hat */
+  .glow {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(36% 30% at 50% 38%, rgba(255, 96, 40, 0.14), transparent 70%),
+      radial-gradient(28% 24% at 50% 40%, rgba(255, 190, 120, 0.06), transparent 70%),
+      radial-gradient(58% 46% at 50% 30%, rgba(30, 26, 60, 0.55), transparent 78%);
+    filter: blur(2px);
+  }
+  .vignette {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
+    background: radial-gradient(120% 100% at 50% 45%, transparent 55%, rgba(0,0,0,0.55) 100%);
+  }
+
+  .stage {
+    position: relative;
+    z-index: 1;
+    width: min(78vw, 62vh, 520px);
+    aspect-ratio: 1 / 1.04;
+  }
+  #scene {
+    display: block;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+    touch-action: manipulation;
+    outline: none;
+  }
+
+  .caption {
+    position: relative;
+    z-index: 2;
+    margin: 0;
+    text-align: center;
+    font-size: clamp(12px, 2.2vh, 17px);
+    letter-spacing: 0.06em;
+    color: var(--ink-dim);
+    line-height: 1.6;
+    padding: 0 20px;
+    max-width: 600px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .caption .t {
+    color: var(--ink);
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    font-size: 0.78em;
+  }
+  .caption .hint { opacity: 0.75; }
+
+  .fallback {
+    position: relative; z-index: 2;
+    max-width: 560px; text-align: center; color: var(--ink-dim);
+    font-size: 14px; line-height: 1.7; padding: 0 20px;
+  }
+
+  /* reduced motion: static, no animation cues */
+  @media (prefers-reduced-motion: reduce) {
+    .caption .hint { display: none; }
+    #scene { cursor: default; }
+  }
+</style>
+</head>
+<body>
+  <main class="hero">
+    <div class="glow" aria-hidden="true"></div>
+    <div class="stage">
+      <canvas id="scene" aria-label="A 3D fedora hat. Hover or tap to scatter it into glowing particles."></canvas>
+    </div>
+    <p class="caption">
+      <span class="t">Shadowman&rsquo;s Fedora</span><br>
+      <span class="hint">hover or tap &mdash; the embers will answer</span>
+    </p>
+    <div class="vignette" aria-hidden="true"></div>
+  </main>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---------------------------------------------------------------- *
+   *  Environment / reduced motion
+   * ---------------------------------------------------------------- */
+  var reduced = false;
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    reduced = true;
+  }
+
+  var canvas = document.getElementById("scene");
+  var gl = canvas.getContext("webgl", { antialias: true, alpha: false, depth: true, premultipliedAlpha: false });
+
+  if (!gl) {
+    var fb = document.createElement("p");
+    fb.className = "fallback";
+    fb.textContent = "A 3D fedora would spin here, but this browser has no WebGL support.";
+    document.querySelector(".stage").after(fb);
+    canvas.style.display = "none";
+    return;
+  }
+
+  /* ---------------------------------------------------------------- *
+   *  Small linear-algebra helpers (column-major mat4)
+   * ---------------------------------------------------------------- */
+  function m4() { return new Float32Array(16); }
+
+  function m4mul(out, a, b) {
+    var i, j, k, s;
+    for (i = 0; i < 4; i++) {
+      for (j = 0; j < 4; j++) {
+        s = 0;
+        for (k = 0; k < 4; k++) s += a[k * 4 + i] * b[j * 4 + k];
+        out[j * 4 + i] = s;
+      }
+    }
+    return out;
+  }
+
+  function m4identity(out) { out.fill(0); for (var i = 0; i < 4; i++) out[i * 4 + i] = 1; return out; }
+
+  function m4perspective(out, fovy, aspect, near, far) {
+    var f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far);
+    out.fill(0);
+    out[0] = f / aspect;
+    out[5] = f;
+    out[10] = (far + near) * nf;
+    out[11] = -1;
+    out[14] = 2 * far * near * nf;
+    return out;
+  }
+
+  function m4lookAt(out, eye, center, up) {
+    var zx = eye[0] - center[0], zy = eye[1] - center[1], zz = eye[2] - center[2];
+    var zl = Math.hypot(zx, zy, zz); zx /= zl; zy /= zl; zz /= zl;
+    var xx = up[1] * zz - up[2] * zy, xy = up[2] * zx - up[0] * zz, xz = up[0] * zy - up[1] * zx;
+    var xl = Math.hypot(xx, xy, xz); xx /= xl; xy /= xl; xz /= xl;
+    var yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+    out.fill(0);
+    out[0] = xx; out[1] = yx; out[2] = zx;
+    out[4] = xy; out[5] = yy; out[6] = zy;
+    out[8] = xz; out[9] = yz; out[10] = zz;
+    out[12] = -(xx * eye[0] + xy * eye[1] + xz * eye[2]);
+    out[13] = -(yx * eye[0] + yy * eye[1] + yz * eye[2]);
+    out[14] = -(zx * eye[0] + zy * eye[1] + zz * eye[2]);
+    out[15] = 1;
+    return out;
+  }
+
+  function vecCross(o, a, b) {
+    o[0] = a[1] * b[2] - a[2] * b[1];
+    o[1] = a[2] * b[0] - a[0] * b[2];
+    o[2] = a[0] * b[1] - a[1] * b[0];
+    return o;
+  }
+  function vecNorm(o) {
+    var l = Math.hypot(o[0], o[1], o[2]) || 1e-9;
+    o[0] /= l; o[1] /= l; o[2] /= l;
+    return o;
+  }
+
+  /* ---------------------------------------------------------------- *
+   *  Shaders
+   * ---------------------------------------------------------------- */
+  function compile(type, src) {
+    var s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+      throw new Error(gl.getShaderInfoLog(s));
+    }
+    return s;
+  }
+  function program(vs, fs) {
+    var p = gl.createProgram();
+    gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+    gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+      throw new Error(gl.getProgramInfoLog(p));
+    }
+    return p;
+  }
+
+  var MAT_VS =
+    "attribute vec3 a_position;\n" +
+    "attribute vec3 a_normal;\n" +
+    "attribute vec4 a_color;\n" +
+    "uniform mat4 u_model;\n" +
+    "uniform mat4 u_viewProj;\n" +
+    "uniform float u_unlit;\n" +
+    "varying vec3 vWorldPos;\n" +
+    "varying vec3 vNormal;\n" +
+    "varying vec4 vColor;\n" +
+    "varying float vUnlit;\n" +
+    "void main(){\n" +
+    "  vec4 w = u_model * vec4(a_position, 1.0);\n" +
+    "  vWorldPos = w.xyz;\n" +
+    "  vNormal = (u_model * vec4(a_normal, 0.0)).xyz;\n" +
+    "  vColor = a_color;\n" +
+    "  vUnlit = u_unlit;\n" +
+    "  gl_Position = u_viewProj * w;\n" +
+    "}\n";
+
+  var MAT_FS =
+    "precision mediump float;\n" +
+    "varying vec3 vWorldPos;\n" +
+    "varying vec3 vNormal;\n" +
+    "varying vec4 vColor;\n" +
+    "varying float vUnlit;\n" +
+    "uniform vec3 u_camPos;\n" +
+    "uniform vec3 u_lightDir;\n" +
+    "uniform vec3 u_fillDir;\n" +
+    "uniform vec3 u_sky;\n" +
+    "uniform float u_key;\n" +
+    "uniform float u_fill;\n" +
+    "uniform float u_ambient;\n" +
+    "uniform float u_spec;\n" +
+    "uniform float u_shininess;\n" +
+    "uniform float u_rim;\n" +
+    "uniform float u_opacity;\n" +
+    "void main(){\n" +
+    "  if (vUnlit > 0.5) { gl_FragColor = vColor * u_opacity; return; }\n" +
+    "  vec3 N = normalize(vNormal);\n" +
+    "  vec3 L = normalize(u_lightDir);\n" +
+    "  vec3 V = normalize(u_camPos - vWorldPos);\n" +
+    "  vec3 H = normalize(L + V);\n" +
+    "  float diff = max(dot(N, L), 0.0);\n" +
+    "  float fill = max(dot(N, u_fillDir), 0.0);\n" +
+    "  float spec = pow(max(dot(N, H), 0.0), u_shininess) * u_spec;\n" +
+    "  float fres = pow(1.0 - max(dot(N, V), 0.0), 3.0);\n" +
+    "  vec3 col = vColor.rgb * (u_ambient + u_key * diff + u_fill * fill);\n" +
+    "  col += vec3(1.0, 0.92, 0.86) * spec;\n" +
+    "  col += u_sky * fres * u_rim * (0.4 + diff * 0.6);\n" +
+    "  gl_FragColor = vec4(col, vColor.a * u_opacity);\n" +
+    "}\n";
+
+  var PT_VS =
+    "attribute vec3 a_pos;\n" +
+    "attribute float a_size;\n" +
+    "attribute vec4 a_color;\n" +
+    "uniform mat4 u_viewProj;\n" +
+    "varying vec4 vColor;\n" +
+    "void main(){\n" +
+    "  vColor = a_color;\n" +
+    "  gl_PointSize = a_size;\n" +
+    "  gl_Position = u_viewProj * vec4(a_pos, 1.0);\n" +
+    "}\n";
+
+  var PT_FS =
+    "precision mediump float;\n" +
+    "varying vec4 vColor;\n" +
+    "void main(){\n" +
+    "  vec2 uv = gl_PointCoord * 2.0 - 1.0;\n" +
+    "  float d = length(uv);\n" +
+    "  float a = smoothstep(1.0, 0.0, d);\n" +
+    "  a *= a;\n" +
+    "  gl_FragColor = vec4(vColor.rgb, vColor.a * a);\n" +
+    "}\n";
+
+  var matProg = program(MAT_VS, MAT_FS);
+  var ptProg = program(PT_VS, PT_FS);
+
+  function locate(p, names) {
+    var u = {};
+    names.forEach(function (n) { u[n] = gl.getUniformLocation(p, n); });
+    return u;
+  }
+  var matU = locate(matProg,
+    ["u_model","u_viewProj","u_unlit","u_camPos","u_lightDir","u_fillDir","u_sky",
+     "u_key","u_fill","u_ambient","u_spec","u_shininess","u_rim","u_opacity"]);
+  var ptU = locate(ptProg, ["u_viewProj"]);
+
+  /* ---------------------------------------------------------------- *
+   *  Geometry build
+   * ---------------------------------------------------------------- */
+  var NS = 84;                 // angular segments
+  var P_COUNT = 2200;          // particle count
+  var TILT = 0.46;            // fixed viewing tilt (radians)
+
+  var hatPos = [], hatNor = [], hatCol = [];
+  var pool = [];               // unique surface sample points
+
+  function normalize3(v) {
+    var l = Math.hypot(v[0], v[1], v[2]) || 1e-9;
+    return [v[0] / l, v[1] / l, v[2] / l];
+  }
+  function cross3(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+  function dot3(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+
+  function makeSurface(grid) {
+    var rows = grid.length, cols = grid[0].length;
+    var nor = [];
+    for (var i = 0; i < rows; i++) {
+      var nr = [];
+      for (var j = 0; j < cols; j++) {
+        var pL = grid[i][(j - 1 + cols) % cols], pR = grid[i][(j + 1) % cols];
+        var iU = Math.max(0, i - 1), iD = Math.min(rows - 1, i + 1);
+        var pU = grid[iU][j], pD = grid[iD][j];
+        var dc = [pR[0] - pL[0], pR[1] - pL[1], pR[2] - pL[2]];
+        var dr = [pD[0] - pU[0], pD[1] - pU[1], pD[2] - pU[2]];
+        nr.push(normalize3(cross3(dr, dc)));
+      }
+      nor.push(nr);
+    }
+
+    function pushTri(a, b, c) {
+      var va = grid[a[0]][a[1]], vb = grid[b[0]][b[1]], vc = grid[c[0]][c[1]];
+      var na = nor[a[0]][a[1]], nb = nor[b[0]][b[1]], nc = nor[c[0]][c[1]];
+      var ga = va, gb = vb, gc = vc;
+      var na2 = na, nb2 = nb, nc2 = nc;
+      var e1 = [gb[0] - ga[0], gb[1] - ga[1], gb[2] - ga[2]];
+      var e2 = [gc[0] - ga[0], gc[1] - ga[1], gc[2] - ga[2]];
+      var geoN = cross3(e1, e2);
+      var refN = [na2[0] + nb2[0] + nc2[0], na2[1] + nb2[1] + nc2[1], na2[2] + nb2[2] + nc2[2]];
+      if (dot3(geoN, refN) < 0) { var t = gb; gb = gc; gc = t; var tn = nb2; nb2 = nc2; nc2 = tn; }
+      var verts = [ga, gb, gc], nrm = [na2, nb2, nc2];
+      for (var k = 0; k < 3; k++) {
+        hatPos.push(verts[k][0], verts[k][1], verts[k][2]);
+        hatNor.push(nrm[k][0], nrm[k][1], nrm[k][2]);
+        hatCol.push(1, 1, 1, 1);
+      }
+    }
+
+    for (var i = 0; i < rows - 1; i++) {
+      for (var j = 0; j < cols; j++) {
+        var j2 = (j + 1) % cols;
+        pushTri([i, j], [i + 1, j], [i + 1, j2]);
+        pushTri([i, j], [i + 1, j2], [i, j2]);
+      }
+    }
+  }
+
+  // --- crown side (tapered cylinder) ---
+  var NVt = 18;
+  var rBottom = 0.52, rTop = 0.40, H = 0.55;
+  (function () {
+    var grid = [];
+    for (var i = 0; i <= NVt; i++) {
+      var h = i / NVt, r = rBottom + (rTop - rBottom) * h, y = h * H;
+      var row = [];
+      for (var j = 0; j < NS; j++) {
+        var t = j / NS * 2 * Math.PI;
+        row.push([r * Math.cos(t), y, r * Math.sin(t)]);
+      }
+      grid.push(row);
+      pool.push.apply(pool, row);
+    }
+    makeSurface(grid);
+  })();
+
+  // --- dome (flattened spherical cap) ---
+  (function () {
+    var latS = 12, R = rTop;
+    var grid = [];
+    for (var i = 0; i <= latS; i++) {
+      var phi = i / latS * Math.PI / 2;
+      var rad = R * Math.sin(phi), y = H + R * Math.cos(phi) - R; // sits on crown top ring
+      var row = [];
+      for (var j = 0; j < NS; j++) {
+        var t = j / NS * 2 * Math.PI;
+        row.push([rad * Math.cos(t), y, rad * Math.sin(t)]);
+      }
+      grid.push(row);
+      pool.push.apply(pool, row);
+    }
+    makeSurface(grid);
+  })();
+
+  // --- brim (annulus with a gentle drape) ---
+  (function () {
+    var rR = 14, A = 0.075, p0 = 0.35;
+    var grid = [];
+    for (var i = 0; i <= rR; i++) {
+      var rho = i / rR;
+      var radius = rBottom + rho * (1.02 - rBottom);
+      var row = [];
+      for (var j = 0; j < NS; j++) {
+        var t = j / NS * 2 * Math.PI;
+        var y = A * rho * rho * Math.cos(t + p0);
+        row.push([radius * Math.cos(t), y, radius * Math.sin(t)]);
+      }
+      grid.push(row);
+      pool.push.apply(pool, row);
+    }
+    makeSurface(grid);
+  })();
+
+  // center the hat vertically
+  var CENTER_Y = 0.27;
+  for (var i = 0; i < hatPos.length; i += 3) hatPos[i + 1] -= CENTER_Y;
+  for (var i = 0; i < pool.length; i++) pool[i][1] -= CENTER_Y;
+
+  var hatPosF = new Float32Array(hatPos);
+  var hatNorF = new Float32Array(hatNor);
+  var hatColF = new Float32Array(hatCol);
+  var hatCount = hatPos.length / 3;
+
+  /* ---------- hat GL buffer ---------- */
+  var hatBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, hatBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, hatPosF.byteLength + hatNorF.byteLength + hatColF.byteLength, gl.STATIC_DRAW);
+  var stride = 3 * 4 + 3 * 4 + 4 * 4;
+  gl.bufferSubData(gl.ARRAY_BUFFER, 0, hatPosF);
+  gl.bufferSubData(gl.ARRAY_BUFFER, hatPosF.byteLength, hatNorF);
+  gl.bufferSubData(gl.ARRAY_BUFFER, hatPosF.byteLength + hatNorF.byteLength, hatColF);
+
+  /* ---------- ground shadow (static disc) ---------- */
+  var shPos = [], shCol = [];
+  (function () {
+    var R = 1.18, y = -0.92, rings = 18, segs = 64;
+    var grid = [];
+    for (var i = 0; i <= rings; i++) {
+      var rho = i / rings, rad = rho * R;
+      var row = [];
+      var alpha = 0.42 * Math.pow(1 - rho, 1.6) + 0.02;
+      for (var j = 0; j < segs; j++) {
+        var t = j / segs * 2 * Math.PI;
+        row.push([rad * Math.cos(t), y, rad * Math.sin(t), alpha]);
+      }
+      grid.push(row);
+    }
+    var c = Math.min(segs, 48), rS = rings;
+    for (var i = 0; i < rS; i++) {
+      for (var j = 0; j < segs; j++) {
+        var j2 = (j + 1) % segs;
+        var a = grid[i][j], b = grid[i + 1][j], c2 = grid[i + 1][j2], d = grid[i][j2];
+        var quad = [a, b, c2, d];
+        for (var k = 0; k < 4; k++) {
+          var v = quad[k];
+          shPos.push(v[0], v[1], v[2]);
+          shCol.push(0, 0, 0, v[3]);
+        }
+        // second triangle
+        var quad2 = [a, c2, d];
+        for (var k = 0; k < 3; k++) {
+          var v = quad2[k];
+          shPos.push(v[0], v[1], v[2]);
+          shCol.push(0, 0, 0, v[3]);
+        }
+      }
+    }
+  })();
+  var shPosF = new Float32Array(shPos);
+  var shColF = new Float32Array(shCol);
+  var shCount = shPos.length / 3;
+  var shBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, shBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, shPosF.byteLength + shColF.byteLength, gl.STATIC_DRAW);
+  gl.bufferSubData(gl.ARRAY_BUFFER, 0, shPosF);
+  gl.bufferSubData(gl.ARRAY_BUFFER, shPosF.byteLength, shColF);
+
+  /* ---------------------------------------------------------------- *
+   *  Particle system
+   * ---------------------------------------------------------------- */
+  var N = Math.min(P_COUNT, pool.length);
+  var stepN = Math.max(1, Math.floor(pool.length / P_COUNT));
+
+  var parts = [];
+  var i;
+  for (i = 0; i < N; i++) {
+    var home = pool[(i * stepN) % pool.length];
+    var bias = normalize3([Math.random() - 0.5, Math.random() * 0.45 - 0.1, Math.random() - 0.5]);
+    var tr = Math.random();
+    var col;
+    if (tr < 0.55) col = [0.99, 0.30, 0.12];
+    else if (tr < 0.86) col = [1.00, 0.60, 0.16];
+    else col = [1.00, 0.82, 0.50];
+    parts.push({
+      home: home,
+      bias: bias,
+      spd: 0.7 + 0.6 * Math.random(),
+      ph: Math.random() * Math.PI * 2,
+      ph2: Math.random() * Math.PI * 2,
+      rad: 1.35 + 0.85 * Math.random(),
+      sz: 1.8 + 3.8 * Math.random(),
+      col: col,
+      inten: 0.60 + 0.40 * Math.random(),
+      orb: false,
+      q: []
+    });
+  }
+
+  // dynamic particle buffers
+  var pPos = new Float32Array(N * 3);
+  var pSize = new Float32Array(N);
+  var pCol = new Float32Array(N * 4);
+
+  // orbiters (trails) get their own extra points
+  var ORB = 46, TRAIL = 34;
+  var oPos = new Float32Array(ORB * TRAIL * 3);
+  var oSize = new Float32Array(ORB * TRAIL);
+  var oCol = new Float32Array(ORB * TRAIL * 4);
+
+  var ptBuf = gl.createBuffer();
+  var ptSizeBuf = gl.createBuffer();
+  var ptColBuf = gl.createBuffer();
+
+  /* ---------------------------------------------------------------- *
+   *  State
+   * ---------------------------------------------------------------- */
+  var spinSpeed = reduced ? 0 : 0.9;
+  var spinAngle = 0.6;
+  var hovering = false;
+  var fxT = 0;          // timeline since hover began
+  var fxOn = false;
+  var settledOrb = false;
+
+  var EYE = [0, 0.32, 4.7];
+  var CENTER = [0, 0.08, 0];
+  var VIEW = m4(); m4lookAt(VIEW, EYE, CENTER, [0, 1, 0]);
+  var PROJ = m4();
+  var MV = m4(), MVP = m4(), MODEL = m4();
+
+  var aspect = 1;
+  var dpr = 1;
+
+  /* ---------------------------------------------------------------- *
+   *  Resize
+   * ---------------------------------------------------------------- */
+  function resize() {
+    var w = canvas.clientWidth, h = canvas.clientHeight;
+    if (w === 0 || h === 0) return;
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    aspect = canvas.width / canvas.height;
+    m4perspective(PROJ, 0.82, aspect, 0.1, 30);
+    m4mul(MV, VIEW, PROJ); // combined view-proj (VIEW * PROJ)
+  }
+  new ResizeObserver(resize).observe(canvas.closest(".stage"));
+  resize();
+
+  /* ---------------------------------------------------------------- *
+   *  Model rotation
+   * ---------------------------------------------------------------- */
+  function rotModel(p) {
+    var ct = Math.cos(TILT), st = Math.sin(TILT);
+    var ca = Math.cos(spinAngle), sa = Math.sin(spinAngle);
+    var y = p[1] * ct - p[2] * st;
+    var z = p[1] * st + p[2] * ct;
+    var x = p[0];
+    var x2 = x * ca + z * sa;
+    var z2 = -x * sa + z * ca;
+    return [x2, y, z2];
+  }
+
+  function setModelIdentity() { m4identity(MODEL); }
+
+  /* ---------------------------------------------------------------- *
+   *  Phase helpers
+   * ---------------------------------------------------------------- */
+  function easeOutCubic(u) { return 1 - Math.pow(1 - u, 3); }
+  function easeInOutCubic(u) { return u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2; }
+
+  var TL_SLOW = 0.9, TL_DISSOLVE = 2.2, TL_SWIRL = 3.7, TL_REFORM = 4.9;
+
+  /* ---------------------------------------------------------------- *
+   *  Per-frame particle update
+   * ---------------------------------------------------------------- */
+  var tmpA = [0, 0, 0], tmpB = [0, 0, 0];
+
+  function updateParticles(dt) {
+    var k, j, t, u, pos, homeR, ang, r, wob, out;
+
+    for (k = 0; k < N; k++) {
+      var p = parts[k];
+      pos = null;
+
+      homeR = rotModel(p.home);
+
+      if (!fxOn) {
+        pos = null; // not drawn
+      } else if (fxT < TL_SLOW) {
+        pos = null;
+      } else if (fxT < TL_DISSOLVE) {
+        // dissolve outward
+        u = (fxT - TL_SLOW) / (TL_DISSOLVE - TL_SLOW);
+        t = easeOutCubic(u);
+        var reach = (0.95 + 0.6 * p.spd) * t;
+        wob = Math.sin(fxT * 9 + p.ph) * 0.06 * t;
+        pos = [
+          homeR[0] + p.bias[0] * reach + wob,
+          homeR[1] + p.bias[1] * reach + wob * 0.6,
+          homeR[2] + p.bias[2] * reach + wob
+        ];
+      } else if (fxT < TL_SWIRL) {
+        // swirl around the hat axis
+        ang = p.ph + fxT * 1.7 * p.spd;
+        r = p.rad * (1 + 0.14 * Math.sin(fxT * 2.4 + p.ph2));
+        wob = Math.sin(fxT * 5 + p.ph2) * 0.05;
+        pos = [
+          Math.cos(ang) * r + wob,
+          0.18 * Math.sin(ang * 1.4 + p.ph) + wob * 0.4,
+          Math.sin(ang) * r + wob
+        ];
+      } else if (fxT < TL_REFORM) {
+        // flow back to home
+        u = (fxT - TL_SWIRL) / (TL_REFORM - TL_SWIRL);
+        var kk = easeInOutCubic(u);
+        // source position = swirl at the moment swirl ends
+        var sAng = p.ph + TL_SWIRL * 1.7 * p.spd;
+        var sR = p.rad * 0.5 * (1 + 0.16 * Math.sin(TL_SWIRL * 2.4 + p.ph2));
+        var sWob = Math.sin(TL_SWIRL * 5 + p.ph2) * 0.05;
+        var sx = Math.cos(sAng) * sR + sWob;
+        var sy = 0.18 * Math.sin(sAng * 1.4 + p.ph) + sWob * 0.4;
+        var sz = Math.sin(sAng) * sR + sWob;
+        pos = [
+          sx + (homeR[0] - sx) * kk,
+          sy + (homeR[1] - sy) * kk,
+          sz + (homeR[2] - sz) * kk
+        ];
+      } else {
+        // settled: only a few orbiters are drawn; the rest are hidden
+        if (p.orb) {
+          ang = p.ph + fxT * 1.2 * p.spd;
+          r = (0.55 + 0.45 * (p.rad - 1.35) / 0.85) * (1 + 0.1 * Math.sin(fxT * 2 + p.ph2));
+          pos = [
+            homeR[0] + Math.cos(ang) * r,
+            homeR[1] + 0.15 * Math.sin(ang * 1.5 + p.ph),
+            homeR[2] + Math.sin(ang) * r
+          ];
+          if (pos) p.q.unshift(pos);
+          if (p.q.length > TRAIL) p.q.pop();
+          p.orb = true;
+        }
+      }
+
+      if (pos) {
+        pPos[k * 3] = pos[0]; pPos[k * 3 + 1] = pos[1]; pPos[k * 3 + 2] = pos[2];
+        pSize[k] = p.sz;
+        pCol[k * 4] = p.col[0] * p.inten;
+        pCol[k * 4 + 1] = p.col[1] * p.inten;
+        pCol[k * 4 + 2] = p.col[2] * p.inten;
+        pCol[k * 4 + 3] = p.inten;
+      } else {
+        pSize[k] = 0;
+        pCol[k * 4 + 3] = 0;
+      }
+    }
+
+    // build orbiter trail arrays
+    oi = 0;
+    for (k = 0; k < N; k++) {
+      var p = parts[k];
+      if (!p.orb) continue;
+      for (j = 0; j < p.q.length; j++) {
+        var q = p.q[j];
+        var fade = 1 - j / TRAIL;
+        oPos[oi * 3] = q[0]; oPos[oi * 3 + 1] = q[1]; oPos[oi * 3 + 2] = q[2];
+        oSize[oi] = Math.max(1.2, p.sz * 0.5 * fade);
+        oCol[oi * 4] = p.col[0] * 0.7 * fade;
+        oCol[oi * 4 + 1] = p.col[1] * 0.7 * fade;
+        oCol[oi * 4 + 2] = p.col[2] * 0.7 * fade;
+        oCol[oi * 4 + 3] = 0.16 * fade;
+        oi++;
+      }
+    }
+  }
+
+  /* ---------------------------------------------------------------- *
+   *  Rendering
+   * ---------------------------------------------------------------- */
+  function bindAttribs(buf, stride, sizeOfPos, sizeOfNor, sizeOfCol) {
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    var al = gl.getAttribLocation(matProg, "a_position");
+    gl.enableVertexAttribArray(al);
+    gl.vertexAttribPointer(al, 3, gl.FLOAT, false, stride, 0);
+    var an = gl.getAttribLocation(matProg, "a_normal");
+    gl.enableVertexAttribArray(an);
+    gl.vertexAttribPointer(an, 3, gl.FLOAT, false, stride, sizeOfPos);
+    var ac = gl.getAttribLocation(matProg, "a_color");
+    gl.enableVertexAttribArray(ac);
+    gl.vertexAttribPointer(ac, 4, gl.FLOAT, false, stride, sizeOfPos + sizeOfNor);
+  }
+
+  function render() {
+    gl.clearColor(0.02, 0.02, 0.034, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    // ---- material pass: shadow ----
+    gl.useProgram(matProg);
+    gl.uniform1f(matU.u_unlit, 1);
+    gl.uniform1f(matU.u_opacity, 1);
+    setModelIdentity();
+    gl.uniformMatrix4fv(matU.u_model, false, MODEL);
+    gl.uniformMatrix4fv(matU.u_viewProj, false, MV);
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthMask(true);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    var stride = 3 * 4 + 4 * 4;
+    gl.bindBuffer(gl.ARRAY_BUFFER, shBuf);
+    var al = gl.getAttribLocation(matProg, "a_position");
+    gl.enableVertexAttribArray(al); gl.vertexAttribPointer(al, 3, gl.FLOAT, false, stride, 0);
+    var an = gl.getAttribLocation(matProg, "a_normal");
+    gl.enableVertexAttribArray(an); gl.vertexAttribPointer(an, 3, gl.FLOAT, false, stride, 3 * 4);
+    var ac = gl.getAttribLocation(matProg, "a_color");
+    gl.enableVertexAttribArray(ac); gl.vertexAttribPointer(ac, 4, gl.FLOAT, false, stride, 6 * 4);
+    gl.drawArrays(gl.TRIANGLES, 0, shCount);
+
+    // ---- material pass: hat ----
+    gl.uniform1f(matU.u_unlit, 0);
+    var hatOpacity = 1;
+    if (fxOn) {
+      if (fxT < TL_SLOW) hatOpacity = 1;
+      else if (fxT < TL_DISSOLVE) hatOpacity = 1 - easeOutCubic((fxT - TL_SLOW) / (TL_DISSOLVE - TL_SLOW));
+      else if (fxT < TL_SWIRL) hatOpacity = 0;
+      else hatOpacity = easeInOutCubic((fxT - TL_SWIRL) / (TL_REFORM - TL_SWIRL));
+      hatOpacity = Math.max(0, Math.min(1, hatOpacity));
+    }
+    gl.uniform1f(matU.u_opacity, hatOpacity);
+
+    // model = Ry(spin) * Rx(TILT)
+    var ca = Math.cos(spinAngle), sa = Math.sin(spinAngle);
+    var ct = Math.cos(TILT), st = Math.sin(TILT);
+    // Rx then Ry
+    MODEL.fill(0);
+    MODEL[0] = ca; MODEL[1] = 0; MODEL[2] = -sa;
+    MODEL[4] = sa * st; MODEL[5] = ct; MODEL[6] = ca * st;
+    MODEL[8] = sa * ct; MODEL[9] = -st; MODEL[10] = ca * ct;
+    MODEL[15] = 1;
+    gl.uniformMatrix4fv(matU.u_model, false, MODEL);
+    gl.uniformMatrix4fv(matU.u_viewProj, false, MV);
+    gl.uniform3f(matU.u_camPos, EYE[0], EYE[1], EYE[2]);
+    var ld = [-0.42, 0.78, 0.45]; normalizeVec(ld);
+    gl.uniform3f(matU.u_lightDir, ld[0], ld[1], ld[2]);
+    var fd = [-0.7, -0.3, -0.55]; normalizeVec(fd);
+    gl.uniform3f(matU.u_fillDir, fd[0], fd[1], fd[2]);
+    gl.uniform3f(matU.u_sky, 1.0, 0.42, 0.18);
+    gl.uniform1f(matU.u_key, 0.85);
+    gl.uniform1f(matU.u_fill, 0.30);
+    gl.uniform1f(matU.u_ambient, 0.28);
+    gl.uniform1f(matU.u_spec, 0.55);
+    gl.uniform1f(matU.u_shininess, 56);
+    gl.uniform1f(matU.u_rim, 0.5);
+
+    bindAttribs(hatBuf, 10 * 4, 3 * 4, 6 * 4, 6 * 4);
+    gl.drawArrays(gl.TRIANGLES, 0, hatCount);
+
+    // ---- particle pass ----
+    if (fxOn) {
+      gl.useProgram(ptProg);
+      gl.uniformMatrix4fv(ptU.u_viewProj, false, MV);
+      gl.disable(gl.DEPTH_TEST);
+      gl.depthMask(false);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // additive glow
+
+      // main particles
+      var nDraw = 0;
+      for (var k = 0; k < N; k++) if (pSize[k] > 0) nDraw++;
+      if (nDraw > 0) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, ptBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, pPos.slice(0, N * 3).buffer, gl.DYNAMIC_DRAW);
+        var ap = gl.getAttribLocation(ptProg, "a_pos");
+        gl.enableVertexAttribArray(ap); gl.vertexAttribPointer(ap, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, ptSizeBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, pSize.slice(0, N).buffer, gl.DYNAMIC_DRAW);
+        var asz = gl.getAttribLocation(ptProg, "a_size");
+        gl.enableVertexAttribArray(asz); gl.vertexAttribPointer(asz, 1, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, ptColBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, pCol.slice(0, N * 4).buffer, gl.DYNAMIC_DRAW);
+        var aco = gl.getAttribLocation(ptProg, "a_color");
+        gl.enableVertexAttribArray(aco); gl.vertexAttribPointer(aco, 4, gl.FLOAT, false, 0, 0);
+        gl.drawArrays(gl.POINTS, 0, N);
+      }
+
+      // trails
+      if (oi > 0) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, ptBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, oPos.slice(0, oi * 3).buffer, gl.DYNAMIC_DRAW);
+        var ap = gl.getAttribLocation(ptProg, "a_pos");
+        gl.enableVertexAttribArray(ap); gl.vertexAttribPointer(ap, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, ptSizeBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, oSize.slice(0, oi).buffer, gl.DYNAMIC_DRAW);
+        var asz = gl.getAttribLocation(ptProg, "a_size");
+        gl.enableVertexAttribArray(asz); gl.vertexAttribPointer(asz, 1, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, ptColBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, oCol.slice(0, oi * 4).buffer, gl.DYNAMIC_DRAW);
+        var aco = gl.getAttribLocation(ptProg, "a_color");
+        gl.enableVertexAttribArray(aco); gl.vertexAttribPointer(aco, 4, gl.FLOAT, false, 0, 0);
+        gl.drawArrays(gl.POINTS, 0, oi);
+      }
+
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthMask(true);
+    }
+  }
+
+  function normalizeVec(v) {
+    var l = Math.hypot(v[0], v[1], v[2]) || 1;
+    v[0] /= l; v[1] /= l; v[2] /= l;
+  }
+
+  /* ---------------------------------------------------------------- *
+   *  Interaction
+   * ---------------------------------------------------------------- */
+  var isDown = false, isOver = false;
+
+  function updateHover() {
+    hovering = isOver || isDown;
+    if (reduced) { hovering = false; return; }
+    if (hovering) {
+      if (!fxOn) {
+        fxOn = true; fxT = 0; settledOrb = false;
+        for (var k = 0; k < N; k++) { parts[k].orb = false; parts[k].q.length = 0; }
+      }
+    } else {
+      fxOn = false; settledOrb = false;
+      for (var k = 0; k < N; k++) { parts[k].orb = false; parts[k].q.length = 0; }
+    }
+  }
+
+  canvas.addEventListener("pointerenter", function () {
+    if (reduced) return;
+    isOver = true; updateHover();
+  });
+  canvas.addEventListener("pointerleave", function () {
+    isOver = false; updateHover();
+  });
+  canvas.addEventListener("pointerdown", function (e) {
+    if (reduced) return;
+    e.preventDefault();
+    isDown = true; updateHover();
+  });
+  window.addEventListener("pointerup", function () {
+    isDown = false; updateHover();
+  });
+  canvas.addEventListener("blur", function () { isDown = false; updateHover(); });
+
+  /* ---------------------------------------------------------------- *
+   *  Main loop
+   * ---------------------------------------------------------------- */
+  var last = 0;
+  var oi = 0;
+
+  function frame(ms) {
+    var dt = Math.min(0.05, (ms - last) / 1000 || 0.016);
+    last = ms;
+
+    if (reduced) {
+      spinSpeed = 0;
+    } else {
+      var target = hovering ? 0.22 : 0.9;
+      spinSpeed += (target - spinSpeed) * Math.min(1, dt * 2.6);
+      spinAngle += spinSpeed * dt;
+    }
+
+    if (fxOn && !reduced) {
+      fxT += dt;
+      if (!settledOrb && fxT >= TL_REFORM) {
+        settledOrb = true;
+        // pick orbiters
+        var picked = 0;
+        for (var k = 0; k < N && picked < ORB; k++) {
+          var p = parts[k];
+          if (!p.orb && Math.random() < 0.02) { p.orb = true; picked++; }
+        }
+        // guarantee the target count
+        for (var k = 0; k < N && picked < ORB; k++) {
+          if (!parts[k].orb) { parts[k].orb = true; picked++; }
+        }
+      }
+    }
+
+    updateParticles(dt);
+    render();
+    requestAnimationFrame(frame);
+  }
+
+  if (!reduced) {
+    requestAnimationFrame(frame);
+  } else {
+    // single static frame
+    updateParticles(0);
+    render();
+  }
+})();
+</script>
+</body>
+</html>
