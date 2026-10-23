@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fedora — a particle study</title>
+<style>
+  :root{
+    --red:#ee1114;
+    --red-soft:#ff4a44;
+    --ink:#07080b;
+    --muted:#8b909c;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;
+    background:
+      radial-gradient(120% 90% at 50% 8%, #14161d 0%, #0b0c11 45%, #050609 100%);
+    color:#e8eaf0;
+    font-family:"Inter","Helvetica Neue",Helvetica,Arial,system-ui,-apple-system,"Segoe UI",sans-serif;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    min-height:100dvh;
+    padding:22px 16px calc(20px + env(safe-area-inset-bottom));
+    -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+  }
+  .stage{
+    position:relative;
+    width:min(94vw, 880px);
+    flex:1 1 auto;
+    min-height:min(62dvh, 520px);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }
+  canvas{
+    display:block;
+    width:100%;
+    height:100%;
+    touch-action:manipulation;
+    cursor:pointer;
+  }
+  .caption{ text-align:center; user-select:none; }
+  .caption h1{
+    margin:0;
+    font-size:clamp(11px,1.5vw,13px);
+    font-weight:600;
+    letter-spacing:.42em;
+    text-transform:uppercase;
+    color:#f2f3f7;
+  }
+  .caption p{
+    margin:9px 0 0;
+    font-size:clamp(11px,1.4vw,12.5px);
+    letter-spacing:.1em;
+    color:var(--muted);
+  }
+  .caption p b{color:#cbd0dd;font-weight:500}
+  .hint{
+    margin-top:14px;
+    font-size:10.5px;
+    letter-spacing:.22em;
+    text-transform:uppercase;
+    color:#5d626f;
+    transition:color .35s ease, opacity .35s ease;
+  }
+  .hint.active{color:var(--red-soft)}
+  .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  @media (prefers-reduced-motion: reduce){ .hint{transition:none} }
+</style>
+</head>
+<body>
+  <main class="stage">
+    <canvas id="scene" role="img"
+      aria-label="A red fedora hat built from glowing particles, slowly spinning. Hover or tap to scatter it into embers and reform."></canvas>
+    <p class="sr">Interactive particle rendering of a red fedora hat. Press the canvas to scatter the particles and reform the hat.</p>
+  </main>
+
+  <footer class="caption">
+    <h1>Fedora</h1>
+    <p><b>Hover</b> or <b>tap</b> — the hat scatters into embers and reforms</p>
+    <div class="hint" id="hint">hover to scatter</div>
+  </footer>
+
+<script>
+(function(){
+  "use strict";
+
+  var canvas = document.getElementById('scene');
+  var ctx    = canvas.getContext('2d');
+  var off    = document.createElement('canvas');   // crisp particle layer
+  var octx   = off.getContext('2d');
+  var glow   = document.createElement('canvas');   // low-res bloom layer
+  var gctx   = glow.getContext('2d');
+  var hintEl = document.getElementById('hint');
+
+  var mq = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : {matches:false};
+  var reduced = !!mq.matches;
+
+  /* ------------------------------------------------------------------ *
+   *  Geometry — a Red Hat style fedora built from lathe profiles.
+   *  Crown, band and brim; every surface point becomes a particle.
+   * ------------------------------------------------------------------ */
+
+  // crown, ordered bottom -> top (so outward normals fall out cleanly)
+  var CROWN = [
+    [0.700,0.060],[0.716,0.135],[0.718,0.250],[0.710,0.380],
+    [0.694,0.500],[0.668,0.615],[0.634,0.720],[0.590,0.812],
+    [0.530,0.885],[0.455,0.940],[0.372,0.975],[0.280,0.992],
+    [0.180,0.988],[0.090,0.962],[0.020,0.945]
+  ];
+  // hat band (sits slightly proud of the crown)
+  var BAND = [
+    [0.704,0.140],[0.734,0.178],[0.740,0.242],[0.734,0.312],
+    [0.718,0.378],[0.694,0.418]
+  ];
+  // brim, inner -> outer, with a soft upturn at the edge
+  var BRIM = [
+    [0.695,0.075],[0.800,0.045],[0.905,0.020],[1.000,0.005],
+    [1.060,0.014],[1.105,0.050],[1.128,0.097]
+  ];
+
+  var COL_CROWN = 0, COL_BAND = 1, COL_BRIM = 2;
+
+  var density = Math.min(1.1, Math.max(0.55, Math.sqrt(window.innerWidth*window.innerHeight)/1150));
+
+  var parts = [];
+  function sampleProfile(profile, count, colorIdx, flip){
+    var segs = [], total = 0, i;
+    for(i=0;i<profile.length-1;i++){
+      var a = profile[i], b = profile[i+1];
+      var dr = b[0]-a[0], dy = b[1]-a[1];
+      var len = Math.sqrt(dr*dr+dy*dy);
+      var w = Math.max(1e-4, 0.5*(a[0]+b[0])*len);   // ~area of the annulus strip
+      segs.push({a:a,b:b,len:len,w:w});
+      total += w;
+    }
+    for(i=0;i<count;i++){
+      var pick = Math.random()*total, s = segs[segs.length-1], t = 0;
+      for(var k=0;k<segs.length;k++){
+        if(pick < segs[k].w){ s = segs[k]; t = pick/segs[k].w; break; }
+        pick -= segs[k].w;
+      }
+      var u = s.a[0] + (s.b[0]-s.a[0])*t;
+      var v = s.a[1] + (s.b[1]-s.a[1])*t;
+      var ang = Math.random()*Math.PI*2;
+      var ca = Math.cos(ang), sa = Math.sin(ang);
+      var dr = s.b[0]-s.a[0], dy = s.b[1]-s.a[1];
+      var il = 1/Math.max(1e-5, Math.hypot(dr,dy));
+      var nr = dy*il, ny = -dr*il;              // outward normal in the (r,y) plane
+      if(flip){ nr = -nr; ny = -ny; }
+      var jit = (Math.random()-0.5)*0.010;
+      parts.push({
+        x:(u+nr*jit)*ca, y:v+ny*jit, z:(u+nr*jit)*sa,
+        nx:nr*ca, ny:ny, nz:nr*sa,
+        c:colorIdx
+      });
+    }
+  }
+
+  sampleProfile(CROWN, Math.round(9200*density), COL_CROWN, false);
+  sampleProfile(BAND,  Math.round(2400*density), COL_BAND,  false);
+  sampleProfile(BRIM,  Math.round(6600*density), COL_BRIM,  true);
+
+  var N = parts.length;
+
+  for(var i=0;i<N;i++){
+    var p = parts[i];
+    var th = Math.random()*Math.PI*2;
+    var ph = Math.acos(2*Math.random()-1);
+    p.dx = Math.sin(ph)*Math.cos(th);
+    p.dy = Math.cos(ph)*0.7 + 0.3;
+    p.dz = Math.sin(ph)*Math.sin(th);
+    var l = Math.hypot(p.dx,p.dy,p.dz); p.dx/=l; p.dy/=l; p.dz/=l;
+    p.dist  = 0.45 + Math.pow(Math.random(),0.7)*2.3;
+    p.phase = Math.random()*Math.PI*2;
+    p.delay = Math.random()*0.42;
+    p.swirl = (Math.random()<0.5?-1:1)*(0.7 + Math.random()*1.8);
+    p.orbit = false;
+    p.trail = [];
+  }
+  // a few particles stay behind and keep orbiting once the hat reforms
+  var ORBITERS = 90;
+  for(var oi=0;oi<ORBITERS;oi++){
+    var q = parts[Math.floor(Math.random()*N)];
+    q.orbit   = true;
+    q.orbitR  = 1.55 + Math.random()*1.05;
+    q.orbitY  = -0.10 + Math.random()*1.05;
+    q.orbitSp = (0.32 + Math.random()*0.45) * (Math.random()<0.5?-1:1);
+    q.orbitPh = Math.random()*Math.PI*2;
+    q.orbitAmp= 0.05 + Math.random()*0.20;
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  Palette — pre-shaded ramps so no colour strings are built per dot.
+   * ------------------------------------------------------------------ */
+  var SHADES = 26;
+  var BASES = [ [236,22,26], [34,15,18], [214,18,20] ];  // crown, band, brim
+  var palettes = [];
+  (function(){
+    for(var b=0;b<BASES.length;b++){
+      var arr = [];
+      for(var s=0;s<SHADES;s++){
+        var f = 0.13 + 1.05*(s/(SHADES-1));
+        arr.push('rgb('+Math.min(255,BASES[b][0]*f|0)+','+
+                      Math.min(255,BASES[b][1]*f|0)+','+
+                      Math.min(255,BASES[b][2]*f|0)+')');
+      }
+      palettes.push(arr);
+    }
+  })();
+
+  /* ------------------------------------------------------------------ *
+   *  View / projection
+   * ------------------------------------------------------------------ */
+  var W=0,H=0,DPR=1,viewScale=100,ox=0,oy=0,bgGrad=null;
+  var TILT = 0.34;                       // look slightly down onto the brim
+  var cosT = Math.cos(TILT), sinT = Math.sin(TILT);
+  var LX=0.52, LY=0.76, LZ=0.38;         // key light
+  var ll=Math.hypot(LX,LY,LZ); LX/=ll; LY/=ll; LZ/=ll;
+  var FX=-0.72, FY=0.14, FZ=-0.42;       // fill light
+  var fl=Math.hypot(FX,FY,FZ); FX/=fl; FY/=fl; FZ/=fl;
+  var HX=LX, HY=LY+sinT, HZ=LZ+cosT;    // half vector for specular
+  var hl=Math.hypot(HX,HY,HZ); HX/=hl; HY/=hl; HZ/=hl;
+
+  function resize(){
+    dirty = true;
+    var rect = canvas.getBoundingClientRect();
+    DPR = Math.min(window.devicePixelRatio || 1, 1.75);
+    W = Math.max(1, Math.round(rect.width));
+    H = Math.max(1, Math.round(rect.height));
+    canvas.width = Math.round(W*DPR);
+    canvas.height= Math.round(H*DPR);
+    off.width = canvas.width; off.height = canvas.height;
+    glow.width = Math.max(1, Math.round(canvas.width/3));
+    glow.height= Math.max(1, Math.round(canvas.height/3));
+
+    viewScale = Math.min(W, H*1.35)*0.255;
+    ox = W/2;
+    oy = H/2 + 0.30*viewScale;
+
+    bgGrad = ctx.createRadialGradient(W/2, H*0.40, 8, W/2, H*0.40, Math.max(W,H)*0.80);
+    bgGrad.addColorStop(0,   '#15171f');
+    bgGrad.addColorStop(0.45,'#0b0c12');
+    bgGrad.addColorStop(1,   '#050609');
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  State
+   * ------------------------------------------------------------------ */
+  var spin = 0, spinSpeed = 0.34, spinTarget = 0.34;
+  var phase = 'idle', tt = 0, last = performance.now()/1000;
+  var cooldown = false, orbitBlend = 0, dirty = true, wasInside = false;
+  var T_EXPLODE = 0.95, T_HOLD = 1.05, T_REFORM = 1.35, T_DELAY = 0.42;
+
+  function setHint(txt, on){
+    if(!hintEl) return;
+    hintEl.textContent = txt;
+    hintEl.classList.toggle('active', !!on);
+  }
+
+  function trigger(){
+    if(cooldown) return;
+    cooldown = true;
+    dirty = true;
+    phase = 'scatter';
+    tt = 0;
+    spinTarget = reduced ? 0 : 0.05;
+    setHint('scattering…', true);
+  }
+
+  function endScatter(){
+    phase = 'idle';
+    cooldown = false;
+    dirty = true;
+    wasInside = false;          // allow the effect to be re-triggered by moving the cursor
+    spinTarget = reduced ? 0 : 0.34;
+    setHint('hover to scatter', false);
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  Interaction
+   * ------------------------------------------------------------------ */
+  function hatHit(cx,cy){
+    var rx = 1.45*viewScale, ry = 1.08*viewScale;
+    var hx = (cx-ox)/rx;
+    var hy = (cy-(oy-0.40*viewScale))/ry;
+    return hx*hx + hy*hy <= 1.0;
+  }
+  function onMove(e){
+    var r = canvas.getBoundingClientRect();
+    var inside = hatHit(e.clientX-r.left, e.clientY-r.top);
+    // fire on entry so a resting cursor doesn't loop the effect
+    if(inside && !wasInside) trigger();
+    wasInside = inside;
+  }
+  canvas.addEventListener('pointermove', onMove, {passive:true});
+  canvas.addEventListener('pointerleave', function(){ wasInside = false; }, {passive:true});
+  canvas.addEventListener('pointerdown', function(){ trigger(); }, {passive:true});
+  canvas.addEventListener('touchstart', function(){ trigger(); }, {passive:true});
+  window.addEventListener('keydown', function(e){
+    if(e.key === ' ' || e.key === 'Enter'){ trigger(); e.preventDefault(); }
+  });
+
+  /* ------------------------------------------------------------------ *
+   *  Buckets (colour grouping so we set fillStyle sparingly)
+   * ------------------------------------------------------------------ */
+  var buckets = [], bucketKeys = [], bucketIndex = Object.create(null);
+  function bucketFor(key){
+    var idx = bucketIndex[key];
+    if(idx === undefined){
+      idx = buckets.length;
+      bucketIndex[key] = idx;
+      buckets.push([]);
+      bucketKeys.push(key);
+    }
+    return idx;
+  }
+  function resetBuckets(){
+    for(var i=0;i<buckets.length;i++) buckets[i].length = 0;
+    buckets.length = 0; bucketKeys.length = 0; bucketIndex = Object.create(null);
+  }
+
+  var pointSize = 2.7;          // CSS px per particle
+
+  /* ------------------------------------------------------------------ *
+   *  Render
+   * ------------------------------------------------------------------ */
+  function frame(nowMs){
+    nowMs /= 1000;
+    var dt = Math.min(0.05, nowMs - last);
+    last = nowMs;
+
+    // Reduced motion: only repaint when the scene actually changes.
+    if(reduced && phase !== 'scatter' && !dirty){
+      requestAnimationFrame(frame);
+      return;
+    }
+    dirty = false;
+
+    spinSpeed += (spinTarget - spinSpeed) * Math.min(1, dt*4.5);
+    if(!reduced) spin += spinSpeed*dt;
+
+    var scattering = false, k = 0;
+    var te = reduced ? 0.45 : T_EXPLODE;
+    var th = reduced ? 0.35 : T_HOLD;
+    var tr = reduced ? 0.60 : T_REFORM;
+    var tl = reduced ? 0.10 : T_DELAY;
+
+    if(phase === 'scatter'){
+      scattering = true;
+      tt += dt;
+      var total = te + tl + th + tr;
+      if(tt < te + tl)            k = Math.min(1, tt/(te+tl));
+      else if(tt < te + tl + th)  k = 1;
+      else if(tt < total)         k = 1 - (tt - te - tl - th)/tr;
+      else { endScatter(); scattering = false; k = 0; }
+    }
+
+
+    var wantOrbit = (phase === 'idle' && !reduced) ? 1 : 0;
+    orbitBlend += (wantOrbit - orbitBlend) * Math.min(1, dt*1.1);
+    if(orbitBlend < 0.002) orbitBlend = 0;
+
+    var cosA = Math.cos(spin), sinA = Math.sin(spin);
+    // gentle lean/roll so the spin reads as a 3D turn rather than a flat spin
+    var roll = reduced ? 0 : Math.sin(nowMs*0.55)*0.075 + Math.sin(nowMs*0.23)*0.045;
+    var cosR = Math.cos(roll), sinR = Math.sin(roll);
+
+    /* ---- background ------------------------------------------------ */
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.filter = 'none';
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0,0,W,H);
+
+    // soft red halo behind the hat
+    ctx.save();
+    ctx.translate(ox, oy-0.34*viewScale);
+    ctx.scale(1, 0.72);
+    var hg = ctx.createRadialGradient(0,0,0,0,0,1.5*viewScale);
+    hg.addColorStop(0,   'rgba(198,34,34,0.22)');
+    hg.addColorStop(0.45,'rgba(120,18,20,0.10)');
+    hg.addColorStop(1,   'rgba(0,0,0,0)');
+    ctx.fillStyle = hg;
+    ctx.fillRect(-2*viewScale,-2*viewScale,4*viewScale,4*viewScale);
+    ctx.restore();
+
+    /* ---- soft contact shadow --------------------------------------- */
+    ctx.save();
+    ctx.translate(ox, oy+0.92*viewScale);
+    ctx.scale(1, 0.22);
+    var sg = ctx.createRadialGradient(0,0,0,0,0,1.15*viewScale);
+    sg.addColorStop(0,'rgba(0,0,0,0.5)');
+    sg.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle = sg;
+    ctx.fillRect(-2*viewScale,-2*viewScale,4*viewScale,4*viewScale);
+    ctx.restore();
+
+    /* ---- particles -------------------------------------------------- */
+    resetBuckets();
+    octx.setTransform(DPR,0,0,DPR,0,0);
+    octx.clearRect(0,0,W,H);
+    octx.globalCompositeOperation = 'source-over';
+
+    var scatterScale = reduced ? 0 : 1;
+
+    for(var i=0;i<N;i++){
+      var p = parts[i];
+
+      // base world position (hat local, spun about Y, then rolled)
+      var bx = p.x*cosA - p.z*sinA;
+      var bz = p.x*sinA + p.z*cosA;
+      var wx = bx*cosR - p.y*sinR;
+      var wy = bx*sinR + p.y*cosR;
+      var wz = bz;
+
+      // orbiters drift away once the hat is whole again
+      if(!scattering && p.orbit && orbitBlend > 0){
+        var oa = p.orbitPh + nowMs*p.orbitSp;
+        var orx = Math.cos(oa)*p.orbitR;
+        var orz = Math.sin(oa)*p.orbitR;
+        var ory = p.orbitY + Math.sin(nowMs*0.9 + p.orbitPh)*p.orbitAmp;
+        var oy2 = ory*cosT - orz*sinT, oz2 = ory*sinT + orz*cosT;
+        var ob = orbitBlend;
+        wx += (orx-wx)*ob; wy += (oy2-wy)*ob; wz += (oz2-wz)*ob;
+      }
+
+      // scatter / reform
+      if(scattering){
+        var dly = reduced ? p.delay*0.22 : p.delay;
+        var local = tt - dly;
+        var lp;
+        if(local < 0)                          lp = 0;
+        else if(local < te)                    { lp = local/te; lp = 1-Math.pow(1-lp,3); }
+        else if(local < te+th)                 lp = 1;
+        else if(local < te+th+tr)               { lp = 1-(local-te-th)/tr; lp = lp*lp*(3-2*lp); }
+        else                                   lp = 0;
+        if(lp > 0){
+          var ex = wx + p.dx*p.dist*scatterScale;
+          var ey = wy + p.dy*p.dist*scatterScale*0.72 + 0.10*scatterScale;
+          var ez = wz + p.dz*p.dist*scatterScale;
+          if(!reduced){
+            var ang = p.swirl*(1-lp) + 0.38*Math.sin(nowMs*2.3 + p.phase)*lp;
+            var ca = Math.cos(ang), sa = Math.sin(ang);
+            var rx2 = ex*ca - ez*sa, rz2 = ex*sa + ez*ca;
+            ex = rx2; ez = rz2;
+            ey += 0.20*Math.sin(nowMs*1.6 + p.phase)*lp;
+            // gentle breathing of the ember cloud
+            var br = 1 + 0.09*Math.sin(nowMs*1.15 + p.phase);
+            ex = wx + (ex-wx)*br; ez = wz + (ez-wz)*br;
+          }
+          wx += (ex-wx)*lp; wy += (ey-wy)*lp; wz += (ez-wz)*lp;
+        }
+      }
+
+      // project
+      var vx = wx, vy = wy*cosT - wz*sinT, vz = wy*sinT + wz*cosT;
+      var persp = 1/(1 - vz*0.115);
+      var sx = ox + vx*viewScale*persp;
+      var sy = oy - vy*viewScale*persp;
+
+      // lighting (normals follow the same rotation)
+      var lnx = p.nx*cosA - p.nz*sinA;
+      var lnz = p.nx*sinA + p.nz*cosA;
+      var nx = lnx*cosR - p.ny*sinR;
+      var ny = lnx*sinR + p.ny*cosR;
+      var nz = lnz;
+      var d1 = nx*LX + ny*LY + nz*LZ; if(d1<0) d1=0;
+      var d2 = nx*FX + ny*FY + nz*FZ; if(d2<0) d2=0;
+      var lum = 0.13 + 0.86*d1 + 0.24*d2;
+      var spec = 0;
+      if(d1 > 0 && ny > -0.2){
+        var nh = nx*HX + ny*HY + nz*HZ; if(nh<0) nh=0;
+        spec = Math.pow(nh, 26)*0.9;
+      }
+      var sIdx = (lum*(SHADES-1)/1.32 + spec*3.2)|0;
+      if(sIdx<0) sIdx=0; else if(sIdx>SHADES-1) sIdx=SHADES-1;
+
+      var aIdx = 8;
+      if(reduced && scattering) aIdx = Math.max(1, Math.round((1-0.6*lp)*8));
+
+      buckets[bucketFor(p.c*4096 + sIdx*16 + aIdx)].push(sx, sy);
+    }
+
+    // draw points grouped by colour/shade
+    for(var b=0;b<buckets.length;b++){
+      var list = buckets[b];
+      if(!list.length) continue;
+      var key = bucketKeys[b];
+      var baseIdx = (key/4096)|0;
+      var rest = key - baseIdx*4096;
+      var sIdx2 = (rest/16)|0;
+      var aIdx2 = rest - sIdx2*16;
+      octx.fillStyle = palettes[baseIdx][sIdx2];
+      octx.globalAlpha = aIdx2/8;
+      for(var j=0;j<list.length;j+=2){
+        octx.fillRect(list[j]-pointSize*0.5, list[j+1]-pointSize*0.5, pointSize, pointSize);
+      }
+    }
+    octx.globalAlpha = 1;
+
+    /* ---- composite: crisp dots + bloom ------------------------------ */
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.filter = 'none';
+    ctx.drawImage(off, 0, 0, canvas.width, canvas.height);
+
+    // low-res bloom: blur small, then blow it back up additively
+    gctx.setTransform(1,0,0,1,0,0);
+    gctx.clearRect(0,0,glow.width,glow.height);
+    gctx.filter = 'blur(2px)';
+    gctx.globalCompositeOperation = 'source-over';
+    gctx.drawImage(off, 0, 0, glow.width, glow.height);
+    gctx.filter = 'none';
+
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.85;
+    ctx.drawImage(glow, 0, 0, canvas.width, canvas.height);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+
+    /* ---- orbit trails ------------------------------------------------ */
+    if(orbitBlend > 0.01 && !reduced){
+      ctx.setTransform(DPR,0,0,DPR,0,0);
+      ctx.globalCompositeOperation = 'lighter';
+      for(var q=0;q<N;q++){
+        var pp = parts[q];
+        if(!pp.orbit) continue;
+        var path = pp.trail;
+        for(var t=path.length-1;t>0;t--){
+          var a = path[t-1], b2 = path[t];
+          var avx=a[0], avy=a[1]*cosT - a[2]*sinT, avz=a[1]*sinT + a[2]*cosT;
+          var bvx=b2[0], bvy=b2[1]*cosT - b2[2]*sinT, bvz=b2[1]*sinT + b2[2]*cosT;
+          var apk = 1/(1-avz*0.115), bpk = 1/(1-bvz*0.115);
+          var at = (1 - t/path.length)*0.26*orbitBlend;
+          if(at <= 0.004) continue;
+          ctx.strokeStyle = 'rgba(255,150,120,'+at.toFixed(3)+')';
+          ctx.lineWidth = 1.1;
+          ctx.beginPath();
+          ctx.moveTo(ox+avx*viewScale*apk, oy-avy*viewScale*apk);
+          ctx.lineTo(ox+bvx*viewScale*bpk, oy-bvy*viewScale*bpk);
+          ctx.stroke();
+        }
+      }
+      ctx.globalCompositeOperation = 'source-over';
+    }
+
+    /* ---- trail history ---------------------------------------------- */
+    if(orbitBlend > 0.01 && !reduced){
+      for(var q2=0;q2<N;q2++){
+        var p2 = parts[q2];
+        if(!p2.orbit) continue;
+        var ang2 = p2.orbitPh + nowMs*p2.orbitSp;
+        p2.trail.push([
+          Math.cos(ang2)*p2.orbitR,
+          p2.orbitY + Math.sin(nowMs*0.9 + p2.orbitPh)*p2.orbitAmp,
+          Math.sin(ang2)*p2.orbitR
+        ]);
+        if(p2.trail.length > 12) p2.trail.shift();
+      }
+    }
+
+    requestAnimationFrame(frame);
+  }
+
+  window.addEventListener('resize', resize);
+  if(window.ResizeObserver){ new ResizeObserver(resize).observe(canvas); }
+  if(mq.addEventListener){
+    mq.addEventListener('change', function(e){
+      reduced = e.matches;
+      spinTarget = reduced ? 0 : 0.34;
+      if(reduced){ spinSpeed = 0; }
+      dirty = true;
+    });
+  }
+
+  resize();
+  if(reduced){ spinSpeed = 0; spinTarget = 0; }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
