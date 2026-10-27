@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Red Fedora</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    background: #0a0a0c;
+    overflow: hidden;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+
+  #scene {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(18px, 4vh, 40px);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  canvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+  }
+
+  .caption {
+    position: relative;
+    z-index: 2;
+    text-align: center;
+    color: #8a8a93;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    font-size: clamp(10px, 1.6vw, 13px);
+    font-weight: 300;
+    user-select: none;
+    padding: 0 24px;
+    transition: color 0.8s ease;
+  }
+
+  .caption .hint {
+    display: block;
+    margin-top: 10px;
+    font-size: 0.78em;
+    letter-spacing: 0.22em;
+    color: #55555e;
+  }
+
+  #scene.hovering .caption { color: #c9c9d2; }
+
+  .vignette {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse at 50% 42%, transparent 40%, rgba(0,0,0,0.55) 100%);
+  }
+</style>
+</head>
+<body>
+  <div id="scene">
+    <canvas id="gl"></canvas>
+    <div class="caption">
+      Shadowman
+      <span class="hint">hover or tap — the hat dissolves</span>
+    </div>
+  </div>
+  <div class="vignette"></div>
+
+<script id="vs" type="x-shader/x-vertex">
+  attribute vec3 aPos;
+  attribute vec3 aNormal;
+  attribute vec2 aUv;
+
+  uniform mat4 uProj;
+  uniform mat4 uView;
+  uniform mat4 uModel;
+  uniform float uTime;
+  uniform float uDissolve;   // 0 = solid, 1 = fully scattered
+  uniform float uGlow;       // particle brightness boost
+
+  varying vec3 vNormal;
+  varying vec3 vWorld;
+  varying vec2 vUv;
+  varying float vDissolve;
+
+  // cheap deterministic pseudo-random
+  float hash(float n) { return fract(sin(n) * 43758.5453123); }
+
+  void main() {
+    vec3 p = aPos;
+    vec3 n = aNormal;
+
+    if (uDissolve > 0.0) {
+      // per-vertex scatter target, seeded by position
+      float seed = hash(dot(aPos, vec3(12.9898, 78.233, 37.719)));
+      float seed2 = hash(seed * 7.13);
+      float seed3 = hash(seed * 13.7);
+
+      // drift direction: outward + upward swirl
+      vec3 dir = normalize(aPos + vec3(0.0, 0.35, 0.0) + vec3(
+        (seed - 0.5) * 1.4,
+        (seed2 - 0.5) * 0.6,
+        (seed3 - 0.5) * 1.4
+      ));
+
+      float d = uDissolve;
+      // ease the scatter so it blooms outward then swirls
+      float drift = d * (2.2 + 1.4 * sin(uTime * 0.9 + seed * 6.2831));
+      p += dir * drift;
+
+      // swirl around the Y axis as it disperses
+      float ang = d * (1.2 + seed * 2.0) * sin(uTime * 0.7 + seed2 * 6.2831);
+      float ca = cos(ang), sa = sin(ang);
+      p = vec3(ca * p.x + sa * p.z, p.y, -sa * p.x + ca * p.z);
+
+      // normals tumble
+      n = normalize(n + vec3(
+        (seed - 0.5) * d * 2.0,
+        (seed2 - 0.5) * d * 2.0,
+        (seed3 - 0.5) * d * 2.0
+      ));
+    }
+
+    vec4 world = uModel * vec4(p, 1.0);
+    vWorld = world.xyz;
+    vNormal = mat3(uModel) * n;
+    vUv = aUv;
+    vDissolve = uDissolve;
+    gl_Position = uProj * uView * world;
+  }
+</script>
+
+<script id="fs" type="x-shader/x-fragment">
+  precision mediump float;
+
+  varying vec3 vNormal;
+  varying vec3 vWorld;
+  varying vec2 vUv;
+  varying float vDissolve;
+
+  uniform vec3 uCamPos;
+  uniform float uTime;
+  uniform float uDissolve;
+  uniform float uGlow;
+
+  void main() {
+    vec3 N = normalize(vNormal);
+    vec3 V = normalize(uCamPos - vWorld);
+
+    // soft key light from upper left, cool fill from right, warm rim below
+    vec3 L1 = normalize(vec3(-0.5, 0.8, 0.4));
+    vec3 L2 = normalize(vec3(0.7, 0.2, -0.3));
+    vec3 L3 = normalize(vec3(0.1, -0.9, 0.2));
+
+    float d1 = max(dot(N, L1), 0.0);
+    float d2 = max(dot(N, L2), 0.0);
+    float d3 = max(dot(N, L3), 0.0);
+
+    // Red Hat red, shaded
+    vec3 base = vec3(0.80, 0.05, 0.04);
+    vec3 dark = vec3(0.28, 0.015, 0.015);
+    vec3 light = vec3(1.0, 0.28, 0.22);
+
+    vec3 col = dark;
+    col += base * d1 * 1.1;
+    col += vec3(0.25, 0.10, 0.10) * d2 * 0.5;
+    col += vec3(1.0, 0.45, 0.30) * d3 * 0.35;   // warm bounce rim
+    col += light * pow(d1, 6.0) * 0.9;            // soft specular sheen
+
+    // band: darker strip near the crown base
+    float band = smoothstep(0.52, 0.62, vUv.y) * (1.0 - smoothstep(0.62, 0.70, vUv.y));
+    col = mix(col, col * 0.35 + vec3(0.02, 0.0, 0.0), band * 0.85);
+
+    // subtle fabric noise
+    float grain = fract(sin(dot(vUv * 90.0, vec2(12.9898, 78.233))) * 43758.5453);
+    col *= 0.94 + grain * 0.12;
+
+    // fresnel edge lift
+    float fres = pow(1.0 - max(dot(N, V), 0.0), 2.5);
+    col += vec3(1.0, 0.35, 0.28) * fres * 0.35;
+
+    // dissolve: vertices become glowing ember points
+    if (uDissolve > 0.0) {
+      float ember = uDissolve * (0.75 + uGlow);
+      col += vec3(1.0, 0.55, 0.25) * ember * 0.9;
+      col += vec3(1.0, 0.85, 0.55) * pow(fres, 1.5) * ember * 0.8;
+      // fade the solid surface as particles take over
+      col *= 1.0 - uDissolve * 0.55;
+    }
+
+    // gentle tone map
+    col = col / (col + vec3(0.85));
+    col = pow(col, vec3(0.9));
+
+    gl_FragColor = vec4(col, 1.0);
+  }
+</script>
+
+<script id="ps" type="x-shader/x-vertex">
+  // particle vertex shader
+  attribute vec3 aPos;      // home position on the hat
+  attribute vec3 aRand;     // per-particle randoms
+  attribute float aSize;
+
+  uniform mat4 uProj;
+  uniform mat4 uView;
+  uniform mat4 uModel;
+  uniform float uTime;
+  uniform float uDissolve;
+  uniform float uPixelRatio;
+
+  varying float vAlpha;
+  varying float vRand;
+
+  float hash(float n) { return fract(sin(n) * 43758.5453123); }
+
+  void main() {
+    vec3 p = aPos;
+    float d = uDissolve;
+
+    if (d > 0.0) {
+      vec3 dir = normalize(aPos * 0.4 + vec3(0.0, 0.5, 0.0) + (aRand - 0.5) * 1.6);
+      float drift = d * (2.4 + 1.6 * sin(uTime * 1.1 + aRand.x * 40.0));
+      p += dir * drift;
+
+      float ang = d * (1.5 + aRand.y * 2.5) * sin(uTime * 0.8 + aRand.z * 20.0);
+      float ca = cos(ang), sa = sin(ang);
+      p = vec3(ca * p.x + sa * p.z, p.y + sin(uTime * 1.3 + aRand.x * 30.0) * d * 0.25, -sa * p.x + ca * p.z);
+    }
+
+    vec4 world = uModel * vec4(p, 1.0);
+    vec4 view = uView * world;
+    gl_Position = uProj * view;
+
+    // fade in with dissolve, flicker like embers
+    float flick = 0.75 + 0.25 * sin(uTime * 9.0 + aRand.y * 60.0);
+    vAlpha = clamp(d * 1.6, 0.0, 1.0) * flick;
+    vRand = aRand.x;
+
+    float sz = aSize * (1.6 + d * 1.2);
+    gl_PointSize = sz * uPixelRatio * (140.0 / -view.z);
+  }
+</script>
+
+<script id="pf" type="x-shader/x-fragment">
+  precision mediump float;
+  varying float vAlpha;
+  varying float vRand;
+
+  void main() {
+    vec2 c = gl_PointCoord - 0.5;
+    float r = length(c);
+    if (r > 0.5) discard;
+    // soft round glow
+    float a = smoothstep(0.5, 0.05, r);
+    float core = smoothstep(0.28, 0.0, r);
+    vec3 col = mix(vec3(1.0, 0.45, 0.18), vec3(1.0, 0.85, 0.55), core);
+    col += vec3(1.0, 0.6, 0.3) * core * 0.8;
+    gl_FragColor = vec4(col, a * vAlpha);
+  }
+</script>
+
+<script id="trail-vs" type="x-shader/x-vertex">
+  attribute vec3 aPos;
+  attribute float aPhase;
+  uniform mat4 uProj;
+  uniform mat4 uView;
+  uniform mat4 uModel;
+  uniform float uTime;
+  uniform float uPixelRatio;
+  varying float vAlpha;
+
+  void main() {
+    // slow orbit around the hat, slightly tilted
+    float t = uTime * 0.35 + aPhase;
+    float radius = 1.55 + 0.25 * sin(aPhase * 3.0);
+    vec3 p = vec3(
+      cos(t) * radius,
+      0.35 * sin(t * 0.8 + aPhase * 2.0) + 0.1,
+      sin(t) * radius * 0.82
+    );
+    vec4 world = uModel * vec4(p, 1.0);
+    vec4 view = uView * world;
+    gl_Position = uProj * view;
+    vAlpha = 0.85;
+    gl_PointSize = 2.4 * uPixelRatio * (140.0 / -view.z);
+  }
+</script>
+
+<script id="trail-fs" type="x-shader/x-fragment">
+  precision mediump float;
+  varying float vAlpha;
+  void main() {
+    vec2 c = gl_PointCoord - 0.5;
+    float r = length(c);
+    if (r > 0.5) discard;
+    float a = smoothstep(0.5, 0.1, r);
+    vec3 col = vec3(1.0, 0.55, 0.3) * (0.5 + a * 0.5);
+    gl_FragColor = vec4(col, a * vAlpha * 0.9);
+  }
+</script>
+
+<script>
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("gl");
+  var scene = document.getElementById("scene");
+  var gl = canvas.getContext("webgl", { antialias: true, alpha: false });
+  if (!gl) {
+    scene.innerHTML = '<div class="caption">WebGL is not available in this browser.</div>';
+    return;
+  }
+
+  var reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---------- shader helpers ----------
+  function compile(type, src) {
+    var s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+      console.error(gl.getShaderInfoLog(s));
+    }
+    return s;
+  }
+
+  function program(vsId, fsId) {
+    var p = gl.createProgram();
+    gl.attachShader(p, compile(gl.VERTEX_SHADER, document.getElementById(vsId).textContent));
+    gl.attachShader(p, compile(gl.FRAGMENT_SHADER, document.getElementById(fsId).textContent));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+      console.error(gl.getProgramInfoLog(p));
+    }
+    return p;
+  }
+
+  var hatProg = program("vs", "fs");
+  var partProg = program("ps", "pf");
+  var trailProg = program("trail-vs", "trail-fs");
+
+  function locs(p, names) {
+    var o = {};
+    names.forEach(function (n) {
+      o[n] = gl.getUniformLocation(p, n);
+      o[n + "_a"] = gl.getAttribLocation(p, n);
+    });
+    return o;
+  }
+
+  // ---------- geometry: a fedora ----------
+  // Build a fedora from a lathe profile (side silhouette revolved around Y).
+  // y goes from -brim to crown top. uv.y = 0 at bottom, 1 at top.
+
+  function buildFedora() {
+    // profile: [radius, y] from bottom of brim to top of crown
+    var profile = [
+      [1.55, -0.42],  // brim outer edge (bottom)
+      [1.58, -0.34],  // brim outer edge (top) — slight thickness
+      [1.05, -0.22],  // brim curls up into the crown base
+      [0.92, -0.05],  // crown base
+      [0.88, 0.25],   // crown lower
+      [0.86, 0.55],   // crown mid (pinch)
+      [0.80, 0.78],   // crown upper pinch
+      [0.62, 0.95],   // crown top taper
+      [0.30, 1.08],   // crown dome
+      [0.00, 1.14]    // crown apex
+    ];
+
+    var SEG = 96;        // around
+    var verts = [], norms = [], uvs = [], idx = [];
+
+    // Precompute smooth normals via profile tangents
+    function profileNormal(i) {
+      var n = profile.length;
+      var a = profile[Math.max(0, i - 1)];
+      var b = profile[Math.min(n - 1, i + 1)];
+      // tangent along profile (dr, dy)
+      var tr = b[0] - a[0], ty = b[1] - a[1];
+      var len = Math.sqrt(tr * tr + ty * ty) || 1;
+      tr /= len; ty /= len;
+      // revolve: normal is perpendicular to tangent, pointing outward
+      return [ty, -tr]; // [nx (radial), ny]
+    }
+
+    for (var i = 0; i < profile.length; i++) {
+      var r = profile[i][0], y = profile[i][1];
+      var nrm = profileNormal(i);
+      var v = i / (profile.length - 1); // uv.y
+      for (var j = 0; j <= SEG; j++) {
+        var a = (j / SEG) * Math.PI * 2;
+        var cx = Math.cos(a), sx = Math.sin(a);
+        verts.push(r * cx, y, r * sx);
+        norms.push(nrm[0] * cx, nrm[1], nrm[0] * sx);
+        uvs.push(j / SEG, v);
+      }
+    }
+
+    var rowLen = SEG + 1;
+    for (var i = 0; i < profile.length - 1; i++) {
+      for (var j = 0; j < SEG; j++) {
+        var a0 = i * rowLen + j;
+        var b0 = (i + 1) * rowLen + j;
+        idx.push(a0, b0, a0 + 1);
+        idx.push(a0 + 1, b0, b0 + 1);
+      }
+    }
+
+    // brim underside disc for thickness when viewed from below
+    var base = verts.length / 3;
+    var cy = profile[0][1] - 0.02;
+    verts.push(0, cy, 0);
+    norms.push(0, -1, 0);
+    uvs.push(0.5, 0);
+    for (var j = 0; j <= SEG; j++) {
+      var a = (j / SEG) * Math.PI * 2;
+      verts.push(profile[0][0] * Math.cos(a), cy, profile[0][0] * Math.sin(a));
+      norms.push(0, -1, 0);
+      uvs.push(0.5 + 0.5 * Math.cos(a), 0.5 + 0.5 * Math.sin(a));
+    }
+    for (var j = 0; j < SEG; j++) {
+      idx.push(base, base + 1 + j + 1, base + 1 + j); // reversed winding (faces down)
+    }
+
+    return { verts: verts, norms: norms, uvs: uvs, idx: idx };
+  }
+
+  var geo = buildFedora();
+
+  function makeBuffer(data, itemSize, attribName, prog) {
+    var b = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, b);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+    return b;
+  }
+
+  // hat buffers
+  var posBuf = makeBuffer(geo.verts, 3);
+  var nrmBuf = makeBuffer(geo.norms, 3);
+  var uvBuf = makeBuffer(geo.uvs, 2);
+  var idxBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(geo.idx), gl.STATIC_DRAW);
+
+  // ---------- particles ----------
+  var PARTICLE_COUNT = 4200;
+  var pPos = new Float32Array(PARTICLE_COUNT * 3);
+  var pRand = new Float32Array(PARTICLE_COUNT * 3);
+  var pSize = new Float32Array(PARTICLE_COUNT);
+
+  // sample points on the hat surface (area-weighted-ish by triangle area)
+  var tris = [];
+  var totalArea = 0;
+  for (var t = 0; t < geo.idx.length; t += 3) {
+    var i0 = geo.idx[t] * 3, i1 = geo.idx[t + 1] * 3, i2 = geo.idx[t + 2] * 3;
+    var ax = geo.verts[i0], ay = geo.verts[i0 + 1], az = geo.verts[i0 + 2];
+    var bx = geo.verts[i1], by = geo.verts[i1 + 1], bz = geo.verts[i1 + 2];
+    var cx = geo.verts[i2], cy = geo.verts[i2 + 1], cz = geo.verts[i2 + 2];
+    var ux = bx - ax, uy = by - ay, uz = bz - az;
+    var vx = cx - ax, vy = cy - ay, vz = cz - az;
+    var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    var area = 0.5 * Math.sqrt(nx * nx + ny * ny + nz * nz);
+    tris.push({ i0: i0, i1: i1, i2: i2, area: area });
+    totalArea += area;
+  }
+  // cumulative distribution
+  var cum = new Float32Array(tris.length);
+  var acc = 0;
+  for (var t = 0; t < tris.length; t++) { acc += tris[t].area; cum[t] = acc / totalArea; }
+
+  function pickTri() {
+    var r = Math.random();
+    var lo = 0, hi = tris.length - 1;
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1;
+      if (cum[mid] < r) lo = mid + 1; else hi = mid;
+    }
+    return tris[lo];
+  }
+
+  function rand() { return Math.random(); }
+
+  for (var i = 0; i < PARTICLE_COUNT; i++) {
+    var tri = pickTri();
+    // barycentric sample
+    var r1 = Math.sqrt(rand()), r2 = rand();
+    var w0 = 1 - r1, w1 = r1 * (1 - r2), w2 = r1 * r2;
+    var px = w0 * geo.verts[tri.i0] + w1 * geo.verts[tri.i1] + w2 * geo.verts[tri.i2];
+    var py = w0 * geo.verts[tri.i0 + 1] + w1 * geo.verts[tri.i1 + 1] + w2 * geo.verts[tri.i2 + 1];
+    var pz = w0 * geo.verts[tri.i0 + 2] + w1 * geo.verts[tri.i1 + 2] + w2 * geo.verts[tri.i2 + 2];
+    pPos[i * 3] = px; pPos[i * 3 + 1] = py; pPos[i * 3 + 2] = pz;
+    pRand[i * 3] = rand(); pRand[i * 3 + 1] = rand(); pRand[i * 3 + 2] = rand();
+    pSize[i] = 0.55 + rand() * 0.9;
+  }
+
+  var pPosBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, pPosBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, pPos, gl.STATIC_DRAW);
+  var pRandBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, pRandBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, pRand, gl.STATIC_DRAW);
+  var pSizeBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, pSizeBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, pSize, gl.STATIC_DRAW);
+
+  // ---------- orbiting trail particles ----------
+  var TRAIL_COUNT = 90;
+  var tPhase = new Float32Array(TRAIL_COUNT);
+  for (var i = 0; i < TRAIL_COUNT; i++) tPhase[i] = rand() * Math.PI * 2;
+  var tPhaseBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, tPhaseBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, tPhase, gl.STATIC_DRAW);
+
+  // ---------- matrices ----------
+  function mat4Identity() {
+    return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
+  }
+  function perspective(fovy, aspect, near, far) {
+    var f = 1 / Math.tan(fovy / 2);
+    var nf = 1 / (near - far);
+    return new Float32Array([
+      f / aspect, 0, 0, 0,
+      0, f, 0, 0,
+      0, 0, (far + near) * nf, -1,
+      0, 0, 2 * far * near * nf, 0
+    ]);
+  }
+  function lookAt(eye, center, up) {
+    var zx = eye[0] - center[0], zy = eye[1] - center[1], zz = eye[2] - center[2];
+    var zl = Math.hypot(zx, zy, zz); zx /= zl; zy /= zl; zz /= zl;
+    var xx = up[1] * zz - up[2] * zy, xy = up[2] * zx - up[0] * zz, xz = up[0] * zy - up[1] * zx;
+    var xl = Math.hypot(xx, xy, xz); xx /= xl; xy /= xl; xz /= xl;
+    var yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+    return new Float32Array([
+      xx, yx, zx, 0,
+      xy, yy, zy, 0,
+      xz, yz, zz, 0,
+      -(xx * eye[0] + xy * eye[1] + xz * eye[2]),
+      -(yx * eye[0] + yy * eye[1] + yz * eye[2]),
+      -(zx * eye[0] + zy * eye[1] + zz * eye[2]),
+      1
+    ]);
+  }
+  function rotY(a) {
+    var c = Math.cos(a), s = Math.sin(a);
+    return new Float32Array([c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1]);
+  }
+  function rotX(a) {
+    var c = Math.cos(a), s = Math.sin(a);
+    return new Float32Array([1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]);
+  }
+  function mul(a, b) {
+    var o = new Float32Array(16);
+    for (var i = 0; i < 4; i++)
+      for (var j = 0; j < 4; j++) {
+        var s = 0;
+        for (var k = 0; k < 4; k++) s += a[k * 4 + j] * b[i * 4 + k];
+        o[i * 4 + j] = s;
+      }
+    return o;
+  }
+
+  // ---------- state ----------
+  var dissolve = 0;        // 0..1
+  var targetDissolve = 0;
+  var hovering = false;
+  var spin = 0;
+  var spinVel = reducedMotion ? 0.12 : 0.55;   // rad/s idle spin
+  var tilt = -0.28;        // slight downward camera tilt for elegance
+  var camDist = 4.6;
+  var glowPulse = 0;
+
+  // dissolve animation timeline (seconds since activation)
+  var dissolveT = 0;
+  var DISSOLVE_DUR = 1.1;   // scatter
+  var SWIRL_DUR = 1.6;      // swirl
+  var REFORM_DUR = 1.4;     // reform
+  var active = false;
+
+  function easeInOut(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
+
+  // ---------- interaction ----------
+  function activate() {
+    if (active) return;
+    active = true;
+    dissolveT = 0;
+    targetDissolve = 1;
+    hovering = true;
+    scene.classList.add("hovering");
+    spinVel = reducedMotion ? 0.12 : 0.18; // slow the spin
+  }
+  function deactivate() {
+    hovering = false;
+    scene.classList.remove("hovering");
+    spinVel = reducedMotion ? 0.12 : 0.55;
+    // after swirl, reform
+    setTimeout(function () {
+      targetDissolve = 0;
+    }, (DISSOLVE_DUR + SWIRL_DUR) * 1000 * (reducedMotion ? 0.4 : 1));
+  }
+
+  scene.addEventListener("mouseenter", activate);
+  scene.addEventListener("mouseleave", deactivate);
+  scene.addEventListener("touchstart", function (e) {
+    e.preventDefault();
+    if (active) deactivate(); else activate();
+  }, { passive: false });
+  scene.addEventListener("click", function () {
+    if (active) deactivate(); else activate();
+  });
+
+  // ---------- resize ----------
+  function resize() {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = Math.floor(w * dpr);
+    canvas.height = Math.floor(h * dpr);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    pixelRatio = dpr;
+  }
+  var pixelRatio = 1;
+  window.addEventListener("resize", resize);
+  resize();
+
+  // ---------- render loop ----------
+  var start = performance.now();
+
+  function bindAttrib(buf, loc, size) {
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+  }
+
+  function render(now) {
+    var time = (now - start) / 1000;
+    var dt = Math.min(0.05, time - (render.t || 0));
+    render.t = time;
+
+    // spin integration
+    spin += spinVel * dt;
+
+    // dissolve timeline
+    if (active) {
+      dissolveT += dt;
+      var total = DISSOLVE_DUR + SWIRL_DUR + REFORM_DUR;
+      if (dissolveT >= total) {
+        // finished: reform complete
+        active = false;
+        hovering = false;
+        scene.classList.remove("hovering");
+        dissolve = 0;
+        targetDissolve = 0;
+        spinVel = reducedMotion ? 0.12 : 0.55;
+      } else if (dissolveT < DISSOLVE_DUR) {
+        dissolve = easeInOut(dissolveT / DISSOLVE_DUR);
+      } else if (dissolveT < DISSOLVE_DUR + SWIRL_DUR) {
+        dissolve = 1;
+      } else {
+        var rt = (dissolveT - DISSOLVE_DUR - SWIRL_DUR) / REFORM_DUR;
+        dissolve = 1 - easeInOut(rt);
+      }
+    } else {
+      // ease toward target when idle (safety)
+      dissolve += (targetDissolve - dissolve) * Math.min(1, dt * 4);
+    }
+
+    glowPulse = 0.5 + 0.5 * Math.sin(time * 2.2);
+    var glow = dissolve * (0.6 + 0.4 * glowPulse);
+
+    // subtle idle bob
+    var bob = reducedMotion ? 0 : Math.sin(time * 0.8) * 0.04;
+
+    gl.clearColor(0.039, 0.039, 0.048, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST);
+
+    var aspect = canvas.width / canvas.height;
+    var proj = perspective(0.85, aspect, 0.1, 50);
+    var eye = [0, 0.9 + bob * 0.5, camDist];
+    var view = lookAt(eye, [0, 0.25 + bob, 0], [0, 1, 0]);
+
+    var model = mul(rotY(spin), rotX(tilt * 0.4));
+    // center the hat vertically a touch
+    var modelT = new Float32Array(model);
+    modelT[13] = -0.25;
+
+    // ---- draw hat ----
+    gl.useProgram(hatProg);
+    gl.uniformMatrix4fv(gl.getUniformLocation(hatProg, "uProj"), false, proj);
+    gl.uniformMatrix4fv(gl.getUniformLocation(hatProg, "uView"), false, view);
+    gl.uniformMatrix4fv(gl.getUniformLocation(hatProg, "uModel"), false, modelT);
+    gl.uniform3f(gl.getUniformLocation(hatProg, "uCamPos"), eye[0], eye[1], eye[2]);
+    gl.uniform1f(gl.getUniformLocation(hatProg, "uTime"), time);
+    gl.uniform1f(gl.getUniformLocation(hatProg, "uDissolve"), dissolve);
+    gl.uniform1f(gl.getUniformLocation(hatProg, "uGlow"), glow);
+
+    bindAttrib(posBuf, gl.getAttribLocation(hatProg, "aPos"), 3);
+    bindAttrib(nrmBuf, gl.getAttribLocation(hatProg, "aNormal"), 3);
+    bindAttrib(uvBuf, gl.getAttribLocation(hatProg, "aUv"), 2);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
+    gl.drawElements(gl.TRIANGLES, geo.idx.length, gl.ELEMENT_ARRAY_BUFFER, 0);
+
+    // ---- draw particles (additive) ----
+    gl.useProgram(partProg);
+    gl.uniformMatrix4fv(gl.getUniformLocation(partProg, "uProj"), false, proj);
+    gl.uniformMatrix4fv(gl.getUniformLocation(partProg, "uView"), false, view);
+    gl.uniformMatrix4fv(gl.getUniformLocation(partProg, "uModel"), false, modelT);
+    gl.uniform1f(gl.getUniformLocation(partProg, "uTime"), time);
+    gl.uniform1f(gl.getUniformLocation(partProg, "uDissolve"), dissolve);
+    gl.uniform1f(gl.getUniformLocation(partProg, "uPixelRatio"), pixelRatio);
+
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+    gl.depthMask(false);
+
+    bindAttrib(pPosBuf, gl.getAttribLocation(partProg, "aPos"), 3);
+    bindAttrib(pRandBuf, gl.getAttribLocation(partProg, "aRand"), 3);
+    bindAttrib(pSizeBuf, gl.getAttribLocation(partProg, "aSize"), 1);
+    gl.drawArrays(gl.POINTS, 0, PARTICLE_COUNT);
+
+    // ---- orbiting trail motes ----
+    gl.useProgram(trailProg);
+    gl.uniformMatrix4fv(gl.getUniformLocation(trailProg, "uProj"), false, proj);
+    gl.uniformMatrix4fv(gl.getUniformLocation(trailProg, "uView"), false, view);
+    gl.uniformMatrix4fv(gl.getUniformLocation(trailProg, "uModel"), false, modelT);
+    gl.uniform1f(gl.getUniformLocation(trailProg, "uTime"), time);
+    gl.uniform1f(gl.getUniformLocation(trailProg, "uPixelRatio"), pixelRatio);
+    bindAttrib(tPhaseBuf, gl.getAttribLocation(trailProg, "aPhase"), 1);
+    // trail motes always orbit, brighter while dissolving
+    gl.drawArrays(gl.POINTS, 0, TRAIL_COUNT);
+
+    gl.depthMask(true);
+    gl.disable(gl.BLEND);
+
+    requestAnimationFrame(render);
+  }
+
+  // trail alpha handled in shader via uniform? simpler: pass dissolve-based alpha
+  // (we keep constant alpha; tasteful faint motes)
+
+  requestAnimationFrame(render);
+})();
+</script>
+</body>
+</html>
