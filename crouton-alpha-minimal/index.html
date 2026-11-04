@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Crouton Alpha</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{background:#050607;color:#f5f5f5;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;overflow:hidden}
+  .hero{position:relative;height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:radial-gradient(120% 90% at 50% 38%,#2a2f33 0%,#141719 48%,#050607 100%);}
+  .hero:before{content:"";position:absolute;inset:0;background:radial-gradient(60% 45% at 50% 62%,rgba(204,0,0,.13),transparent 70%);pointer-events:none}
+  canvas{position:relative;z-index:1;display:block;touch-action:manipulation;cursor:pointer;outline:none}
+  canvas:focus-visible{outline:2px solid rgba(255,255,255,.35);outline-offset:6px;border-radius:8px}
+  .caption{position:relative;z-index:2;margin-top:-8px;text-align:center;pointer-events:none;padding:0 20px}
+  .caption h1{font-size:clamp(18px,3.2vw,26px);font-weight:650;letter-spacing:.02em}
+  .caption p{margin-top:6px;font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.55)}
+  .hint{margin-top:12px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.35)}
+  @media (prefers-reduced-motion:reduce){.hint{display:none}}
+</style>
+</head>
+<body>
+<main class="hero">
+  <canvas id="c" aria-label="Red Hat style fedora made of glowing particles. Hover or tap to dissolve and reform." tabindex="0"></canvas>
+  <div class="caption"><h1>The Fedora</h1><p>Hover or tap — watch it dissolve</p><div class="hint" id="hint">Particles react on interaction</div></div>
+</main>
+<script>
+(function(){
+"use strict";
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+let W=0,H=0,DPR=1,scale=1,cx=0,cy=0;
+function resize(){
+  DPR=Math.min(devicePixelRatio||1,2);
+  const vh=innerHeight* .72; // canvas area
+  const availW=Math.min(innerWidth*.92,760), availH=Math.min(vh,560);
+  W=availW; H=availH;
+  canvas.width=W*DPR; canvas.height=H*DPR;
+  canvas.style.width=W+'px'; canvas.style.height=H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  scale=Math.min(W,H)/4.2; cx=W/2; cy=H/2 - scale*.1;
+}
+addEventListener('resize',resize); resize();
+
+// --- Particle generation: sample hat surfaces ---
+const N=6500;
+const P=[];
+function rand(){return Math.random()}
+function add(x,y,z,nx,ny,nz,glow){
+  P.push({ox:x,oy:y,oz:z,x,y,z,nx,ny,nz,glow:glow||0,
+    // per-particle dissolve offsets
+    dx:0,dy:0,dz:0, seed:Math.random()*Math.PI*2, size:.7+Math.random()*1.4,
+    orbit:Math.random()<.02, orbitR:1.8+Math.random()*1.2, orbitS:(.3+Math.random()*.7),
+    orbitA:Math.random()*Math.PI*2});
+}
+// brim: flat ellipse (a=1.7,b=1.35) with slight curl
+for(let i=0;i<2100;i++){
+  const r=Math.sqrt(rand())*1.0, a=rand()*Math.PI*2;
+  const x=Math.cos(a)*r*1.7, z=Math.sin(a)*r*1.35;
+  let y=-Math.pow(Math.max(0,r-.78),2)*.9 + (rand()-.5)*.015;
+  // front dip
+  y += Math.max(0, Math.sin(a))*.06*r;
+  if(r<.42) continue; // under crown
+  add(x,y,z,0,1,0, r>.92?.6:0);
+}
+// crown: cylinder r=.88 h=1.05, plus top
+for(let i=0;i<3200;i++){
+  const a=rand()*Math.PI*2, y=rand()*1.05;
+  let r=.88+Math.sin(y*2.2)*.02;
+  // pinch front
+  const pinch = Math.max(0,Math.cos(a)) * .12 * (1-y);
+  r-=pinch*.4;
+  const x=Math.cos(a)*r, z=Math.sin(a)*r*.92;
+  add(x,y,z,Math.cos(a),.15,Math.sin(a),0);
+}
+// top disc
+for(let i=0;i<900;i++){
+  const r=Math.sqrt(rand())*.88, a=rand()*Math.PI*2;
+  add(Math.cos(a)*r,1.05,Math.sin(a)*r*.92,0,1,0,.2);
+}
+// band
+for(let i=0;i<300;i++){
+  const a=rand()*Math.PI*2, y=.12+rand()*.22;
+  const x=Math.cos(a)*.895, z=Math.sin(a)*.895*.92;
+  add(x,y,z,Math.cos(a),0,Math.sin(a),1);
+}
+// soften size
+const total=P.length;
+
+// --- State machine ---
+let angle=0, speed=.5, targetSpeed=.5;
+let state='idle', tState=0, explodeT=0;
+let orbitAlpha=0;
+const light={x:.5,y:-1,z:.6}; {const l=Math.hypot(light.x,light.y,light.z); light.x/=l;light.y/=l;light.z/=l;}
+
+function startDissolve(){
+  if(state!=='idle') return;
+  if(reduced){ flashReduced(); return; }
+  state='dissolve'; tState=0;
+  P.forEach(p=>{
+    const a=p.seed, b=Math.random()*Math.PI*2;
+    // outward bias from center
+    const mag=1.2+Math.random()*2.8;
+    p.dx=(p.ox* .6 + Math.cos(a)*Math.sin(b)*mag);
+    p.dy=(p.oy*.5 + Math.cos(b)*mag*.7 - .3);
+    p.dz=(p.oz*.6 + Math.sin(a)*Math.cos(b)*mag);
+  });
+}
+function flashReduced(){
+  // minimal motion: brief glow, no explode/swirl
+  state='reducedFlash'; tState=0;
+}
+canvas.addEventListener('pointerenter',()=>{targetSpeed=.06; if(!reduced) startDissolve();});
+canvas.addEventListener('pointerleave',()=>{targetSpeed=.5;});
+canvas.addEventListener('pointerdown',e=>{e.preventDefault(); startDissolve();});
+canvas.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault(); startDissolve();}});
+
+let last=performance.now();
+function frame(now){
+  const dt=Math.min(.05,(now-last)/1000); last=now;
+  if(!reduced){
+    // smooth spin speed
+    speed+=(targetSpeed-speed)*Math.min(1,dt*4);
+    angle+=speed*dt*1.2;
+    if(state==='dissolve'){ tState+=dt; explodeT=Math.min(1,tState/.5);
+      if(tState>1.4){state='swirl'; tState=0;}
+    } else if(state==='swirl'){ tState+=dt; explodeT=1;
+      if(tState>1.2){state='reform'; tState=0;}
+    } else if(state==='reform'){ tState+=dt; explodeT=Math.max(0,1-tState/1.1);
+      if(tState>1.1){state='idle'; tState=0; P.forEach(p=>{p.x=p.ox;p.y=p.oy;p.z=p.oz;});}
+    }
+    if(state==='idle'||state==='reform') orbitAlpha=Math.min(1,orbitAlpha+dt*.5);
+  } else {
+    if(state==='reducedFlash'){ tState+=dt; if(tState>.4){state='idle';tState=0;} }
+    angle+=dt*.15; // very slow for reduced, or 0 if desire; keep gentle
+    if(reduced) angle= angle; // keep
+  }
+
+  ctx.clearRect(0,0,W,H);
+  // soft shadow
+  const shY=cy+scale*1.35;
+  const og=ctx.createRadialGradient(cx,shY,10,cx,shY,scale*1.8);
+  og.addColorStop(0,'rgba(0,0,0,.55)'); og.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=og; ctx.beginPath(); ctx.ellipse(cx,shY,scale*1.8,scale*.42,0,0,Math.PI*2); ctx.fill();
+
+  const cosA=Math.cos(angle), sinA=Math.sin(angle);
+  const tilt=.42, cosT=Math.cos(tilt), sinT=Math.sin(tilt);
+  const flash = state==='reducedFlash' ? (1-tState/.4) : 0;
+
+  // draw far to near for depth
+  // simple bucket sort every frame is heavy; use pseudo depth in loop with pre-sorted order maintained approximately by z after rotation approximated via sin
+  // To keep 60fps, do two passes: back half then front half based on rotated z
+  for(let pass=0;pass<2;pass++){
+    for(let i=0;i<total;i++){
+      const p=P[i];
+      let x=p.ox,y=p.oy,z=p.oz;
+      if(state==='dissolve'){
+        const e=easeOutCubic(explodeT);
+        x+=p.dx*e; y+=p.dy*e; z+=p.dz*e;
+      } else if(state==='swirl'){
+        const a=p.seed + tState*2.2;
+        const swirl=1.6;
+        // rotate offset around Y
+        const ox=p.dx, oz=p.dz;
+        const rx=ox*Math.cos(a)-oz*Math.sin(a), rz=ox*Math.sin(a)+oz*Math.cos(a);
+        const lift=Math.sin(tState*3+p.seed)*.5;
+        x+=rx*swirl; y+=p.dy+lift; z+=rz*swirl;
+      } else if(state==='reform'){
+        const e=easeInOut(explodeT); // 1->0
+        x+=p.dx*e; y+=p.dy*e; z+=p.dz*e;
+      }
+      // orbiters after reform
+      let ox2=0,oy2=0,oz2=0,isOrbit=false;
+      if(p.orbit && orbitAlpha>0 && (state==='idle'||state==='reform')){
+        p.orbitA+=dt*p.orbitS*.6;
+        ox2=Math.cos(p.orbitA)*p.orbitR; oz2=Math.sin(p.orbitA)*p.orbitR; oy2=.6+Math.sin(p.orbitA*1.3)*.35;
+        isOrbit=true;
+      }
+      // rotate Y
+      let rx=(isOrbit?ox2:x)*cosA-(isOrbit?oz2:z)*sinA;
+      let rz=(isOrbit?ox2:x)*sinA+(isOrbit?oz2:z)*cosA;
+      let ry=isOrbit?oy2:y;
+      // tilt X
+      let ty=ry*cosT - rz*sinT;
+      let tz=ry*sinT + rz*cosT;
+      if((pass===0 && tz>0)||(pass===1 && tz<=0)) continue;
+      // perspective
+      const persp=1/(1.6+tz*.18);
+      const sx=cx+rx*scale*persp, sy=cy-ty*scale*persp;
+      // lighting
+      let dl=p.nx*light.x + p.ny*light.y + p.nz*light.z; // approx, ignores rotation - fine for stylized
+      dl=.35+.65*Math.max(0,dl);
+      // depth fade
+      const depth=.55+.45*(1-(tz+1.5)/3);
+      let r,g,b;
+      if(p.glow>0){ r=255; g=180; b=120; } else { r=Math.round(204*dl); g=Math.round(8*dl); b=Math.round(8*dl); }
+      if(isOrbit){ r=255; g=210; b=150; }
+      const alpha=Math.max(.12,Math.min(1,depth*dl + p.glow*.3 + flash*.6));
+      const sz=p.size*persp*(1+p.glow*.3+flash*1.2);
+      ctx.fillStyle=`rgba(${r},${g},${b},${alpha})`;
+      // tiny glow for some
+      if(p.glow>0||isOrbit||flash>.3){
+        ctx.shadowColor=`rgba(255,120,80,${.5*alpha})`; ctx.shadowBlur=6;
+      } else ctx.shadowBlur=0;
+      ctx.beginPath(); ctx.arc(sx,sy,sz,0,Math.PI*2); ctx.fill();
+    }
+  }
+  ctx.shadowBlur=0;
+  requestAnimationFrame(frame);
+}
+function easeOutCubic(t){return 1-Math.pow(1-t,3)}
+function easeInOut(t){return t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
